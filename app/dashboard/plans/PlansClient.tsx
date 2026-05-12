@@ -177,6 +177,7 @@ export default function PlansClient() {
   const pollInFlightRef = useRef(false);
   const queuedRetryAttemptedRef = useRef(false);
   const [queuedRetryInFlightCount, setQueuedRetryInFlightCount] = useState(0);
+  const [queuedRetryDisplayUntilMs, setQueuedRetryDisplayUntilMs] = useState(0);
 
   const [mobilePanel, setMobilePanel] = useState<"none" | "search" | "filters">("none");
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
@@ -291,6 +292,14 @@ export default function PlansClient() {
     }).length;
   };
 
+  const countQueuedRetryEligibleOffers = (offers: OfferRow[]): number => {
+    return offers.filter((o: any) => {
+      if (String(o?.intelliwatt?.statusLabel ?? "").toUpperCase() !== "QUEUED") return false;
+      const tceStatus = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
+      return tceStatus !== "OK" && tceStatus !== "APPROXIMATE";
+    }).length;
+  };
+
   const classifyPlanUiState = (o: any): "AVAILABLE" | "NEED_USAGE" | "CALCULATING" | "UNAVAILABLE" => {
     const tce = (o as any)?.intelliwatt?.trueCostEstimate;
     const tceStatus = String(tce?.status ?? "").toUpperCase();
@@ -359,6 +368,7 @@ export default function PlansClient() {
     pipelineKickRef.current = false;
     queuedRetryAttemptedRef.current = false;
     setQueuedRetryInFlightCount(0);
+    setQueuedRetryDisplayUntilMs(0);
     if (pollTimerRef.current) window.clearInterval(pollTimerRef.current);
     pollTimerRef.current = null;
     if (pollStopTimerRef.current) window.clearTimeout(pollStopTimerRef.current);
@@ -602,11 +612,7 @@ export default function PlansClient() {
     if (!resp?.hasUsage) return;
     const offersNow = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
     const pendingCountNow = pendingCountFromResponse(resp);
-    const queuedRetryCountNow = offersNow.filter((o: any) => {
-      if (String(o?.intelliwatt?.statusLabel ?? "").toUpperCase() !== "QUEUED") return false;
-      const tceStatus = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
-      return tceStatus !== "OK" && tceStatus !== "APPROXIMATE";
-    }).length;
+    const queuedRetryCountNow = countQueuedRetryEligibleOffers(offersNow);
     const needsRetryKick = pendingCountNow > 0 || queuedRetryCountNow > 0;
     if (!needsRetryKick) return;
 
@@ -648,10 +654,10 @@ export default function PlansClient() {
     if (kickEligible && !prefetchInFlightRef.current && now - lastPipelineKickAtRef.current >= 30_000) {
       pipelineKickRef.current = true;
       lastPipelineKickAtRef.current = now;
-      if (retryOnlyQueued) queuedRetryAttemptedRef.current = true;
 
       prefetchInFlightRef.current = true;
       setQueuedRetryInFlightCount(retryOnlyQueued ? queuedRetryCountNow : 0);
+      setQueuedRetryDisplayUntilMs(retryOnlyQueued ? Date.now() + 20_000 : 0);
       setPrefetchNote(
         retryOnlyQueued
           ? `Retrying IntelliWatt calculations… (${queuedRetryCountNow} queued)`
@@ -670,6 +676,7 @@ export default function PlansClient() {
         params.set("proactiveCooldownMs", "60000");
         params.set("fallbackCooldownMs", "15000");
         (async () => {
+          let keepQueuedRetryVisible = false;
           try {
             const r = await fetch(`/api/dashboard/plans/pipeline?${params.toString()}`, {
               method: "POST",
@@ -686,6 +693,8 @@ export default function PlansClient() {
             // Only throttle on a successful "started" run. If the call was blocked (cooldown/already_running)
             // or failed, allow a prompt retry in the next effect tick.
             if (started) {
+              if (retryOnlyQueued) queuedRetryAttemptedRef.current = true;
+              keepQueuedRetryVisible = retryOnlyQueued;
               try {
                 window.sessionStorage.setItem(sessionKey, String(now));
               } catch {
@@ -693,6 +702,9 @@ export default function PlansClient() {
               }
             } else {
               const why = typeof j?.reason === "string" && j.reason ? j.reason : typeof j?.error === "string" ? j.error : null;
+              if (retryOnlyQueued && why === "already_running") {
+                keepQueuedRetryVisible = true;
+              }
               if (why) {
                 setPrefetchNote(
                   retryOnlyQueued
@@ -705,12 +717,16 @@ export default function PlansClient() {
             setLastPipelineKickResult({ ok: false, error: e?.message ?? String(e) });
           } finally {
             prefetchInFlightRef.current = false;
-            setQueuedRetryInFlightCount(0);
+            if (!keepQueuedRetryVisible) {
+              setQueuedRetryInFlightCount(0);
+              setQueuedRetryDisplayUntilMs(0);
+            }
           }
         })();
       } catch {
         prefetchInFlightRef.current = false;
         setQueuedRetryInFlightCount(0);
+        setQueuedRetryDisplayUntilMs(0);
       }
     }
 
@@ -972,10 +988,16 @@ export default function PlansClient() {
     if (!estimateTargetCount) return 0;
     return Math.max(0, estimateTargetCount - availableEstimateCount);
   }, [availableEstimateCount, estimateTargetCount]);
+  const currentQueuedRetryCount = useMemo(() => {
+    return countQueuedRetryEligibleOffers(offersRaw);
+  }, [offersRaw]);
+  const queuedRetryDisplayActive = useMemo(() => {
+    return queuedRetryInFlightCount > 0 && queuedRetryDisplayUntilMs > Date.now();
+  }, [queuedRetryInFlightCount, queuedRetryDisplayUntilMs]);
   const displayedPendingCount = useMemo(() => {
     if (pendingCount > 0) return pendingCount;
-    return queuedRetryInFlightCount;
-  }, [pendingCount, queuedRetryInFlightCount]);
+    return queuedRetryDisplayActive ? currentQueuedRetryCount : 0;
+  }, [pendingCount, queuedRetryDisplayActive, currentQueuedRetryCount]);
   const rawUnavailableCount = useMemo(() => {
     if (!hasUsageForUi) return 0;
     let count = 0;
@@ -985,11 +1007,33 @@ export default function PlansClient() {
     return count;
   }, [hasUsageForUi, offersRaw]);
   const displayedUnavailableCount = useMemo(() => {
-    return Math.max(0, rawUnavailableCount - queuedRetryInFlightCount);
-  }, [rawUnavailableCount, queuedRetryInFlightCount]);
+    return Math.max(0, rawUnavailableCount - (queuedRetryDisplayActive ? currentQueuedRetryCount : 0));
+  }, [rawUnavailableCount, queuedRetryDisplayActive, currentQueuedRetryCount]);
   const threeBucketStatusText = useMemo(() => {
     return `${availableEstimateCount} available • ${displayedPendingCount} calculating • ${displayedUnavailableCount} unable to calculate`;
   }, [availableEstimateCount, displayedPendingCount, displayedUnavailableCount]);
+  useEffect(() => {
+    if (queuedRetryInFlightCount <= 0) return;
+    if (currentQueuedRetryCount <= 0) {
+      setQueuedRetryInFlightCount(0);
+      setQueuedRetryDisplayUntilMs(0);
+      return;
+    }
+    if (currentQueuedRetryCount !== queuedRetryInFlightCount) {
+      setQueuedRetryInFlightCount(currentQueuedRetryCount);
+    }
+    if (queuedRetryDisplayUntilMs <= Date.now()) {
+      setQueuedRetryInFlightCount(0);
+      setQueuedRetryDisplayUntilMs(0);
+      return;
+    }
+    const timeoutMs = Math.max(0, queuedRetryDisplayUntilMs - Date.now());
+    const timer = window.setTimeout(() => {
+      setQueuedRetryInFlightCount(0);
+      setQueuedRetryDisplayUntilMs(0);
+    }, timeoutMs);
+    return () => window.clearTimeout(timer);
+  }, [queuedRetryInFlightCount, queuedRetryDisplayUntilMs, currentQueuedRetryCount]);
   // IMPORTANT: /dashboard/plans must never trigger/retrigger the plan pipeline.
   // This page is display-only; background warm-ups happen elsewhere.
   useEffect(() => {
