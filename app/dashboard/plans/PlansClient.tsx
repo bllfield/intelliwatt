@@ -494,48 +494,6 @@ export default function PlansClient() {
     return () => controller.abort();
   }, [plansQueryString, refreshNonce, cacheKey, cacheTtlMs]);
 
-  // IMPORTANT: /dashboard/plans must never trigger/retrigger the plan pipeline.
-  // This page is display-only; background warm-ups happen elsewhere.
-  useEffect(() => {
-    if (!resp?.ok) return;
-    const offersNow = offersRaw;
-    const pendingNow = pendingCountFromResponse(resp);
-
-    let availableCount = 0;
-    let needUsageCount = 0;
-    let calculatingCount = 0;
-    let unavailableCount = 0;
-    for (const o of offersNow) {
-      const k = classifyPlanUiState(o);
-      if (k === "AVAILABLE") availableCount++;
-      else if (k === "NEED_USAGE") needUsageCount++;
-      else if (k === "CALCULATING") calculatingCount++;
-      else unavailableCount++;
-    }
-    const effectiveCalculatingCount = Math.max(calculatingCount, pendingCount, queuedRetryInFlightCount);
-    const effectiveUnavailableCount = Math.max(0, unavailableCount - queuedRetryInFlightCount);
-    setAutoPreparing(calculatingCount > 0 && allowWarmupInBackground);
-    if (allowWarmupInBackground && pendingNow > 0) {
-      setPrefetchNote(
-        `IntelliWatt estimates: ${availableEstimateCount} available • ${effectiveCalculatingCount} calculating • ${effectiveUnavailableCount} unable to calculate. Results refresh automatically.`,
-      );
-      return;
-    }
-
-    // Summary note: keep the header aligned with customer-visible plan states.
-    if (resp?.hasUsage) {
-      const parts: string[] = [];
-      parts.push(`${availableEstimateCount} available`);
-      parts.push(`${effectiveCalculatingCount} calculating`);
-      parts.push(`${effectiveUnavailableCount} unable to calculate`);
-      if (needUsageCount > 0) parts.push(`${needUsageCount} need usage`);
-      setPrefetchNote(`IntelliWatt estimates: ${parts.join(" • ")}`);
-      return;
-    }
-
-    setPrefetchNote(null);
-  }, [resp?.ok, resp?.offers, allowWarmupInBackground, availableEstimateCount, pendingCount, queuedRetryInFlightCount]);
-
   // When pending reaches 0, end the warmup session so future browsing doesn't keep background-kicking.
   useEffect(() => {
     if (!warmupSessionActive) return;
@@ -1032,6 +990,45 @@ export default function PlansClient() {
   const threeBucketStatusText = useMemo(() => {
     return `${availableEstimateCount} available • ${displayedPendingCount} calculating • ${displayedUnavailableCount} unable to calculate`;
   }, [availableEstimateCount, displayedPendingCount, displayedUnavailableCount]);
+  // IMPORTANT: /dashboard/plans must never trigger/retrigger the plan pipeline.
+  // This page is display-only; background warm-ups happen elsewhere.
+  useEffect(() => {
+    if (!resp?.ok) return;
+    const offersNow = offersRaw;
+    const pendingNow = pendingCountFromResponse(resp);
+
+    let calculatingCount = 0;
+    let unavailableCount = 0;
+    let needUsageCount = 0;
+    for (const o of offersNow) {
+      const k = classifyPlanUiState(o);
+      if (k === "CALCULATING") calculatingCount++;
+      else if (k === "UNAVAILABLE") unavailableCount++;
+      else if (k === "NEED_USAGE") needUsageCount++;
+    }
+
+    const effectiveCalculatingCount = Math.max(calculatingCount, pendingCount, queuedRetryInFlightCount);
+    const effectiveUnavailableCount = Math.max(0, unavailableCount - queuedRetryInFlightCount);
+    setAutoPreparing(calculatingCount > 0 && allowWarmupInBackground);
+    if (allowWarmupInBackground && pendingNow > 0) {
+      setPrefetchNote(
+        `IntelliWatt estimates: ${availableEstimateCount} available • ${effectiveCalculatingCount} calculating • ${effectiveUnavailableCount} unable to calculate. Results refresh automatically.`,
+      );
+      return;
+    }
+
+    if (resp?.hasUsage) {
+      const parts: string[] = [];
+      parts.push(`${availableEstimateCount} available`);
+      parts.push(`${effectiveCalculatingCount} calculating`);
+      parts.push(`${effectiveUnavailableCount} unable to calculate`);
+      if (needUsageCount > 0) parts.push(`${needUsageCount} need usage`);
+      setPrefetchNote(`IntelliWatt estimates: ${parts.join(" • ")}`);
+      return;
+    }
+
+    setPrefetchNote(null);
+  }, [resp?.ok, resp?.offers, allowWarmupInBackground, offersRaw, availableEstimateCount, pendingCount, queuedRetryInFlightCount]);
   const progressPercent = useMemo(() => {
     if (!estimateTargetCount) return 0;
     return Math.max(0, Math.min(100, Math.round((availableEstimateCount / estimateTargetCount) * 100)));
