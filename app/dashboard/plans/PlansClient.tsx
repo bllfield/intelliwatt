@@ -467,8 +467,8 @@ export default function PlansClient() {
   // This page is display-only; background warm-ups happen elsewhere.
   useEffect(() => {
     if (!resp?.ok) return;
-    const offersNow = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
-    const pending = pendingCountFromResponse(resp);
+    const offersNow = offersRaw;
+    const pendingNow = pendingCountFromResponse(resp);
     const classify = (o: any): "AVAILABLE" | "NEED_USAGE" | "CALCULATING" | "UNAVAILABLE" => {
       const tce = (o as any)?.intelliwatt?.trueCostEstimate;
       const tceStatus = String(tce?.status ?? "").toUpperCase();
@@ -507,9 +507,9 @@ export default function PlansClient() {
       else unavailableCount++;
     }
     setAutoPreparing(calculatingCount > 0 && allowWarmupInBackground);
-    if (allowWarmupInBackground && pending > 0) {
+    if (allowWarmupInBackground && pendingNow > 0) {
       setPrefetchNote(
-        `IntelliWatt estimates: ${availableCount} available • ${pending} left to calculate${
+        `IntelliWatt estimates: ${availableEstimateCount} available • ${pendingCount} left to calculate${
           unavailableCount > 0 ? ` • ${unavailableCount} cannot calculate` : ""
         }. Results refresh automatically.`,
       );
@@ -519,8 +519,8 @@ export default function PlansClient() {
     // Summary note: never let one uncomputable plan make the whole page feel "stuck calculating".
     if (calculatingCount > 0 || unavailableCount > 0 || needUsageCount > 0) {
       const parts: string[] = [];
-      parts.push(`${availableCount} available`);
-      if (calculatingCount > 0) parts.push(`${calculatingCount} calculating`);
+      parts.push(`${availableEstimateCount} available`);
+      if (calculatingCount > 0) parts.push(`${pendingCount} calculating`);
       if (unavailableCount > 0) parts.push(`${unavailableCount} not computable`);
       if (needUsageCount > 0) parts.push(`${needUsageCount} need usage`);
       setPrefetchNote(`IntelliWatt estimates: ${parts.join(" • ")}`);
@@ -802,6 +802,10 @@ export default function PlansClient() {
   }, [hasUsage]);
   const hasUsageForUi = hasUsage || hasUsageEverRef.current;
   const offersRaw = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
+  const progressSnapshotRef = useRef<{ available: number; target: number }>({
+    available: 0,
+    target: 0,
+  });
   // In datasetMode, the server returns the full dataset and we apply all sort/filter/paging client-side.
   const offers = useMemo(() => {
     if (!datasetMode) return offersRaw;
@@ -930,23 +934,52 @@ export default function PlansClient() {
     () => offers.filter((o: any) => o?.intelliwatt?.statusLabel === "QUEUED").length,
     [offers],
   );
-  const availableEstimateCount = useMemo(() => {
-    return offers.filter((o: any) => {
+  const rawAvailableEstimateCount = useMemo(() => {
+    return offersRaw.filter((o: any) => {
       const st = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
       return st === "OK" || st === "APPROXIMATE";
     }).length;
-  }, [offers]);
-  const pendingCount = useMemo(() => {
+  }, [offersRaw]);
+  const rawPendingCount = useMemo(() => {
     // Pending = expected to eventually compute (not UNSUPPORTED/NOT_COMPUTABLE).
-    return offers.filter((o: any) => {
+    return offersRaw.filter((o: any) => {
       if (String(o?.intelliwatt?.statusLabel ?? "") !== "QUEUED") return false;
       const tceStatus = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
       const tceReason = String((o as any)?.intelliwatt?.trueCostEstimate?.reason ?? "").toUpperCase();
       const isCacheMiss = tceStatus === "NOT_IMPLEMENTED" && tceReason === "CACHE_MISS";
       return !tceStatus || tceStatus === "QUEUED" || tceStatus === "MISSING_TEMPLATE" || isCacheMiss;
     }).length;
-  }, [offers]);
-  const estimateTargetCount = useMemo(() => availableEstimateCount + pendingCount, [availableEstimateCount, pendingCount]);
+  }, [offersRaw]);
+  const rawEstimateTargetCount = useMemo(
+    () => rawAvailableEstimateCount + rawPendingCount,
+    [rawAvailableEstimateCount, rawPendingCount],
+  );
+  useEffect(() => {
+    progressSnapshotRef.current = { available: 0, target: 0 };
+  }, [serverDatasetKey]);
+  useEffect(() => {
+    if (!resp?.ok || !resp?.hasUsage) return;
+    progressSnapshotRef.current = {
+      available: Math.max(progressSnapshotRef.current.available, rawAvailableEstimateCount),
+      target: Math.max(
+        progressSnapshotRef.current.target,
+        rawEstimateTargetCount,
+        rawAvailableEstimateCount,
+      ),
+    };
+  }, [resp?.ok, resp?.hasUsage, rawAvailableEstimateCount, rawEstimateTargetCount]);
+  const availableEstimateCount = useMemo(() => {
+    if (!hasUsageForUi) return 0;
+    return Math.max(rawAvailableEstimateCount, progressSnapshotRef.current.available);
+  }, [hasUsageForUi, rawAvailableEstimateCount, rawPendingCount, resp?.ok]);
+  const estimateTargetCount = useMemo(() => {
+    if (!hasUsageForUi) return 0;
+    return Math.max(rawEstimateTargetCount, progressSnapshotRef.current.target, availableEstimateCount);
+  }, [hasUsageForUi, rawEstimateTargetCount, availableEstimateCount, rawPendingCount, resp?.ok]);
+  const pendingCount = useMemo(() => {
+    if (!estimateTargetCount) return 0;
+    return Math.max(0, estimateTargetCount - availableEstimateCount);
+  }, [availableEstimateCount, estimateTargetCount]);
   const progressPercent = useMemo(() => {
     if (!estimateTargetCount) return 0;
     return Math.max(0, Math.min(100, Math.round((availableEstimateCount / estimateTargetCount) * 100)));
