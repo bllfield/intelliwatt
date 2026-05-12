@@ -99,6 +99,18 @@ describe("eflExtractor - EFL Version code extraction", () => {
     expect(extractEflVersionCodeFromText(text)).toBe("TexasConnect 12 20251208E V1");
   });
 
+  test("stitches Spark-style Version Number values wrapped across lines", () => {
+    const text = `
+      Telephone Number                 1-877-547-7275
+      PUCT Certificate Number          10046
+      Version Number                   REFE_Opendoor Select_West Texas Utilities [WTU /
+                                        AEP]_06162025
+    `;
+    expect(extractEflVersionCodeFromText(text)).toBe(
+      "REFE_Opendoor Select_West Texas Utilities [WTU / AEP]_06162025",
+    );
+  });
+
   test("stitches Chariot-style 'Ver. #' plan-family label with following underscore code", () => {
     const text = `
       Ver. #: GreenVolt

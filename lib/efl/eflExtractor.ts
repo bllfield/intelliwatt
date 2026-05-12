@@ -327,6 +327,34 @@ function extractEflVersionCode(text: string): string | null {
     return out || null;
   };
 
+  const isVersionContinuationLine = (line: string): boolean => {
+    const trimmed = line.trim();
+    if (!trimmed) return false;
+    if (
+      /^(?:PUCT|Type\s+of\s+Product|Contract\s+Term|Internet\s+Address|Email\s+Address|Telephone\s+Number|Fax\s+Number|Hours\s+of\s+Operation|Mailing\s+Address)\b/i.test(
+        trimmed,
+      )
+    ) {
+      return false;
+    }
+    if (
+      /^(?:Electricity\s+Facts\s+Label|Etiqueta\s+de\s+informaci[oó]n|Average\s+Monthly\s+Use|Other\s+Key\s+Terms)\b/i.test(
+        trimmed,
+      )
+    ) {
+      return false;
+    }
+
+    const normalized = normalizeToken(trimmed);
+    if (!normalized || isObviousJunkToken(normalized)) return false;
+
+    // Continuation fragments are usually compact pieces of the same version
+    // token, such as "AEP]_06162025", "5_ENGLISH", or "_ENGLISH".
+    if (/\s/.test(normalized)) return false;
+    if (normalized.length > 80) return false;
+    return /[_\]\[]|\d/.test(normalized);
+  };
+
   // 0) Simple footer-style "Version 10.0" pattern.
   const footerVersion = text.match(
     /\bVersion\s+([0-9]+(?:\.[0-9]+)?)\b/i,
@@ -505,14 +533,35 @@ function extractEflVersionCode(text: string): string | null {
   // Example (Spark):
   //   "Version Number                   REFE_Opendoor Select_Centerpoint Energy_06162025"
   // Spanish variants also appear in bilingual PDFs, but English is usually present too.
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
     const m =
       line.match(/\bVersion\s*Number\s+(.+)$/i) ??
       line.match(/\bVersi[oó]n\s*n[uú]mero\s+(.+)$/i);
     if (!m?.[1]) continue;
     const raw = m[1].trim();
+    const continuation: string[] = [];
+    for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+      const next = lines[j]?.trim();
+      if (!next) continue;
+      if (!isVersionContinuationLine(next)) {
+        break;
+      }
+      continuation.push(next);
+      if (continuation.length >= 2) break;
+    }
+
+    if (continuation.length > 0) {
+      const joined = [raw, ...continuation].join(" ").replace(/\s+/g, " ").trim();
+      const joinedVal = normalizeToken(joined);
+      if (joinedVal && joinedVal.length >= 8 && !isWeakVersionCandidate(joinedVal)) {
+        return joinedVal;
+      }
+    }
+
     const val = normalizeToken(raw);
     if (val && val.length >= 6 && !isWeakVersionCandidate(val)) return val;
+
     // If normalization stripped too much (e.g., due to spacing), keep a cleaned version.
     const cleaned = raw.replace(/\s+/g, " ").trim();
     if (cleaned && cleaned.length >= 8 && !isWeakVersionCandidate(cleaned)) return cleaned;
