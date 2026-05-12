@@ -1008,10 +1008,12 @@ export default function PlansClient() {
     if (!estimateTargetCount) return 0;
     return Math.max(0, Math.min(100, Math.round((availableEstimateCount / estimateTargetCount) * 100)));
   }, [availableEstimateCount, estimateTargetCount]);
-  const isStillWorking = Boolean(loading || autoPreparing);
+  const hasInitialLoadInFlight = Boolean(loading && !resp?.ok);
+  const hasActiveCalculations = Boolean(pendingCount > 0 || autoPreparing);
+  const isStillWorking = Boolean(hasInitialLoadInFlight || hasActiveCalculations);
   const showRecommendedBadge = Boolean(recommendedOfferId && !isStillWorking);
   const showCalcBot =
-    Boolean(hasUsage && sort === "best_for_you_proxy" && (isStillWorking || pendingCount > 0));
+    Boolean(hasUsage && sort === "best_for_you_proxy" && isStillWorking);
 
   const defaultCalcMsg =
     "I'm calculating all your options using your actual usage to determine which plan is best based on your energy usage habits.\n\nYour results will be available soon.";
