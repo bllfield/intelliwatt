@@ -1,4 +1,5 @@
 import { parseEflTextWithAi } from "@/lib/efl/eflAiParser";
+import { canonicalizeRateStructureForPipeline } from "@/lib/efl/canonicalizePipelineShapes";
 import { extractEflVersionCodeFromText } from "@/lib/efl/eflExtractor";
 import { scoreEflPassStrength } from "@/lib/efl/eflValidator";
 import { solveEflValidationGaps } from "@/lib/efl/validation/solveEflValidationGaps";
@@ -83,10 +84,16 @@ export async function runEflPipelineFromRawTextNoStore(
       ? derivedForValidation.derivedPlanRules
       : aiResult.planRules ?? null;
 
-  const finalRateStructure =
+  const finalRateStructureRaw =
     finalStatus === "PASS" && derivedForValidation?.derivedRateStructure
       ? derivedForValidation.derivedRateStructure
       : aiResult.rateStructure ?? null;
+
+  const finalRateStructure = canonicalizeRateStructureForPipeline({
+    finalStatus,
+    planRules: finalPlanRules,
+    rateStructure: finalRateStructureRaw,
+  });
 
   let passStrength: "STRONG" | "WEAK" | "INVALID" | null = null;
   let passStrengthReasons: string[] = [];

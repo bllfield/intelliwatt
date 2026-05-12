@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 
 import { deterministicEflExtract } from "@/lib/efl/eflExtractor";
 import { EflAiParseResult, parseEflTextWithAi } from "@/lib/efl/eflAiParser";
+import { canonicalizeRateStructureForPipeline } from "@/lib/efl/canonicalizePipelineShapes";
 import {
   getTemplateKey,
   type EflTemplateKeyResult,
@@ -252,10 +253,16 @@ async function handleManualUpload(
       ? derivedForValidation.derivedPlanRules
       : aiResult.planRules;
 
-  const rateStructureForTemplate =
+  const rateStructureForTemplateRaw =
     finalStatus === "PASS" && derivedForValidation?.derivedRateStructure
       ? derivedForValidation.derivedRateStructure
       : aiResult.rateStructure;
+
+  const rateStructureForTemplate = canonicalizeRateStructureForPipeline({
+    finalStatus,
+    planRules: planRulesForTemplate,
+    rateStructure: rateStructureForTemplateRaw,
+  });
 
   const validationForTemplate =
     finalStatus === "PASS" && validationAfter
@@ -391,10 +398,16 @@ async function handleWattbuy(
       ? derivedForValidation.derivedPlanRules
       : aiResult.planRules;
 
-  const rateStructureForTemplate =
+  const rateStructureForTemplateRaw =
     finalStatus === "PASS" && derivedForValidation?.derivedRateStructure
       ? derivedForValidation.derivedRateStructure
       : aiResult.rateStructure;
+
+  const rateStructureForTemplate = canonicalizeRateStructureForPipeline({
+    finalStatus,
+    planRules: planRulesForTemplate,
+    rateStructure: rateStructureForTemplateRaw,
+  });
 
   const validationForTemplate =
     finalStatus === "PASS" && validationAfter

@@ -3,6 +3,7 @@ import { Buffer } from "node:buffer";
 import { deterministicEflExtract } from "@/lib/efl/eflExtractor";
 import type { PdfTextExtractor } from "@/lib/efl/eflExtractor";
 import { parseEflTextWithAi } from "@/lib/efl/eflAiParser";
+import { canonicalizeRateStructureForPipeline } from "@/lib/efl/canonicalizePipelineShapes";
 import { scoreEflPassStrength } from "@/lib/efl/eflValidator";
 import { solveEflValidationGaps } from "@/lib/efl/validation/solveEflValidationGaps";
 
@@ -144,10 +145,16 @@ export async function runEflPipelineNoStore(
       ? derivedForValidation.derivedPlanRules
       : aiResult.planRules ?? null;
 
-  const finalRateStructure =
+  const finalRateStructureRaw =
     finalStatus === "PASS" && derivedForValidation?.derivedRateStructure
       ? derivedForValidation.derivedRateStructure
       : aiResult.rateStructure ?? null;
+
+  const finalRateStructure = canonicalizeRateStructureForPipeline({
+    finalStatus,
+    planRules: finalPlanRules,
+    rateStructure: finalRateStructureRaw,
+  });
 
   let passStrength: "STRONG" | "WEAK" | "INVALID" | null = null;
   let passStrengthReasons: string[] = [];
