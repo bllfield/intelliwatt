@@ -227,10 +227,12 @@
 - **False-positive controls**
   - Require clear TDSP/TDU/delivery context on the same logical line/window.
   - Exclude the `Average price per kWh` table as a TDSP source.
+  - If a candidate line has TDSP context but does not actually parse to a numeric per-kWh charge, continue scanning later candidates instead of treating that candidate as authoritative.
   - Do not treat a REP `Energy Charge` line as TDSP when it is the only cents-per-kWh token in the window.
 
 - **Known examples**
   - Spark / Oncor style delivery tables where the TDSP row is rendered as `5.61830¢    ¢ per kWh`.
+  - Spark / WTU multi-table EFLs where residential rows are followed by small-commercial non-demand and demand-meter average-price/distribution tables.
 
 ---
 

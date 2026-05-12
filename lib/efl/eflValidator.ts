@@ -418,7 +418,10 @@ function pickBestTdspPerKwhLine(
   };
 
   const best = lines.find(isTdspTokenLine);
-  if (best) return { value: parseCentsPerKwhFromLine(best), line: best };
+  if (best) {
+    const parsed = parseCentsPerKwhFromLine(best);
+    if (parsed != null) return { value: parsed, line: best };
+  }
 
   const next = lines.find(
     (l) =>
@@ -429,7 +432,10 @@ function pickBestTdspPerKwhLine(
           l.replace(/,/g, "").matchAll(/(\d+(?:\.\d+)?)\s*¢\s*(?:¢\s*)?(?:[\/⁄]\s*kWh|per\s*kWh)/gi),
         ).length === 1),
   );
-  if (next) return { value: parseCentsPerKwhFromLine(next), line: next };
+  if (next) {
+    const parsed = parseCentsPerKwhFromLine(next);
+    if (parsed != null) return { value: parsed, line: next };
+  }
 
   const any = lines.find((l) =>
     !(/Average\s+price\s+per\s*kWh/i.test(l) || /Average\s+monthly\s+use/i.test(l)) &&
@@ -439,7 +445,10 @@ function pickBestTdspPerKwhLine(
         l.replace(/,/g, "").matchAll(/(\d+(?:\.\d+)?)\s*¢\s*(?:¢\s*)?(?:[\/⁄]\s*kWh|per\s*kWh)/gi),
       ).length === 1),
   );
-  if (any) return { value: parseCentsPerKwhFromLine(any), line: any };
+  if (any) {
+    const parsed = parseCentsPerKwhFromLine(any);
+    if (parsed != null) return { value: parsed, line: any };
+  }
 
   return { value: null, line: null };
 }
