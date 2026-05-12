@@ -11,5 +11,24 @@ Electricity AEP Texas N Delivery Charges 5.9233¢ per kWh and $3.24 per month
 `.trim();
     expect(inferTdspTerritoryFromEflText(raw)).toBe("AEP_NORTH");
   });
+
+  it("infers AEP_NORTH from legacy West Texas Utilities service-area labels", () => {
+    const raw = `
+Electricity Facts Label (EFL)
+Constellation NewEnergy, Inc. (Constellation)
+West Texas Utilities Company Service Area
+DH EFL - 4949329 – AEP-WTU12 MONTH RESIDENTIAL FIXED RATE 5/6/2026
+`.trim();
+    expect(inferTdspTerritoryFromEflText(raw)).toBe("AEP_NORTH");
+  });
+
+  it("infers AEP_CENTRAL from legacy Central Power and Light service-area labels", () => {
+    const raw = `
+Electricity Facts Label (EFL)
+Central Power and Light Company Service Area
+DH EFL - 1234567 – AEP-CPL12 MONTH RESIDENTIAL FIXED RATE 5/6/2026
+`.trim();
+    expect(inferTdspTerritoryFromEflText(raw)).toBe("AEP_CENTRAL");
+  });
 });
 

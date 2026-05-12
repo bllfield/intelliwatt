@@ -179,6 +179,33 @@
 
 ---
 
+## Rule R-TDSP-TERRITORY-002 — Legacy AEP Utility Service-Area Mapping
+
+- **Intent**
+  - Infer the TDSP territory from legacy AEP utility names in EFL service-area headers so masked/pass-through TDU disclosures can use the shared utility-table validation fallback.
+
+- **Input pattern(s)**
+  - EFL header/footer text such as:
+    - `West Texas Utilities Company Service Area`
+    - `AEP-WTU...`
+    - `Central Power and Light Company Service Area`
+    - `AEP-CPL...`
+
+- **Output field(s)**
+  - `inferTdspTerritoryFromEflText(rawText)` should return:
+    - `AEP_NORTH` for WTU / West Texas Utilities labels.
+    - `AEP_CENTRAL` for CPL / Central Power and Light labels.
+  - Downstream validator fallback may populate `assumptionsUsed.tdspFromUtilityTable` and validate masked/pass-through TDU average-price tables.
+
+- **False-positive controls**
+  - Require explicit legacy utility/service-area tokens; do not infer AEP territory from generic `West Texas` geography alone.
+  - Keep CPL and WTU distinct because they map to different AEP TDSP territories.
+
+- **Known examples**
+  - Constellation / West Texas Utilities fixed-rate EFLs where average-price rows include TDU tariff charges but the EFL does not print numeric TDSP delivery components.
+
+---
+
 ## Rule R‑TDSP‑ROW‑002 — Split-Unit TDSP Delivery Row Extraction
 
 - **Intent**

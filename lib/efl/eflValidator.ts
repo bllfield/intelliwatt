@@ -647,6 +647,10 @@ export function inferTdspTerritoryFromEflText(
     norm.includes("aep north") ||
     norm.includes("aep-north") ||
     norm.includes("aep texas north") ||
+    // Legacy utility names still appear in some EFL service-area headers.
+    norm.includes("west texas utilities") ||
+    norm.includes("wtu service area") ||
+    norm.includes("aep-wtu") ||
     // Some EFLs abbreviate North/Central as a single letter (e.g., "AEP Texas N").
     norm.includes("aep texas n ") ||
     norm.includes("aep texas n service area") ||
@@ -659,6 +663,9 @@ export function inferTdspTerritoryFromEflText(
     norm.includes("aep central") ||
     norm.includes("aep-central") ||
     norm.includes("aep texas central") ||
+    norm.includes("central power and light") ||
+    norm.includes("cpl service area") ||
+    norm.includes("aep-cpl") ||
     norm.includes("aep texas c ") ||
     norm.includes("aep texas c service area") ||
     norm.includes("aep texas c delivery") ||
