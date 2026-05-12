@@ -152,6 +152,34 @@
 
 ---
 
+## Rule R‑TDSP‑ROW‑002 — Split-Unit TDSP Delivery Row Extraction
+
+- **Intent**
+  - Extract TDSP/TDU per-kWh delivery charges when the numeric value and the unit are split across table columns, such as `5.61830¢    ¢ per kWh`, so the shared parser/validator path does not drop the delivery component.
+
+- **Input pattern(s)**
+  - TDSP/TDU delivery table rows where:
+    - the row has explicit delivery context (`TDU Delivery Charge`, `TDSP Delivery Charge`, `Oncor Charges`, etc.), and
+    - the numeric token appears as `N¢`, and
+    - the unit may appear in an adjacent column as `¢ per kWh` rather than inline as `N¢ per kWh`.
+  - Conceptual pattern:
+    - `(<delivery context>).{0,80}(\d+(?:\.\d+)?)¢\s*(?:¢\s*)?(?:/ ?kWh|per ?kWh)`
+
+- **Output field(s)**
+  - Shared raw-text TDSP extraction should populate:
+    - `eflTdsp.perKwhCents`
+    - downstream validator assumptions such as `assumptionsUsed.tdspFromEfl.perKwhCents`
+
+- **False-positive controls**
+  - Require clear TDSP/TDU/delivery context on the same logical line/window.
+  - Exclude the `Average price per kWh` table as a TDSP source.
+  - Do not treat a REP `Energy Charge` line as TDSP when it is the only cents-per-kWh token in the window.
+
+- **Known examples**
+  - Spark / Oncor style delivery tables where the TDSP row is rendered as `5.61830¢    ¢ per kWh`.
+
+---
+
 ## Rule R‑META‑PUCT‑001 — REP PUCT Certificate Extraction
 
 - **Intent**

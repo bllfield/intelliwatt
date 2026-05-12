@@ -6,6 +6,8 @@ This SOP defines **how IntelliWatt resolves quarantined EFLs** (items in the EFL
 
 - We **never** introduce supplier/plan/label‑specific patches into the parser or solver.
 - Every resolved item results in a **generalized extraction/normalization/solver rule** that improves the system for future EFLs.
+- The goal of resolving a queued EFL is to make the **shared processing path** smarter so the same pattern calculates correctly in the **user page, batch run, auto solver, and manual loader**.
+- Persisting or reusing a template may clear stale queue rows, but it is **not** by itself considered the fix when the root cause is a parser/solver miss.
 - Solver behavior that computes and persists **per‑card derived numbers** remains allowed and expected.
 - Only EFLs with **finalValidationStatus === PASS** are eligible for user‑facing presentation.
 
@@ -49,6 +51,9 @@ This SOP defines **how IntelliWatt resolves quarantined EFLs** (items in the EFL
 - If a matching EFL template (`RatePlan.rateStructure`) exists and does **not** require manual review, the corresponding **OPEN** quarantine row should be auto-resolved.
   - This is handled automatically by admin tooling (queue refresh / batch parsing) so admins do not have to clear items one-by-one.
   - DRY_RUN operations must remain side-effect-free and must not auto-resolve.
+- Auto-resolution is a **queue hygiene** step, not the definition of success:
+  - If the underlying EFL still fails to parse/validate on a fresh shared-path rerun, the work is **not done** even if a stored template exists.
+  - The actual success condition is that the shared parser/solver path can process that EFL pattern correctly without relying on a one-off rescue path.
 
 ### 3.2 Template persistence guardrail (no incomplete templates)
 
@@ -89,6 +94,13 @@ This SOP defines **how IntelliWatt resolves quarantined EFLs** (items in the EFL
 5. **Document failure category and intended fix**
    - Assign a taxonomy code (e.g., `BASE_CHARGE_SYNONYM`, `TIER_MISSING_GT_RANGE`, `ASSUMPTION_TABLE_ONLY`).
    - Write down the generalized rule/heuristic you intend to implement.
+6. **Verify the fix on the shared path**
+   - Confirm the generalized fix works through the shared processing path used by:
+     - user pricing/read flows,
+     - batch parsing,
+     - auto-solver/validation reruns, and
+     - manual loader/admin reruns.
+   - A queue item is only considered truly resolved when future runs of the same EFL pattern stay out of quarantine for the **right reason**: the parser/solver now understands it.
 
 ## 5. Fix Strategy Matrix
 
@@ -129,6 +141,7 @@ Use this checklist for every quarantined EFL item before marking it resolved:
 - [ ] General rule implemented (no supplier/plan/label‑specific keys).
 - [ ] Regression fixture added (rawText snippet or full text in fixtures).
 - [ ] Regression test added and passing (parser + validator/solver as appropriate).
+- [ ] Shared-path behavior verified so user page, batch run, auto solver, and manual loader all benefit from the same fix.
 - [ ] `docs/PROJECT_PLAN.md` updated with what changed, which **rule ID** was added/updated, and which fixture/test was added.
 
 

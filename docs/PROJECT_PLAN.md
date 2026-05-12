@@ -1402,6 +1402,16 @@ Next step: Step 7 — Documentation + runbooks + failure modes
 
 > **2025‑12‑15 (policy clarify)** — Clarified that the solver may persist per‑card derived numbers (per‑template/per‑plan) into templates/rate models, but manual review must always drive generalized extractor/normalizer/solver improvements rather than label‑ or supplier‑specific code branches.
 
+> **2026‑05‑12 (queue-resolution clarify + TDSP row fix)** — Clarified the governing goal for queued EFLs: the job is **not** merely to turn that queued plan into a template. The job is to improve the **shared EFL processing path** so the same pattern calculates correctly for the **user page, batch run, auto solver, and manual loader**. Template reuse/auto-resolution is still required for stale queue hygiene, but it is not considered the root-cause fix when a fresh rerun still misparses the EFL. For the Spark/Oncor miss, the shared parser/validator path was updated to recognize split-unit TDSP delivery rows like `5.61830¢    ¢ per kWh` instead of only inline forms like `5.61830¢ per kWh`.
+
+- **Rule ID updated**
+  - `R‑TDSP‑ROW‑002` in `docs/EFL_PARSER_RULES.md`
+- **What changed**
+  - Shared raw-text TDSP extraction now accepts split-unit delivery rows where the cents value and the `¢ per kWh` unit are separated across table columns.
+  - The same generalized token handling was applied in the shared validator/solver/parser helpers so a fresh rerun does not drop the TDSP per-kWh component.
+- **Regression coverage**
+  - `tests/efl/spark.opendoor-select.oncor.tdsp-validation.test.ts`
+
 #### UTILITY / TDSP MODULE — Step 5B tariff expansion (2025-12-13)
 
 - **Utilities added**
@@ -1452,6 +1462,7 @@ Next step: Step 7 — Documentation + runbooks + failure modes
     - **Quarantine**: EFLs that FAIL/SKIP validation or emit concerning `queueReason` values are kept out of user‑facing flows and land in the EFL review queue.
     - **Diagnose**: Admin reviews the EFL PDF + pipeline output to identify what is missing/misparsed (base charge, tiers, credits, TOU, TDSP inclusion, TDSP masking, etc.).
     - **Generalize**: Decide which layer (extractor, AI normalization, deterministic fallback, validator, solver) should be updated with a **reusable rule**, not a one‑off patch.
+    - **Shared-path success criteria**: The fix is only considered complete when the same generalized rule benefits the user page, batch run, auto solver, and manual loader through the shared path. Persisting a template for one card is not enough if a fresh rerun would still queue.
     - **Regression fixture/test**: Add a fixture and automated tests so the same class of failure cannot silently re‑appear.
     - **Update plan**: Record the change in this plan file with the new/updated **Rule ID** and the fixtures/tests that were added.
 
@@ -1526,6 +1537,8 @@ Next step: Step 7 — Documentation + runbooks + failure modes
 - The EFL review queue is used to:
   - **(a)** Approve/use solver‑derived stored values for that card (so users can see it once validated), and
   - **(b)** Classify the failure and drive a **generalized** extraction/normalization/solver improvement so future similar cards PASS automatically.
+- The primary success metric for queue work is **future shared-path correctness**, not simply converting the current queued card into a reusable template.
+  - A queue item is truly fixed when the next fresh shared-path rerun of that EFL pattern calculates correctly and stays out of quarantine for the same reason across user/admin/batch flows.
 - The queue is **not** used to introduce supplier/plan/version‑specific code conditions:
   - No per‑card branches, no special‑case label handling baked into the parser; all fixes must be concept‑level.
 
