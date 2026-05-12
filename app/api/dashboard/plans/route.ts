@@ -11,7 +11,10 @@ import { estimateTrueCost } from "@/lib/plan-engine/estimateTrueCost";
 import { getCachedPlanEstimate, putCachedPlanEstimate, sha256Hex as sha256HexCache } from "@/lib/plan-engine/planEstimateCache";
 import { PLAN_ENGINE_ESTIMATE_VERSION, makePlanEstimateInputsSha256 } from "@/lib/plan-engine/estimateInputsKey";
 import { getMaterializedPlanEstimate } from "@/lib/plan-engine/materializedEstimateStore";
-import { getLatestPlanPipelineJob } from "@/lib/plan-engine/planPipelineJob";
+import {
+  getLatestPlanPipelineJob,
+  summarizePlanPipelineEstimateReadiness,
+} from "@/lib/plan-engine/planPipelineJob";
 import { wattbuyOffersPrisma } from "@/lib/db/wattbuyOffersClient";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEstimate";
@@ -393,10 +396,11 @@ export async function GET(req: NextRequest) {
     // This prevents "58 available" from flipping to "58 pending" when new usage arrives (different window = different key).
     let usageWindowEndForCalc = usageWindowEnd;
     let usageCutoffForCalc = usageCutoff;
+    let latestPlanPipelineJob: Awaited<ReturnType<typeof getLatestPlanPipelineJob>> | null = null;
     if (house.id) {
       try {
-        const latestJob = await getLatestPlanPipelineJob(house.id);
-        const windowEndIso = latestJob?.lastCalcWindowEnd;
+        latestPlanPipelineJob = await getLatestPlanPipelineJob(house.id);
+        const windowEndIso = latestPlanPipelineJob?.lastCalcWindowEnd;
         if (windowEndIso && typeof windowEndIso === "string") {
           const d = new Date(windowEndIso);
           if (Number.isFinite(d.getTime())) {
@@ -408,6 +412,23 @@ export async function GET(req: NextRequest) {
         // ignore; use latest SMT window
       }
     }
+    const planEstimateReadiness = hasUsage
+      ? summarizePlanPipelineEstimateReadiness(
+          latestPlanPipelineJob,
+          PLAN_ENGINE_ESTIMATE_VERSION,
+        )
+      : {
+          complete: true,
+          reason: "NO_USAGE_REQUIRED",
+          status: null,
+          runId: null,
+          calcVersion: null,
+          terminalEstimateCount: 0,
+          ratePlanIdsCount: null,
+          counts: {},
+        };
+    const suppressAvailableEstimatesUntilPipelineComplete =
+      hasUsage && !planEstimateReadiness.complete;
 
     // Canonical calc buckets (stitched 12 months). We'll fill after we know requiredBucketKeys.
     let recentYearMonths: string[] = [];
@@ -1797,7 +1818,7 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      const trueCostEstimate: any = await (async () => {
+      const trueCostEstimateRaw: any = await (async () => {
         if (!hasUsage) return { status: "MISSING_USAGE" };
         if (annualKwhForCalc == null) {
           return { status: "NOT_IMPLEMENTED", reason: "MISSING_USAGE_TOTALS" };
@@ -1872,6 +1893,20 @@ export async function GET(req: NextRequest) {
         // Cache warm-up happens via `/api/dashboard/plans/pipeline` (dashboard bootstrap) or admin tooling.
         return { status: "NOT_IMPLEMENTED", reason: "CACHE_MISS" };
       })();
+      const trueCostEstimate: any =
+        suppressAvailableEstimatesUntilPipelineComplete &&
+        (String(trueCostEstimateRaw?.status ?? "").toUpperCase() === "OK" ||
+          String(trueCostEstimateRaw?.status ?? "").toUpperCase() === "APPROXIMATE")
+          ? {
+              status: "NOT_IMPLEMENTED",
+              reason: "PIPELINE_IN_PROGRESS",
+              readiness: {
+                complete: false,
+                reason: planEstimateReadiness.reason,
+                runId: planEstimateReadiness.runId,
+              },
+            }
+          : trueCostEstimateRaw;
 
       // If an offer is template-mapped but the engine returns NOT_COMPUTABLE, it MUST be visible in admin review.
       // Examples: USAGE_BUCKET_SUM_MISMATCH (bucket defs/aggregation mismatch) and NON_DETERMINISTIC_PRICING_INDEXED.
@@ -2008,7 +2043,7 @@ export async function GET(req: NextRequest) {
     let bestOffersAllInBasis: string | null = null;
     let bestOffersAllInDisclaimer: string | null = null;
     try {
-      if (hasUsage) {
+      if (hasUsage && planEstimateReadiness.complete) {
         // datasetMode (pageSize=2000) is used for client-side browsing/sort/filter.
         // Keep this route fast: do not run expensive "score the entire offer set" work.
         const allowComputeBestAllIn = Boolean(!datasetMode);
@@ -2190,6 +2225,7 @@ export async function GET(req: NextRequest) {
         hasUsage,
         usageSummary,
         avgMonthlyKwh: avgMonthlyKwhForDisplay ?? undefined,
+        estimateReadiness: planEstimateReadiness,
         offers: shaped,
         bestOffers,
         bestOffersBasis,

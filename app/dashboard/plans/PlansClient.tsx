@@ -25,6 +25,15 @@ type ApiResponse = {
   message?: string;
   hardBlock?: boolean;
   hasUsage?: boolean;
+  estimateReadiness?: {
+    complete?: boolean;
+    reason?: string | null;
+    status?: string | null;
+    runId?: string | null;
+    terminalEstimateCount?: number;
+    ratePlanIdsCount?: number | null;
+    counts?: Record<string, number>;
+  } | null;
   usageSummary?: UsageSummary;
   avgMonthlyKwh?: number;
   offers?: OfferRow[];
@@ -263,7 +272,7 @@ export default function PlansClient() {
   // instead of refetching.
   // Bump when API semantics change so we don't pin users to stale session-cached payloads.
   // Bump when API semantics change so we don't pin users to stale session-cached payloads.
-  const cacheKey = useMemo(() => `dashboard_plans_dataset_v6:${serverDatasetKey}`, [serverDatasetKey]);
+  const cacheKey = useMemo(() => `dashboard_plans_dataset_v7:${serverDatasetKey}`, [serverDatasetKey]);
   // This is NOT the plan-engine cache (engine outputs are persisted in the WattBuy Offers DB).
   // This is only a UX cache for the API response to avoid flashing loading states on navigation.
   // Keep it long-lived; correctness still comes from server-side canonical inputs + DB-stored estimates.
@@ -271,6 +280,7 @@ export default function PlansClient() {
 
   const responseHasPending = (r: ApiResponse | null): boolean => {
     if (!r?.ok) return false;
+    if (r?.hasUsage && r?.estimateReadiness?.complete !== true) return true;
     const offersNow = Array.isArray(r?.offers) ? (r!.offers as OfferRow[]) : [];
     // IMPORTANT:
     // Do not pin the UI to a cached response when ANY offers are QUEUED.
@@ -287,7 +297,9 @@ export default function PlansClient() {
       if (String(o?.intelliwatt?.statusLabel ?? "") !== "QUEUED") return false;
       const tceStatus = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
       const tceReason = String((o as any)?.intelliwatt?.trueCostEstimate?.reason ?? "").toUpperCase();
-      const isCacheMiss = tceStatus === "NOT_IMPLEMENTED" && tceReason === "CACHE_MISS";
+      const isCacheMiss =
+        tceStatus === "NOT_IMPLEMENTED" &&
+        (tceReason === "CACHE_MISS" || tceReason === "PIPELINE_IN_PROGRESS");
       return !tceStatus || tceStatus === "QUEUED" || tceStatus === "MISSING_TEMPLATE" || isCacheMiss;
     }).length;
   };
@@ -313,6 +325,7 @@ export default function PlansClient() {
       tceStatus === "MISSING_TEMPLATE" ||
       (tceStatus === "NOT_IMPLEMENTED" &&
         (tceReason === "CACHE_MISS" ||
+          tceReason === "PIPELINE_IN_PROGRESS" ||
           tceReason.includes("MISSING TEMPLATE") ||
           tceReason.includes("MISSING BUCKET"))) ||
       (statusLabel === "QUEUED" &&
@@ -321,6 +334,7 @@ export default function PlansClient() {
           tceStatus === "MISSING_TEMPLATE" ||
           (tceStatus === "NOT_IMPLEMENTED" &&
             (tceReason === "CACHE_MISS" ||
+              tceReason === "PIPELINE_IN_PROGRESS" ||
               tceReason.includes("MISSING TEMPLATE") ||
               tceReason.includes("MISSING BUCKET")))));
     if (calculating) return "CALCULATING";
@@ -921,6 +935,7 @@ export default function PlansClient() {
 
   const recommendedOfferId = useMemo(() => {
     if (!hasUsage) return null;
+    if (resp?.estimateReadiness?.complete !== true) return null;
     if (sort !== "best_for_you_proxy") return null;
     if (safePage !== 1) return null;
     const first = calculableOffers?.[0] as any;
@@ -928,7 +943,7 @@ export default function PlansClient() {
     const tce = first?.intelliwatt?.trueCostEstimate;
     if (!tce || tce.status !== "OK") return null;
     return String(first.offerId);
-  }, [hasUsage, sort, safePage, calculableOffers]);
+  }, [hasUsage, resp?.estimateReadiness?.complete, sort, safePage, calculableOffers]);
 
   const queuedCount = useMemo(
     () => offers.filter((o: any) => o?.intelliwatt?.statusLabel === "QUEUED").length,
@@ -946,7 +961,9 @@ export default function PlansClient() {
       if (String(o?.intelliwatt?.statusLabel ?? "") !== "QUEUED") return false;
       const tceStatus = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
       const tceReason = String((o as any)?.intelliwatt?.trueCostEstimate?.reason ?? "").toUpperCase();
-      const isCacheMiss = tceStatus === "NOT_IMPLEMENTED" && tceReason === "CACHE_MISS";
+      const isCacheMiss =
+        tceStatus === "NOT_IMPLEMENTED" &&
+        (tceReason === "CACHE_MISS" || tceReason === "PIPELINE_IN_PROGRESS");
       return !tceStatus || tceStatus === "QUEUED" || tceStatus === "MISSING_TEMPLATE" || isCacheMiss;
     }).length;
   }, [offersRaw]);

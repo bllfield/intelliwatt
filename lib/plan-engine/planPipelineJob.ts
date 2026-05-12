@@ -57,15 +57,123 @@ function readCount(payload: PlanPipelineJobPayload | null, key: string): number 
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
+export function summarizePlanPipelineEstimateReadiness(
+  latest: PlanPipelineJobPayload | null,
+  requiredCalcVersion?: string | null,
+): {
+  complete: boolean;
+  reason: string;
+  status: PlanPipelineJobStatus | null;
+  runId: string | null;
+  calcVersion: string | null;
+  terminalEstimateCount: number;
+  ratePlanIdsCount: number | null;
+  counts: Record<string, number>;
+} {
+  const counts = ((latest as any)?.counts && typeof (latest as any).counts === "object"
+    ? ((latest as any).counts as Record<string, number>)
+    : {}) as Record<string, number>;
+  const status = latest?.status ?? null;
+  const calcVersion = typeof latest?.calcVersion === "string" ? latest.calcVersion.trim() : null;
+  const required = typeof requiredCalcVersion === "string" ? requiredCalcVersion.trim() : "";
+
+  const ratePlanIdsCount = readCount(latest, "ratePlanIdsCount");
+  const ratePlansLoaded = readCount(latest, "ratePlansLoaded") ?? ratePlanIdsCount;
+  const terminalEstimateCount =
+    (readCount(latest, "estimatesComputed") ?? 0) +
+    (readCount(latest, "estimatesAlreadyCached") ?? 0) +
+    (readCount(latest, "ratePlansMissingRateStructure") ?? 0) +
+    (readCount(latest, "ratePlansDerivedNotComputable") ?? 0) +
+    (readCount(latest, "ratePlansMissingRequiredKeys") ?? 0);
+  const expectedTerminalCount =
+    ratePlanIdsCount == null
+      ? null
+      : Math.max(ratePlanIdsCount, ratePlansLoaded ?? ratePlanIdsCount);
+
+  if (!latest) {
+    return {
+      complete: false,
+      reason: "NO_PIPELINE_RUN",
+      status: null,
+      runId: null,
+      calcVersion: null,
+      terminalEstimateCount,
+      ratePlanIdsCount,
+      counts,
+    };
+  }
+
+  if (status !== "DONE") {
+    return {
+      complete: false,
+      reason: status === "RUNNING" ? "PIPELINE_RUNNING" : "PIPELINE_NOT_DONE",
+      status,
+      runId: latest.runId ?? null,
+      calcVersion,
+      terminalEstimateCount,
+      ratePlanIdsCount,
+      counts,
+    };
+  }
+
+  if (required && calcVersion !== required) {
+    return {
+      complete: false,
+      reason: calcVersion ? "PIPELINE_VERSION_STALE" : "PIPELINE_VERSION_MISSING",
+      status,
+      runId: latest.runId ?? null,
+      calcVersion,
+      terminalEstimateCount,
+      ratePlanIdsCount,
+      counts,
+    };
+  }
+
+  if (expectedTerminalCount == null) {
+    return {
+      complete: false,
+      reason: "PIPELINE_COUNTS_MISSING",
+      status,
+      runId: latest.runId ?? null,
+      calcVersion,
+      terminalEstimateCount,
+      ratePlanIdsCount,
+      counts,
+    };
+  }
+
+  if (terminalEstimateCount < expectedTerminalCount) {
+    return {
+      complete: false,
+      reason: "PIPELINE_INCOMPLETE",
+      status,
+      runId: latest.runId ?? null,
+      calcVersion,
+      terminalEstimateCount,
+      ratePlanIdsCount,
+      counts,
+    };
+  }
+
+  return {
+    complete: true,
+    reason: "PIPELINE_COMPLETE",
+    status,
+    runId: latest.runId ?? null,
+    calcVersion,
+    terminalEstimateCount,
+    ratePlanIdsCount,
+    counts,
+  };
+}
+
 function hasRemainingWork(latest: PlanPipelineJobPayload | null): boolean {
   if (!latest) return false;
-  const ratePlanIdsCount = readCount(latest, "ratePlanIdsCount");
-  const estimatesComputed = readCount(latest, "estimatesComputed") ?? 0;
-  const estimatesAlreadyCached = readCount(latest, "estimatesAlreadyCached") ?? 0;
-  if (ratePlanIdsCount == null) return false;
-  // If we haven't computed/cached estimates for all known ratePlans yet, the pipeline is incomplete
+  const readiness = summarizePlanPipelineEstimateReadiness(latest, latest.calcVersion ?? null);
+  if (readiness.ratePlanIdsCount == null) return false;
+  // If we haven't reached a terminal estimate state for all known ratePlans yet, the pipeline is incomplete
   // and we should NOT block follow-on batches behind a long cooldown.
-  return estimatesComputed + estimatesAlreadyCached < ratePlanIdsCount;
+  return !readiness.complete;
 }
 
 export function shouldStartPlanPipelineJob(args: {

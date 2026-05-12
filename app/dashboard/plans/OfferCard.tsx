@@ -145,6 +145,7 @@ export default function OfferCard({ offer, recommended, forceCalculating = false
     // Plans list is read-only: a CACHE_MISS means "pipeline hasn't materialized this input-set yet".
     (tceStatus === "NOT_IMPLEMENTED" &&
       (tceReason === "CACHE_MISS" ||
+        tceReason === "PIPELINE_IN_PROGRESS" ||
         tceReason.includes("MISSING TEMPLATE") ||
         tceReason.includes("MISSING BUCKET"))) ||
     // Template missing can be transient (prefetch/pipeline may be building it); treat as calculating on the card.
