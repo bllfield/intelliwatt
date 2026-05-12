@@ -227,6 +227,11 @@ export async function POST(req: NextRequest) {
           let usedUrl: string | null = null;
           let usedRawTextFallback = false;
           let rawTextFromFetch: string | null = null;
+          let pipeline: any = null;
+          let det: any = null;
+          let finalValidation: any = null;
+          let finalStatus: string | null = null;
+          let passStrength: "STRONG" | "WEAK" | "INVALID" | null = null;
 
           const fetchedRes = await fetchEflSourceFromCandidateUrls(candidates.length ? candidates : [eflUrl]);
           const tried = fetchedRes.tried;
@@ -302,9 +307,6 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          const finalStatus = null;
-          const passStrength = null;
-
           {
             // Canonical pipeline execution (single source of truth). We keep the legacy implementation
             // below for now, but short-circuit here so production semantics converge on one module.
@@ -331,6 +333,18 @@ export async function POST(req: NextRequest) {
                 tdspName: it?.tdspName ?? null,
               },
             });
+            pipeline = canonical as any;
+            det = {
+              eflPdfSha256: canonical.eflPdfSha256 ?? null,
+              repPuctCertificate: canonical.repPuctCertificate ?? null,
+              eflVersionCode: canonical.eflVersionCode ?? null,
+              rawText: usedRawTextFallback
+                ? (rawTextFromFetch || String((it as any)?.rawText ?? ""))
+                : null,
+            };
+            finalValidation = canonical.finalValidation ?? null;
+            finalStatus = canonical.finalValidation?.status ?? null;
+            passStrength = (canonical.passStrength as any) ?? null;
 
             const templateAction: "CREATED" | "SKIPPED" =
               canonical.ratePlanId && canonical.queued === false ? "CREATED" : "SKIPPED";
