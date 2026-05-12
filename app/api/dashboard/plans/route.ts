@@ -15,10 +15,16 @@ import { getLatestPlanPipelineJob } from "@/lib/plan-engine/planPipelineJob";
 import { wattbuyOffersPrisma } from "@/lib/db/wattbuyOffersClient";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEstimate";
-import { canComputePlanFromBuckets, derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
+import { canComputePlanFromBuckets } from "@/lib/plan-engine/planComputability";
 import { isPlanCalcQuarantineWorthyReasonCode } from "@/lib/plan-engine/planCalcQuarantine";
+import { isComputableOverride } from "@/lib/plan-engine/planCalcOverrides";
+import { selectAuthoritativePlanCalc } from "@/lib/plan-engine/authoritativePlanCalc";
 import { deriveUniversalAvailability } from "@/lib/plan-engine/universalStatus";
 import { bucketDefsFromBucketKeys } from "@/lib/plan-engine/usageBuckets";
+import {
+  shouldWriteOpenQueueRowForEvidence,
+  withQueueEvidenceFingerprint,
+} from "@/lib/efl/reviewQueueEvidence";
 import { upsertReviewQueueRowRespectingOpenUrl } from "@/lib/efl/reviewQueueWrite";
 import { recordSimulationDataAlert } from "@/modules/usageSimulator/simulationDataAlerts";
 import {
@@ -73,6 +79,13 @@ function canonicalUrlKey(u: string): string | null {
   } catch {
     return null;
   }
+}
+
+function buildEflParseEvidenceFingerprint(eflUrl: string | null): string {
+  return (
+    (canonicalUrlKey(eflUrl ?? "") ?? String(eflUrl ?? "").trim()) ||
+    "MISSING_EFL_URL"
+  );
 }
 
 function parseApproxKwhPerMonth(v: string | null): number | null {
@@ -602,110 +615,56 @@ export async function GET(req: NextRequest) {
             planCalcStatus: true,
             planCalcReasonCode: true,
             requiredBucketKeys: true,
+            supportedFeatures: true,
           },
         });
 
         for (const rp of rows as any[]) {
           const id = String(rp.id);
           const rsPresent = isRateStructurePresent(rp.rateStructure);
-          const storedStatus =
-            typeof rp?.planCalcStatus === "string" ? (String(rp.planCalcStatus) as any) : null;
-          const storedReason =
-            typeof rp?.planCalcReasonCode === "string" ? String(rp.planCalcReasonCode) : null;
-          const storedKeys = Array.isArray((rp as any)?.requiredBucketKeys)
-            ? ((rp as any).requiredBucketKeys as any[]).map((k) => String(k))
-            : [];
-
-          // Always compute derived requirements when rateStructure is present. We use this as the canonical
-          // requiredBucketKeys for hashing (inputsSha256) so the dashboard and pipeline agree, even if the stored
-          // requiredBucketKeys are stale.
-          const derived = derivePlanCalcRequirementsFromTemplate({
+          const authoritativeCalc = selectAuthoritativePlanCalc({
             rateStructure: rsPresent ? rp.rateStructure : null,
+            stored: {
+              planCalcStatus: rp?.planCalcStatus ?? null,
+              planCalcReasonCode: rp?.planCalcReasonCode ?? null,
+              requiredBucketKeys: (rp as any)?.requiredBucketKeys ?? [],
+              supportedFeatures: (rp as any)?.supportedFeatures ?? {},
+            },
           });
-
-          const derivedKeys = Array.isArray((derived as any)?.requiredBucketKeys)
-            ? ((derived as any).requiredBucketKeys as any[]).map((k) => String(k))
+          const effectiveKeys = Array.isArray(authoritativeCalc.requiredBucketKeys)
+            ? authoritativeCalc.requiredBucketKeys.map((k) => String(k))
             : [];
-
-          const keysEqual = (() => {
-            if (storedKeys.length !== derivedKeys.length) return false;
-            for (let i = 0; i < storedKeys.length; i++) {
-              if (String(storedKeys[i] ?? "") !== String(derivedKeys[i] ?? "")) return false;
-            }
-            return true;
-          })();
-
-          if (storedStatus === "COMPUTABLE" || storedStatus === "NOT_COMPUTABLE") {
-            // IMPORTANT:
-            // Prefer the derived planCalc status from the current engine when we have a rateStructure,
-            // otherwise a stale stored NOT_COMPUTABLE can block bucket loading and leave offers stuck as
-            // "UNSUPPORTED" / pending forever even though the engine is now able to compute them.
-            //
-            // The only exception is an explicit admin override to COMPUTABLE.
-            const isAdminOverride =
-              storedStatus === "COMPUTABLE" && String(storedReason ?? "").trim() === "ADMIN_OVERRIDE_COMPUTABLE";
-
-            const shouldPreferDerived = rsPresent && !isAdminOverride;
-            const effectiveStatus = shouldPreferDerived ? derived.planCalcStatus : storedStatus;
-            const effectiveReason =
-              shouldPreferDerived ? (derived.planCalcReasonCode || "UNKNOWN") : (storedReason ?? "UNKNOWN");
-            const effectiveKeys =
-              shouldPreferDerived
-                ? derivedKeys
-                : (storedKeys.length ? storedKeys : derivedKeys.length ? derivedKeys : []);
-
-            planCalcByRatePlanId.set(id, {
-              planCalcStatus: effectiveStatus,
-              planCalcReasonCode: effectiveReason,
-              rateStructurePresent: rsPresent,
-              rateStructure: rsPresent ? rp.rateStructure : null,
-              requiredBucketKeys: effectiveKeys.length ? effectiveKeys : null,
-            });
-
-            // Best-effort self-heal: if stored differs from derived (and not admin override), update the RatePlan row.
-            // This helps the pipeline, admin views, and future requests converge.
-            if (shouldPreferDerived) {
-              try {
-                const storedStatusNorm = String(storedStatus ?? "").trim();
-                const storedReasonNorm = String(storedReason ?? "").trim();
-                const nextStatusNorm = String(derived.planCalcStatus ?? "").trim();
-                const nextReasonNorm = String(derived.planCalcReasonCode ?? "").trim();
-                const nextKeysNorm = derivedKeys;
-                const differs =
-                  (nextStatusNorm && storedStatusNorm !== nextStatusNorm) ||
-                  (nextReasonNorm && storedReasonNorm !== nextReasonNorm) ||
-                  (derivedKeys.length > 0 && !keysEqual);
-                if (differs) {
-                  (prisma as any).ratePlan
-                    .update({
-                      where: { id },
-                      data: {
-                        planCalcVersion: (derived as any)?.planCalcVersion ?? 1,
-                        planCalcStatus: nextStatusNorm || storedStatusNorm || "UNKNOWN",
-                        planCalcReasonCode: nextReasonNorm || storedReasonNorm || "UNKNOWN",
-                        requiredBucketKeys: nextKeysNorm,
-                        supportedFeatures: (derived as any)?.supportedFeatures ?? {},
-                        planCalcDerivedAt: new Date(),
-                      },
-                      select: { id: true },
-                    })
-                    .catch(() => {});
-                }
-              } catch {
-                // ignore
-              }
-            }
-            continue;
-          }
-
-          // Fall back to deriving from rateStructure (if present); otherwise treat as unknown.
           planCalcByRatePlanId.set(id, {
-            planCalcStatus: derived.planCalcStatus,
-            planCalcReasonCode: derived.planCalcReasonCode,
+            planCalcStatus: authoritativeCalc.planCalcStatus,
+            planCalcReasonCode: authoritativeCalc.planCalcReasonCode,
             rateStructurePresent: rsPresent,
             rateStructure: rsPresent ? rp.rateStructure : null,
-            requiredBucketKeys: derived.requiredBucketKeys,
+            requiredBucketKeys: effectiveKeys.length ? effectiveKeys : null,
+            templateFingerprint: authoritativeCalc.templateFingerprint,
           });
+
+          if (authoritativeCalc.source === "derived") {
+            try {
+              (prisma as any).ratePlan
+                .update({
+                  where: { id },
+                  data: {
+                    planCalcVersion: authoritativeCalc.derived.planCalcVersion ?? 1,
+                    planCalcStatus: authoritativeCalc.derived.planCalcStatus,
+                    planCalcReasonCode:
+                      authoritativeCalc.derived.planCalcReasonCode || "UNKNOWN",
+                    requiredBucketKeys: effectiveKeys,
+                    supportedFeatures:
+                      authoritativeCalc.derived.supportedFeatures ?? {},
+                    planCalcDerivedAt: new Date(),
+                  },
+                  select: { id: true },
+                })
+                .catch(() => {});
+            } catch {
+              // ignore
+            }
+          }
         }
       } catch {
         // Best-effort only; absence means we won't refine status labels server-side.
@@ -1069,6 +1028,8 @@ export async function GET(req: NextRequest) {
             rateStructure: true,
             planCalcStatus: true,
             planCalcReasonCode: true,
+            requiredBucketKeys: true,
+            supportedFeatures: true,
           } as any,
         });
 
@@ -1126,26 +1087,23 @@ export async function GET(req: NextRequest) {
                     typeof p?.planCalcReasonCode === "string" ? String(p.planCalcReasonCode) : null;
                   const storedKeys = Array.isArray((p as any)?.requiredBucketKeys) ? ((p as any).requiredBucketKeys as any[]).map((k) => String(k)) : null;
 
-                  if (storedStatus === "COMPUTABLE" || storedStatus === "NOT_COMPUTABLE") {
-                    planCalcByRatePlanId.set(ratePlanId, {
+                  const authoritativeCalc = selectAuthoritativePlanCalc({
+                    rateStructure: rsPresent ? p.rateStructure : null,
+                    stored: {
                       planCalcStatus: storedStatus,
-                      planCalcReasonCode: storedReason ?? "UNKNOWN",
-                      rateStructurePresent: rsPresent,
-                      rateStructure: rsPresent ? p.rateStructure : null,
+                      planCalcReasonCode: storedReason,
                       requiredBucketKeys: storedKeys,
-                    });
-                  } else {
-                    const derived = derivePlanCalcRequirementsFromTemplate({
-                      rateStructure: rsPresent ? p.rateStructure : null,
-                    });
-                    planCalcByRatePlanId.set(ratePlanId, {
-                      planCalcStatus: derived.planCalcStatus,
-                      planCalcReasonCode: derived.planCalcReasonCode,
-                      rateStructurePresent: rsPresent,
-                      rateStructure: rsPresent ? p.rateStructure : null,
-                      requiredBucketKeys: derived.requiredBucketKeys,
-                    });
-                  }
+                      supportedFeatures: (p as any)?.supportedFeatures ?? {},
+                    },
+                  });
+                  planCalcByRatePlanId.set(ratePlanId, {
+                    planCalcStatus: authoritativeCalc.planCalcStatus,
+                    planCalcReasonCode: authoritativeCalc.planCalcReasonCode,
+                    rateStructurePresent: rsPresent,
+                    rateStructure: rsPresent ? p.rateStructure : null,
+                    requiredBucketKeys: authoritativeCalc.requiredBucketKeys,
+                    templateFingerprint: authoritativeCalc.templateFingerprint,
+                  });
                 }
               })
               .catch(() => {}),
@@ -1177,8 +1135,33 @@ export async function GET(req: NextRequest) {
           const reason = eflUrl
             ? "DASHBOARD_QUEUED: offer has EFL URL but no template mapping yet."
             : "DASHBOARD_QUEUED: offer is missing EFL URL and has no template mapping yet.";
+          const evidenceFingerprint = buildEflParseEvidenceFingerprint(eflUrl);
           queuedWrites.push(
-            upsertReviewQueueRowRespectingOpenUrl({
+            (async () => {
+              const existingRow = await (prisma as any).eflParseReviewQueue
+                .findUnique({
+                  where: { kind_dedupeKey: { kind: "EFL_PARSE", dedupeKey: offerId } },
+                  select: { resolvedAt: true, queueReason: true },
+                })
+                .catch(() => null);
+              if (
+                existingRow &&
+                !shouldWriteOpenQueueRowForEvidence({
+                  resolvedAt: existingRow.resolvedAt,
+                  queueReason: existingRow.queueReason,
+                  evidenceFingerprint,
+                })
+              ) {
+                return null;
+              }
+              const queueReasonPayload = withQueueEvidenceFingerprint(
+                {
+                  type: "EFL_PARSE",
+                  reason,
+                },
+                evidenceFingerprint,
+              );
+              return upsertReviewQueueRowRespectingOpenUrl({
                 prismaClient: prisma as any,
                 where: { kind_dedupeKey: { kind: "EFL_PARSE", dedupeKey: offerId } },
                 create: {
@@ -1193,7 +1176,7 @@ export async function GET(req: NextRequest) {
                   tdspName,
                   termMonths,
                   finalStatus: "NEEDS_REVIEW",
-                  queueReason: reason,
+                  queueReason: JSON.stringify(queueReasonPayload),
                   resolvedAt: null,
                   resolvedBy: null,
                   resolutionNotes: null,
@@ -1209,12 +1192,13 @@ export async function GET(req: NextRequest) {
                   tdspName,
                   termMonths,
                   finalStatus: "NEEDS_REVIEW",
-                  queueReason: reason,
+                  queueReason: JSON.stringify(queueReasonPayload),
                   resolvedAt: null,
                   resolvedBy: null,
                   resolutionNotes: null,
                 },
               })
+            })()
               .catch((e: any) => {
                 // eslint-disable-next-line no-console
                 console.error("[dashboard_plans] failed to upsert EFL_PARSE queue row", {
@@ -1239,15 +1223,44 @@ export async function GET(req: NextRequest) {
           // If calc is missing, we *do* enqueue to match the UI's QUEUED statusLabel behavior.
           if (calc && !isPlanCalcQuarantineWorthyReasonCode(reasonCode)) continue;
 
-          const queueReasonPayload = {
-            type: "PLAN_CALC_QUARANTINE",
-            planCalcStatus,
-            planCalcReasonCode: reasonCode,
-            ratePlanId,
-            offerId,
-          };
+          const evidenceFingerprint =
+            typeof calc?.templateFingerprint === "string" && calc.templateFingerprint
+              ? calc.templateFingerprint
+              : `ratePlan:${ratePlanId}`;
+          const queueReasonPayload = withQueueEvidenceFingerprint(
+            {
+              type: "PLAN_CALC_QUARANTINE",
+              planCalcStatus,
+              planCalcReasonCode: reasonCode,
+              ratePlanId,
+              offerId,
+            },
+            evidenceFingerprint,
+          );
           queuedWrites.push(
-            upsertReviewQueueRowRespectingOpenUrl({
+            (async () => {
+              const existingRow = await (prisma as any).eflParseReviewQueue
+                .findUnique({
+                  where: {
+                    kind_dedupeKey: {
+                      kind: "PLAN_CALC_QUARANTINE",
+                      dedupeKey: offerId,
+                    },
+                  },
+                  select: { resolvedAt: true, queueReason: true },
+                })
+                .catch(() => null);
+              if (
+                existingRow &&
+                !shouldWriteOpenQueueRowForEvidence({
+                  resolvedAt: existingRow.resolvedAt,
+                  queueReason: existingRow.queueReason,
+                  evidenceFingerprint,
+                })
+              ) {
+                return null;
+              }
+              return upsertReviewQueueRowRespectingOpenUrl({
                 prismaClient: prisma as any,
                 where: { kind_dedupeKey: { kind: "PLAN_CALC_QUARANTINE", dedupeKey: offerId } },
                 create: {
@@ -1290,6 +1303,7 @@ export async function GET(req: NextRequest) {
                   resolutionNotes: reasonCode,
                 },
               })
+            })()
               .catch((e: any) => {
                 // eslint-disable-next-line no-console
                 console.error("[dashboard_plans] failed to upsert PLAN_CALC_QUARANTINE queue row", {
@@ -1582,9 +1596,6 @@ export async function GET(req: NextRequest) {
       let planCalcReasonCode: string | null = null;
       let planCalcInputs: any | null = null;
       let missingBucketKeys: string[] = [];
-      const isComputableOverride = () =>
-        String(planCalcReasonCode ?? "").trim() === "ADMIN_OVERRIDE_COMPUTABLE" &&
-        String(planCalcStatus ?? "").trim() === "COMPUTABLE";
 
       // IMPORTANT:
       // If the RatePlan/template probe threw, we must not treat it as "missing template" (that triggers
@@ -1595,45 +1606,38 @@ export async function GET(req: NextRequest) {
         const templateAvailable = Boolean((base as any)?.intelliwatt?.templateAvailable);
         const effectiveRatePlanId = templateOk ? ratePlanId : null;
 
-        // IMPORTANT:
-        // Prefer derived plan-calc requirements (status + requiredBucketKeys) from the current engine whenever we have
-        // a rateStructure. Stored fields can be stale after engine upgrades and cause:
-        // - offers to incorrectly show as UNSUPPORTED
-        // - inputsSha256 mismatches (pipeline computes, dashboard reads different key) → stuck CACHE_MISS / pending
-        //
-        // The only exception is an explicit admin override to COMPUTABLE.
-        const storedKeys = Array.isArray(ratePlanRow?.requiredBucketKeys)
-          ? (ratePlanRow.requiredBucketKeys as any[]).map((k) => String(k))
+        const authoritativeCalc = selectAuthoritativePlanCalc({
+          rateStructure: template?.rateStructure ?? null,
+          stored: {
+            planCalcStatus: ratePlanRow?.planCalcStatus ?? null,
+            planCalcReasonCode: ratePlanRow?.planCalcReasonCode ?? null,
+            requiredBucketKeys: ratePlanRow?.requiredBucketKeys ?? [],
+            supportedFeatures: ratePlanRow?.supportedFeatures ?? {},
+          },
+        });
+        requiredBucketKeys = Array.isArray(authoritativeCalc.requiredBucketKeys)
+          ? authoritativeCalc.requiredBucketKeys.map((k) => String(k))
           : [];
-        const storedStatus = typeof ratePlanRow?.planCalcStatus === "string" ? String(ratePlanRow.planCalcStatus) : null;
-        const storedReason =
-          typeof ratePlanRow?.planCalcReasonCode === "string" ? String(ratePlanRow.planCalcReasonCode) : null;
-
-        const derived = derivePlanCalcRequirementsFromTemplate({ rateStructure: template?.rateStructure });
-        const derivedKeys = Array.isArray(derived?.requiredBucketKeys) ? derived.requiredBucketKeys.map((k) => String(k)) : [];
-
-        const isAdminOverride =
-          String(storedStatus ?? "").trim() === "COMPUTABLE" &&
-          String(storedReason ?? "").trim() === "ADMIN_OVERRIDE_COMPUTABLE";
-
-        const shouldPreferDerived = Boolean(template?.rateStructure) && !isAdminOverride;
-        requiredBucketKeys = shouldPreferDerived ? derivedKeys : (storedKeys.length ? storedKeys : derivedKeys);
-        planCalcStatus = shouldPreferDerived ? derived.planCalcStatus : storedStatus;
-        planCalcReasonCode = shouldPreferDerived ? derived.planCalcReasonCode : (storedReason ?? "UNKNOWN");
+        planCalcStatus = authoritativeCalc.planCalcStatus;
+        planCalcReasonCode = authoritativeCalc.planCalcReasonCode;
 
         // Lazy backfill so older/stale RatePlans self-heal (best-effort; never breaks offers).
-        if (effectiveRatePlanId && shouldPreferDerived && planCalcBackfillWrites < MAX_PLAN_CALC_BACKFILL_WRITES) {
+        if (
+          effectiveRatePlanId &&
+          authoritativeCalc.source === "derived" &&
+          planCalcBackfillWrites < MAX_PLAN_CALC_BACKFILL_WRITES
+        ) {
           planCalcBackfillWrites++;
           try {
             (prisma as any).ratePlan
               .update({
                 where: { id: effectiveRatePlanId },
                 data: {
-                  planCalcVersion: derived.planCalcVersion,
-                  planCalcStatus: derived.planCalcStatus,
-                  planCalcReasonCode: derived.planCalcReasonCode,
-                  requiredBucketKeys: derivedKeys,
-                  supportedFeatures: derived.supportedFeatures as any,
+                  planCalcVersion: authoritativeCalc.derived.planCalcVersion,
+                  planCalcStatus: authoritativeCalc.derived.planCalcStatus,
+                  planCalcReasonCode: authoritativeCalc.derived.planCalcReasonCode,
+                  requiredBucketKeys,
+                  supportedFeatures: authoritativeCalc.derived.supportedFeatures as any,
                   planCalcDerivedAt: new Date(),
                 },
               })
@@ -1702,18 +1706,45 @@ export async function GET(req: NextRequest) {
           isPlanCalcQuarantineWorthyReasonCode(quarantineReasonCode);
 
         if (shouldQuarantine && offerId) {
-          const queueReasonPayload = {
-            type: "PLAN_CALC_QUARANTINE",
-            planCalcStatus: planCalcStatus ?? null,
-            planCalcReasonCode: quarantineReasonCode || null,
-            requiredBucketKeys: requiredBucketKeys ?? null,
-            missingBucketKeys: missingBucketKeys.length > 0 ? missingBucketKeys : null,
-            ratePlanId: effectiveRatePlanId,
-            offerId,
-          };
+          const evidenceFingerprint =
+            (planCalcByRatePlanId.get(effectiveRatePlanId ?? "") as any)?.templateFingerprint ??
+            (effectiveRatePlanId ? `ratePlan:${effectiveRatePlanId}` : null);
+          const queueReasonPayload = withQueueEvidenceFingerprint(
+            {
+              type: "PLAN_CALC_QUARANTINE",
+              planCalcStatus: planCalcStatus ?? null,
+              planCalcReasonCode: quarantineReasonCode || null,
+              requiredBucketKeys: requiredBucketKeys ?? null,
+              missingBucketKeys: missingBucketKeys.length > 0 ? missingBucketKeys : null,
+              ratePlanId: effectiveRatePlanId,
+              offerId,
+            },
+            evidenceFingerprint,
+          );
           try {
-            (prisma as any).eflParseReviewQueue
-              .upsert({
+            const existingQuarantine = await (prisma as any).eflParseReviewQueue
+              .findUnique({
+                where: {
+                  kind_dedupeKey: {
+                    kind: "PLAN_CALC_QUARANTINE",
+                    dedupeKey: offerId,
+                  },
+                },
+                select: { resolvedAt: true, queueReason: true },
+              })
+              .catch(() => null);
+            if (
+              existingQuarantine &&
+              !shouldWriteOpenQueueRowForEvidence({
+                resolvedAt: existingQuarantine.resolvedAt,
+                queueReason: existingQuarantine.queueReason,
+                evidenceFingerprint,
+              })
+            ) {
+              // Keep resolved unless the template fingerprint changed.
+            } else {
+              await (prisma as any).eflParseReviewQueue
+                .upsert({
                 where: { kind_dedupeKey: { kind: "PLAN_CALC_QUARANTINE", dedupeKey: offerId } },
                 create: {
                   source: "dashboard_plans",
@@ -1756,8 +1787,9 @@ export async function GET(req: NextRequest) {
                   resolvedAt: null,
                   resolvedBy: null,
                 },
-              })
-              .catch(() => {});
+                })
+                .catch(() => {});
+            }
           } catch {
             // swallow
           }
@@ -1779,7 +1811,11 @@ export async function GET(req: NextRequest) {
           return { status: "NOT_IMPLEMENTED", reason: "MISSING_TDSP_RATES" };
         }
         // Manual override: when ops explicitly forces COMPUTABLE, do not block on template-derived planComputability.
-        if (!isComputableOverride() && planComputability && planComputability.status === "NOT_COMPUTABLE") {
+        if (
+          !isComputableOverride(planCalcStatus, planCalcReasonCode) &&
+          planComputability &&
+          planComputability.status === "NOT_COMPUTABLE"
+        ) {
           return { status: "NOT_COMPUTABLE", reason: planComputability.reason ?? "Plan not computable" };
         }
         // If required usage buckets are missing, this is not "unsupported"—it means the pipeline hasn't populated
@@ -1851,25 +1887,38 @@ export async function GET(req: NextRequest) {
           estStatus === "NOT_COMPUTABLE" &&
           isPlanCalcQuarantineWorthyReasonCode(quarantineReasonCode)
         ) {
-          const queueReasonPayload = {
-            type: "PLAN_CALC_QUARANTINE",
-            source: "dashboard_plans_trueCostEstimate",
-            estimateStatus: estStatus,
-            estimateReason: estReason || null,
-            requiredBucketKeys: requiredBucketKeys ?? null,
-            missingBucketKeys: missingBucketKeys.length > 0 ? missingBucketKeys : null,
-            ratePlanId: effectiveRatePlanIdForQueue,
-            offerId: offerIdForQueue,
-          };
+          const evidenceFingerprint =
+            (planCalcByRatePlanId.get(effectiveRatePlanIdForQueue ?? "") as any)
+              ?.templateFingerprint ??
+            `ratePlan:${effectiveRatePlanIdForQueue}`;
+          const queueReasonPayload = withQueueEvidenceFingerprint(
+            {
+              type: "PLAN_CALC_QUARANTINE",
+              source: "dashboard_plans_trueCostEstimate",
+              estimateStatus: estStatus,
+              estimateReason: estReason || null,
+              requiredBucketKeys: requiredBucketKeys ?? null,
+              missingBucketKeys: missingBucketKeys.length > 0 ? missingBucketKeys : null,
+              ratePlanId: effectiveRatePlanIdForQueue,
+              offerId: offerIdForQueue,
+            },
+            evidenceFingerprint,
+          );
           const existingQuarantine = await (prisma as any).eflParseReviewQueue
             .findUnique({
               where: { kind_dedupeKey: { kind: "PLAN_CALC_QUARANTINE", dedupeKey: offerIdForQueue } },
-              select: { resolvedAt: true },
+              select: { resolvedAt: true, queueReason: true },
             })
             .catch(() => null);
 
-          // Once ops explicitly resolves a quarantine row, do not recreate it from the customer plans page.
-          if (!existingQuarantine?.resolvedAt) {
+          if (
+            !existingQuarantine ||
+            shouldWriteOpenQueueRowForEvidence({
+              resolvedAt: existingQuarantine.resolvedAt,
+              queueReason: existingQuarantine.queueReason,
+              evidenceFingerprint,
+            })
+          ) {
             await (prisma as any).eflParseReviewQueue
               .upsert({
                 where: { kind_dedupeKey: { kind: "PLAN_CALC_QUARANTINE", dedupeKey: offerIdForQueue } },

@@ -7,7 +7,7 @@ import {
   extractPlanRulesAndRateStructureFromEflText,
   extractPlanRulesAndRateStructureFromEflUrlVision,
 } from "@/lib/efl/planAiExtractor";
-import { upsertRatePlanFromEfl } from "@/lib/plan-engine-next/efl/planPersistence";
+import { runEflPipeline } from "@/lib/plan-engine-next/efl/runEflPipeline";
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 
@@ -193,28 +193,25 @@ export async function POST(req: NextRequest) {
         ? "Test mode: downloads/fingerprints the EFL PDF and (best-effort) runs AI extraction; no persistence."
         : "Live mode: best-effort persistence into RatePlan with EFL guardrails; incomplete plans are marked for manual review.";
 
-    // Live-mode persistence with guardrails. Test mode remains read-only.
-    if (mode === "live" && planRules && pdfSha256) {
+    // Live-mode persistence goes through the shared pipeline boundary so admin/manual writes
+    // materialize the same authoritative template state that customer reads consume.
+    if (mode === "live") {
       try {
-        const saved = await upsertRatePlanFromEfl({
-          mode,
+        const pipelineResult = await runEflPipeline({
+          source: "manual_url",
+          actor: "admin",
+          dryRun: false,
+          offerId: null,
           eflUrl: normalizedUrl,
-          repPuctCertificate:
-            (validation as any)?.repPuctCertificate ?? null,
-          eflVersionCode: (validation as any)?.eflVersionCode ?? null,
-          eflPdfSha256: pdfSha256,
-          providerName: (planRules as any)?.repName ?? null,
-          planName: (planRules as any)?.planMarketingName ?? null,
-          termMonths:
-            typeof (planRules as any)?.termMonths === "number"
-              ? (planRules as any).termMonths
-              : null,
-          planRules: planRules as any,
-          rateStructure: rateStructure as any,
-          validation: validation as any,
+          eflSourceUrl: normalizedUrl,
+          pdfBytes,
         });
         steps.push(
-          (saved as any)?.templatePersisted ? "rateplan_template_persisted" : "rateplan_saved_manual_review",
+          (pipelineResult as any)?.ratePlanId
+            ? "rateplan_template_persisted"
+            : (pipelineResult as any)?.queued
+              ? "rateplan_saved_manual_review"
+              : "rateplan_persist_not_materialized",
         );
       } catch (persistError) {
         warnings.push(

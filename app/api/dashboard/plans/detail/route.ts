@@ -18,7 +18,9 @@ import { extractDeterministicTouSchedule } from "@/lib/plan-engine/touPeriods";
 import { extractDeterministicTierSchedule, computeRepEnergyCostForMonthlyKwhTiered } from "@/lib/plan-engine/tieredPricing";
 import { extractDeterministicBillCredits, applyBillCreditsToMonth } from "@/lib/plan-engine/billCredits";
 import { extractDeterministicMinimumRules, applyMinimumRulesToMonth } from "@/lib/plan-engine/minimumRules";
-import { canComputePlanFromBuckets, derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
+import { canComputePlanFromBuckets } from "@/lib/plan-engine/planComputability";
+import { isComputableOverride } from "@/lib/plan-engine/planCalcOverrides";
+import { selectAuthoritativePlanCalc } from "@/lib/plan-engine/authoritativePlanCalc";
 import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
 import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEstimate";
 
@@ -332,13 +334,6 @@ function isRateStructurePresent(v: any): boolean {
   }
 }
 
-function isComputableOverride(planCalcStatus: string | null | undefined, planCalcReasonCode: string | null | undefined) {
-  return (
-    String(planCalcStatus ?? "").trim() === "COMPUTABLE" &&
-    String(planCalcReasonCode ?? "").trim() === "ADMIN_OVERRIDE_COMPUTABLE"
-  );
-}
-
 export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
@@ -486,6 +481,7 @@ export async function GET(req: NextRequest) {
             planCalcStatus: true,
             planCalcReasonCode: true,
             requiredBucketKeys: true,
+            supportedFeatures: true,
             planCalcDerivedAt: true,
           },
         })
@@ -499,16 +495,20 @@ export async function GET(req: NextRequest) {
     const tdspRates = tdspSlug ? await getTdspDeliveryRates({ tdspSlug, asOf: new Date() }).catch(() => null) : null;
 
     // Plan calc requirements + computability
-    const derivedReq = derivePlanCalcRequirementsFromTemplate({ rateStructure: rsPresent ? rateStructure : null });
-    const planCalcStatus =
-      typeof ratePlanRow?.planCalcStatus === "string" ? String(ratePlanRow.planCalcStatus) : derivedReq.planCalcStatus;
-    const planCalcReasonCode =
-      typeof ratePlanRow?.planCalcReasonCode === "string"
-        ? String(ratePlanRow.planCalcReasonCode)
-        : derivedReq.planCalcReasonCode;
-    const requiredBucketKeys = Array.isArray(ratePlanRow?.requiredBucketKeys) && ratePlanRow.requiredBucketKeys.length
-      ? (ratePlanRow.requiredBucketKeys as any[]).map(String)
-      : derivedReq.requiredBucketKeys;
+    const authoritativeCalc = selectAuthoritativePlanCalc({
+      rateStructure: rsPresent ? rateStructure : null,
+      stored: {
+        planCalcStatus: ratePlanRow?.planCalcStatus ?? null,
+        planCalcReasonCode: ratePlanRow?.planCalcReasonCode ?? null,
+        requiredBucketKeys: ratePlanRow?.requiredBucketKeys ?? [],
+        supportedFeatures: (ratePlanRow as any)?.supportedFeatures ?? {},
+      },
+    });
+    const planCalcStatus = authoritativeCalc.planCalcStatus;
+    const planCalcReasonCode = authoritativeCalc.planCalcReasonCode;
+    const requiredBucketKeys = Array.isArray(authoritativeCalc.requiredBucketKeys)
+      ? authoritativeCalc.requiredBucketKeys.map(String)
+      : [];
 
     const planComputability = canComputePlanFromBuckets({
       offerId,

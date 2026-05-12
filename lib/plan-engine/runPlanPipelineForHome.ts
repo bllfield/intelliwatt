@@ -16,8 +16,16 @@ import { getCachedPlanEstimate, putCachedPlanEstimate, sha256Hex as sha256HexCac
 import { PLAN_ENGINE_ESTIMATE_VERSION, makePlanEstimateInputsSha256 } from "@/lib/plan-engine/estimateInputsKey";
 import { upsertMaterializedPlanEstimate } from "@/lib/plan-engine/materializedEstimateStore";
 import { isComputableOverride } from "@/lib/plan-engine/planCalcOverrides";
+import {
+  getStoredPlanCalcTemplateFingerprint,
+  selectAuthoritativePlanCalc,
+} from "@/lib/plan-engine/authoritativePlanCalc";
 import { derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
 import { isPlanCalcQuarantineWorthyReasonCode } from "@/lib/plan-engine/planCalcQuarantine";
+import {
+  shouldWriteOpenQueueRowForEvidence,
+  withQueueEvidenceFingerprint,
+} from "@/lib/efl/reviewQueueEvidence";
 import { getLatestPlanPipelineJob, shouldStartPlanPipelineJob, writePlanPipelineJobSnapshot } from "@/lib/plan-engine/planPipelineJob";
 import { Prisma } from "@prisma/client";
 import { currentPlanPrisma } from "@/lib/db/currentPlanClient";
@@ -528,7 +536,14 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
       ? await (prisma as any).ratePlan.findMany({
           where: { id: { in: ratePlanIds } },
           orderBy: { id: "asc" as const },
-          select: { id: true, rateStructure: true, requiredBucketKeys: true, planCalcStatus: true, planCalcReasonCode: true },
+          select: {
+            id: true,
+            rateStructure: true,
+            requiredBucketKeys: true,
+            planCalcStatus: true,
+            planCalcReasonCode: true,
+            supportedFeatures: true,
+          },
         })
       : [];
 
@@ -649,57 +664,95 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
 
     const overridden = isComputableOverride(rp?.planCalcStatus, rp?.planCalcReasonCode);
     if (!overridden) {
-      // Derive computability from the template rateStructure (authoritative).
-      // IMPORTANT: Do NOT call canComputePlanFromBuckets() here; that helper is for dashboard UI and expects a different input shape.
-      const derived = derivePlanCalcRequirementsFromTemplate({ rateStructure });
+      const authoritativeCalc = selectAuthoritativePlanCalc({
+        rateStructure,
+        stored: {
+          planCalcStatus: rp?.planCalcStatus ?? null,
+          planCalcReasonCode: rp?.planCalcReasonCode ?? null,
+          requiredBucketKeys: (rp as any)?.requiredBucketKeys ?? [],
+          supportedFeatures: (rp as any)?.supportedFeatures ?? {},
+        },
+      });
 
-      // Keep the persisted planCalcStatus/Reason in sync with the authoritative derivation.
-      // This prevents stale NOT_COMPUTABLE reason codes (like SUSPECT_TOU_EVIDENCE_IN_VALIDATION) from lingering after rule fixes,
-      // and ensures admin tooling + pipeline agree without manual intervention.
-      try {
-        const curStatus = String(rp?.planCalcStatus ?? "").trim();
-        const curReason = String(rp?.planCalcReasonCode ?? "").trim();
-        const nextStatus = String((derived as any)?.planCalcStatus ?? "").trim();
-        const nextReason = String((derived as any)?.planCalcReasonCode ?? "").trim();
-        if (nextStatus && (curStatus !== nextStatus || curReason !== nextReason)) {
-          await (prisma as any).ratePlan
-            .update({
-              where: { id: ratePlanId },
-              data: {
-                planCalcVersion: (derived as any)?.planCalcVersion ?? 1,
-                planCalcStatus: nextStatus,
-                planCalcReasonCode: nextReason || "UNKNOWN",
-                requiredBucketKeys: Array.isArray((derived as any)?.requiredBucketKeys) ? (derived as any).requiredBucketKeys : [],
-                supportedFeatures: (derived as any)?.supportedFeatures ?? {},
-                planCalcDerivedAt: new Date(),
-              },
-              select: { id: true },
-            })
-            .catch(() => null);
+      if (authoritativeCalc.source === "stored") {
+        requiredBucketKeysForKey = Array.isArray(authoritativeCalc.requiredBucketKeys)
+          ? authoritativeCalc.requiredBucketKeys.map((k) => String(k))
+          : [];
+      } else {
+        try {
+          const nextStatus = String(authoritativeCalc.derived.planCalcStatus ?? "").trim();
+          const nextReason = String(authoritativeCalc.derived.planCalcReasonCode ?? "").trim();
+          if (nextStatus) {
+            await (prisma as any).ratePlan
+              .update({
+                where: { id: ratePlanId },
+                data: {
+                  planCalcVersion: authoritativeCalc.derived.planCalcVersion ?? 1,
+                  planCalcStatus: nextStatus,
+                  planCalcReasonCode: nextReason || "UNKNOWN",
+                  requiredBucketKeys: Array.isArray(authoritativeCalc.derived.requiredBucketKeys)
+                    ? authoritativeCalc.derived.requiredBucketKeys
+                    : [],
+                  supportedFeatures: authoritativeCalc.derived.supportedFeatures ?? {},
+                  planCalcDerivedAt: new Date(),
+                },
+                select: { id: true },
+              })
+              .catch(() => null);
+          }
+        } catch {
+          // best-effort only
         }
-      } catch {
-        // best-effort only
+        requiredBucketKeysForKey = Array.isArray(authoritativeCalc.derived.requiredBucketKeys)
+          ? authoritativeCalc.derived.requiredBucketKeys.map((k) => String(k))
+          : requiredBucketKeysForKey;
       }
 
-      if (derived?.planCalcStatus !== "COMPUTABLE") {
+      if (authoritativeCalc.planCalcStatus !== "COMPUTABLE") {
         ratePlansDerivedNotComputable++;
         // Auto-enqueue true template defects / non-deterministic pricing for admin review (system-caught).
-        const rc = String(derived?.planCalcReasonCode ?? "").trim();
+        const rc = String(authoritativeCalc.planCalcReasonCode ?? "").trim();
         if (rc && isPlanCalcQuarantineWorthyReasonCode(rc)) {
           const offerIdsForPlan = Array.from(new Set(offerIdsByRatePlanId.get(ratePlanId) ?? []));
           await Promise.all(
             offerIdsForPlan.map(async (offerId) => {
               const meta = offerMetaById.get(offerId) ?? null;
-              const queueReasonPayload = {
-                type: "PLAN_CALC_QUARANTINE",
-                source: "plan_pipeline",
-                planCalcStatus: derived?.planCalcStatus ?? "NOT_COMPUTABLE",
-                planCalcReasonCode: rc,
-                ratePlanId,
-                offerId,
-                utilityId: meta?.utilityId ?? null,
-              };
+              const evidenceFingerprint =
+                authoritativeCalc.templateFingerprint ?? `ratePlan:${ratePlanId}`;
+              const queueReasonPayload = withQueueEvidenceFingerprint(
+                {
+                  type: "PLAN_CALC_QUARANTINE",
+                  source: "plan_pipeline",
+                  planCalcStatus: authoritativeCalc.planCalcStatus ?? "NOT_COMPUTABLE",
+                  planCalcReasonCode: rc,
+                  ratePlanId,
+                  offerId,
+                  utilityId: meta?.utilityId ?? null,
+                },
+                evidenceFingerprint,
+              );
               try {
+                const existingRow = await (prisma as any).eflParseReviewQueue
+                  .findUnique({
+                    where: {
+                      kind_dedupeKey: {
+                        kind: "PLAN_CALC_QUARANTINE",
+                        dedupeKey: offerId,
+                      },
+                    },
+                    select: { resolvedAt: true, queueReason: true },
+                  })
+                  .catch(() => null);
+                if (
+                  existingRow &&
+                  !shouldWriteOpenQueueRowForEvidence({
+                    resolvedAt: existingRow.resolvedAt,
+                    queueReason: existingRow.queueReason,
+                    evidenceFingerprint,
+                  })
+                ) {
+                  return;
+                }
                 await upsertReviewQueueRowRespectingOpenUrl({
                   prismaClient: prisma as any,
                   where: { kind_dedupeKey: { kind: "PLAN_CALC_QUARANTINE", dedupeKey: offerId } },
@@ -719,7 +772,10 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
                     planRules: null,
                     rateStructure: null,
                     validation: null,
-                    derivedForValidation: { derived, queueReasonPayload },
+                    derivedForValidation: {
+                      derived: authoritativeCalc.derived,
+                      queueReasonPayload,
+                    },
                     finalStatus: "OPEN",
                     queueReason: JSON.stringify(queueReasonPayload),
                     solverApplied: [],
@@ -734,7 +790,10 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
                     tdspName: meta?.tdspName ?? null,
                     termMonths: meta?.termMonths ?? null,
                     ratePlanId,
-                    derivedForValidation: { derived, queueReasonPayload },
+                    derivedForValidation: {
+                      derived: authoritativeCalc.derived,
+                      queueReasonPayload,
+                    },
                     finalStatus: "OPEN",
                     queueReason: JSON.stringify(queueReasonPayload),
                     resolvedAt: null,
@@ -933,16 +992,43 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
         await Promise.all(
           offerIdsForPlan.map(async (offerId) => {
             const meta = offerMetaById.get(offerId) ?? null;
-            const queueReasonPayload = {
-              type: "PLAN_CALC_QUARANTINE",
-              source: "plan_pipeline_trueCostEstimate",
-              estimateStatus: estStatus,
-              estimateReason: estReason || null,
-              ratePlanId,
-              offerId,
-              utilityId: meta?.utilityId ?? null,
-            };
+            const evidenceFingerprint =
+              getStoredPlanCalcTemplateFingerprint((rp as any)?.supportedFeatures ?? {}) ??
+              `ratePlan:${ratePlanId}`;
+            const queueReasonPayload = withQueueEvidenceFingerprint(
+              {
+                type: "PLAN_CALC_QUARANTINE",
+                source: "plan_pipeline_trueCostEstimate",
+                estimateStatus: estStatus,
+                estimateReason: estReason || null,
+                ratePlanId,
+                offerId,
+                utilityId: meta?.utilityId ?? null,
+              },
+              evidenceFingerprint,
+            );
             try {
+              const existingRow = await (prisma as any).eflParseReviewQueue
+                .findUnique({
+                  where: {
+                    kind_dedupeKey: {
+                      kind: "PLAN_CALC_QUARANTINE",
+                      dedupeKey: offerId,
+                    },
+                  },
+                  select: { resolvedAt: true, queueReason: true },
+                })
+                .catch(() => null);
+              if (
+                existingRow &&
+                !shouldWriteOpenQueueRowForEvidence({
+                  resolvedAt: existingRow.resolvedAt,
+                  queueReason: existingRow.queueReason,
+                  evidenceFingerprint,
+                })
+              ) {
+                return;
+              }
               await upsertReviewQueueRowRespectingOpenUrl({
                 prismaClient: prisma as any,
                 where: { kind_dedupeKey: { kind: "PLAN_CALC_QUARANTINE", dedupeKey: offerId } },

@@ -3,7 +3,6 @@ import { Buffer } from "node:buffer";
 
 import { fetchEflSourceFromUrl } from "@/lib/efl/fetchEflPdf";
 import { runEflPipeline } from "@/lib/plan-engine-next/efl/runEflPipeline";
-import { upsertRatePlanFromEfl } from "@/lib/plan-engine-next/efl/planPersistence";
 import { prisma } from "@/lib/db";
 import { adminUsageAuditForHome } from "@/lib/usage/adminUsageAudit";
 import { adminPersistCurrentPlanFromEflPipeline } from "@/lib/current-plan/adminPersistCurrentPlanFromEflPipeline";
@@ -88,20 +87,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const pipelineResult = await runEflPipeline({
-      source: "manual_url",
-      actor: "admin",
-      // For offers: persist only when requested AND authorized.
-      // For current_plan: never persist RatePlan templates; we'll persist into the module DB separately.
-      dryRun: target === "current_plan",
-      offerId: target === "offers" ? offerId : null,
-      eflUrl: effectiveEflUrl,
-      eflSourceUrl,
-      ...(fetched.kind === "pdf"
-        ? { pdfBytes: Buffer.from(fetched.pdfBytes) }
-        : { rawText: fetched.rawText }),
-    });
-
     // Persist gating (admin-only). We do NOT allow writes without a valid admin token.
     const adminToken = process.env.ADMIN_TOKEN ?? null;
     const headerToken = req.headers.get("x-admin-token");
@@ -110,6 +95,18 @@ export async function POST(req: NextRequest) {
     const persistRequested = body.persistTemplate === true;
     const canPersistOffers = Boolean(persistRequested && canAdminWrite && target === "offers");
     const canPersistCurrentPlan = Boolean(persistRequested && canAdminWrite && target === "current_plan");
+
+    const pipelineResult = await runEflPipeline({
+      source: "manual_url",
+      actor: "admin",
+      dryRun: !(target === "offers" && canPersistOffers),
+      offerId: target === "offers" ? offerId : null,
+      eflUrl: effectiveEflUrl,
+      eflSourceUrl,
+      ...(fetched.kind === "pdf"
+        ? { pdfBytes: Buffer.from(fetched.pdfBytes) }
+        : { rawText: fetched.rawText }),
+    });
 
     const aiEnabled = process.env.OPENAI_IntelliWatt_Fact_Card_Parser === "1";
     const hasKey = Boolean(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim().length > 0);
@@ -165,31 +162,10 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // If we're in offers mode AND authorized, persist the RatePlan template now.
-    // (runEflPipeline was run in dryRun mode; we explicitly persist here so this endpoint is token-gated.)
-    let persistedRatePlanId: string | null = null;
-    if (canPersistOffers && !pipelineResult.queued) {
-      try {
-        const upserted = await upsertRatePlanFromEfl({
-          offerId,
-          eflUrl: effectiveEflUrl,
-          eflSourceUrl,
-          eflPdfSha256: pipelineResult.eflPdfSha256 ?? null,
-          repPuctCertificate: pipelineResult.repPuctCertificate ?? null,
-          eflVersionCode: pipelineResult.eflVersionCode ?? null,
-          planRules: pipelineResult.planRules ?? null,
-          rateStructure: pipelineResult.rateStructure ?? null,
-          validation: pipelineResult.validation ?? null,
-          derivedForValidation: pipelineResult.derivedForValidation ?? null,
-          finalValidation: pipelineResult.finalValidation ?? null,
-          passStrength: pipelineResult.passStrength ?? null,
-          passStrengthReasons: pipelineResult.passStrengthReasons ?? null,
-        } as any);
-        persistedRatePlanId = upserted?.ratePlan?.id ? String(upserted.ratePlan.id) : null;
-      } catch {
-        persistedRatePlanId = null;
-      }
-    }
+    const persistedRatePlanId =
+      target === "offers" && canPersistOffers && !pipelineResult.queued
+        ? String((pipelineResult as any)?.ratePlanId ?? "").trim() || null
+        : null;
 
     // Current-plan persistence (module DB). Requires usageEmail to select the home.
     let currentPlanPersist: any | null = null;

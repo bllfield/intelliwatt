@@ -48,6 +48,35 @@ function isPrismaJsonNullLike(v: unknown): boolean {
   return v === (Prisma as any).JsonNull || v === (Prisma as any).DbNull || v === (Prisma as any).AnyNull;
 }
 
+function stableStringify(value: unknown): string {
+  if (value == null) return "null";
+  if (typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b));
+  return `{${entries
+    .map(([key, val]) => `${JSON.stringify(key)}:${stableStringify(val)}`)
+    .join(",")}}`;
+}
+
+function hashStringDjb2(input: string): string {
+  let hash = 5381;
+  for (let i = 0; i < input.length; i += 1) {
+    hash = (hash * 33) ^ input.charCodeAt(i);
+  }
+  return `pcf_${(hash >>> 0).toString(16)}`;
+}
+
+export function computePlanCalcTemplateFingerprint(
+  rateStructure: unknown,
+): string | null {
+  if (!rateStructure || isPrismaJsonNullLike(rateStructure)) return null;
+  try {
+    return hashStringDjb2(stableStringify(rateStructure));
+  } catch {
+    return null;
+  }
+}
+
 const ENSURE_BUCKETS_ATTEMPT_COOLDOWN_MS = 5 * 60 * 1000;
 const ENSURE_BUCKETS_POOL_FAILURE_COOLDOWN_MS = 10 * 60 * 1000;
 const ensureBucketsInFlight = new Set<string>();
@@ -236,13 +265,18 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
   const planCalcVersion = 1 as const;
 
   const rs = args.rateStructure;
+  const templateFingerprint = computePlanCalcTemplateFingerprint(rs);
+  const stampSupportedFeatures = (supportedFeatures: Record<string, any> | null | undefined) => ({
+    ...(supportedFeatures ?? {}),
+    __planCalcTemplateFingerprint: templateFingerprint,
+  });
   if (!rs || isPrismaJsonNullLike(rs)) {
     return {
       planCalcVersion,
       planCalcStatus: "UNKNOWN",
       planCalcReasonCode: "MISSING_TEMPLATE",
       requiredBucketKeys: [],
-      supportedFeatures: {},
+      supportedFeatures: stampSupportedFeatures({}),
     };
   }
 
@@ -560,13 +594,13 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
       planCalcStatus: "NOT_COMPUTABLE",
       planCalcReasonCode: "UNSUPPORTED_BUCKET_KEY",
       requiredBucketKeys: Array.isArray(out.requiredBucketKeys) ? out.requiredBucketKeys : [],
-      supportedFeatures: {
+      supportedFeatures: stampSupportedFeatures({
         ...(out.supportedFeatures ?? {}),
         notes: [
           ...((out.supportedFeatures as any)?.notes ?? []),
           `Invalid required bucket key(s): ${msg}`,
         ],
-      },
+      }),
     };
   }
 
@@ -574,7 +608,10 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
   // This must not change status logic; failures here are typically infrastructure/transient.
   bestEffortEnsureBucketsExist(out.requiredBucketKeys);
 
-  return out;
+  return {
+    ...out,
+    supportedFeatures: stampSupportedFeatures(out.supportedFeatures),
+  };
 }
 
 export function canComputePlanFromBuckets(input: {
