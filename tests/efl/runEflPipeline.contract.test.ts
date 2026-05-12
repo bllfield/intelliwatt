@@ -1,8 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const ratePlanFindFirstMock = vi.fn(async () => null);
+
 vi.mock("@/lib/db", () => {
   return {
     prisma: {
+      ratePlan: {
+        findFirst: (...args: any[]) => ratePlanFindFirstMock(...args),
+      },
       eflParseReviewQueue: {
         upsert: vi.fn(async () => ({})),
       },
@@ -57,6 +62,8 @@ vi.mock("@/lib/efl/persistAndLinkFromPipeline", () => {
 describe("runEflPipeline (contract)", () => {
   beforeEach(() => {
     persistAndLinkFromPipelineMock.mockReset();
+    ratePlanFindFirstMock.mockReset();
+    ratePlanFindFirstMock.mockResolvedValue(null);
   });
 
   it("queues (fail-closed) when persistence succeeds but offerId link fails", async () => {
@@ -126,6 +133,61 @@ describe("runEflPipeline (contract)", () => {
     expect(res.ok).toBe(true);
     expect(res.stage).toBe("QUEUE_UPDATE");
     expect(res.queued).toBe(true);
+  });
+
+  it("prefers an existing persisted template over a stale weak rerun", async () => {
+    const mod = await import("@/lib/efl/runEflPipelineNoStore");
+    (mod.runEflPipelineNoStore as any).mockResolvedValueOnce({
+      deterministic: {
+        eflPdfSha256: "sha_pdf",
+        repPuctCertificate: "REP123",
+        eflVersionCode: "VER1",
+        rawText: "Provider: Foo Power\nPlan: Bar Saver\n",
+        warnings: [],
+        extractorMethod: "pdftotext",
+      },
+      planRules: { termMonths: 12 },
+      rateStructure: { type: "FIXED", energyRateCents: 9.99 },
+      validation: { requiresManualReview: false },
+      derivedForValidation: null,
+      finalValidation: { status: "PASS", queueReason: "PASS_WEAK", points: [] },
+      passStrength: "WEAK",
+      parseConfidence: 0.7,
+      parseWarnings: [],
+    });
+
+    ratePlanFindFirstMock.mockResolvedValueOnce({
+      id: "rp_existing",
+      planName: "Bar Saver",
+      rateStructure: { type: "FIXED", energyRateCents: 11.44 },
+      planCalcStatus: "COMPUTABLE",
+      planCalcReasonCode: "FIXED_RATE_OK",
+      requiredBucketKeys: ["kwh.m.all.total"],
+      supportedFeatures: {},
+      modeledEflAvgPriceValidation: { status: "PASS", points: [] },
+    });
+
+    const { runEflPipeline } = await import("@/lib/efl/runEflPipeline");
+    const res = await runEflPipeline({
+      source: "manual_url",
+      actor: "admin",
+      dryRun: false,
+      offerId: "offer_1",
+      eflUrl: "https://example.com/efl.pdf",
+      pdfBytes: Buffer.from("pdf"),
+      offerMeta: {
+        supplier: "Foo Power",
+        planName: "Bar Saver",
+        termMonths: 12,
+      },
+    });
+
+    expect(res.ok).toBe(true);
+    expect(res.ratePlanId).toBe("rp_existing");
+    expect(res.queued).toBe(false);
+    expect(res.planCalcStatus).toBe("COMPUTABLE");
+    expect(res.planCalcReasonCode).toBe("FIXED_RATE_OK");
+    expect(res.rateStructure).toMatchObject({ type: "FIXED", energyRateCents: 11.44 });
   });
 });
 

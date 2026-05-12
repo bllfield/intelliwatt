@@ -7,6 +7,7 @@ import { runEflPipelineNoStore } from "@/lib/efl/runEflPipelineNoStore";
 import { runEflPipelineFromRawTextNoStore } from "@/lib/efl/runEflPipelineFromRawTextNoStore";
 import { persistAndLinkFromPipeline } from "@/lib/efl/persistAndLinkFromPipeline";
 import { prisma } from "@/lib/db";
+import { selectAuthoritativePlanCalc } from "@/lib/plan-engine/authoritativePlanCalc";
 import { derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
 import { isPlanCalcQuarantineWorthyReasonCode } from "@/lib/plan-engine/planCalcQuarantine";
 
@@ -117,6 +118,51 @@ function fallbackEflUrlForSha(sha256: string | null | undefined): string | null 
 
 function toBuffer(x: Buffer | Uint8Array): Buffer {
   return Buffer.isBuffer(x) ? x : Buffer.from(x);
+}
+
+async function findPersistedRatePlanForEflIdentity(args: {
+  eflPdfSha256?: string | null;
+  repPuctCertificate?: string | null;
+  eflVersionCode?: string | null;
+  planName?: string | null;
+}) {
+  const sha = String(args.eflPdfSha256 ?? "").trim();
+  const rep = String(args.repPuctCertificate ?? "").trim();
+  const ver = String(args.eflVersionCode ?? "").trim();
+  const planName = String(args.planName ?? "").trim();
+
+  const select = {
+    id: true,
+    planName: true,
+    rateStructure: true,
+    planCalcStatus: true,
+    planCalcReasonCode: true,
+    requiredBucketKeys: true,
+    supportedFeatures: true,
+    modeledEflAvgPriceValidation: true,
+  } as const;
+
+  if (rep && ver && planName) {
+    const byPlanIdentity = await (prisma as any).ratePlan.findFirst({
+      where: {
+        repPuctCertificate: rep,
+        eflVersionCode: ver,
+        planName: { equals: planName, mode: "insensitive" },
+      },
+      select,
+    });
+    if (byPlanIdentity) return byPlanIdentity;
+  }
+
+  if (sha) {
+    const bySha = await (prisma as any).ratePlan.findFirst({
+      where: { eflPdfSha256: sha } as any,
+      select,
+    });
+    if (bySha) return bySha;
+  }
+
+  return null;
 }
 
 async function upsertQueueItem(args: {
@@ -408,6 +454,56 @@ export async function runEflPipeline(input: RunEflPipelineInput): Promise<RunEfl
       (finalStatus !== "PASS"
         ? `PIPELINE_NOT_ELIGIBLE: status=${finalStatus ?? "UNKNOWN"}`
         : `PIPELINE_NOT_ELIGIBLE: passStrength=${passStrength ?? "UNKNOWN"}`);
+
+    const existingRatePlan = await findPersistedRatePlanForEflIdentity({
+      eflPdfSha256,
+      repPuctCertificate,
+      eflVersionCode,
+      planName: offerMetaResolved.planName ?? null,
+    }).catch(() => null);
+
+    if (existingRatePlan?.id) {
+      const authoritativeStoredCalc = selectAuthoritativePlanCalc({
+        rateStructure: (existingRatePlan as any)?.rateStructure ?? null,
+        stored: {
+          planCalcStatus: (existingRatePlan as any)?.planCalcStatus ?? null,
+          planCalcReasonCode: (existingRatePlan as any)?.planCalcReasonCode ?? null,
+          requiredBucketKeys: (existingRatePlan as any)?.requiredBucketKeys ?? [],
+          supportedFeatures: (existingRatePlan as any)?.supportedFeatures ?? {},
+        },
+      });
+
+      return {
+        ok: true,
+        stage: "PERSIST",
+        offerId,
+        eflUrlCanonical: eflUrlForStorage,
+        ratePlanId: String((existingRatePlan as any).id),
+        rawTextLen: rawText.length,
+        rawTextPreview: det?.rawTextPreview ?? rawText.slice(0, 20000),
+        rawTextTruncated: Boolean(det?.rawTextTruncated ?? rawText.length > 20000),
+        extractorMethod: extractorMethod ?? undefined,
+        parseConfidence,
+        parseWarnings,
+        deterministicWarnings,
+        eflPdfSha256,
+        repPuctCertificate,
+        eflVersionCode,
+        planRules,
+        rateStructure: (existingRatePlan as any)?.rateStructure ?? rateStructure,
+        validation: pipeline?.validation ?? null,
+        derivedForValidation: pipeline?.derivedForValidation ?? null,
+        finalValidation:
+          (existingRatePlan as any)?.modeledEflAvgPriceValidation ?? finalValidation,
+        passStrength,
+        passStrengthReasons,
+        passStrengthOffPointDiffs,
+        planCalcStatus: authoritativeStoredCalc.planCalcStatus,
+        planCalcReasonCode: authoritativeStoredCalc.planCalcReasonCode,
+        requiredBucketKeys: authoritativeStoredCalc.requiredBucketKeys,
+        queued: false,
+      };
+    }
 
     if (!dryRun) {
       await upsertQueueItem({
