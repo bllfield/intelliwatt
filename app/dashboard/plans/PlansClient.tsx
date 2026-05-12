@@ -907,18 +907,6 @@ export default function PlansClient() {
     () => (hasUsageForUi ? offers.filter((o: any) => isCalculatedOffer(o)) : offers),
     [hasUsageForUi, offers],
   );
-  const retryDisplayOffers = useMemo(
-    () => (hasUsageForUi ? offers.filter((o: any) => isRetryDisplayOffer(o)) : []),
-    [hasUsageForUi, offers, isRetryDisplayOffer],
-  );
-  const unavailableOffers = useMemo(
-    () => (hasUsageForUi ? offers.filter((o: any) => !isCalculatedOffer(o) && !isRetryDisplayOffer(o)) : []),
-    [hasUsageForUi, offers, isRetryDisplayOffer],
-  );
-  const hasUnavailable = !availableFilterOn && unavailableOffers.length > 0;
-  const pinUnavailableToBottom =
-    Boolean(hasUsageForUi && sort === "best_for_you_proxy" && !availableFilterOn && unavailableOffers.length > 0);
-  const primaryOffers = pinUnavailableToBottom ? [...calculableOffers, ...retryDisplayOffers] : offers;
 
   // Default sort:
   // - if usage is present: "Best for you"
@@ -1021,6 +1009,18 @@ export default function PlansClient() {
     },
     [retryDisplayOfferIds],
   );
+  const retryDisplayOffers = useMemo(
+    () => (hasUsageForUi ? offers.filter((o: any) => isRetryDisplayOffer(o)) : []),
+    [hasUsageForUi, offers, isRetryDisplayOffer],
+  );
+  const unavailableOffers = useMemo(
+    () => (hasUsageForUi ? offers.filter((o: any) => !isCalculatedOffer(o) && !isRetryDisplayOffer(o)) : []),
+    [hasUsageForUi, offers, isRetryDisplayOffer],
+  );
+  const hasUnavailable = !availableFilterOn && unavailableOffers.length > 0;
+  const pinUnavailableToBottom =
+    Boolean(hasUsageForUi && sort === "best_for_you_proxy" && !availableFilterOn && unavailableOffers.length > 0);
+  const primaryOffers = pinUnavailableToBottom ? [...calculableOffers, ...retryDisplayOffers] : offers;
   const rawUnavailableCount = useMemo(() => {
     if (!hasUsageForUi) return 0;
     let count = 0;
