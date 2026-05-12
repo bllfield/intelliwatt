@@ -33,6 +33,56 @@ function centsToDollars(cents: number): number {
   return cents / 100;
 }
 
+function normalizeAdditiveThresholdMinCredits(args: {
+  ranges: Array<{
+    min: number;
+    max: number;
+    label: string;
+    creditDollars: number;
+  }>;
+}): BillCreditRule[] | null {
+  const sorted = args.ranges.slice().sort((a, b) => a.min - b.min || a.max - b.max);
+  if (sorted.length === 0) return null;
+  if (!sorted.every((r) => Number.isFinite(r.min) && r.min >= 0 && r.max === Number.POSITIVE_INFINITY)) {
+    return null;
+  }
+
+  const grouped = new Map<number, { min: number; labelParts: string[]; creditDollars: number }>();
+  for (const r of sorted) {
+    const existing = grouped.get(r.min);
+    if (existing) {
+      existing.creditDollars += r.creditDollars;
+      if (r.label) existing.labelParts.push(r.label);
+      continue;
+    }
+    grouped.set(r.min, {
+      min: r.min,
+      labelParts: r.label ? [r.label] : [],
+      creditDollars: r.creditDollars,
+    });
+  }
+
+  const thresholds = Array.from(grouped.values()).sort((a, b) => a.min - b.min);
+  if (thresholds.length === 0) return null;
+
+  let runningCredit = 0;
+  const out: BillCreditRule[] = [];
+  for (let i = 0; i < thresholds.length; i++) {
+    const cur = thresholds[i]!;
+    const next = thresholds[i + 1] ?? null;
+    runningCredit += cur.creditDollars;
+    const maxKwhExclusive = next ? next.min : null;
+    out.push({
+      type: "USAGE_RANGE_CREDIT",
+      creditDollars: runningCredit,
+      minKwhInclusive: cur.min,
+      maxKwhExclusive,
+      ...(cur.labelParts.length > 0 ? { label: cur.labelParts.join(" + ") } : {}),
+    });
+  }
+  return out;
+}
+
 type ExtractFailReason =
   | "NO_CREDITS"
   | "UNSUPPORTED_CREDIT_SHAPE"
@@ -169,7 +219,15 @@ export function extractDeterministicBillCredits(
           a.min === b.min &&
           a.max === b.max &&
           Math.abs(a.creditDollars - b.creditDollars) < 1e-9;
-        if (!same) return { ok: false, reason: "UNSUPPORTED_CREDIT_COMBINATION", notes: ["overlapping_usage_ranges"] };
+        if (!same) {
+          const normalizedAdditive = normalizeAdditiveThresholdMinCredits({ ranges });
+          if (normalizedAdditive) {
+            notes.push("normalized_additive_threshold_min_bill_credits");
+            notes.push("range_semantics: minInclusive <= kWh < maxExclusive (or no max)");
+            return { ok: true, credits: { rules: normalizedAdditive, notes } };
+          }
+          return { ok: false, reason: "UNSUPPORTED_CREDIT_COMBINATION", notes: ["overlapping_usage_ranges"] };
+        }
       }
     }
   }

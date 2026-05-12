@@ -13,8 +13,8 @@ export function canonicalizeRateStructureForPipeline(args: {
     const canonical = planRulesToRateStructure(planRules as any);
     if (!canonical || typeof canonical !== "object") return rateStructure ?? null;
     return {
-      ...(rateStructure && typeof rateStructure === "object" ? rateStructure : {}),
       ...canonical,
+      ...(rateStructure && typeof rateStructure === "object" ? rateStructure : {}),
     };
   } catch {
     return rateStructure ?? null;

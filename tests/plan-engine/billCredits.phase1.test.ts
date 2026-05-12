@@ -54,6 +54,38 @@ describe("billCredits: extractDeterministicBillCredits", () => {
     if (!out.ok) expect(out.reason).toBe("UNSUPPORTED_CREDIT_COMBINATION");
   });
 
+  it("normalizes additive threshold-min overlaps into deterministic non-overlapping segments", () => {
+    const rs: any = {
+      billCredits: {
+        hasBillCredit: true,
+        rules: [
+          { label: "$35 >= 1000", creditAmountCents: 3500, minUsageKWh: 1000 },
+          { label: "$15 >= 2000", creditAmountCents: 1500, minUsageKWh: 2000 },
+        ],
+      },
+    };
+    const out = extractDeterministicBillCredits(rs);
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.credits.rules).toEqual([
+        {
+          type: "USAGE_RANGE_CREDIT",
+          label: "$35 >= 1000",
+          creditDollars: 35,
+          minKwhInclusive: 1000,
+          maxKwhExclusive: 2000,
+        },
+        {
+          type: "USAGE_RANGE_CREDIT",
+          label: "$15 >= 2000",
+          creditDollars: 50,
+          minKwhInclusive: 2000,
+          maxKwhExclusive: null,
+        },
+      ]);
+    }
+  });
+
   it("returns NO_CREDITS when only minimum usage fee (negative) rules exist", () => {
     const rs: any = {
       billCredits: {

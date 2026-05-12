@@ -42,4 +42,35 @@ describe("canonicalizeRateStructureForPipeline", () => {
 
     expect(res).toBe(original);
   });
+
+  it("preserves solver-normalized bill credit segments over canonical plan-rules credits", () => {
+    const res = canonicalizeRateStructureForPipeline({
+      finalStatus: "PASS",
+      planRules: {
+        rateType: "FIXED",
+        planType: "flat",
+        defaultRateCentsPerKwh: 11.44,
+        billCredits: [
+          { type: "THRESHOLD_MIN", thresholdKwh: 1000, creditDollars: 35 },
+          { type: "THRESHOLD_MIN", thresholdKwh: 2000, creditDollars: 15 },
+        ],
+      },
+      rateStructure: {
+        type: "FIXED",
+        energyRateCents: 11.44,
+        billCredits: {
+          hasBillCredit: true,
+          rules: [
+            { label: "$35 >= 1000", creditAmountCents: 3500, minUsageKWh: 1000, maxUsageKWh: 2000 },
+            { label: "$50 >= 2000", creditAmountCents: 5000, minUsageKWh: 2000 },
+          ],
+        },
+      },
+    });
+
+    expect((res as any)?.billCredits?.rules).toEqual([
+      { label: "$35 >= 1000", creditAmountCents: 3500, minUsageKWh: 1000, maxUsageKWh: 2000 },
+      { label: "$50 >= 2000", creditAmountCents: 5000, minUsageKWh: 2000 },
+    ]);
+  });
 });
