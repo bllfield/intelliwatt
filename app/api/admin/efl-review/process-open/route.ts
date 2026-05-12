@@ -9,6 +9,7 @@ import { inferTdspTerritoryFromEflText } from "@/lib/efl/eflValidator";
 import { normalizeTdspCode } from "@/lib/utility/tdspCode";
 import { prisma } from "@/lib/db";
 import { ensureBucketsExist } from "@/lib/usage/aggregateMonthlyBuckets";
+import { collectOfferEflCandidateUrls, normalizeOffer } from "@/lib/wattbuy/normalize";
 
 export const dynamic = "force-dynamic";
 
@@ -71,6 +72,17 @@ async function buildEflUrlCandidatesForQueueItem(it: any): Promise<string[]> {
       });
       push(mp?.eflUrl);
       push((mp as any)?.docs?.efl);
+      try {
+        const rawOffer = (mp as any)?.docs ?? null;
+        if (rawOffer && typeof rawOffer === "object") {
+          const normalized = normalizeOffer(rawOffer);
+          for (const candidate of collectOfferEflCandidateUrls(normalized)) {
+            push(candidate);
+          }
+        }
+      } catch {
+        // ignore candidate reconstruction failures
+      }
     } catch {
       // ignore
     }

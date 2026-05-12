@@ -1143,6 +1143,7 @@ export async function POST(req: NextRequest) {
                       where: {
                         resolvedAt: null,
                         OR: [
+                          offerId ? { offerId: offerId } : undefined,
                           repPuct && ver
                             ? { repPuctCertificate: repPuct, eflVersionCode: ver }
                             : undefined,
