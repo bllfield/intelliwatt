@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { upsertReviewQueueRowRespectingOpenUrl } from "@/lib/efl/reviewQueueWrite";
 import type {
   PlanRules,
   RateStructure,
@@ -250,7 +251,8 @@ export async function upsertRatePlanFromEfl(
   // with any existing row for the same PDF.
   if (forcedManualReviewForTouMismatch) {
     try {
-      await (prisma as any).eflParseReviewQueue.upsert({
+      await upsertReviewQueueRowRespectingOpenUrl({
+        prismaClient: prisma as any,
         where: { eflPdfSha256 },
         create: {
           source: "plan_persistence_guardrail",

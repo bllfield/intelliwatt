@@ -8,6 +8,7 @@ import { runEflPipelineNoStore } from "@/lib/efl/runEflPipelineNoStore";
 import { validatePlanRules } from "@/lib/efl/planEngine";
 import { upsertRatePlanFromEfl } from "@/lib/efl/planPersistence";
 import { inferTdspTerritoryFromEflText } from "@/lib/efl/eflValidator";
+import { upsertReviewQueueRowRespectingOpenUrl } from "@/lib/efl/reviewQueueWrite";
 import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEstimate";
 import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
 import { estimateTrueCost } from "@/lib/plan-engine/estimateTrueCost";
@@ -699,7 +700,8 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
                 utilityId: meta?.utilityId ?? null,
               };
               try {
-                await (prisma as any).eflParseReviewQueue.upsert({
+                await upsertReviewQueueRowRespectingOpenUrl({
+                  prismaClient: prisma as any,
                   where: { kind_dedupeKey: { kind: "PLAN_CALC_QUARANTINE", dedupeKey: offerId } },
                   create: {
                     source: "plan_pipeline",
@@ -941,7 +943,8 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
               utilityId: meta?.utilityId ?? null,
             };
             try {
-              await (prisma as any).eflParseReviewQueue.upsert({
+              await upsertReviewQueueRowRespectingOpenUrl({
+                prismaClient: prisma as any,
                 where: { kind_dedupeKey: { kind: "PLAN_CALC_QUARANTINE", dedupeKey: offerId } },
                 create: {
                   source: "plan_pipeline",

@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { prisma } from "@/lib/db";
+import { upsertReviewQueueRowRespectingOpenUrl } from "@/lib/efl/reviewQueueWrite";
 import { derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
 import { isPlanCalcQuarantineWorthyReasonCode } from "@/lib/plan-engine/planCalcQuarantine";
 import { normalizeTdspCode } from "@/lib/utility/tdspCode";
@@ -261,7 +262,8 @@ export async function POST(req: NextRequest) {
         try {
           const sha = String(p.eflPdfSha256 ?? "").trim();
           if (sha) {
-            await (prisma as any).eflParseReviewQueue.upsert({
+            await upsertReviewQueueRowRespectingOpenUrl({
+              prismaClient: prisma as any,
               where: { eflPdfSha256: sha },
               create: {
                 source: "admin_revalidate_templates",

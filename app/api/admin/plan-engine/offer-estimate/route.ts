@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db";
+import { upsertReviewQueueRowRespectingOpenUrl } from "@/lib/efl/reviewQueueWrite";
 import { requireAdmin } from "@/lib/auth/admin";
 import { computeAnnualKwhForEsiid, estimateOfferFromOfferId, getTdspApplied } from "@/app/api/plan-engine/_shared/estimate";
 
@@ -146,7 +147,8 @@ export async function POST(req: NextRequest) {
       });
       const sha = String((rp as any)?.eflPdfSha256 ?? "").trim();
       if (sha) {
-        await (prisma as any).eflParseReviewQueue.upsert({
+        await upsertReviewQueueRowRespectingOpenUrl({
+          prismaClient: prisma as any,
           where: { eflPdfSha256: sha },
           create: {
             source: "admin_estimate",

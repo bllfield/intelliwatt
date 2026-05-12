@@ -11,6 +11,7 @@ import { runEflPipelineNoStore } from "@/lib/plan-engine-next/efl/runEflPipeline
 import { validatePlanRules } from "@/lib/plan-engine-next/efl/planEngine";
 import { upsertRatePlanFromEfl } from "@/lib/plan-engine-next/efl/planPersistence";
 import { inferTdspTerritoryFromEflText } from "@/lib/efl/eflValidator";
+import { upsertReviewQueueRowRespectingOpenUrl } from "@/lib/efl/reviewQueueWrite";
 import { Prisma } from "@prisma/client";
 
 export const runtime = "nodejs";
@@ -228,7 +229,8 @@ export async function POST(req: NextRequest) {
         try {
           const identity = "MISSING_EFL_URL";
           const syntheticSha = sha256Hex(["dashboard_prefetch", "EFL_PARSE", offerId, identity].join("|"));
-          await (prisma as any).eflParseReviewQueue.upsert({
+          await upsertReviewQueueRowRespectingOpenUrl({
+            prismaClient: prisma as any,
             where: { kind_dedupeKey: { kind: "EFL_PARSE", dedupeKey: offerId } },
             create: {
               source: "dashboard_prefetch",
@@ -276,7 +278,8 @@ export async function POST(req: NextRequest) {
         try {
           const identity = eflUrl || "MISSING_EFL_URL";
           const syntheticSha = sha256Hex(["dashboard_prefetch", "EFL_PARSE", offerId, identity].join("|"));
-          await (prisma as any).eflParseReviewQueue.upsert({
+          await upsertReviewQueueRowRespectingOpenUrl({
+            prismaClient: prisma as any,
             where: { kind_dedupeKey: { kind: "EFL_PARSE", dedupeKey: offerId } },
             create: {
               source: "dashboard_prefetch",
@@ -332,8 +335,8 @@ export async function POST(req: NextRequest) {
           const msg = e?.message ? String(e.message) : String(e);
           const identity = eflUrl || "MISSING_EFL_URL";
           const syntheticSha = sha256Hex(["dashboard_prefetch", "EFL_PARSE_EXCEPTION", offerId, identity].join("|"));
-          await (prisma as any).eflParseReviewQueue
-            .upsert({
+          await upsertReviewQueueRowRespectingOpenUrl({
+            prismaClient: prisma as any,
               where: { kind_dedupeKey: { kind: "EFL_PARSE", dedupeKey: offerId } },
               create: {
                 source: "dashboard_prefetch",
@@ -397,7 +400,8 @@ export async function POST(req: NextRequest) {
           const queueSha =
             det.eflPdfSha256 ??
             sha256Hex(["dashboard_prefetch", "PIPELINE_NO_TEMPLATE", offerId, pdf.pdfUrl].join("|"));
-          await (prisma as any).eflParseReviewQueue.upsert({
+          await upsertReviewQueueRowRespectingOpenUrl({
+            prismaClient: prisma as any,
             where: { kind_dedupeKey: { kind: "EFL_PARSE", dedupeKey: offerId } },
             create: {
               source: "dashboard_prefetch",
@@ -559,7 +563,8 @@ export async function POST(req: NextRequest) {
           const missing = Array.isArray((saved as any)?.missingTemplateFields)
             ? ((saved as any).missingTemplateFields as string[])
             : [];
-          await (prisma as any).eflParseReviewQueue.upsert({
+          await upsertReviewQueueRowRespectingOpenUrl({
+            prismaClient: prisma as any,
             where: { eflPdfSha256: queueSha },
             create: {
               source: "dashboard_prefetch",

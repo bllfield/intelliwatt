@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db";
 import { isPlanCalcQuarantineWorthyReasonCode } from "@/lib/plan-engine/planCalcQuarantine";
+import { upsertReviewQueueRowRespectingOpenUrl } from "@/lib/efl/reviewQueueWrite";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -137,7 +138,8 @@ export async function POST(req: NextRequest) {
         : {};
 
       try {
-        await (prisma as any).eflParseReviewQueue.upsert({
+        await upsertReviewQueueRowRespectingOpenUrl({
+          prismaClient: prisma as any,
           where: { kind_dedupeKey: { kind: "PLAN_CALC_QUARANTINE", dedupeKey: offerId } },
           create: {
             source: "admin_enqueue_quarantines",

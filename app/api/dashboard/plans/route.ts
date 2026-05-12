@@ -19,6 +19,7 @@ import { canComputePlanFromBuckets, derivePlanCalcRequirementsFromTemplate } fro
 import { isPlanCalcQuarantineWorthyReasonCode } from "@/lib/plan-engine/planCalcQuarantine";
 import { deriveUniversalAvailability } from "@/lib/plan-engine/universalStatus";
 import { bucketDefsFromBucketKeys } from "@/lib/plan-engine/usageBuckets";
+import { upsertReviewQueueRowRespectingOpenUrl } from "@/lib/efl/reviewQueueWrite";
 import { recordSimulationDataAlert } from "@/modules/usageSimulator/simulationDataAlerts";
 import {
   extractFixedRepEnergyCentsPerKwh,
@@ -1177,8 +1178,8 @@ export async function GET(req: NextRequest) {
             ? "DASHBOARD_QUEUED: offer has EFL URL but no template mapping yet."
             : "DASHBOARD_QUEUED: offer is missing EFL URL and has no template mapping yet.";
           queuedWrites.push(
-            (prisma as any).eflParseReviewQueue
-              .upsert({
+            upsertReviewQueueRowRespectingOpenUrl({
+                prismaClient: prisma as any,
                 where: { kind_dedupeKey: { kind: "EFL_PARSE", dedupeKey: offerId } },
                 create: {
                   source: "dashboard_plans",
@@ -1246,8 +1247,8 @@ export async function GET(req: NextRequest) {
             offerId,
           };
           queuedWrites.push(
-            (prisma as any).eflParseReviewQueue
-              .upsert({
+            upsertReviewQueueRowRespectingOpenUrl({
+                prismaClient: prisma as any,
                 where: { kind_dedupeKey: { kind: "PLAN_CALC_QUARANTINE", dedupeKey: offerId } },
                 create: {
                   source: "dashboard_plans",
