@@ -613,7 +613,7 @@ export default function PlanCompareClient(props: { offerId: string }) {
                           step="0.01"
                           value={switchingFeeInput}
                           onChange={(e) => setSwitchingFeeInput(e.target.value)}
-                          placeholder="10"
+                          placeholder="0"
                           className="w-full rounded-lg border border-brand-cyan/30 bg-brand-white/10 pl-7 pr-3 py-2 text-sm text-brand-white placeholder:text-brand-cyan/50 focus:border-brand-cyan focus:outline-none"
                         />
                       </div>
