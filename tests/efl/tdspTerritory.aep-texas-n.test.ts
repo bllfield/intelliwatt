@@ -30,5 +30,15 @@ DH EFL - 1234567 – AEP-CPL12 MONTH RESIDENTIAL FIXED RATE 5/6/2026
 `.trim();
     expect(inferTdspTerritoryFromEflText(raw)).toBe("AEP_CENTRAL");
   });
+
+  it("infers AEP_CENTRAL from Central Power & Light / CP&L service-area labels", () => {
+    const raw = `
+Electricity Facts Label (EFL)
+Spark Energy, LLC
+Central Power & Light [CP&L / AEP] Service Area
+Opendoor Select
+`.trim();
+    expect(inferTdspTerritoryFromEflText(raw)).toBe("AEP_CENTRAL");
+  });
 });
 

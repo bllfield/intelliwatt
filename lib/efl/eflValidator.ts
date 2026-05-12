@@ -676,6 +676,7 @@ export function inferTdspTerritoryFromEflText(
     .replace(/[\u2010-\u2015]/g, "-") // unicode hyphens → '-'
     .replace(/\s+/g, " ")
     .trim();
+  const normWords = norm.replace(/&/g, "and");
 
   if (norm.includes("centerpoint")) return "CENTERPOINT";
   if (norm.includes("oncor")) return "ONCOR";
@@ -708,8 +709,9 @@ export function inferTdspTerritoryFromEflText(
     norm.includes("aep central") ||
     norm.includes("aep-central") ||
     norm.includes("aep texas central") ||
-    norm.includes("central power and light") ||
+    normWords.includes("central power and light") ||
     norm.includes("cpl service area") ||
+    norm.includes("cp&l") ||
     norm.includes("aep-cpl") ||
     norm.includes("aep texas c ") ||
     norm.includes("aep texas c service area") ||

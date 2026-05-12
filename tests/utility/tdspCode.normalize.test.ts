@@ -14,5 +14,12 @@ describe("normalizeTdspCode", () => {
     expect(normalizeTdspCode("centerpoint")).toBe("CENTERPOINT");
     expect(normalizeTdspCode("tnmp")).toBe("TNMP");
   });
+
+  it("maps legacy Central Power & Light aliases to AEP_CENTRAL", () => {
+    expect(normalizeTdspCode("Central Power & Light [CP&L / AEP] Service Area")).toBe(
+      "AEP_CENTRAL",
+    );
+    expect(normalizeTdspCode("CPL Service Area")).toBe("AEP_CENTRAL");
+  });
 });
 

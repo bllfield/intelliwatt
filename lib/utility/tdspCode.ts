@@ -58,11 +58,18 @@ export function normalizeTdspCode(input: unknown): TdspCodeCanonical | null {
 
   // Verbose names / text snippets.
   const norm = raw.toLowerCase();
+  const normWords = norm.replace(/&/g, "and");
   if (norm.includes("oncor")) return "ONCOR";
   if (norm.includes("centerpoint") || norm.includes("center point")) return "CENTERPOINT";
   if (norm.includes("tnmp") || /\btexas\s*-?\s*new\s+mexico\s+power\b/i.test(raw)) return "TNMP";
   if (norm.includes("aep") && norm.includes("north")) return "AEP_NORTH";
-  if (norm.includes("aep") && (norm.includes("central") || norm.includes("south"))) return "AEP_CENTRAL";
+  if (
+    (norm.includes("aep") && (norm.includes("central") || norm.includes("south"))) ||
+    normWords.includes("central power and light") ||
+    norm.includes("cp&l") ||
+    /\bcpl\b/i.test(raw)
+  )
+    return "AEP_CENTRAL";
 
   return null;
 }
