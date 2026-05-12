@@ -85,6 +85,7 @@ type OfferRow = {
 export type OfferCardProps = {
   offer: OfferRow;
   recommended?: boolean;
+  forceCalculating?: boolean;
 };
 
 function fmtCents(v: number | undefined): string {
@@ -104,7 +105,7 @@ function badgeClasses(kind: "AVAILABLE" | "CALCULATING" | "NEED_USAGE" | "NOT_CO
   return "border-amber-400/40 bg-amber-500/10 text-amber-200";
 }
 
-export default function OfferCard({ offer, recommended }: OfferCardProps) {
+export default function OfferCard({ offer, recommended, forceCalculating = false }: OfferCardProps) {
   const router = useRouter();
   const supplier = offer.supplierName ?? "Unknown supplier";
   const plan = offer.planName ?? "Unknown plan";
@@ -126,18 +127,21 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
   const tceReason = String(tce?.reason ?? offer.intelliwatt?.statusReason ?? "").toUpperCase();
   const isTemplateLookupError = tceStatus === "NOT_IMPLEMENTED" && tceReason === "TEMPLATE_LOOKUP_ERROR";
   const isMissingBuckets = tceStatus === "NOT_IMPLEMENTED" && tceReason === "MISSING_BUCKETS";
+  const isForcedCalculating = Boolean(forceCalculating);
 
   // Only show the scary UNSUPPORTED tag for true template/engine limitations.
   // Missing templates / cache misses / missing buckets should read as CALCULATING, not UNSUPPORTED.
   const isUnsupported =
-    (planCompStatus === "NOT_COMPUTABLE" &&
+    !isForcedCalculating &&
+    ((planCompStatus === "NOT_COMPUTABLE" &&
       (planCompReason.startsWith("UNSUPPORTED") ||
         planCompReason.startsWith("NON_DETERMINISTIC") ||
         planCompReason.includes("UNSUPPORTED"))) ||
-    tceStatus === "NOT_COMPUTABLE";
+      tceStatus === "NOT_COMPUTABLE");
 
   // Customer-facing status language (never show "QUEUED").
   const isCalculating =
+    isForcedCalculating ||
     // Plans list is read-only: a CACHE_MISS means "pipeline hasn't materialized this input-set yet".
     (tceStatus === "NOT_IMPLEMENTED" &&
       (tceReason === "CACHE_MISS" ||

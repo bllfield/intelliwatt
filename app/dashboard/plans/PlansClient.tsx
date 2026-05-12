@@ -907,14 +907,18 @@ export default function PlansClient() {
     () => (hasUsageForUi ? offers.filter((o: any) => isCalculatedOffer(o)) : offers),
     [hasUsageForUi, offers],
   );
+  const retryDisplayOffers = useMemo(
+    () => (hasUsageForUi ? offers.filter((o: any) => isRetryDisplayOffer(o)) : []),
+    [hasUsageForUi, offers, isRetryDisplayOffer],
+  );
   const unavailableOffers = useMemo(
-    () => (hasUsageForUi ? offers.filter((o: any) => !isCalculatedOffer(o)) : []),
-    [hasUsageForUi, offers],
+    () => (hasUsageForUi ? offers.filter((o: any) => !isCalculatedOffer(o) && !isRetryDisplayOffer(o)) : []),
+    [hasUsageForUi, offers, isRetryDisplayOffer],
   );
   const hasUnavailable = !availableFilterOn && unavailableOffers.length > 0;
   const pinUnavailableToBottom =
     Boolean(hasUsageForUi && sort === "best_for_you_proxy" && !availableFilterOn && unavailableOffers.length > 0);
-  const primaryOffers = pinUnavailableToBottom ? calculableOffers : offers;
+  const primaryOffers = pinUnavailableToBottom ? [...calculableOffers, ...retryDisplayOffers] : offers;
 
   // Default sort:
   // - if usage is present: "Best for you"
@@ -998,6 +1002,25 @@ export default function PlansClient() {
     if (pendingCount > 0) return pendingCount;
     return queuedRetryDisplayActive ? currentQueuedRetryCount : 0;
   }, [pendingCount, queuedRetryDisplayActive, currentQueuedRetryCount]);
+  const retryDisplayOfferIds = useMemo(() => {
+    if (!queuedRetryDisplayActive) return new Set<string>();
+    const ids = new Set<string>();
+    for (const o of offers) {
+      if (String(o?.intelliwatt?.statusLabel ?? "").toUpperCase() !== "QUEUED") continue;
+      const tceStatus = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
+      if (tceStatus === "OK" || tceStatus === "APPROXIMATE") continue;
+      const offerId = String((o as any)?.offerId ?? "").trim();
+      if (offerId) ids.add(offerId);
+    }
+    return ids;
+  }, [queuedRetryDisplayActive, offers]);
+  const isRetryDisplayOffer = useCallback(
+    (offer: any) => {
+      const offerId = String((offer as any)?.offerId ?? "").trim();
+      return Boolean(offerId && retryDisplayOfferIds.has(offerId));
+    },
+    [retryDisplayOfferIds],
+  );
   const rawUnavailableCount = useMemo(() => {
     if (!hasUsageForUi) return 0;
     let count = 0;
@@ -1722,6 +1745,7 @@ export default function PlansClient() {
                       key={o.offerId}
                       offer={o}
                       recommended={showRecommendedBadge ? o.offerId === recommendedOfferId : false}
+                      forceCalculating={isRetryDisplayOffer(o)}
                     />
                   ))}
                 </div>
@@ -1745,6 +1769,7 @@ export default function PlansClient() {
                       key={o.offerId}
                       offer={o}
                       recommended={false}
+                      forceCalculating={false}
                     />
                   ))}
                 </div>

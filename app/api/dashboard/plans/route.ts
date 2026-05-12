@@ -1861,51 +1861,60 @@ export async function GET(req: NextRequest) {
             ratePlanId: effectiveRatePlanIdForQueue,
             offerId: offerIdForQueue,
           };
-
-          (prisma as any).eflParseReviewQueue
-            .upsert({
+          const existingQuarantine = await (prisma as any).eflParseReviewQueue
+            .findUnique({
               where: { kind_dedupeKey: { kind: "PLAN_CALC_QUARANTINE", dedupeKey: offerIdForQueue } },
-              create: {
-                source: "dashboard_plans",
-                kind: "PLAN_CALC_QUARANTINE",
-                dedupeKey: offerIdForQueue,
-                // Legacy NOT NULL unique field (EFL queue origin). For quarantine we do not use it as identity.
-                eflPdfSha256: sha256HexCache(["dashboard_plans", "PLAN_CALC_QUARANTINE", offerIdForQueue].join("|")),
-                offerId: offerIdForQueue,
-                supplier: (base as any)?.supplierName ?? null,
-                planName: (base as any)?.planName ?? null,
-                eflUrl: (base as any)?.efl?.eflUrl ?? null,
-                tdspName: (base as any)?.utility?.utilityName ?? null,
-                termMonths: (base as any)?.termMonths ?? null,
-                ratePlanId: effectiveRatePlanIdForQueue,
-                rawText: null,
-                planRules: null,
-                rateStructure: null,
-                validation: null,
-                derivedForValidation: { ...(planComputability as any)?.details, missingBucketKeys, trueCostEstimate },
-                finalStatus: "OPEN",
-                queueReason: JSON.stringify(queueReasonPayload),
-                solverApplied: [],
-                resolvedAt: null,
-                resolvedBy: null,
-                resolutionNotes: estReason || "NOT_COMPUTABLE",
-              },
-              update: {
-                supplier: (base as any)?.supplierName ?? null,
-                planName: (base as any)?.planName ?? null,
-                eflUrl: (base as any)?.efl?.eflUrl ?? null,
-                tdspName: (base as any)?.utility?.utilityName ?? null,
-                termMonths: (base as any)?.termMonths ?? null,
-                ratePlanId: effectiveRatePlanIdForQueue,
-                derivedForValidation: { ...(planComputability as any)?.details, missingBucketKeys, trueCostEstimate },
-                finalStatus: "OPEN",
-                queueReason: JSON.stringify(queueReasonPayload),
-                resolutionNotes: estReason || "NOT_COMPUTABLE",
-                resolvedAt: null,
-                resolvedBy: null,
-              },
+              select: { resolvedAt: true },
             })
-            .catch(() => {});
+            .catch(() => null);
+
+          // Once ops explicitly resolves a quarantine row, do not recreate it from the customer plans page.
+          if (!existingQuarantine?.resolvedAt) {
+            await (prisma as any).eflParseReviewQueue
+              .upsert({
+                where: { kind_dedupeKey: { kind: "PLAN_CALC_QUARANTINE", dedupeKey: offerIdForQueue } },
+                create: {
+                  source: "dashboard_plans",
+                  kind: "PLAN_CALC_QUARANTINE",
+                  dedupeKey: offerIdForQueue,
+                  // Legacy NOT NULL unique field (EFL queue origin). For quarantine we do not use it as identity.
+                  eflPdfSha256: sha256HexCache(["dashboard_plans", "PLAN_CALC_QUARANTINE", offerIdForQueue].join("|")),
+                  offerId: offerIdForQueue,
+                  supplier: (base as any)?.supplierName ?? null,
+                  planName: (base as any)?.planName ?? null,
+                  eflUrl: (base as any)?.efl?.eflUrl ?? null,
+                  tdspName: (base as any)?.utility?.utilityName ?? null,
+                  termMonths: (base as any)?.termMonths ?? null,
+                  ratePlanId: effectiveRatePlanIdForQueue,
+                  rawText: null,
+                  planRules: null,
+                  rateStructure: null,
+                  validation: null,
+                  derivedForValidation: { ...(planComputability as any)?.details, missingBucketKeys, trueCostEstimate },
+                  finalStatus: "OPEN",
+                  queueReason: JSON.stringify(queueReasonPayload),
+                  solverApplied: [],
+                  resolvedAt: null,
+                  resolvedBy: null,
+                  resolutionNotes: estReason || "NOT_COMPUTABLE",
+                },
+                update: {
+                  supplier: (base as any)?.supplierName ?? null,
+                  planName: (base as any)?.planName ?? null,
+                  eflUrl: (base as any)?.efl?.eflUrl ?? null,
+                  tdspName: (base as any)?.utility?.utilityName ?? null,
+                  termMonths: (base as any)?.termMonths ?? null,
+                  ratePlanId: effectiveRatePlanIdForQueue,
+                  derivedForValidation: { ...(planComputability as any)?.details, missingBucketKeys, trueCostEstimate },
+                  finalStatus: "OPEN",
+                  queueReason: JSON.stringify(queueReasonPayload),
+                  resolutionNotes: estReason || "NOT_COMPUTABLE",
+                  resolvedAt: null,
+                  resolvedBy: null,
+                },
+              })
+              .catch(() => {});
+          }
         }
       } catch {
         // best-effort only; never block plans API
