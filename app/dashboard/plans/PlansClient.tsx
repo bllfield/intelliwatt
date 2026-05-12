@@ -291,6 +291,33 @@ export default function PlansClient() {
     }).length;
   };
 
+  const classifyPlanUiState = (o: any): "AVAILABLE" | "NEED_USAGE" | "CALCULATING" | "UNAVAILABLE" => {
+    const tce = (o as any)?.intelliwatt?.trueCostEstimate;
+    const tceStatus = String(tce?.status ?? "").toUpperCase();
+    const tceReason = String(tce?.reason ?? (o as any)?.intelliwatt?.statusReason ?? "").toUpperCase();
+    const statusLabel = String((o as any)?.intelliwatt?.statusLabel ?? "").toUpperCase();
+    if (tceStatus === "OK" || tceStatus === "APPROXIMATE") return "AVAILABLE";
+    if (tceStatus === "MISSING_USAGE") return "NEED_USAGE";
+    if (tceStatus === "NOT_IMPLEMENTED" && tceReason === "MISSING_BUCKETS") return "NEED_USAGE";
+
+    const calculating =
+      tceStatus === "MISSING_TEMPLATE" ||
+      (tceStatus === "NOT_IMPLEMENTED" &&
+        (tceReason === "CACHE_MISS" ||
+          tceReason.includes("MISSING TEMPLATE") ||
+          tceReason.includes("MISSING BUCKET"))) ||
+      (statusLabel === "QUEUED" &&
+        (!tceStatus ||
+          tceStatus === "QUEUED" ||
+          tceStatus === "MISSING_TEMPLATE" ||
+          (tceStatus === "NOT_IMPLEMENTED" &&
+            (tceReason === "CACHE_MISS" ||
+              tceReason.includes("MISSING TEMPLATE") ||
+              tceReason.includes("MISSING BUCKET")))));
+    if (calculating) return "CALCULATING";
+    return "UNAVAILABLE";
+  };
+
   // IMPORTANT:
   // Sort/filter must be display-only: it must never *start* any background warmups.
   // Warmups may only start from the default landing view, and may continue only if a warmup session
@@ -473,43 +500,13 @@ export default function PlansClient() {
     if (!resp?.ok) return;
     const offersNow = offersRaw;
     const pendingNow = pendingCountFromResponse(resp);
-    const classify = (o: any): "AVAILABLE" | "NEED_USAGE" | "CALCULATING" | "UNAVAILABLE" => {
-      const tce = (o as any)?.intelliwatt?.trueCostEstimate;
-      const tceStatus = String(tce?.status ?? "").toUpperCase();
-      const tceReason = String(tce?.reason ?? (o as any)?.intelliwatt?.statusReason ?? "").toUpperCase();
-      const statusLabel = String((o as any)?.intelliwatt?.statusLabel ?? "").toUpperCase();
-      if (tceStatus === "OK" || tceStatus === "APPROXIMATE") return "AVAILABLE";
-      if (tceStatus === "MISSING_USAGE") return "NEED_USAGE";
-      if (tceStatus === "NOT_IMPLEMENTED" && tceReason === "MISSING_BUCKETS") return "NEED_USAGE";
-
-      // "Calculating" means: expected to resolve once templates/usage buckets/estimates materialize.
-      // Keep this aligned with OfferCard's customer-facing language.
-      const calculating =
-        tceStatus === "MISSING_TEMPLATE" ||
-        (tceStatus === "NOT_IMPLEMENTED" &&
-          (tceReason === "CACHE_MISS" ||
-            tceReason.includes("MISSING TEMPLATE") ||
-            tceReason.includes("MISSING BUCKET"))) ||
-        (statusLabel === "QUEUED" &&
-          (!tceStatus ||
-            tceStatus === "QUEUED" ||
-            tceStatus === "MISSING_TEMPLATE" ||
-            (tceStatus === "NOT_IMPLEMENTED" &&
-              (tceReason === "CACHE_MISS" ||
-                tceReason.includes("MISSING TEMPLATE") ||
-                tceReason.includes("MISSING BUCKET")))));
-      if (calculating) return "CALCULATING";
-
-      // Everything else is currently unavailable (true defects, temporary lookups, etc).
-      return "UNAVAILABLE";
-    };
 
     let availableCount = 0;
     let needUsageCount = 0;
     let calculatingCount = 0;
     let unavailableCount = 0;
     for (const o of offersNow) {
-      const k = classify(o);
+      const k = classifyPlanUiState(o);
       if (k === "AVAILABLE") availableCount++;
       else if (k === "NEED_USAGE") needUsageCount++;
       else if (k === "CALCULATING") calculatingCount++;
@@ -1021,6 +1018,20 @@ export default function PlansClient() {
     if (pendingCount > 0) return pendingCount;
     return queuedRetryInFlightCount;
   }, [pendingCount, queuedRetryInFlightCount]);
+  const rawUnavailableCount = useMemo(() => {
+    if (!hasUsageForUi) return 0;
+    let count = 0;
+    for (const o of offersRaw) {
+      if (classifyPlanUiState(o) === "UNAVAILABLE") count++;
+    }
+    return count;
+  }, [hasUsageForUi, offersRaw]);
+  const displayedUnavailableCount = useMemo(() => {
+    return Math.max(0, rawUnavailableCount - queuedRetryInFlightCount);
+  }, [rawUnavailableCount, queuedRetryInFlightCount]);
+  const threeBucketStatusText = useMemo(() => {
+    return `${availableEstimateCount} available • ${displayedPendingCount} calculating • ${displayedUnavailableCount} unable to calculate`;
+  }, [availableEstimateCount, displayedPendingCount, displayedUnavailableCount]);
   const progressPercent = useMemo(() => {
     if (!estimateTargetCount) return 0;
     return Math.max(0, Math.min(100, Math.round((availableEstimateCount / estimateTargetCount) * 100)));
@@ -1612,8 +1623,7 @@ export default function PlansClient() {
               <div className="min-w-0">
                 <div className="text-sm font-semibold text-brand-white">Calculating IntelliWatt estimates</div>
                 <div className="mt-1 text-xs text-brand-cyan/75">
-                  {availableEstimateCount} of {estimateTargetCount} plans ready. {displayedPendingCount} left to calculate.
-                  Results refresh automatically as each plan becomes available.
+                  {threeBucketStatusText}. Results refresh automatically as each plan becomes available.
                 </div>
               </div>
               <div className="shrink-0 text-right">
@@ -1637,10 +1647,8 @@ export default function PlansClient() {
               <div className="min-w-0">
                 <div className="text-sm font-semibold text-brand-white">Calculating your best plan…</div>
                 <div className="mt-1 text-xs text-brand-cyan/75">
-                  We’re loading all plan options and applying IntelliWatt calculations using your usage.
-                  {displayedPendingCount > 0 ? (
-                    <span className="ml-2 text-brand-cyan/60">({displayedPendingCount} still processing)</span>
-                  ) : null}
+                  We’re loading all plan options and applying IntelliWatt calculations using your usage.{" "}
+                  <span className="text-brand-cyan/60">{threeBucketStatusText}.</span>
                 </div>
               </div>
             </div>
