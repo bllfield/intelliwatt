@@ -811,7 +811,7 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
       }
 
       // Ensure required buckets are present in the stitched bucket union we built above.
-      const requiredKeys = Array.isArray(derived?.requiredBucketKeys) ? (derived.requiredBucketKeys as string[]) : [];
+      const requiredKeys = Array.isArray(requiredBucketKeysForKey) ? requiredBucketKeysForKey : [];
       requiredBucketKeysForKey = requiredKeys.map((k) => String(k));
       const missing = requiredKeys.filter((k) => !unionKeys.has(String(k ?? "").trim()));
       if (missing.length > 0) {

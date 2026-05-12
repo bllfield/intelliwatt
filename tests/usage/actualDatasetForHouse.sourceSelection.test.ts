@@ -122,4 +122,24 @@ describe("actualDatasetForHouse source selection", () => {
     expect(result.dataset?.summary.source).toBe("SMT");
     expect(result.dataset?.summary.totalKwh).toBe(10);
   });
+
+  it("anchors SMT reads to Chicago-local day boundaries for the canonical 365-day window", async () => {
+    const { getActualUsageDatasetForHouse } = await import("@/lib/usage/actualDatasetForHouse");
+
+    await getActualUsageDatasetForHouse("house-1", "esiid-1", {
+      skipFullYearIntervalFetch: true,
+    });
+
+    expect(smtFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          esiid: "esiid-1",
+          ts: expect.objectContaining({
+            gte: new Date("2024-12-02T06:00:00.000Z"),
+            lte: new Date("2025-12-02T05:59:59.999Z"),
+          }),
+        }),
+      }),
+    );
+  });
 });

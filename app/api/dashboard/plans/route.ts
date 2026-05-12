@@ -602,6 +602,7 @@ export async function GET(req: NextRequest) {
         rateStructurePresent: boolean;
         rateStructure?: any | null;
         requiredBucketKeys?: string[] | null;
+        templateFingerprint?: string | null;
       }
     >();
 

@@ -783,8 +783,13 @@ async function getGreenButtonWindow(usageClient: any, houseId: string, rawId: st
 
 async function getSmtWindow(esiid: string) {
   const { startDate, endDate } = resolveCanonicalUsage365CoverageWindow();
-  const cutoff = new Date(startDate + "T00:00:00.000Z");
-  const end = new Date(endDate + "T23:59:59.999Z");
+  const range = buildUtcRangeForChicagoLocalDateRange({
+    startDateKey: startDate,
+    endDateKey: endDate,
+  });
+  if (!range) return null;
+  const cutoff = range.startInclusive;
+  const end = range.endInclusive;
   const hasRows = await prisma.smtInterval.findFirst({
     where: { esiid, ts: { gte: cutoff, lte: end } },
     orderBy: { ts: "desc" },
