@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import { wbGetOffers } from "@/lib/wattbuy/client";
 import { collectOfferEflCandidateUrls, normalizeOffers, type OfferNormalized } from "@/lib/wattbuy/normalize";
 import { computePdfSha256 } from "@/lib/efl/eflExtractor";
-import { fetchEflSourceFromCandidateUrls } from "@/lib/efl/fetchEflPdf";
+import { fetchEflSourceFromUrl } from "@/lib/efl/fetchEflPdf";
 import { runEflPipeline } from "@/lib/plan-engine-next/efl/runEflPipeline";
 import { runEflPipelineNoStore } from "@/lib/plan-engine-next/efl/runEflPipelineNoStore";
 import { upsertRatePlanFromEfl } from "@/lib/plan-engine-next/efl/planPersistence";
@@ -393,7 +393,7 @@ export async function POST(req: NextRequest) {
     const usageErrors: string[] = [];
     const tdspRatesCache = new Map<string, Promise<any | null>>();
 
-    for (const offer of sliced as OfferNormalized[]) {
+    offerLoop: for (const offer of sliced as OfferNormalized[]) {
       scannedCount++;
       const offerId = offer.offer_id ?? null;
       const supplier: string | null = offer.supplier_name ?? null;
@@ -601,11 +601,179 @@ export async function POST(req: NextRequest) {
       processedCount++;
 
       try {
-        const fetchedRes = await fetchEflSourceFromCandidateUrls(eflCandidateUrls);
-        const fetchedCandidateUrl = fetchedRes.ok ? fetchedRes.usedUrl : null;
-        const fetched = fetchedRes.ok ? fetchedRes.result : null;
-        const fetchFailures = fetchedRes.tried.map((x) => `${x.url} -> ${x.error ?? "fetch failed"}`);
-        if (!fetchedRes.ok || !fetched) {
+        const fetchFailures: string[] = [];
+        const nonEflCandidates: string[] = [];
+        let pipelineResult: any = null;
+        let resolvedDocUrl: string | null = null;
+        let fetchedCandidateUrl: string | null = null;
+        let pdfSha256: string | null = null;
+
+        for (const candidateUrl of eflCandidateUrls) {
+          const fetchedRes = await fetchEflSourceFromUrl(candidateUrl, { timeoutMs: 20_000 });
+          if (!fetchedRes.ok) {
+            fetchFailures.push(`${candidateUrl} -> ${fetchedRes.error ?? "fetch failed"}`);
+            continue;
+          }
+
+          const fetched = fetchedRes;
+          fetchedCandidateUrl = candidateUrl;
+          const pdfBytes = fetched.kind === "pdf" ? fetched.pdfBytes : null;
+          pdfSha256 = pdfBytes ? computePdfSha256(pdfBytes) : null;
+          resolvedDocUrl =
+            fetched.kind === "pdf"
+              ? (fetched.pdfUrl ?? fetchedCandidateUrl ?? eflSeedUrl)
+              : (fetched.sourceUrl ?? fetchedCandidateUrl ?? eflSeedUrl);
+          const prefetchedRawText = fetched.kind === "raw_text" ? fetched.rawText : null;
+
+          // 2a) Fast path: if we already have a saved RatePlan.rateStructure for
+          // this exact EFL fingerprint (and it doesn't require manual review),
+          // skip running the expensive EFL pipeline entirely.
+          if (!forceReparseTemplates && pdfSha256) {
+            const existing = (await prisma.ratePlan.findFirst({
+              where: { eflPdfSha256: pdfSha256 } as any,
+            })) as any;
+
+            if (isUsableTemplate(existing)) {
+              // Same logic as URL fast-path: in STORE mode, a template hit means any OPEN queue
+              // rows for this EFL should be cleared.
+              if (mode === "STORE_TEMPLATES_ON_PASS") {
+                try {
+                  await (prisma as any).eflParseReviewQueue.updateMany({
+                    where: {
+                      resolvedAt: null,
+                      OR: [
+                        { eflPdfSha256: pdfSha256 },
+                        { eflUrl: resolvedDocUrl },
+                        ...eflCandidateUrls.map((url) => ({ eflUrl: url })),
+                        ...(existing.eflUrl ? [{ eflUrl: String(existing.eflUrl) }] : []),
+                        ...(existing.eflSourceUrl
+                          ? [{ eflUrl: String(existing.eflSourceUrl) }]
+                          : []),
+                        ...(existing.repPuctCertificate && existing.eflVersionCode
+                          ? [
+                              {
+                                repPuctCertificate: String(existing.repPuctCertificate),
+                                eflVersionCode: String(existing.eflVersionCode),
+                              },
+                            ]
+                          : []),
+                      ],
+                    },
+                    data: {
+                      resolvedAt: new Date(),
+                      resolvedBy: "AUTO_TEMPLATE_HIT",
+                      resolutionNotes: "Auto-resolved: template already exists for this EFL.",
+                    },
+                  });
+                } catch {
+                  // Best-effort only.
+                }
+              }
+              results.push({
+                offerId,
+                supplier,
+                planName,
+                termMonths,
+                tdspName,
+                eflUrl: resolvedDocUrl,
+                eflPdfSha256: pdfSha256,
+                repPuctCertificate: existing.repPuctCertificate ?? null,
+                eflVersionCode: existing.eflVersionCode ?? null,
+                // IMPORTANT: validationStatus must remain a real validation outcome
+                // so downstream consumers that gate on PASS behave correctly.
+                // "Template-ness" is represented by templateAction below.
+                validationStatus: "PASS",
+                originalValidationStatus: "PASS",
+                finalValidationStatus: "PASS",
+                tdspAppliedMode: null,
+                parseConfidence: null,
+                passStrength: null,
+                passStrengthReasons: null,
+                passStrengthOffPointDiffs: null,
+                templateHit: true,
+                // DRY_RUN contract: templateAction is always SKIPPED (no template
+                // handling semantics). In STORE_TEMPLATES_ON_PASS, surface TEMPLATE.
+                templateAction: mode === "STORE_TEMPLATES_ON_PASS" ? "TEMPLATE" : "SKIPPED",
+                queueReason: null,
+                finalQueueReason: null,
+                solverApplied: null,
+                notes:
+                  docsEflUrl
+                    ? "Template hit: RatePlan already has rateStructure for this EFL fingerprint."
+                    : "Template hit: resolved EFL via enroll_link and found existing RatePlan.rateStructure.",
+              });
+
+              // REAL FIX: Even when we "hit" an existing template (no new persistence),
+              // we must still link the WattBuy offer_id -> RatePlan.id so consumer UIs
+              // show "IntelliWatt calculation available" rather than "Queued".
+              //
+              // Safety: this mapping is keyed by the exact offerId.
+              if (mode === "STORE_TEMPLATES_ON_PASS" && offerId && (existing as any)?.id) {
+                const ratePlanId = String((existing as any).id);
+                try {
+                  await (prisma as any).offerIdRatePlanMap.upsert({
+                    where: { offerId: String(offerId) },
+                    create: {
+                      offerId: String(offerId),
+                      ratePlanId,
+                      lastLinkedAt: new Date(),
+                      linkedBy: "wattbuy-batch-template-hit",
+                    },
+                    update: {
+                      ratePlanId,
+                      lastLinkedAt: new Date(),
+                      linkedBy: "wattbuy-batch-template-hit",
+                    },
+                  });
+                } catch {
+                  // Best-effort; do not fail the batch run due to mapping bookkeeping.
+                }
+
+                // Secondary enrichment: update OfferRateMap if it exists (never create).
+                try {
+                  await (prisma as any).offerRateMap.updateMany({
+                    where: { offerId: String(offerId) },
+                    data: { ratePlanId, lastSeenAt: new Date() },
+                  });
+                } catch {
+                  // Best-effort only.
+                }
+              }
+              continue offerLoop;
+            }
+          }
+
+          // 2b) Canonical pipeline: single source of truth.
+          const candidatePipelineResult = await runEflPipeline({
+            source: "batch",
+            actor: "system",
+            dryRun: mode === "DRY_RUN",
+            queueNonEflDocuments: false,
+            offerId,
+            eflUrl: resolvedDocUrl,
+            eflSourceUrl: fetchedCandidateUrl ?? eflSeedUrl,
+            ...(pdfBytes ? { pdfBytes } : {}),
+            ...(prefetchedRawText ? { rawText: prefetchedRawText } : {}),
+            offerMeta: {
+              supplier,
+              planName,
+              termMonths,
+              tdspName,
+            },
+          });
+
+          const candidateReason = String(candidatePipelineResult.queueReason ?? "");
+          if (candidateReason.startsWith("NON_EFL_DOCUMENT")) {
+            nonEflCandidates.push(`${candidateUrl} -> ${candidateReason}`);
+            pipelineResult = candidatePipelineResult;
+            continue;
+          }
+
+          pipelineResult = candidatePipelineResult;
+          break;
+        }
+
+        if (!pipelineResult || String(pipelineResult.queueReason ?? "").startsWith("NON_EFL_DOCUMENT")) {
           // Ensure offers don't "disappear" from ops: if we can't even fetch the EFL,
           // queue a stable synthetic item keyed by URL + offer metadata.
           try {
@@ -646,7 +814,7 @@ export async function POST(req: NextRequest) {
               validation: null,
               derivedForValidation: null,
               finalStatus: "SKIP",
-              queueReason: `EFL fetch failed: ${String(fetchFailures.join(" | ") || "unknown error")}`.slice(
+              queueReason: `EFL candidates exhausted: ${String([...nonEflCandidates, ...fetchFailures].join(" | ") || "unknown error")}`.slice(
                 0,
                 1000,
               ),
@@ -679,155 +847,11 @@ export async function POST(req: NextRequest) {
             tdspAppliedMode: null,
             parseConfidence: null,
             templateAction: "SKIPPED",
-            queueReason: "Queued: EFL fetch failed (see notes).",
-            notes: fetchFailures.join(" | ").slice(0, 1000),
+            queueReason: "Queued: EFL candidates exhausted (see notes).",
+            notes: [...nonEflCandidates, ...fetchFailures].join(" | ").slice(0, 1000),
           });
           continue;
         }
-
-        const pdfBytes = fetched.kind === "pdf" ? fetched.pdfBytes : null;
-        const pdfSha256 = pdfBytes ? computePdfSha256(pdfBytes) : null;
-        const resolvedDocUrl =
-          fetched.kind === "pdf"
-            ? (fetched.pdfUrl ?? fetchedCandidateUrl ?? eflSeedUrl)
-            : (fetched.sourceUrl ?? fetchedCandidateUrl ?? eflSeedUrl);
-        const prefetchedRawText = fetched.kind === "raw_text" ? fetched.rawText : null;
-
-        // 2a) Fast path: if we already have a saved RatePlan.rateStructure for
-        // this exact EFL fingerprint (and it doesn't require manual review),
-        // skip running the expensive EFL pipeline entirely.
-        if (!forceReparseTemplates && pdfSha256) {
-          const existing = (await prisma.ratePlan.findFirst({
-            where: { eflPdfSha256: pdfSha256 } as any,
-          })) as any;
-
-          if (isUsableTemplate(existing)) {
-            // Same logic as URL fast-path: in STORE mode, a template hit means any OPEN queue
-            // rows for this EFL should be cleared.
-            if (mode === "STORE_TEMPLATES_ON_PASS") {
-              try {
-                await (prisma as any).eflParseReviewQueue.updateMany({
-                  where: {
-                    resolvedAt: null,
-                    OR: [
-                      { eflPdfSha256: pdfSha256 },
-                      { eflUrl: resolvedDocUrl },
-                      ...eflCandidateUrls.map((url) => ({ eflUrl: url })),
-                      ...(existing.eflUrl ? [{ eflUrl: String(existing.eflUrl) }] : []),
-                      ...(existing.eflSourceUrl
-                        ? [{ eflUrl: String(existing.eflSourceUrl) }]
-                        : []),
-                      ...(existing.repPuctCertificate && existing.eflVersionCode
-                        ? [
-                            {
-                              repPuctCertificate: String(existing.repPuctCertificate),
-                              eflVersionCode: String(existing.eflVersionCode),
-                            },
-                          ]
-                        : []),
-                    ],
-                  },
-                  data: {
-                    resolvedAt: new Date(),
-                    resolvedBy: "AUTO_TEMPLATE_HIT",
-                    resolutionNotes: "Auto-resolved: template already exists for this EFL.",
-                  },
-                });
-              } catch {
-                // Best-effort only.
-              }
-            }
-            results.push({
-              offerId,
-              supplier,
-              planName,
-              termMonths,
-              tdspName,
-              eflUrl: resolvedDocUrl,
-              eflPdfSha256: pdfSha256,
-              repPuctCertificate: existing.repPuctCertificate ?? null,
-              eflVersionCode: existing.eflVersionCode ?? null,
-              // IMPORTANT: validationStatus must remain a real validation outcome
-              // so downstream consumers that gate on PASS behave correctly.
-              // "Template-ness" is represented by templateAction below.
-              validationStatus: "PASS",
-              originalValidationStatus: "PASS",
-              finalValidationStatus: "PASS",
-              tdspAppliedMode: null,
-              parseConfidence: null,
-              passStrength: null,
-              passStrengthReasons: null,
-              passStrengthOffPointDiffs: null,
-              templateHit: true,
-              // DRY_RUN contract: templateAction is always SKIPPED (no template
-              // handling semantics). In STORE_TEMPLATES_ON_PASS, surface TEMPLATE.
-              templateAction: mode === "STORE_TEMPLATES_ON_PASS" ? "TEMPLATE" : "SKIPPED",
-              queueReason: null,
-              finalQueueReason: null,
-              solverApplied: null,
-              notes:
-                docsEflUrl
-                  ? "Template hit: RatePlan already has rateStructure for this EFL fingerprint."
-                  : "Template hit: resolved EFL via enroll_link and found existing RatePlan.rateStructure.",
-            });
-
-            // REAL FIX: Even when we "hit" an existing template (no new persistence),
-            // we must still link the WattBuy offer_id -> RatePlan.id so consumer UIs
-            // show "IntelliWatt calculation available" rather than "Queued".
-            //
-            // Safety: this mapping is keyed by the exact offerId.
-            if (mode === "STORE_TEMPLATES_ON_PASS" && offerId && (existing as any)?.id) {
-              const ratePlanId = String((existing as any).id);
-              try {
-                await (prisma as any).offerIdRatePlanMap.upsert({
-                  where: { offerId: String(offerId) },
-                  create: {
-                    offerId: String(offerId),
-                    ratePlanId,
-                    lastLinkedAt: new Date(),
-                    linkedBy: "wattbuy-batch-template-hit",
-                  },
-                  update: {
-                    ratePlanId,
-                    lastLinkedAt: new Date(),
-                    linkedBy: "wattbuy-batch-template-hit",
-                  },
-                });
-              } catch {
-                // Best-effort; do not fail the batch run due to mapping bookkeeping.
-              }
-
-              // Secondary enrichment: update OfferRateMap if it exists (never create).
-              try {
-                await (prisma as any).offerRateMap.updateMany({
-                  where: { offerId: String(offerId) },
-                  data: { ratePlanId, lastSeenAt: new Date() },
-                });
-              } catch {
-                // Best-effort only.
-              }
-            }
-            continue;
-          }
-        }
-
-        // 2b) Canonical pipeline: single source of truth.
-        const pipelineResult = await runEflPipeline({
-          source: "batch",
-          actor: "system",
-          dryRun: mode === "DRY_RUN",
-          offerId,
-          eflUrl: resolvedDocUrl,
-          eflSourceUrl: fetchedCandidateUrl ?? eflSeedUrl,
-          ...(pdfBytes ? { pdfBytes } : {}),
-          ...(prefetchedRawText ? { rawText: prefetchedRawText } : {}),
-          offerMeta: {
-            supplier,
-            planName,
-            termMonths,
-            tdspName,
-          },
-        });
 
         const effectiveValidation = pipelineResult.finalValidation ?? null;
         const finalStatus: string | null = effectiveValidation?.status ?? null;

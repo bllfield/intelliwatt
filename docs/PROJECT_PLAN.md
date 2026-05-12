@@ -966,29 +966,34 @@ Next step: Step 7 — Documentation + runbooks + failure modes
 2. **Deterministic metadata extraction (from rawText)**
    - `repPuctCertificate`: REP PUCT Certificate # via regex in `lib/efl/eflExtractor.ts`.
    - `eflVersionCode`: EFL `Ver. #` via regex in `lib/efl/eflExtractor.ts`.
-3. **Identity + Dedupe (templateKey precedence)**
+3. **Document type guard (shared path)**
+   - `lib/efl/eflDocumentGuard.ts` rejects extracted Terms of Service / YRAC / non-EFL contract documents before AI parsing or solver work.
+   - This returns `finalValidation.status = "SKIP"` with `queueReason = NON_EFL_DOCUMENT...`, leaves `planRules` / `rateStructure` null, and prevents accidental template persistence when upstream document metadata points `docs.efl` at a TOS PDF.
+   - Candidate-based batch parsing treats `NON_EFL_DOCUMENT` as a wrong candidate and continues to the next available EFL URL before queueing, so a TOS PDF does not block a valid later EFL link.
+   - Rule: `R-DOC-TYPE-001` in `docs/EFL_PARSER_RULES.md`.
+4. **Identity + Dedupe (templateKey precedence)**
    - `PUCT_CERT_PLUS_EFL_VERSION` → `puct:${repPuctCertificate}|ver:${normalizedEflVersionCode}`.
    - `EFL_PDF_SHA256` → `sha256:${eflPdfSha256}`.
    - `WATTBUY_FALLBACK` → `wb:${norm(provider)}|plan:${norm(plan)}|term:${term||"na"}|tdsp:${norm(tdsp)||"na"}|offer:${offerId||"na"}`.
    - Implemented by `lib/efl/templateIdentity.ts#getTemplateKey`.
-4. **Template lookup**
+5. **Template lookup**
    - In-process caches in `lib/efl/getOrCreateEflTemplate.ts`:
      - TTL cache (`TEMPLATE_CACHE`, 5-minute TTL) keyed by `identity.primaryKey`.
      - Longer-lived map keyed by all `lookupKeys`.
    - On miss, callers may persist templates into `RatePlan` via `upsertRatePlanFromEfl` (separate persistence step).
-5. **If missing: AI parse (TEXT-ONLY)**
+6. **If missing: AI parse (TEXT-ONLY)**
    - `parseEflTextWithAi` consumes **normalized `rawText` only**; PDFs are **never** uploaded to OpenAI (413 eliminated).
    - Input passes through the soft slicer (`normalizeEflTextForAi`) with **fail-open** back to original text if too aggressive.
-6. **Deterministic fallback fill**
+7. **Deterministic fallback fill**
    - If AI leaves fields empty but the text clearly states them:
      - Base charge per month (dollars → cents).
      - Usage tiers (`minKwh`, `maxKwh`, `rateCentsPerKwh`).
      - Threshold-based bill credits (e.g., `$50 if usage >= 800 kWh`).
-7. **Validation + computed confidence**
+8. **Validation + computed confidence**
    - `parseConfidence` computed deterministically from completeness:
      - presence of base charge, tiers/fixed rate, bill credits, rate type, and term months.
    - Model self-reported confidence is ignored in favor of this score.
-8. **Persist template + metadata**
+9. **Persist template + metadata**
    - In-memory template record from `getOrCreateEflTemplate` includes:
      - `eflPdfSha256`, `repPuctCertificate`, `eflVersionCode`, `rawText`, `extractorMethod`.
      - `planRules`, `rateStructure`, `parseConfidence`, `parseWarnings`.

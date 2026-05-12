@@ -4,6 +4,7 @@ import { deterministicEflExtract } from "@/lib/efl/eflExtractor";
 import type { PdfTextExtractor } from "@/lib/efl/eflExtractor";
 import { parseEflTextWithAi } from "@/lib/efl/eflAiParser";
 import { canonicalizeRateStructureForPipeline } from "@/lib/efl/canonicalizePipelineShapes";
+import { classifyEflDocument } from "@/lib/efl/eflDocumentGuard";
 import { scoreEflPassStrength } from "@/lib/efl/eflValidator";
 import { solveEflValidationGaps } from "@/lib/efl/validation/solveEflValidationGaps";
 
@@ -112,6 +113,54 @@ export async function runEflPipelineNoStore(
     throw new Error("EFL rawText empty; cannot run EFL pipeline.");
   }
 
+  const rawTextLength = rawText.length;
+  const rawTextTruncated = rawTextLength > MAX_PREVIEW_CHARS;
+  const rawTextPreview = rawTextTruncated
+    ? rawText.slice(0, MAX_PREVIEW_CHARS)
+    : rawText;
+
+  const docClass = classifyEflDocument(rawText);
+  if (!docClass.isEfl) {
+    const finalValidation = {
+      status: "SKIP" as const,
+      toleranceCentsPerKwh: 0.25,
+      points: [],
+      assumptionsUsed: {},
+      fail: false,
+      queueReason: docClass.reason,
+      notes: [docClass.reason, `documentKind=${docClass.documentKind}`],
+      avgTableFound: false,
+      avgTableRows: [],
+    };
+
+    return {
+      deterministic: {
+        eflPdfSha256: extract.eflPdfSha256 ?? null,
+        repPuctCertificate: extract.repPuctCertificate ?? null,
+        eflVersionCode: extract.eflVersionCode ?? null,
+        extractorMethod: extract.extractorMethod ?? "pdftotext",
+        warnings: [...(extract.warnings ?? []), docClass.reason],
+        rawText,
+        rawTextPreview,
+        rawTextLength,
+        rawTextTruncated,
+      },
+      planRules: null,
+      rateStructure: null,
+      parseConfidence: 0,
+      parseWarnings: [docClass.reason],
+      validation: { eflAvgPriceValidation: finalValidation },
+      derivedForValidation: null,
+      finalValidation,
+      needsAdminReview: true,
+      effectivePlanRules: null,
+      effectiveRateStructure: null,
+      passStrength: null,
+      passStrengthReasons: [docClass.reason],
+      passStrengthOffPointDiffs: null,
+    };
+  }
+
   const aiResult = await parseEflTextWithAi({
     rawText,
     eflPdfSha256: extract.eflPdfSha256,
@@ -207,12 +256,6 @@ export async function runEflPipelineNoStore(
     (finalStatus === "PASS" &&
       passStrength != null &&
       passStrength !== "STRONG");
-
-  const rawTextLength = rawText.length;
-  const rawTextTruncated = rawTextLength > MAX_PREVIEW_CHARS;
-  const rawTextPreview = rawTextTruncated
-    ? rawText.slice(0, MAX_PREVIEW_CHARS)
-    : rawText;
 
   return {
     deterministic: {

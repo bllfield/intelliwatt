@@ -152,6 +152,33 @@
 
 ---
 
+## Rule R-DOC-TYPE-001 — Reject Non-EFL Contract Documents
+
+- **Intent**
+  - Prevent Terms of Service, Your Rights as a Customer, enrollment summaries, and other contract documents from entering the EFL parser/solver as if they were Electricity Facts Labels.
+
+- **Input pattern(s)**
+  - Extracted `rawText` where the first meaningful lines identify the document as:
+    - `Terms of Service`
+    - `Your Rights as a Customer`
+    - `YRAC`
+  - The document may mention `Electricity Facts Label`, `Electricity Price`, `Energy Charge`, or `TDU Delivery Charges` as contract references, but does not include the actual EFL average-price table.
+
+- **Output field(s)**
+  - Shared pipeline returns `finalValidation.status = "SKIP"`.
+  - Shared pipeline sets `queueReason` beginning with `NON_EFL_DOCUMENT`.
+  - `planRules` and `rateStructure` remain `null`; no template is eligible for persistence.
+  - Candidate-based callers should treat this as a wrong-document candidate and try the next available EFL link before queueing the offer.
+
+- **False-positive controls**
+  - Do not reject a document with a real EFL average-price table (`Average Monthly Use` plus `Average Price per kWh` / `Average Price per Kilowatt-hour`).
+  - Apply the guard after text extraction and before AI parsing so all PDF-backed and raw-text reruns share the same behavior.
+
+- **Known examples**
+  - Champion Terms of Service PDFs referenced in place of an EFL URL by upstream offer/document metadata.
+
+---
+
 ## Rule R‑TDSP‑ROW‑002 — Split-Unit TDSP Delivery Row Extraction
 
 - **Intent**

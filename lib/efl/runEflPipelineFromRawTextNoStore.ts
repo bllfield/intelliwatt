@@ -1,5 +1,6 @@
 import { parseEflTextWithAi } from "@/lib/efl/eflAiParser";
 import { canonicalizeRateStructureForPipeline } from "@/lib/efl/canonicalizePipelineShapes";
+import { classifyEflDocument } from "@/lib/efl/eflDocumentGuard";
 import { extractEflVersionCodeFromText } from "@/lib/efl/eflExtractor";
 import { scoreEflPassStrength } from "@/lib/efl/eflValidator";
 import { solveEflValidationGaps } from "@/lib/efl/validation/solveEflValidationGaps";
@@ -53,6 +54,55 @@ export async function runEflPipelineFromRawTextNoStore(
     String(args.eflVersionCode ?? "").trim() ||
     extractEflVersionCodeFromEflText(rawText) ||
     null;
+
+  const rawTextLength = rawText.length;
+  const rawTextTruncated = rawTextLength > MAX_PREVIEW_CHARS;
+  const rawTextPreview = rawTextTruncated ? rawText.slice(0, MAX_PREVIEW_CHARS) : rawText;
+
+  const docClass = classifyEflDocument(rawText);
+  if (!docClass.isEfl) {
+    const finalValidation = {
+      status: "SKIP" as const,
+      toleranceCentsPerKwh: 0.25,
+      points: [],
+      assumptionsUsed: {},
+      fail: false,
+      queueReason: docClass.reason,
+      notes: [docClass.reason, `documentKind=${docClass.documentKind}`],
+      avgTableFound: false,
+      avgTableRows: [],
+    };
+
+    return {
+      deterministic: {
+        eflPdfSha256,
+        repPuctCertificate,
+        eflVersionCode,
+        extractorMethod: "raw_text_queue",
+        warnings: [
+          "Pipeline used stored rawText (PDF fetch unavailable).",
+          docClass.reason,
+        ],
+        rawText,
+        rawTextPreview,
+        rawTextLength,
+        rawTextTruncated,
+      },
+      planRules: null,
+      rateStructure: null,
+      parseConfidence: 0,
+      parseWarnings: [docClass.reason],
+      validation: { eflAvgPriceValidation: finalValidation },
+      derivedForValidation: null,
+      finalValidation,
+      needsAdminReview: true,
+      effectivePlanRules: null,
+      effectiveRateStructure: null,
+      passStrength: null,
+      passStrengthReasons: [docClass.reason],
+      passStrengthOffPointDiffs: null,
+    };
+  }
 
   const aiResult = await parseEflTextWithAi({
     rawText,
@@ -141,10 +191,6 @@ export async function runEflPipelineFromRawTextNoStore(
     (finalStatus === "PASS" &&
       passStrength != null &&
       passStrength !== "STRONG");
-
-  const rawTextLength = rawText.length;
-  const rawTextTruncated = rawTextLength > MAX_PREVIEW_CHARS;
-  const rawTextPreview = rawTextTruncated ? rawText.slice(0, MAX_PREVIEW_CHARS) : rawText;
 
   return {
     deterministic: {

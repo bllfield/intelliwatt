@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const ratePlanFindFirstMock = vi.fn(async () => null);
-const offerIdRatePlanMapFindUniqueMock = vi.fn(async () => null);
-const offerIdRatePlanMapUpsertMock = vi.fn(async () => ({}));
-const eflParseReviewQueueUpdateManyMock = vi.fn(async () => ({ count: 0 }));
-const offerRateMapUpdateManyMock = vi.fn(async () => ({ count: 0 }));
+const ratePlanFindFirstMock: any = vi.fn(async () => null);
+const offerIdRatePlanMapFindUniqueMock: any = vi.fn(async () => null);
+const offerIdRatePlanMapUpsertMock: any = vi.fn(async () => ({}));
+const eflParseReviewQueueUpsertMock: any = vi.fn(async () => ({}));
+const eflParseReviewQueueUpdateManyMock: any = vi.fn(async () => ({ count: 0 }));
+const offerRateMapUpdateManyMock: any = vi.fn(async () => ({ count: 0 }));
 
 vi.mock("@/lib/db", () => {
   return {
@@ -20,7 +21,7 @@ vi.mock("@/lib/db", () => {
         updateMany: (...args: any[]) => offerRateMapUpdateManyMock(...args),
       },
       eflParseReviewQueue: {
-        upsert: vi.fn(async () => ({})),
+        upsert: (...args: any[]) => eflParseReviewQueueUpsertMock(...args),
         updateMany: (...args: any[]) => eflParseReviewQueueUpdateManyMock(...args),
       },
     },
@@ -80,6 +81,8 @@ describe("runEflPipeline (contract)", () => {
     offerIdRatePlanMapFindUniqueMock.mockResolvedValue(null);
     offerIdRatePlanMapUpsertMock.mockReset();
     offerIdRatePlanMapUpsertMock.mockResolvedValue({});
+    eflParseReviewQueueUpsertMock.mockReset();
+    eflParseReviewQueueUpsertMock.mockResolvedValue({});
     eflParseReviewQueueUpdateManyMock.mockReset();
     eflParseReviewQueueUpdateManyMock.mockResolvedValue({ count: 0 });
     offerRateMapUpdateManyMock.mockReset();
@@ -210,6 +213,54 @@ describe("runEflPipeline (contract)", () => {
     expect(res.rateStructure).toMatchObject({ type: "FIXED", energyRateCents: 11.44 });
     expect(offerIdRatePlanMapUpsertMock).toHaveBeenCalled();
     expect(eflParseReviewQueueUpdateManyMock).toHaveBeenCalled();
+  });
+
+  it("can return NON_EFL_DOCUMENT without writing a queue row for candidate probing", async () => {
+    const mod = await import("@/lib/efl/runEflPipelineNoStore");
+    (mod.runEflPipelineNoStore as any).mockResolvedValueOnce({
+      deterministic: {
+        eflPdfSha256: "sha_tos",
+        repPuctCertificate: "10098",
+        eflVersionCode: "Champion-RES-TX-TOS-062424",
+        rawText: "TERMS OF SERVICE\nERCOT Residential\n",
+        warnings: ["NON_EFL_DOCUMENT"],
+        extractorMethod: "pdftotext",
+      },
+      planRules: null,
+      rateStructure: null,
+      validation: {
+        eflAvgPriceValidation: {
+          status: "SKIP",
+          queueReason: "NON_EFL_DOCUMENT: extracted document appears to be Terms of Service, not an Electricity Facts Label.",
+          points: [],
+        },
+      },
+      derivedForValidation: null,
+      finalValidation: {
+        status: "SKIP",
+        queueReason: "NON_EFL_DOCUMENT: extracted document appears to be Terms of Service, not an Electricity Facts Label.",
+        points: [],
+      },
+      passStrength: null,
+      parseConfidence: 0,
+      parseWarnings: ["NON_EFL_DOCUMENT"],
+    });
+
+    const { runEflPipeline } = await import("@/lib/efl/runEflPipeline");
+    const res = await runEflPipeline({
+      source: "batch",
+      actor: "system",
+      dryRun: false,
+      queueNonEflDocuments: false,
+      offerId: "offer_tos_first",
+      eflUrl: "https://example.com/tos.pdf",
+      pdfBytes: Buffer.from("pdf"),
+    });
+
+    expect(res.ok).toBe(true);
+    expect(res.queued).toBe(true);
+    expect(res.queueReason).toContain("NON_EFL_DOCUMENT");
+    expect(eflParseReviewQueueUpsertMock).not.toHaveBeenCalled();
   });
 });
 

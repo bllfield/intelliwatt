@@ -44,6 +44,11 @@ export type RunEflPipelineInput = {
     repPuctCertificate?: string | null;
     eflVersionCode?: string | null;
   } | null;
+  /**
+   * Candidate URL loops can use this to probe a fetched document without
+   * creating a quarantine row when the document is clearly not an EFL.
+   */
+  queueNonEflDocuments?: boolean;
   // best-effort context (helps persistence)
   offerMeta?: {
     supplier?: string | null;
@@ -608,7 +613,8 @@ export async function runEflPipeline(input: RunEflPipelineInput): Promise<RunEfl
       };
     }
 
-    if (!dryRun) {
+    const isNonEflDocument = String(reason).startsWith("NON_EFL_DOCUMENT");
+    if (!dryRun && (input.queueNonEflDocuments !== false || !isNonEflDocument)) {
       await upsertQueueItem({
         kind: "EFL_PARSE",
         eflPdfSha256: String(eflPdfSha256),
