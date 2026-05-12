@@ -176,6 +176,7 @@ export default function PlansClient() {
   const pollStopTimerRef = useRef<number | null>(null);
   const pollInFlightRef = useRef(false);
   const queuedRetryAttemptedRef = useRef(false);
+  const [queuedRetryInFlightCount, setQueuedRetryInFlightCount] = useState(0);
 
   const [mobilePanel, setMobilePanel] = useState<"none" | "search" | "filters">("none");
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
@@ -330,6 +331,7 @@ export default function PlansClient() {
     setPrefetchNote(null);
     pipelineKickRef.current = false;
     queuedRetryAttemptedRef.current = false;
+    setQueuedRetryInFlightCount(0);
     if (pollTimerRef.current) window.clearInterval(pollTimerRef.current);
     pollTimerRef.current = null;
     if (pollStopTimerRef.current) window.clearTimeout(pollStopTimerRef.current);
@@ -489,8 +491,13 @@ export default function PlansClient() {
             tceReason.includes("MISSING TEMPLATE") ||
             tceReason.includes("MISSING BUCKET"))) ||
         (statusLabel === "QUEUED" &&
-          tceStatus !== "OK" &&
-          tceStatus !== "APPROXIMATE");
+          (!tceStatus ||
+            tceStatus === "QUEUED" ||
+            tceStatus === "MISSING_TEMPLATE" ||
+            (tceStatus === "NOT_IMPLEMENTED" &&
+              (tceReason === "CACHE_MISS" ||
+                tceReason.includes("MISSING TEMPLATE") ||
+                tceReason.includes("MISSING BUCKET")))));
       if (calculating) return "CALCULATING";
 
       // Everything else is currently unavailable (true defects, temporary lookups, etc).
@@ -508,29 +515,29 @@ export default function PlansClient() {
       else if (k === "CALCULATING") calculatingCount++;
       else unavailableCount++;
     }
+    const effectiveCalculatingCount = Math.max(calculatingCount, pendingCount, queuedRetryInFlightCount);
+    const effectiveUnavailableCount = Math.max(0, unavailableCount - queuedRetryInFlightCount);
     setAutoPreparing(calculatingCount > 0 && allowWarmupInBackground);
     if (allowWarmupInBackground && pendingNow > 0) {
       setPrefetchNote(
-        `IntelliWatt estimates: ${availableEstimateCount} available • ${pendingCount} left to calculate${
-          unavailableCount > 0 ? ` • ${unavailableCount} cannot calculate` : ""
-        }. Results refresh automatically.`,
+        `IntelliWatt estimates: ${availableEstimateCount} available • ${effectiveCalculatingCount} calculating • ${effectiveUnavailableCount} unable to calculate. Results refresh automatically.`,
       );
       return;
     }
 
-    // Summary note: never let one uncomputable plan make the whole page feel "stuck calculating".
-    if (calculatingCount > 0 || unavailableCount > 0 || needUsageCount > 0) {
+    // Summary note: keep the header aligned with customer-visible plan states.
+    if (resp?.hasUsage) {
       const parts: string[] = [];
       parts.push(`${availableEstimateCount} available`);
-      if (calculatingCount > 0) parts.push(`${pendingCount} calculating`);
-      if (unavailableCount > 0) parts.push(`${unavailableCount} not computable`);
+      parts.push(`${effectiveCalculatingCount} calculating`);
+      parts.push(`${effectiveUnavailableCount} unable to calculate`);
       if (needUsageCount > 0) parts.push(`${needUsageCount} need usage`);
       setPrefetchNote(`IntelliWatt estimates: ${parts.join(" • ")}`);
       return;
     }
 
     setPrefetchNote(null);
-  }, [resp?.ok, resp?.offers, allowWarmupInBackground]);
+  }, [resp?.ok, resp?.offers, allowWarmupInBackground, availableEstimateCount, pendingCount, queuedRetryInFlightCount]);
 
   // When pending reaches 0, end the warmup session so future browsing doesn't keep background-kicking.
   useEffect(() => {
@@ -689,6 +696,7 @@ export default function PlansClient() {
       if (retryOnlyQueued) queuedRetryAttemptedRef.current = true;
 
       prefetchInFlightRef.current = true;
+      setQueuedRetryInFlightCount(retryOnlyQueued ? queuedRetryCountNow : 0);
       setPrefetchNote(
         retryOnlyQueued
           ? `Retrying IntelliWatt calculations… (${queuedRetryCountNow} queued)`
@@ -742,10 +750,12 @@ export default function PlansClient() {
             setLastPipelineKickResult({ ok: false, error: e?.message ?? String(e) });
           } finally {
             prefetchInFlightRef.current = false;
+            setQueuedRetryInFlightCount(0);
           }
         })();
       } catch {
         prefetchInFlightRef.current = false;
+        setQueuedRetryInFlightCount(0);
       }
     }
 
@@ -931,6 +941,9 @@ export default function PlansClient() {
     [hasUsageForUi, offers],
   );
   const hasUnavailable = !availableFilterOn && unavailableOffers.length > 0;
+  const pinUnavailableToBottom =
+    Boolean(hasUsageForUi && sort === "best_for_you_proxy" && !availableFilterOn && unavailableOffers.length > 0);
+  const primaryOffers = pinUnavailableToBottom ? calculableOffers : offers;
 
   // Default sort:
   // - if usage is present: "Best for you"
@@ -1004,16 +1017,30 @@ export default function PlansClient() {
     if (!estimateTargetCount) return 0;
     return Math.max(0, estimateTargetCount - availableEstimateCount);
   }, [availableEstimateCount, estimateTargetCount]);
+  const displayedPendingCount = useMemo(() => {
+    if (pendingCount > 0) return pendingCount;
+    return queuedRetryInFlightCount;
+  }, [pendingCount, queuedRetryInFlightCount]);
   const progressPercent = useMemo(() => {
     if (!estimateTargetCount) return 0;
     return Math.max(0, Math.min(100, Math.round((availableEstimateCount / estimateTargetCount) * 100)));
   }, [availableEstimateCount, estimateTargetCount]);
   const hasInitialLoadInFlight = Boolean(loading && !resp?.ok);
-  const hasActiveCalculations = Boolean(pendingCount > 0 || autoPreparing);
+  const hasActiveCalculations = Boolean(displayedPendingCount > 0 || autoPreparing);
   const isStillWorking = Boolean(hasInitialLoadInFlight || hasActiveCalculations);
   const showRecommendedBadge = Boolean(recommendedOfferId && !isStillWorking);
   const showCalcBot =
     Boolean(hasUsage && sort === "best_for_you_proxy" && isStillWorking);
+  const showPipelineKickStatus = useMemo(() => {
+    const note = String(prefetchNote ?? "");
+    if (!note) return false;
+    return (
+      note.startsWith("Retrying IntelliWatt calculations") ||
+      note.startsWith("Preparing IntelliWatt calculations") ||
+      note.startsWith("Parsing plan fact labels") ||
+      note.includes("left to calculate")
+    );
+  }, [prefetchNote]);
 
   const defaultCalcMsg =
     "I'm calculating all your options using your actual usage to determine which plan is best based on your energy usage habits.\n\nYour results will be available soon.";
@@ -1486,7 +1513,7 @@ export default function PlansClient() {
                 ) : prefetchNote ? (
                   <span className="text-brand-cyan/80">
                     {prefetchNote}
-                    {lastPipelineKickResult ? (
+                    {showPipelineKickStatus && lastPipelineKickResult ? (
                       <span className="ml-2 text-brand-cyan/55">
                         (pipeline:{" "}
                         {lastPipelineKickResult?.ok === true
@@ -1579,13 +1606,13 @@ export default function PlansClient() {
       ) : null}
 
       <div className="mx-auto w-full max-w-5xl">
-        {estimateTargetCount > 0 && pendingCount > 0 ? (
+        {estimateTargetCount > 0 && displayedPendingCount > 0 ? (
           <div className="mb-4 rounded-3xl border border-brand-cyan/20 bg-brand-navy px-5 py-4 text-brand-cyan/80 shadow-[0_18px_40px_rgba(10,20,60,0.22)]">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
                 <div className="text-sm font-semibold text-brand-white">Calculating IntelliWatt estimates</div>
                 <div className="mt-1 text-xs text-brand-cyan/75">
-                  {availableEstimateCount} of {estimateTargetCount} plans ready. {pendingCount} left to calculate.
+                  {availableEstimateCount} of {estimateTargetCount} plans ready. {displayedPendingCount} left to calculate.
                   Results refresh automatically as each plan becomes available.
                 </div>
               </div>
@@ -1611,8 +1638,8 @@ export default function PlansClient() {
                 <div className="text-sm font-semibold text-brand-white">Calculating your best plan…</div>
                 <div className="mt-1 text-xs text-brand-cyan/75">
                   We’re loading all plan options and applying IntelliWatt calculations using your usage.
-                  {pendingCount > 0 ? (
-                    <span className="ml-2 text-brand-cyan/60">({pendingCount} still processing)</span>
+                  {displayedPendingCount > 0 ? (
+                    <span className="ml-2 text-brand-cyan/60">({displayedPendingCount} still processing)</span>
                   ) : null}
                 </div>
               </div>
@@ -1633,15 +1660,15 @@ export default function PlansClient() {
           </div>
         ) : (
           <div className="space-y-6">
-            {calculableOffers.length > 0 ? (
+            {primaryOffers.length > 0 ? (
               <div>
-                {hasUnavailable ? (
+                {pinUnavailableToBottom ? (
                   <div className="mb-3 text-sm font-semibold text-brand-navy">
                     IntelliWatt calculated plans
                   </div>
                 ) : null}
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  {calculableOffers.map((o) => (
+                  {primaryOffers.map((o) => (
                     <OfferCard
                       key={o.offerId}
                       offer={o}
@@ -1652,7 +1679,7 @@ export default function PlansClient() {
               </div>
             ) : null}
 
-            {hasUnavailable ? (
+            {pinUnavailableToBottom ? (
               <div>
                 <div className="mb-3 rounded-2xl border border-amber-400/20 bg-brand-navy px-4 py-3">
                   <div className="text-sm font-semibold text-brand-white">
