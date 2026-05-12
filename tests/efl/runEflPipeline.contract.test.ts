@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const ratePlanFindFirstMock = vi.fn(async () => null);
+const offerIdRatePlanMapFindUniqueMock = vi.fn(async () => null);
+const offerIdRatePlanMapUpsertMock = vi.fn(async () => ({}));
+const eflParseReviewQueueUpdateManyMock = vi.fn(async () => ({ count: 0 }));
+const offerRateMapUpdateManyMock = vi.fn(async () => ({ count: 0 }));
 
 vi.mock("@/lib/db", () => {
   return {
@@ -8,8 +12,16 @@ vi.mock("@/lib/db", () => {
       ratePlan: {
         findFirst: (...args: any[]) => ratePlanFindFirstMock(...args),
       },
+      offerIdRatePlanMap: {
+        findUnique: (...args: any[]) => offerIdRatePlanMapFindUniqueMock(...args),
+        upsert: (...args: any[]) => offerIdRatePlanMapUpsertMock(...args),
+      },
+      offerRateMap: {
+        updateMany: (...args: any[]) => offerRateMapUpdateManyMock(...args),
+      },
       eflParseReviewQueue: {
         upsert: vi.fn(async () => ({})),
+        updateMany: (...args: any[]) => eflParseReviewQueueUpdateManyMock(...args),
       },
     },
   };
@@ -64,6 +76,14 @@ describe("runEflPipeline (contract)", () => {
     persistAndLinkFromPipelineMock.mockReset();
     ratePlanFindFirstMock.mockReset();
     ratePlanFindFirstMock.mockResolvedValue(null);
+    offerIdRatePlanMapFindUniqueMock.mockReset();
+    offerIdRatePlanMapFindUniqueMock.mockResolvedValue(null);
+    offerIdRatePlanMapUpsertMock.mockReset();
+    offerIdRatePlanMapUpsertMock.mockResolvedValue({});
+    eflParseReviewQueueUpdateManyMock.mockReset();
+    eflParseReviewQueueUpdateManyMock.mockResolvedValue({ count: 0 });
+    offerRateMapUpdateManyMock.mockReset();
+    offerRateMapUpdateManyMock.mockResolvedValue({ count: 0 });
   });
 
   it("queues (fail-closed) when persistence succeeds but offerId link fails", async () => {
@@ -188,6 +208,8 @@ describe("runEflPipeline (contract)", () => {
     expect(res.planCalcStatus).toBe("COMPUTABLE");
     expect(res.planCalcReasonCode).toBe("FIXED_RATE_OK");
     expect(res.rateStructure).toMatchObject({ type: "FIXED", energyRateCents: 11.44 });
+    expect(offerIdRatePlanMapUpsertMock).toHaveBeenCalled();
+    expect(eflParseReviewQueueUpdateManyMock).toHaveBeenCalled();
   });
 });
 

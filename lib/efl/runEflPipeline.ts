@@ -121,11 +121,17 @@ function toBuffer(x: Buffer | Uint8Array): Buffer {
 }
 
 async function findPersistedRatePlanForEflIdentity(args: {
+  offerId?: string | null;
+  eflUrl?: string | null;
+  eflSourceUrl?: string | null;
   eflPdfSha256?: string | null;
   repPuctCertificate?: string | null;
   eflVersionCode?: string | null;
   planName?: string | null;
 }) {
+  const offerId = String(args.offerId ?? "").trim();
+  const eflUrl = normalizeUrl(args.eflUrl ?? null);
+  const eflSourceUrl = normalizeUrl(args.eflSourceUrl ?? null);
   const sha = String(args.eflPdfSha256 ?? "").trim();
   const rep = String(args.repPuctCertificate ?? "").trim();
   const ver = String(args.eflVersionCode ?? "").trim();
@@ -134,6 +140,8 @@ async function findPersistedRatePlanForEflIdentity(args: {
   const select = {
     id: true,
     planName: true,
+    eflUrl: true,
+    eflSourceUrl: true,
     rateStructure: true,
     planCalcStatus: true,
     planCalcReasonCode: true,
@@ -141,6 +149,25 @@ async function findPersistedRatePlanForEflIdentity(args: {
     supportedFeatures: true,
     modeledEflAvgPriceValidation: true,
   } as const;
+
+  if (offerId) {
+    const mapped = await (prisma as any).offerIdRatePlanMap.findUnique({
+      where: { offerId },
+      include: { ratePlan: { select } },
+    });
+    if ((mapped as any)?.ratePlan?.id) return (mapped as any).ratePlan;
+  }
+
+  const urls = [eflUrl, eflSourceUrl].filter((v): v is string => typeof v === "string" && v.length > 0);
+  if (urls.length > 0) {
+    const byUrl = await (prisma as any).ratePlan.findFirst({
+      where: {
+        OR: [{ eflUrl: { in: urls } }, { eflSourceUrl: { in: urls } }],
+      },
+      select,
+    });
+    if (byUrl) return byUrl;
+  }
 
   if (rep && ver && planName) {
     const byPlanIdentity = await (prisma as any).ratePlan.findFirst({
@@ -163,6 +190,69 @@ async function findPersistedRatePlanForEflIdentity(args: {
   }
 
   return null;
+}
+
+async function bestEffortLinkAndResolveForExistingTemplate(args: {
+  ratePlanId: string;
+  offerId?: string | null;
+  eflPdfSha256?: string | null;
+  repPuctCertificate?: string | null;
+  eflVersionCode?: string | null;
+}) {
+  const ratePlanId = String(args.ratePlanId ?? "").trim();
+  const offerId = String(args.offerId ?? "").trim();
+  const sha = String(args.eflPdfSha256 ?? "").trim();
+  const rep = String(args.repPuctCertificate ?? "").trim();
+  const ver = String(args.eflVersionCode ?? "").trim();
+  if (!ratePlanId) return;
+
+  try {
+    if (offerId) {
+      const now = new Date();
+      await (prisma as any).offerIdRatePlanMap.upsert({
+        where: { offerId },
+        create: {
+          offerId,
+          ratePlanId,
+          lastLinkedAt: now,
+          linkedBy: "canonical_pipeline_existing_template",
+        },
+        update: {
+          ratePlanId,
+          lastLinkedAt: now,
+          linkedBy: "canonical_pipeline_existing_template",
+        },
+      });
+      await (prisma as any).offerRateMap
+        .updateMany({
+          where: { offerId },
+          data: { ratePlanId, lastSeenAt: now },
+        })
+        .catch(() => {});
+    }
+  } catch {
+    // best-effort only
+  }
+
+  try {
+    const whereOr = [
+      sha ? { eflPdfSha256: sha } : undefined,
+      offerId ? { offerId } : undefined,
+      rep && ver ? { repPuctCertificate: rep, eflVersionCode: ver } : undefined,
+    ].filter(Boolean);
+    if (whereOr.length > 0) {
+      await (prisma as any).eflParseReviewQueue.updateMany({
+        where: { resolvedAt: null, OR: whereOr },
+        data: {
+          resolvedAt: new Date(),
+          resolvedBy: "auto",
+          resolutionNotes: `AUTO_RESOLVED: existing template reused via canonical pipeline. ratePlanId=${ratePlanId}`,
+        },
+      });
+    }
+  } catch {
+    // best-effort only
+  }
 }
 
 async function upsertQueueItem(args: {
@@ -456,6 +546,9 @@ export async function runEflPipeline(input: RunEflPipelineInput): Promise<RunEfl
         : `PIPELINE_NOT_ELIGIBLE: passStrength=${passStrength ?? "UNKNOWN"}`);
 
     const existingRatePlan = await findPersistedRatePlanForEflIdentity({
+      offerId,
+      eflUrl: eflUrlForStorage,
+      eflSourceUrl: eflSourceUrlForStorage,
       eflPdfSha256,
       repPuctCertificate,
       eflVersionCode,
@@ -463,6 +556,16 @@ export async function runEflPipeline(input: RunEflPipelineInput): Promise<RunEfl
     }).catch(() => null);
 
     if (existingRatePlan?.id) {
+      if (!dryRun) {
+        await bestEffortLinkAndResolveForExistingTemplate({
+          ratePlanId: String((existingRatePlan as any).id),
+          offerId,
+          eflPdfSha256,
+          repPuctCertificate,
+          eflVersionCode,
+        }).catch(() => {});
+      }
+
       const authoritativeStoredCalc = selectAuthoritativePlanCalc({
         rateStructure: (existingRatePlan as any)?.rateStructure ?? null,
         stored: {
