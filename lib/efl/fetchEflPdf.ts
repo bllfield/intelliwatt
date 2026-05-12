@@ -39,6 +39,26 @@ export type FetchEflSourceResult =
       notes: string[];
     };
 
+export type FetchEflSourceAttempt = {
+  url: string;
+  error: string | null;
+  notes: string[];
+};
+
+export type FetchEflSourceFromCandidatesResult =
+  | {
+      ok: true;
+      usedUrl: string;
+      result: Extract<FetchEflSourceResult, { ok: true }>;
+      tried: FetchEflSourceAttempt[];
+    }
+  | {
+      ok: false;
+      usedUrl: null;
+      error: string;
+      tried: FetchEflSourceAttempt[];
+    };
+
 const PDF_HINT_RE = /\.pdf(?:$|\?)/i;
 
 /**
@@ -985,6 +1005,44 @@ export async function fetchEflPdfFromUrl(
     source: res.source,
     contentType: res.contentType,
     notes: res.notes,
+  };
+}
+
+export async function fetchEflSourceFromCandidateUrls(
+  urls: Array<string | null | undefined>,
+  opts?: { timeoutMs?: number },
+): Promise<FetchEflSourceFromCandidatesResult> {
+  const tried: FetchEflSourceAttempt[] = [];
+  const seen = new Set<string>();
+
+  for (const rawUrl of urls) {
+    const url = String(rawUrl ?? "").trim();
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+
+    const res = await fetchEflSourceFromUrl(url, opts);
+    if (res.ok) {
+      return {
+        ok: true,
+        usedUrl: url,
+        result: res,
+        tried,
+      };
+    }
+
+    tried.push({
+      url,
+      error: res.error ?? "fetch failed",
+      notes: Array.isArray(res.notes) ? res.notes : [],
+    });
+  }
+
+  const last = tried.length ? tried[tried.length - 1] : null;
+  return {
+    ok: false,
+    usedUrl: null,
+    error: last?.error ?? "fetch failed",
+    tried,
   };
 }
 

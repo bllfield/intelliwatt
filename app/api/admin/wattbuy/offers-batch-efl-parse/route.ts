@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import { wbGetOffers } from "@/lib/wattbuy/client";
 import { collectOfferEflCandidateUrls, normalizeOffers, type OfferNormalized } from "@/lib/wattbuy/normalize";
 import { computePdfSha256 } from "@/lib/efl/eflExtractor";
-import { fetchEflSourceFromUrl } from "@/lib/efl/fetchEflPdf";
+import { fetchEflSourceFromCandidateUrls } from "@/lib/efl/fetchEflPdf";
 import { runEflPipeline } from "@/lib/plan-engine-next/efl/runEflPipeline";
 import { runEflPipelineNoStore } from "@/lib/plan-engine-next/efl/runEflPipelineNoStore";
 import { upsertRatePlanFromEfl } from "@/lib/plan-engine-next/efl/planPersistence";
@@ -601,19 +601,11 @@ export async function POST(req: NextRequest) {
       processedCount++;
 
       try {
-        let fetchedCandidateUrl: string | null = null;
-        let fetched: Awaited<ReturnType<typeof fetchEflSourceFromUrl>> | null = null;
-        const fetchFailures: string[] = [];
-        for (const candidateUrl of eflCandidateUrls) {
-          const attempt = await fetchEflSourceFromUrl(candidateUrl);
-          if (attempt.ok) {
-            fetched = attempt;
-            fetchedCandidateUrl = candidateUrl;
-            break;
-          }
-          fetchFailures.push(`${candidateUrl} -> ${attempt.error}`);
-        }
-        if (!fetched) {
+        const fetchedRes = await fetchEflSourceFromCandidateUrls(eflCandidateUrls);
+        const fetchedCandidateUrl = fetchedRes.ok ? fetchedRes.usedUrl : null;
+        const fetched = fetchedRes.ok ? fetchedRes.result : null;
+        const fetchFailures = fetchedRes.tried.map((x) => `${x.url} -> ${x.error ?? "fetch failed"}`);
+        if (!fetchedRes.ok || !fetched) {
           // Ensure offers don't "disappear" from ops: if we can't even fetch the EFL,
           // queue a stable synthetic item keyed by URL + offer metadata.
           try {

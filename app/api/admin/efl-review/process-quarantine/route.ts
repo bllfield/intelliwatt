@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Buffer } from "node:buffer";
 
-import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
-import { runEflPipelineFromRawTextNoStore } from "@/lib/plan-engine-next/efl/runEflPipelineFromRawTextNoStore";
-import { runEflPipelineNoStore } from "@/lib/plan-engine-next/efl/runEflPipelineNoStore";
+import { fetchEflSourceFromCandidateUrls } from "@/lib/efl/fetchEflPdf";
 import { runEflPipeline } from "@/lib/plan-engine-next/efl/runEflPipeline";
 import { upsertRatePlanFromEfl } from "@/lib/plan-engine-next/efl/planPersistence";
 import { validatePlanRules } from "@/lib/plan-engine-next/efl/planEngine";
@@ -206,27 +204,23 @@ export async function POST(req: NextRequest) {
 
         try {
           const candidates = await buildEflUrlCandidatesForQueueItem(it);
-          const tried: Array<{ url: string; error: string | null; notes: string[] }> = [];
-
           let fetched: any = null;
           let usedUrl: string | null = null;
           let usedRawTextFallback = false;
+          let rawTextFromFetch: string | null = null;
 
-          for (const u of candidates.length ? candidates : [eflUrl]) {
-            const res = await fetchEflPdfFromUrl(u);
-            if ((res as any)?.ok === true) {
-              fetched = res;
-              usedUrl = u;
-              break;
+          const fetchedRes = await fetchEflSourceFromCandidateUrls(candidates.length ? candidates : [eflUrl]);
+          const tried = fetchedRes.tried;
+          if (fetchedRes.ok) {
+            fetched = fetchedRes.result;
+            usedUrl = fetchedRes.usedUrl;
+            if (fetched.kind === "raw_text") {
+              usedRawTextFallback = true;
+              rawTextFromFetch = String(fetched.rawText ?? "");
             }
-            tried.push({
-              url: u,
-              error: (res as any)?.error ?? "fetch failed",
-              notes: Array.isArray((res as any)?.notes) ? (res as any).notes : [],
-            });
           }
 
-          if (!fetched || (fetched as any).ok !== true) {
+          if (!fetched) {
             // Fallback: if we already have rawText + sha in the queue row, we can still
             // run the EFL pipeline without fetching the PDF again (WAF/TLS blocks).
             const rawTextStored = String((it as any)?.rawText ?? "").trim();
@@ -289,37 +283,8 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          const pipeline = usedRawTextFallback
-            ? await runEflPipelineFromRawTextNoStore({
-                rawText: String((it as any)?.rawText ?? ""),
-                eflPdfSha256: String((it as any)?.eflPdfSha256 ?? ""),
-                repPuctCertificate: (it as any)?.repPuctCertificate ?? null,
-                eflVersionCode: (it as any)?.eflVersionCode ?? null,
-                source: "queue_rawtext",
-                offerMeta: {
-                  supplier: it?.supplier ?? null,
-                  planName: it?.planName ?? null,
-                  termMonths: typeof it?.termMonths === "number" ? it.termMonths : null,
-                  tdspName: it?.tdspName ?? null,
-                  offerId: it?.offerId ?? null,
-                },
-              })
-            : await runEflPipelineNoStore({
-                pdfBytes: Buffer.from((fetched as any).pdfBytes),
-                source: "manual",
-                offerMeta: {
-                  supplier: it?.supplier ?? null,
-                  planName: it?.planName ?? null,
-                  termMonths: typeof it?.termMonths === "number" ? it.termMonths : null,
-                  tdspName: it?.tdspName ?? null,
-                  offerId: it?.offerId ?? null,
-                },
-              });
-
-          const det = pipeline.deterministic;
-          const finalValidation = pipeline.finalValidation ?? null;
-          const finalStatus = finalValidation?.status ?? null;
-          const passStrength = (pipeline as any).passStrength ?? null;
+          const finalStatus = null;
+          const passStrength = null;
 
           {
             // Canonical pipeline execution (single source of truth). We keep the legacy implementation
@@ -332,7 +297,7 @@ export async function POST(req: NextRequest) {
               eflUrl: usedUrl ?? eflUrl,
               ...(usedRawTextFallback
                 ? {
-                    rawText: String((it as any)?.rawText ?? ""),
+                    rawText: rawTextFromFetch || String((it as any)?.rawText ?? ""),
                     identity: {
                       eflPdfSha256: String((it as any)?.eflPdfSha256 ?? "") || null,
                       repPuctCertificate: (it as any)?.repPuctCertificate ?? null,
