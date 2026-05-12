@@ -3,7 +3,7 @@ import { Buffer } from "node:buffer";
 import crypto from "node:crypto";
 
 import { wbGetOffers } from "@/lib/wattbuy/client";
-import { normalizeOffers, type OfferNormalized } from "@/lib/wattbuy/normalize";
+import { collectOfferEflCandidateUrls, normalizeOffers, type OfferNormalized } from "@/lib/wattbuy/normalize";
 import { computePdfSha256 } from "@/lib/efl/eflExtractor";
 import { fetchEflSourceFromUrl } from "@/lib/efl/fetchEflPdf";
 import { runEflPipeline } from "@/lib/plan-engine-next/efl/runEflPipeline";
@@ -405,9 +405,10 @@ export async function POST(req: NextRequest) {
         offer.tdsp ??
         null;
       const tdspSlug: string | null = (offer as any)?.tdsp ? String((offer as any).tdsp) : null;
+      const eflCandidateUrls = collectOfferEflCandidateUrls(offer);
       const docsEflUrl: string | null = offer.docs?.efl ?? null;
       const enrollLink: string | null = (offer as any)?.enroll_link ?? null;
-      const eflSeedUrl: string | null = docsEflUrl ?? enrollLink ?? null;
+      const eflSeedUrl: string | null = eflCandidateUrls[0] ?? null;
       const offerRate500 = (offer as any)?.kwh500_cents ?? null;
       const offerRate1000 = (offer as any)?.kwh1000_cents ?? null;
       const offerRate2000 = (offer as any)?.kwh2000_cents ?? null;
@@ -471,7 +472,7 @@ export async function POST(req: NextRequest) {
               derivedForValidation: null,
               finalStatus: "SKIP",
               queueReason:
-                "WattBuy electricity offer is missing docs.efl and has no enroll_link to discover the EFL.",
+                "WattBuy electricity offer is missing usable EFL links in docs and enroll metadata.",
               solverApplied: [],
             },
             update: {
@@ -482,7 +483,7 @@ export async function POST(req: NextRequest) {
               termMonths: termMonths ?? null,
               finalStatus: "SKIP",
               queueReason:
-                "WattBuy electricity offer is missing docs.efl and has no enroll_link to discover the EFL.",
+                "WattBuy electricity offer is missing usable EFL links in docs and enroll metadata.",
             },
           });
         } catch {
@@ -505,7 +506,7 @@ export async function POST(req: NextRequest) {
           parseConfidence: null,
           templateAction: "NOT_ELIGIBLE",
           queueReason:
-            "Queued: WattBuy electricity offer is missing docs.efl and has no enroll_link to discover the EFL.",
+            "Queued: WattBuy electricity offer is missing usable EFL links in docs and enroll metadata.",
           notes: "No EFL URL present on offer (queued for admin review).",
         });
         continue;
@@ -514,7 +515,10 @@ export async function POST(req: NextRequest) {
       // 0) Fast path by URL: if we already have a persisted template for this URL,
       // skip fetching PDFs and re-running the EFL pipeline.
       if (!forceReparseTemplates) {
-        const existingUrlPlan = urlToRatePlan.get(eflSeedUrl);
+        const existingUrlPlan =
+          eflCandidateUrls
+            .map((url) => urlToRatePlan.get(url) ?? null)
+            .find((plan) => Boolean(plan)) ?? null;
         if (isUsableTemplate(existingUrlPlan)) {
           // If we're in STORE mode, this "template hit" is evidence the queue item no longer
           // needs attention. Auto-resolve any matching OPEN queue rows.
@@ -529,7 +533,7 @@ export async function POST(req: NextRequest) {
                     ...(existingUrlPlan.eflUrl
                       ? [{ eflUrl: String(existingUrlPlan.eflUrl) }]
                       : []),
-                    { eflUrl: eflSeedUrl },
+                    ...eflCandidateUrls.map((url) => ({ eflUrl: url })),
                     ...(existingUrlPlan.eflSourceUrl
                       ? [{ eflUrl: String(existingUrlPlan.eflSourceUrl) }]
                       : []),
@@ -597,15 +601,26 @@ export async function POST(req: NextRequest) {
       processedCount++;
 
       try {
-        const fetched = await fetchEflSourceFromUrl(eflSeedUrl);
-        if (!fetched.ok) {
-          // Ensure offers don't "disappear" from ops: if we can't even fetch the PDF,
+        let fetchedCandidateUrl: string | null = null;
+        let fetched: Awaited<ReturnType<typeof fetchEflSourceFromUrl>> | null = null;
+        const fetchFailures: string[] = [];
+        for (const candidateUrl of eflCandidateUrls) {
+          const attempt = await fetchEflSourceFromUrl(candidateUrl);
+          if (attempt.ok) {
+            fetched = attempt;
+            fetchedCandidateUrl = candidateUrl;
+            break;
+          }
+          fetchFailures.push(`${candidateUrl} -> ${attempt.error}`);
+        }
+        if (!fetched) {
+          // Ensure offers don't "disappear" from ops: if we can't even fetch the EFL,
           // queue a stable synthetic item keyed by URL + offer metadata.
           try {
             const syntheticSha = sha256Hex(
               [
                 "wattbuy-fetch-efl-failed",
-                eflSeedUrl ?? "",
+                ...eflCandidateUrls,
                 offerId ?? "",
                 supplier ?? "",
                 planName ?? "",
@@ -615,7 +630,10 @@ export async function POST(req: NextRequest) {
             );
 
             const existingOpen = await (prisma as any).eflParseReviewQueue.findFirst({
-              where: { resolvedAt: null, eflUrl: eflSeedUrl },
+              where: {
+                resolvedAt: null,
+                OR: eflCandidateUrls.map((url) => ({ eflUrl: url })),
+              },
               select: { id: true },
             });
 
@@ -636,7 +654,7 @@ export async function POST(req: NextRequest) {
               validation: null,
               derivedForValidation: null,
               finalStatus: "SKIP",
-              queueReason: `EFL fetch failed: ${String(fetched.error ?? "unknown error")}`.slice(
+              queueReason: `EFL fetch failed: ${String(fetchFailures.join(" | ") || "unknown error")}`.slice(
                 0,
                 1000,
               ),
@@ -670,7 +688,7 @@ export async function POST(req: NextRequest) {
             parseConfidence: null,
             templateAction: "SKIPPED",
             queueReason: "Queued: EFL fetch failed (see notes).",
-            notes: fetched.error,
+            notes: fetchFailures.join(" | ").slice(0, 1000),
           });
           continue;
         }
@@ -678,7 +696,9 @@ export async function POST(req: NextRequest) {
         const pdfBytes = fetched.kind === "pdf" ? fetched.pdfBytes : null;
         const pdfSha256 = pdfBytes ? computePdfSha256(pdfBytes) : null;
         const resolvedDocUrl =
-          fetched.kind === "pdf" ? (fetched.pdfUrl ?? eflSeedUrl) : (fetched.sourceUrl ?? eflSeedUrl);
+          fetched.kind === "pdf"
+            ? (fetched.pdfUrl ?? fetchedCandidateUrl ?? eflSeedUrl)
+            : (fetched.sourceUrl ?? fetchedCandidateUrl ?? eflSeedUrl);
         const prefetchedRawText = fetched.kind === "raw_text" ? fetched.rawText : null;
 
         // 2a) Fast path: if we already have a saved RatePlan.rateStructure for
@@ -700,7 +720,7 @@ export async function POST(req: NextRequest) {
                     OR: [
                       { eflPdfSha256: pdfSha256 },
                       { eflUrl: resolvedDocUrl },
-                      { eflUrl: eflSeedUrl },
+                      ...eflCandidateUrls.map((url) => ({ eflUrl: url })),
                       ...(existing.eflUrl ? [{ eflUrl: String(existing.eflUrl) }] : []),
                       ...(existing.eflSourceUrl
                         ? [{ eflUrl: String(existing.eflSourceUrl) }]
@@ -806,7 +826,7 @@ export async function POST(req: NextRequest) {
           dryRun: mode === "DRY_RUN",
           offerId,
           eflUrl: resolvedDocUrl,
-          eflSourceUrl: eflSeedUrl,
+          eflSourceUrl: fetchedCandidateUrl ?? eflSeedUrl,
           ...(pdfBytes ? { pdfBytes } : {}),
           ...(prefetchedRawText ? { rawText: prefetchedRawText } : {}),
           offerMeta: {

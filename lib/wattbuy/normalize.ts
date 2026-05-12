@@ -189,6 +189,116 @@ function deepFindBestDocUrl(
   return candidates[0].url;
 }
 
+function deepFindAllDocUrls(
+  root: unknown,
+  opts: { kind: 'efl' | 'tos' | 'yrac' },
+): string[] {
+  const seen = new Set<unknown>();
+  const byUrl = new Map<string, number>();
+
+  const scorePath = (path: string, url: string): number => {
+    const p = path.toLowerCase();
+    const u = url.toLowerCase();
+    let score = 0;
+    if (opts.kind === 'efl') {
+      if (p.includes('efl')) score += 200;
+      if (p.includes('electricity') && p.includes('facts')) score += 150;
+      if (p.includes('facts') && p.includes('label')) score += 150;
+      if (u.includes('/documents/download.aspx') && u.includes('productdocumentid=')) score += 120;
+      if (u.includes('smartgridcis')) score += 40;
+      if (u.includes('ohm')) score += 20;
+    } else if (opts.kind === 'tos') {
+      if (p.includes('tos') || p.includes('terms')) score += 200;
+      if (u.includes('terms')) score += 80;
+    } else if (opts.kind === 'yrac') {
+      if (p.includes('yrac') || p.includes('rights')) score += 200;
+      if (u.includes('rights')) score += 80;
+    }
+    if (u.endsWith('.pdf') || u.includes('.pdf?')) score += 50;
+    return score;
+  };
+
+  const push = (url: string, score: number) => {
+    const prev = byUrl.get(url);
+    if (prev == null || score > prev) byUrl.set(url, score);
+  };
+
+  const walk = (node: unknown, path: string, depth: number) => {
+    if (depth > 10) return;
+    if (node == null) return;
+    if (typeof node === 'string') {
+      const sanitized = sanitizeDocURL(node);
+      if (sanitized) {
+        let isBitly = false;
+        try {
+          isBitly = new URL(sanitized).hostname.toLowerCase().endsWith('bit.ly');
+        } catch {
+          isBitly = false;
+        }
+
+        const p = path.toLowerCase();
+        const shortlinkMatchesKind =
+          opts.kind === 'efl'
+            ? p.includes('efl')
+            : opts.kind === 'tos'
+              ? p.includes('tos') || p.includes('terms')
+              : p.includes('yrac') || p.includes('rights');
+
+        if ((isBitly && shortlinkMatchesKind) || (!isBitly && looksLikeEflDocUrlLoose(sanitized))) {
+          push(sanitized, scorePath(path, sanitized));
+        }
+      }
+      return;
+    }
+    if (typeof node !== 'object') return;
+    if (seen.has(node)) return;
+    seen.add(node);
+
+    if (Array.isArray(node)) {
+      for (let i = 0; i < node.length; i++) {
+        walk(node[i], `${path}[${i}]`, depth + 1);
+      }
+      return;
+    }
+
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      walk(v, path ? `${path}.${k}` : k, depth + 1);
+    }
+  };
+
+  walk(root, '', 0);
+  return Array.from(byUrl.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([url]) => url);
+}
+
+export function collectOfferEflCandidateUrls(offerLike: any): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  const push = (value: unknown) => {
+    if (typeof value !== 'string') return;
+    const sanitized = sanitizeDocURL(value);
+    if (!sanitized || seen.has(sanitized)) return;
+    seen.add(sanitized);
+    out.push(sanitized);
+  };
+
+  push(offerLike?.docs?.efl ?? null);
+  push(offerLike?.raw?.offer_data?.efl ?? null);
+  push(offerLike?.raw?.offer_data?.docs?.efl ?? null);
+  push(offerLike?.raw?.offer_data?.documents?.efl ?? null);
+
+  for (const url of deepFindAllDocUrls(offerLike?.raw ?? offerLike, { kind: 'efl' })) {
+    push(url);
+  }
+
+  push(offerLike?.enroll_link ?? null);
+  push(offerLike?.raw?.link ?? null);
+
+  return out;
+}
+
 function toNum(n: any): number | null {
   const v = Number(n);
   return Number.isFinite(v) ? v : null;
