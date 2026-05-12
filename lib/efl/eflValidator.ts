@@ -525,6 +525,19 @@ export function extractEflTdspCharges(rawText: string): EflTdspCharges {
     .map((l) => l.trim())
     .filter((l) => l.length > 0);
 
+  const isCommercialDeliveryLine = (line: string): boolean =>
+    /\b(?:small\s+commercial|commercial|demand\s+meter|non-demand|non\s+demand|por\s+kW|kW\/kVa)\b/i.test(line);
+
+  // First pass: exact same-line residential delivery rows. This avoids losing
+  // the per-kWh value when broader joined-window scans encounter nearby energy
+  // charge or commercial demand table context first.
+  const explicitPerKwhLine =
+    lines.find((l) => {
+      if (isCommercialDeliveryLine(l)) return false;
+      if (!/\b(?:TDU|TDSP)\b/i.test(l) || !/\bDelivery\s+Charge\b/i.test(l)) return false;
+      return /[0-9]+(?:\.[0-9]+)?\s*¢\s*(?:¢\s*)?(?:[\/⁄]\s*kWh|per\s*kWh)\b/i.test(l);
+    }) ?? null;
+
   // Candidate lines often include only the table headers ("Delivery ... per month")
   // while the numeric values may be on adjacent rows. Build a search window that
   // includes keyword lines plus their neighbors.
@@ -560,7 +573,13 @@ export function extractEflTdspCharges(rawText: string): EflTdspCharges {
     searchLines = Array.from(set);
   }
 
-  const perPick = pickBestTdspPerKwhLine(searchLines);
+  const explicitPerKwhCents = explicitPerKwhLine
+    ? parseCentsPerKwhFromLine(explicitPerKwhLine)
+    : null;
+  const perPick =
+    explicitPerKwhCents != null
+      ? { value: explicitPerKwhCents, line: explicitPerKwhLine }
+      : pickBestTdspPerKwhLine(searchLines);
   const moPick = pickBestTdspMonthlyLine(searchLines);
 
   let perKwhCents = perPick.value;

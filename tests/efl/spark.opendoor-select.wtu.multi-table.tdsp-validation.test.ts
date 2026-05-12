@@ -38,6 +38,59 @@ PUCT Certificate Number          10046
 Version Number                   REFE_Opendoor Select_West Texas Utilities [WTU / AEP]_06162025
 `.trim();
 
+const auditRawTextShape = `
+Electricity Facts Label (EFL)
+                                                  Spark Energy, LLC
+                                     West Texas Utilities [WTU / AEP] Service Area
+                                                    Opendoor Select
+                                              ISSUE DATE: 05/12/2026
+
+                  Average Monthly Use (Residential)                      500 kWh                1000 kWh               2000 kWh
+
+                  Average Price per Kilowatt-hour (¢ per kWh)              29.3¢                  29.0¢                     28.8¢
+
+
+                  Average Monthly Use (Small Commercial)                 1500 kWh               2500 kWh               3500 kWh
+                  Non-Demand Meter Average Price per
+                  Kilowatt-hour (¢ per kWh)                                27.8¢                  27.6¢                     27.5¢
+                  Demand Meter Average Price per Kilowatt-
+                  hour (¢ per kWh)                                         30.3¢                  29.4¢                     29.4¢
+
+              The average price examples shown above include your Transmission and Distribution Utility (TDU) delivery costs,
+              which will be passed through to you in accordance with the rates charged by your TDU. The average price per kWh
+              examples are based on the specified monthly kWh consumption amounts using a 30% load factor, if applicable. The price
+              disclosure is an estimate. This estimated average price per kWh disclosure is an example and is calculated using:
+
+                  Energy Charge                                 22.99¢                        ¢ per kWh
+                  Base Charge                                   $0.00                         $ per bill month
+                  Minimum Usage Fee                             $0.00                         $ per bill month if usage < 1000 kWh
+Electricity       TDU Delivery Charge                           5.66770¢                      ¢ per kWh
+Price             TDU Delivery Charge                           $3.24                         $ per bill month
+
+              There is no incentive for this product.
+
+              If Small Commercial
+
+                  TDU Delivery Charge Demand Meter                       0.07430¢                                ¢ per kWh
+                  TDU Delivery Charge Demand Meter                       $22.00                                  $ per bill month
+                  TDU Delivery Charge Non-Demand                         4.39590¢                                ¢ per kWh
+                  TDU Delivery Charge Non-Demand                         $5.66                                   $ per bill month
+                  TDU Demand Charges                                     $12.38                                  $ per kW/kVa
+
+                                  Etiqueta de información sobre la electricidad (EFL)
+                                                    Spark Energy, LLC
+                                  Área de servicio de West Texas Utilities [WTU / AEP]
+                                                     Opendoor Select
+
+                   Cargo por energía                           22.99¢                       ¢ por kWh
+                   Cargo básico                                $0.00                        $ por mes de cuenta
+                   Tarifa de uso mínimo (MUF)                  $0.00                        $ por mes de cuenta si el uso < 1000 kWh
+                   Cargo de entrega de la empresa de
+Precio de la       servicio de transmisión y distribución
+electricidad       (TDU)                                       5.66770¢                     ¢ por kWh
+                   Cargo de entrega de la TDU                  $3.24                        $ por mes de cuenta
+`.trim();
+
 describe("Spark Opendoor Select WTU residential TDSP extraction", () => {
   it("extracts the residential split-unit TDU per-kWh row before commercial demand rows", () => {
     const tdsp = extractEflTdspCharges(rawText);
@@ -46,6 +99,15 @@ describe("Spark Opendoor Select WTU residential TDSP extraction", () => {
     expect(tdsp.perKwhCents).toBeCloseTo(5.6677, 6);
     expect(tdsp.snippet).toContain("5.66770");
     expect(tdsp.snippet).not.toContain("Demand Meter Average Price");
+  });
+
+  it("extracts the residential TDU row from the full audit text shape", () => {
+    const tdsp = extractEflTdspCharges(auditRawTextShape);
+
+    expect(tdsp.monthlyCents).toBe(324);
+    expect(tdsp.perKwhCents).toBeCloseTo(5.6677, 6);
+    expect(tdsp.snippet).toContain("Electricity       TDU Delivery Charge");
+    expect(tdsp.snippet).not.toMatch(/Demand Meter|Non-Demand/i);
   });
 
   it("passes avg-price validation when residential TDU per-kWh and monthly rows are recognized", async () => {
