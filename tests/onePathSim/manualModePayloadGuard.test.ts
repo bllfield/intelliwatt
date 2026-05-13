@@ -237,10 +237,48 @@ describe("one path manual mode payload guards", () => {
     expect(engineInput.actualMonthlyReference).toEqual({
       "2025-04": 10,
     });
-    expect(engineInput.coverageWindowStart).toBe("2025-05-01");
-    expect(engineInput.coverageWindowEnd).toBe("2026-04-30");
+    expect(engineInput.coverageWindowStart).toBe("2025-04-26");
+    expect(engineInput.coverageWindowEnd).toBe("2026-04-25");
+    expect(engineInput.anchorEndDate).toBe("2026-04-25");
     expect(engineInput.weatherDaysReference).toBeNull();
     expect(engineInput.weatherEfficiencyDerivedInput).toBeNull();
+  });
+
+  it("keeps GREEN_BUTTON non-baseline adaptation on the canonical shared window", async () => {
+    resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue({
+      selectedHouse: { id: "house-1", esiid: "esiid-1" },
+      actualContextHouse: { id: "house-1", esiid: "esiid-1" },
+      dataset: {
+        summary: { source: "GREEN_BUTTON", start: "2025-04-26", end: "2026-04-25", totalKwh: 1234 },
+        daily: [{ date: "2025-04-26", kwh: 10 }],
+        monthly: [{ month: "2025-04", kwh: 10 }],
+        meta: { actualSource: "GREEN_BUTTON", timezone: "America/Chicago" },
+        series: { intervals15: [{ timestamp: "2025-04-26T12:00:00.000Z", kwh: 1 }] },
+      },
+      alternatives: { smt: null, greenButton: { totalKwh: 1234 } },
+      usageTruthSource: "persisted_usage_output",
+      seedResult: null,
+      summary: { title: "Upstream Usage Truth", summary: "green button non-baseline", currentRun: {}, sharedOwners: [] },
+    });
+
+    const { adaptGreenButtonRawInput } = await import("@/modules/onePathSim/onePathSim");
+    const engineInput = await adaptGreenButtonRawInput({
+      userId: "user-1",
+      houseId: "house-1",
+      actualContextHouseId: "house-1",
+      scenarioId: "past-1",
+      weatherPreference: "LAST_YEAR_WEATHER",
+      validationSelectionMode: "stratified_weather_balanced",
+      validationDayCount: 14,
+      validationOnlyDateKeysLocal: [],
+      travelRanges: [],
+      persistRequested: true,
+    });
+
+    expect(engineInput.inputType).toBe("GREEN_BUTTON");
+    expect(engineInput.coverageWindowStart).toBe("2025-05-01");
+    expect(engineInput.coverageWindowEnd).toBe("2026-04-30");
+    expect(engineInput.anchorEndDate).toBeNull();
   });
 
   it("uses stitched displayed monthly totals for GREEN_BUTTON actualMonthlyReference", async () => {
