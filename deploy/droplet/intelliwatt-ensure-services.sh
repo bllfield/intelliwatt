@@ -35,6 +35,17 @@ ensure_enabled_active() {
   fi
 }
 
+disable_if_installed() {
+  local unit="$1"
+  if ! is_installed_unit "${unit}"; then
+    return 0
+  fi
+  log "Disabling legacy/conflicting ${unit}"
+  sudo systemctl stop "${unit}" >/dev/null 2>&1 || true
+  sudo systemctl disable "${unit}" >/dev/null 2>&1 || true
+  sudo systemctl reset-failed "${unit}" >/dev/null 2>&1 || true
+}
+
 # Core droplet daemons (some droplets may not have all of these installed).
 ensure_enabled_active "nginx.service"
 ensure_enabled_active "efl-pdftotext.service"
@@ -42,8 +53,9 @@ ensure_enabled_active "efl-pdftotext.service"
 # SMT big-file path server
 ensure_enabled_active "smt-upload-server.service"
 
-# Green Button big-file path server (legacy name + repo name)
-ensure_enabled_active "green-button-upload.service"
+# Green Button big-file path server. The old alias targets the same 8091
+# process, so keep it disabled to avoid service fights on the port.
+disable_if_installed "green-button-upload.service"
 ensure_enabled_active "green-button-upload-server.service"
 
 # SMT webhook server (pull trigger endpoint)

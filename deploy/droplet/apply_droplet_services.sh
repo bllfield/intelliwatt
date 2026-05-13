@@ -69,6 +69,21 @@ sudo systemctl daemon-reload
 log "Enabling watchdog timer"
 sudo systemctl enable --now intelliwatt-ensure-services.timer || true
 
+disable_unit_if_present() {
+  local unit="$1"
+  if [[ -f "/etc/systemd/system/${unit}" || -f "/lib/systemd/system/${unit}" || -f "/usr/lib/systemd/system/${unit}" ]] ||
+    sudo systemctl list-unit-files --no-pager 2>/dev/null | awk '{print $1}' | grep -qx "${unit}"; then
+    log "Disabling legacy/conflicting service ${unit}"
+    sudo systemctl stop "${unit}" >/dev/null 2>&1 || true
+    sudo systemctl disable "${unit}" >/dev/null 2>&1 || true
+    sudo systemctl reset-failed "${unit}" >/dev/null 2>&1 || true
+  fi
+}
+
+# The repo-owned Green Button unit is green-button-upload-server.service. Some
+# droplets still have the older alias installed; running both races for 8091.
+disable_unit_if_present "green-button-upload.service"
+
 # Best-effort: enable the critical long-running daemons if their units are installed.
 log "Enabling core services (best-effort)"
 sudo systemctl enable --now smt-upload-server.service || true

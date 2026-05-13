@@ -15,6 +15,9 @@ Environment=GREEN_BUTTON_UPLOAD_PORT=8091
 # Allow up to 500MB uploads to match server defaults
 Environment=GREEN_BUTTON_UPLOAD_MAX_BYTES=524288000
 
+# Best-effort: clear stale or legacy listeners before binding 8091.
+ExecStartPre=-/usr/local/bin/gb-kill-8091.sh
+
 # Start the Node upload server
 ExecStart=/usr/bin/node scripts/droplet/green-button-upload-server.js
 

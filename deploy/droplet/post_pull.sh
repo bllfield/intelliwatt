@@ -69,11 +69,29 @@ restart_if_exists() {
   fi
 }
 
+disable_if_exists() {
+  local unit="$1"
+  if [[ -f "/etc/systemd/system/${unit}" || -f "/lib/systemd/system/${unit}" || -f "/usr/lib/systemd/system/${unit}" ]]; then
+    log "Disabling ${unit}"
+    sudo systemctl stop "${unit}" >/dev/null 2>&1 || true
+    sudo systemctl disable "${unit}" >/dev/null 2>&1 || true
+    sudo systemctl reset-failed "${unit}" >/dev/null 2>&1 || true
+  elif sudo systemctl list-unit-files --no-pager 2>/dev/null | awk '{print $1}' | grep -qx "${unit}"; then
+    log "Disabling ${unit}"
+    sudo systemctl stop "${unit}" >/dev/null 2>&1 || true
+    sudo systemctl disable "${unit}" >/dev/null 2>&1 || true
+    sudo systemctl reset-failed "${unit}" >/dev/null 2>&1 || true
+  fi
+}
+
+# green-button-upload.service is the old alias for the same 8091 Node process.
+# Keep only the repo-owned green-button-upload-server.service active.
+disable_if_exists "green-button-upload.service"
+
 # Keep this conservative: only the droplet services we already run here.
 restart_if_exists "smt-webhook.service"
 restart_if_exists "smt-ingest.service"
 restart_if_exists "smt-upload-server.service"
-restart_if_exists "green-button-upload.service"
 restart_if_exists "green-button-upload-server.service"
 restart_if_exists "efl-pdftotext.service"
 restart_if_exists "intelliwatt-ensure-services.timer"

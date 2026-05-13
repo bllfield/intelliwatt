@@ -57,4 +57,20 @@ describe("green button upload house rebinding", () => {
       jsUploadHandler.indexOf("await usagePrisma.greenButtonInterval.deleteMany({ where: { homeId: house.id } })")
     );
   });
+
+  it("keeps Droplet service management on one Green Button unit for port 8091", () => {
+    const postPullSource = readRepoFile("deploy/droplet/post_pull.sh");
+    const applyServicesSource = readRepoFile("deploy/droplet/apply_droplet_services.sh");
+    const ensureServicesSource = readRepoFile("deploy/droplet/intelliwatt-ensure-services.sh");
+    const greenButtonUnitSource = readRepoFile("deploy/droplet/green-button-upload-server.service");
+
+    expect(postPullSource).toContain("disable_if_exists \"green-button-upload.service\"");
+    expect(postPullSource).not.toContain("restart_if_exists \"green-button-upload.service\"");
+    expect(postPullSource).toContain("restart_if_exists \"green-button-upload-server.service\"");
+    expect(applyServicesSource).toContain("disable_unit_if_present \"green-button-upload.service\"");
+    expect(applyServicesSource).toContain("enable --now green-button-upload-server.service");
+    expect(ensureServicesSource).toContain("disable_if_installed \"green-button-upload.service\"");
+    expect(ensureServicesSource).toContain("ensure_enabled_active \"green-button-upload-server.service\"");
+    expect(greenButtonUnitSource).toContain("ExecStartPre=-/usr/local/bin/gb-kill-8091.sh");
+  });
 });
