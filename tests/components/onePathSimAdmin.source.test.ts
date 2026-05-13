@@ -261,10 +261,26 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("freshSelection: !shouldUsePresetSourceContext && !reusingCurrentLookup");
     expect(source).toContain("email: resolvedEmail,");
     expect(source).toContain("includeDebugDiagnostics?: boolean");
+    expect(source).toContain("lightweightLookup?: boolean");
     expect(source).toContain("includeDebugDiagnostics: args?.includeDebugDiagnostics ?? debugDiagnosticsEnabled");
     expect(source).toContain("includeDebugDiagnostics: debugDiagnosticsEnabled");
     expect(source).not.toContain("setEmail(selectedKnownScenario.sourceUserEmail);");
     expect(source).not.toContain("email: selectedKnownScenario.sourceUserEmail,");
+  });
+
+  it("keeps Green Button known-preset lookup lightweight so the Past scenario can be selected before run", () => {
+    const source = readRepoFile("components/admin/OnePathSimAdmin.tsx");
+    const routeSource = readRepoFile("app/api/admin/tools/one-path-sim/route.ts");
+
+    expect(source).toContain('const useLightweightGreenButtonPresetLookup = selectedKnownScenario.scenarioType === "GREEN_BUTTON_TRUTH";');
+    expect(source).toContain("includeDebugDiagnostics: useLightweightGreenButtonPresetLookup ? false : debugDiagnosticsEnabled");
+    expect(source).toContain("lightweightLookup: useLightweightGreenButtonPresetLookup");
+    expect(source).toContain("lightweightLookup: true");
+    expect(source).toContain("options?: {");
+    expect(source).toContain("includeDebugDiagnostics: options?.includeDebugDiagnostics");
+    expect(source).toContain("lightweightLookup: options?.lightweightLookup");
+    expect(routeSource).toContain("const lightweightLookupRequested = body?.lightweightLookup === true;");
+    expect(routeSource).toContain("(!includeDebugDiagnostics || lightweightLookupRequested)");
   });
 
   it("preserves refresh state but realigns stale known-preset scenario ids before run", () => {

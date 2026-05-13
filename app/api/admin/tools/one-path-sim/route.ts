@@ -1897,8 +1897,9 @@ export async function POST(request: NextRequest) {
     typeof body?.mode === "string" && body.mode.trim()
       ? normalizeMode(body.mode)
       : "INTERVAL";
+  const lightweightLookupRequested = body?.lightweightLookup === true;
 
-  if ((action === "lookup" || !action) && !includeDebugDiagnostics) {
+  if ((action === "lookup" || !action) && (!includeDebugDiagnostics || lightweightLookupRequested)) {
     const travelRangesFromDb = await getOnePathTravelRangesFromDb(effectiveUserId, effectiveHouseId).catch(() => []);
     const previewActualContextHouseId =
       typeof body?.actualContextHouseId === "string" && body.actualContextHouseId.trim()

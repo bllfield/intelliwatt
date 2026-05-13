@@ -678,6 +678,7 @@ export function OnePathSimAdmin() {
       actualContextHouseId?: string | null;
       freshSelection?: boolean;
       includeDebugDiagnostics?: boolean;
+      lightweightLookup?: boolean;
     }) => {
       const trimmedEmail = (args?.email ?? email).trim();
       if (!trimmedEmail) {
@@ -688,23 +689,33 @@ export function OnePathSimAdmin() {
       setBusy(true);
       setError(null);
       setStatus("Loading user, houses, and source context...");
-      const res = await fetch("/api/admin/tools/one-path-sim", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "lookup",
-          email: trimmedEmail,
-          houseId: args?.houseId ?? (freshSelection ? "" : effectiveHouseId ?? ""),
-          sourceHouseId: args?.sourceHouseId ?? args?.houseId ?? (freshSelection ? "" : effectiveHouseId ?? ""),
-          onePathTestHomeHouseId:
-            args?.onePathTestHomeHouseId ??
-            (typeof onePathTestHome?.houseId === "string" && onePathTestHome.houseId.trim() ? onePathTestHome.houseId.trim() : null),
-          mode: args?.mode ?? mode,
-          actualContextHouseId: args?.actualContextHouseId ?? (freshSelection ? null : effectiveActualContextHouseId ?? null),
-          includeDebugDiagnostics: args?.includeDebugDiagnostics ?? debugDiagnosticsEnabled,
-        }),
-      });
-      const json = await res.json().catch(() => null);
+      let res: Response;
+      let json: any = null;
+      try {
+        res = await fetch("/api/admin/tools/one-path-sim", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "lookup",
+            email: trimmedEmail,
+            houseId: args?.houseId ?? (freshSelection ? "" : effectiveHouseId ?? ""),
+            sourceHouseId: args?.sourceHouseId ?? args?.houseId ?? (freshSelection ? "" : effectiveHouseId ?? ""),
+            onePathTestHomeHouseId:
+              args?.onePathTestHomeHouseId ??
+              (typeof onePathTestHome?.houseId === "string" && onePathTestHome.houseId.trim() ? onePathTestHome.houseId.trim() : null),
+            mode: args?.mode ?? mode,
+            actualContextHouseId: args?.actualContextHouseId ?? (freshSelection ? null : effectiveActualContextHouseId ?? null),
+            includeDebugDiagnostics: args?.includeDebugDiagnostics ?? debugDiagnosticsEnabled,
+            lightweightLookup: args?.lightweightLookup === true,
+          }),
+        });
+        json = await res.json().catch(() => null);
+      } catch (lookupError) {
+        setBusy(false);
+        setStatus(null);
+        setError(lookupError instanceof Error ? lookupError.message : "Lookup failed.");
+        return null;
+      }
       if (!res.ok || !json?.ok) {
         setBusy(false);
         setStatus(null);
@@ -735,7 +746,15 @@ export function OnePathSimAdmin() {
   );
 
   const ensureOnePathTestHomeReady = useCallback(
-    async (json: LookupResponse, sourceHouseId: string, lookupEmail: string) => {
+    async (
+      json: LookupResponse,
+      sourceHouseId: string,
+      lookupEmail: string,
+      options?: {
+        includeDebugDiagnostics?: boolean;
+        lightweightLookup?: boolean;
+      }
+    ) => {
       const testHome = asRecord(json.sourceContext?.onePathTestHome);
       const alreadyPinned =
         testHome?.isPinned === true &&
@@ -761,6 +780,8 @@ export function OnePathSimAdmin() {
         onePathTestHomeHouseId: typeof replaceJson?.testHomeHouseId === "string" ? replaceJson.testHomeHouseId : null,
         actualContextHouseId: null,
         freshSelection: false,
+        includeDebugDiagnostics: options?.includeDebugDiagnostics,
+        lightweightLookup: options?.lightweightLookup,
       });
       setBusy(false);
       if (!refreshed) {
@@ -918,16 +939,22 @@ export function OnePathSimAdmin() {
     setPersistRequested(selectedKnownScenario.persistRequested);
     setRunReason(`known_house:${selectedKnownScenario.scenarioKey}`);
     setGreenButtonUploadError(null);
+    const useLightweightGreenButtonPresetLookup = selectedKnownScenario.scenarioType === "GREEN_BUTTON_TRUTH";
 
     let json = await requestLookup({
       ...lookupArgs,
-      includeDebugDiagnostics: debugDiagnosticsEnabled,
+      includeDebugDiagnostics: useLightweightGreenButtonPresetLookup ? false : debugDiagnosticsEnabled,
+      lightweightLookup: useLightweightGreenButtonPresetLookup,
     });
     if (!json) return;
     const ensuredLookup = await ensureOnePathTestHomeReady(
       json,
       lookupArgs.houseId || json.selectedHouse?.id || "",
-      resolvedEmail
+      resolvedEmail,
+      {
+        includeDebugDiagnostics: useLightweightGreenButtonPresetLookup ? false : debugDiagnosticsEnabled,
+        lightweightLookup: useLightweightGreenButtonPresetLookup,
+      }
     );
     if (!ensuredLookup) return;
     json = ensuredLookup;
@@ -953,13 +980,18 @@ export function OnePathSimAdmin() {
           houseId: resolvedSelection.selectedHouseId || lookupArgs.houseId,
           actualContextHouseId: targetActualContextHouseId,
           freshSelection: false,
-          includeDebugDiagnostics: debugDiagnosticsEnabled,
+          includeDebugDiagnostics: false,
+          lightweightLookup: true,
         });
         if (!json) return;
         const reEnsuredLookup = await ensureOnePathTestHomeReady(
           json,
           resolvedSelection.selectedHouseId || lookupArgs.houseId || json.selectedHouse?.id || "",
-          resolvedEmail
+          resolvedEmail,
+          {
+            includeDebugDiagnostics: false,
+            lightweightLookup: true,
+          }
         );
         if (!reEnsuredLookup) return;
         json = reEnsuredLookup;
