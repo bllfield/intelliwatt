@@ -19,17 +19,18 @@ describe("Green Button admin pipeline tool wiring", () => {
     expect(pageSource).toContain("GreenButtonPipelineClient");
   });
 
-  it("reuses the shared usage pipeline and avoids home-scoped persistence", () => {
-    const routeSource = readRepoFile("app/api/admin/tools/green-button-pipeline/route.ts");
+  it("uses the Droplet upload ticket path and never posts the file through Vercel", () => {
     const clientSource = readRepoFile("app/admin/tools/green-button-pipeline/GreenButtonPipelineClient.tsx");
     const uploadRouteSource = readRepoFile("app/api/green-button/upload/route.ts");
+    const ticketRouteSource = readRepoFile("app/api/admin/tools/one-path-sim/green-button/upload-ticket/route.ts");
 
-    expect(routeSource).toContain("runGreenButtonUsagePipeline");
-    expect(routeSource).toContain("dry_run_no_database_writes");
-    expect(routeSource).not.toContain("greenButtonInterval.createMany");
-    expect(routeSource).not.toContain("rawGreenButton.create");
-    expect(routeSource).not.toContain("manualUsageUpload.create");
-    expect(clientSource).toContain("No home email is required");
+    expect(clientSource).toContain("/api/admin/tools/one-path-sim/green-button/upload-ticket");
+    expect(clientSource).toContain("ticket.uploadUrl");
+    expect(clientSource).toContain('credentials: "omit"');
+    expect(clientSource).not.toContain('/api/admin/tools/green-button-pipeline",');
+    expect(clientSource).toContain("isolated One Path admin test home");
+    expect(ticketRouteSource).toContain("resolveOnePathWriteTarget");
+    expect(ticketRouteSource).toContain("testHomeHouseId");
     expect(uploadRouteSource).toContain("runGreenButtonUsagePipeline");
   });
 });

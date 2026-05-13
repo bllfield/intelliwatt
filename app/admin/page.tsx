@@ -944,7 +944,7 @@ export default function AdminDashboard() {
             >
               <div className="font-semibold text-brand-navy mb-1">Green Button Pipeline Check</div>
               <div className="text-sm text-brand-navy/60">
-                Dry-run a Green Button file through the shared parser, normalizer, and coverage window without writing home data
+                Upload a Green Button file through Droplet ingest against the isolated admin test home
               </div>
             </a>
             <a

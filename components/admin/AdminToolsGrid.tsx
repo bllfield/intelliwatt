@@ -34,7 +34,7 @@ const TOOL_CARDS = [
   {
     href: "/admin/tools/green-button-pipeline",
     title: "Green Button Pipeline Check",
-    description: "Dry-run a Green Button file through the shared usage parser, normalizer, and coverage window.",
+    description: "Upload a Green Button file through Droplet ingest against the isolated admin test home.",
   },
   {
     href: "/admin/tools/usage-shape-profile",
