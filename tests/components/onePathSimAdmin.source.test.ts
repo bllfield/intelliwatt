@@ -276,4 +276,17 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("setSelectedScenarioId(effectiveScenarioId);");
     expect(source).toContain("scenarioId: effectiveScenarioId || null,");
   });
+
+  it("polls Droplet-backed One Path Past Sim jobs instead of waiting in the Vercel request", () => {
+    const source = readRepoFile("components/admin/OnePathSimAdmin.tsx");
+    const routeSource = readRepoFile("app/api/admin/tools/one-path-sim/route.ts");
+
+    expect(routeSource).toContain("dispatchPastSimRecalc");
+    expect(routeSource).toContain("executionMode: \"droplet_async\"");
+    expect(routeSource).toContain("action === \"past_recalc_status\"");
+    expect(routeSource).toContain("buildPastSimRunReadbackResponse");
+    expect(source).toContain("json?.executionMode === \"droplet_async\"");
+    expect(source).toContain("action: \"past_recalc_status\"");
+    expect(source).toContain("Past Sim is still running on the Droplet");
+  });
 });
