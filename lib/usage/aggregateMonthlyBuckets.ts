@@ -10,6 +10,7 @@ import {
   type OvernightAttribution,
   type UsageBucketDef,
 } from "@/lib/plan-engine/usageBuckets";
+import { getLatestUsableRawGreenButtonIdForHouse } from "@/modules/realUsageAdapter/greenButton";
 
 export type UsageIntervalSource = "SMT" | "GREENBUTTON";
 export type BucketComputeSource = "SMT" | "GREENBUTTON" | "SIMULATED";
@@ -96,6 +97,7 @@ export type EnsureCoreMonthlyBucketsInput = {
   homeId: string;
   // Only required for SMT interval reads. Green Button buckets can be computed without ESIID.
   esiid?: string | null;
+  rawId?: string | null;
   rangeStart: Date;
   rangeEnd: Date;
   source: BucketComputeSource;
@@ -163,6 +165,26 @@ export async function ensureCoreMonthlyBuckets(
   notes.push(`TZ=${tz}`);
   notes.push(`intervalSource=${intervalSource}`);
   notes.push(`source=${input.source}`);
+
+  let greenButtonRawId: string | null = null;
+  if (intervalSource === "GREENBUTTON") {
+    const explicitRawId = typeof input.rawId === "string" && input.rawId.trim().length > 0 ? input.rawId.trim() : null;
+    greenButtonRawId = explicitRawId;
+    if (!greenButtonRawId) {
+      greenButtonRawId = await getLatestUsableRawGreenButtonIdForHouse(input.homeId).catch(() => null);
+      if (greenButtonRawId) notes.push("greenbutton_rawId_resolved=true");
+    }
+    if (!greenButtonRawId) {
+      return {
+        monthsProcessed: 0,
+        rowsUpserted: 0,
+        intervalRowsRead: 0,
+        kwhSummed: 0,
+        notes: [...notes, "missing_rawId_for_greenbutton_interval_read"],
+      };
+    }
+    notes.push(`greenbutton_rawId=${greenButtonRawId}`);
+  }
 
   const bucketDefsRaw = Array.isArray(input.bucketDefs) && input.bucketDefs.length > 0 ? input.bucketDefs : CORE_MONTHLY_BUCKETS;
   const bucketDefs = (() => {
@@ -303,7 +325,7 @@ export async function ensureCoreMonthlyBuckets(
   const intervals: Array<{ ts: Date; kwh: any }> =
     intervalSource === "GREENBUTTON"
       ? await (usagePrisma as any).greenButtonInterval.findMany({
-          where: { homeId: input.homeId, timestamp: { gte: input.rangeStart, lte: input.rangeEnd } },
+          where: { homeId: input.homeId, rawId: greenButtonRawId, timestamp: { gte: input.rangeStart, lte: input.rangeEnd } },
           orderBy: { timestamp: "asc" },
           select: { timestamp: true, consumptionKwh: true },
         }).then((rows: Array<{ timestamp: Date; consumptionKwh: any }>) =>

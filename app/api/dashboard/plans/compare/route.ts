@@ -24,6 +24,7 @@ import { extractDeterministicMinimumRules, applyMinimumRulesToMonth } from "@/li
 import { computeMonthsRemainingOnContract } from "@/lib/current-plan/contractTerm";
 import { pickTouPeriodForMonth } from "@/lib/plan-engine/touBreakdown";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
+import { getLatestUsableRawGreenButtonIdForHouse } from "@/modules/realUsageAdapter/greenButton";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -155,15 +156,17 @@ export async function GET(req: NextRequest) {
     }
     if (!usageSource) {
       const usageClient = usagePrisma as any;
-      const latestGb = await usageClient.greenButtonInterval.findFirst({
-        where: { homeId: house.id },
-        orderBy: { timestamp: "desc" },
-        select: { timestamp: true, rawId: true },
-      });
+      gbRawId = await getLatestUsableRawGreenButtonIdForHouse(house.id).catch(() => null);
+      const latestGb = gbRawId
+        ? await usageClient.greenButtonInterval.findFirst({
+            where: { homeId: house.id, rawId: gbRawId },
+            orderBy: { timestamp: "desc" },
+            select: { timestamp: true },
+          })
+        : null;
       if (latestGb?.timestamp) {
         usageSource = "GREEN_BUTTON";
         windowEnd = latestGb.timestamp;
-        gbRawId = latestGb.rawId ?? null;
       }
     }
     if (!usageSource || !windowEnd) {
@@ -171,8 +174,12 @@ export async function GET(req: NextRequest) {
     }
 
     const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
-    const usageWindowStart = new Date(`${canonicalCoverage.startDate}T00:00:00.000Z`);
-    const usageWindowEnd = new Date(`${canonicalCoverage.endDate}T23:59:59.999Z`);
+    const usageWindowStart =
+      usageSource === "GREEN_BUTTON"
+        ? new Date(windowEnd.getTime() - 365 * 24 * 60 * 60 * 1000)
+        : new Date(`${canonicalCoverage.startDate}T00:00:00.000Z`);
+    const usageWindowEnd =
+      usageSource === "GREEN_BUTTON" ? windowEnd : new Date(`${canonicalCoverage.endDate}T23:59:59.999Z`);
 
     // Load the offer (for enroll link + RatePlan mapping).
     // IMPORTANT: renter status is a persisted house attribute; do not accept it via query params.

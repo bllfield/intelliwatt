@@ -34,6 +34,7 @@ import {
   extractFixedRepEnergyCentsPerKwh,
   extractRepFixedMonthlyChargeDollars,
 } from "@/lib/plan-engine/calculatePlanCostForUsage";
+import { getLatestUsableRawGreenButtonIdForHouse } from "@/modules/realUsageAdapter/greenButton";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -326,6 +327,8 @@ export async function GET(req: NextRequest) {
     // Usage summary: cheap aggregate over the last 12 months, best-effort.
     // Must never break offers response (wrap errors).
     let hasUsage = false;
+    let selectedUsageSource: "SMT" | "GREEN_BUTTON" | null = null;
+    let selectedGreenButtonRawId: string | null = null;
     // Canonical usage window anchor: latest SMT interval timestamp (not "now").
     // This must match the detail route so plan engine inputs hash the same everywhere.
     let usageWindowEnd: Date = new Date();
@@ -373,6 +376,7 @@ export async function GET(req: NextRequest) {
         })();
 
         hasUsage = rows > 0;
+        if (hasUsage) selectedUsageSource = "SMT";
         usageSummary = hasUsage
           ? {
               source: "SMT",
@@ -383,8 +387,48 @@ export async function GET(req: NextRequest) {
             }
           : null;
       }
+      if (!hasUsage) {
+        selectedGreenButtonRawId = await getLatestUsableRawGreenButtonIdForHouse(house.id).catch(() => null);
+        if (selectedGreenButtonRawId) {
+          const usageClient = usagePrisma as any;
+          const latest = await usageClient.greenButtonInterval.findFirst({
+            where: { homeId: house.id, rawId: selectedGreenButtonRawId },
+            orderBy: { timestamp: "desc" },
+            select: { timestamp: true },
+          });
+          if (latest?.timestamp) {
+            usageWindowEnd = latest.timestamp;
+            usageCutoff = new Date(usageWindowEnd.getTime() - 365 * DAY_MS);
+            const rangeEnd = usageWindowEnd;
+            const rangeStart = usageCutoff;
+            const aggregates = await usageClient.greenButtonInterval.aggregate({
+              where: { homeId: house.id, rawId: selectedGreenButtonRawId, timestamp: { gte: rangeStart, lte: rangeEnd } },
+              _count: { _all: true },
+              _sum: { consumptionKwh: true },
+              _min: { timestamp: true },
+              _max: { timestamp: true },
+            });
+            const rows = Number(aggregates?._count?._all ?? 0) || 0;
+            usageRowsForSummary = rows;
+            const totalKwh = decimalToNumber(aggregates?._sum?.consumptionKwh ?? 0);
+            hasUsage = rows > 0;
+            if (hasUsage) selectedUsageSource = "GREEN_BUTTON";
+            usageSummary = hasUsage
+              ? {
+                  source: "GREEN_BUTTON",
+                  rangeStart: rangeStart.toISOString(),
+                  rangeEnd: rangeEnd.toISOString(),
+                  totalKwh: totalKwh != null ? Number(totalKwh.toFixed(6)) : undefined,
+                  rows,
+                }
+              : null;
+          }
+        }
+      }
     } catch {
       hasUsage = false;
+      selectedUsageSource = null;
+      selectedGreenButtonRawId = null;
       usageSummary = null;
     }
 
@@ -401,7 +445,7 @@ export async function GET(req: NextRequest) {
       try {
         latestPlanPipelineJob = await getLatestPlanPipelineJob(house.id);
         const windowEndIso = latestPlanPipelineJob?.lastCalcWindowEnd;
-        if (windowEndIso && typeof windowEndIso === "string") {
+        if (selectedUsageSource === "SMT" && windowEndIso && typeof windowEndIso === "string") {
           const d = new Date(windowEndIso);
           if (Number.isFinite(d.getTime())) {
             usageWindowEndForCalc = d;
@@ -409,7 +453,7 @@ export async function GET(req: NextRequest) {
           }
         }
       } catch {
-        // ignore; use latest SMT window
+        // ignore; use latest selected usage window
       }
     }
     const planEstimateReadiness = hasUsage
@@ -435,7 +479,7 @@ export async function GET(req: NextRequest) {
     let bucketPresenceByKey: Map<string, Set<string>> = new Map();
     let usageBucketsByMonthForCalc: Record<string, Record<string, number>> = {};
     try {
-      if (hasUsage && house.id && house.esiid) {
+      if (hasUsage && house.id && selectedUsageSource) {
         const tz = "America/Chicago";
         const fmt = new Intl.DateTimeFormat("en-US", { timeZone: tz, year: "numeric", month: "2-digit" });
         const parts = fmt.formatToParts(new Date());
@@ -696,7 +740,7 @@ export async function GET(req: NextRequest) {
     // Now that RatePlan rows are loaded, we can do a bounded, best-effort "ensure required buckets"
     // and load per-month bucket totals for calculation (TOU / bucket-gated plans).
     try {
-      if (hasUsage && house.id && house.esiid && mappedRatePlanIds.length > 0) {
+      if (hasUsage && house.id && selectedUsageSource && mappedRatePlanIds.length > 0) {
         const unionKeys = new Set<string>(["kwh.m.all.total"]);
         // Only load bucket keys for plans that are actually COMPUTABLE by the current engine.
         // Unavailable plans (TOU/indexed/unsupported) often explode the keyset and make this endpoint slow.
@@ -714,9 +758,9 @@ export async function GET(req: NextRequest) {
         try {
           const bucketBuild = await buildUsageBucketsForEstimate({
             homeId: house.id,
-            usageSource: "SMT",
-            esiid: house.esiid,
-            rawId: null,
+            usageSource: selectedUsageSource,
+            esiid: selectedUsageSource === "SMT" ? house.esiid : null,
+            rawId: selectedUsageSource === "GREEN_BUTTON" ? selectedGreenButtonRawId : null,
             windowEnd: usageWindowEndForCalc,
             cutoff: usageCutoffForCalc,
             requiredBucketKeys: Array.from(unionKeys),
@@ -770,7 +814,7 @@ export async function GET(req: NextRequest) {
           // Keep the response usageSummary aligned with the same calc window we used for estimates.
           if (hasUsage) {
             usageSummary = {
-              source: "SMT",
+              source: selectedUsageSource ?? "SMT",
               rangeStart: usageCutoff.toISOString(),
               rangeEnd: usageWindowEnd.toISOString(),
               totalKwh:

@@ -396,6 +396,7 @@ export async function buildUsageBucketsForEstimate(args: {
         rangeEnd: args.windowEnd,
         source: args.usageSource === "SMT" ? "SMT" : "GREENBUTTON",
         intervalSource: args.usageSource === "SMT" ? "SMT" : "GREENBUTTON",
+        rawId: args.usageSource === "GREEN_BUTTON" ? (args.rawId ?? null) : null,
         bucketDefs,
       });
     } catch {

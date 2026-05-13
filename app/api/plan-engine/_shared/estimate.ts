@@ -5,6 +5,7 @@ import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
 import { calculatePlanCostForUsage } from "@/lib/plan-engine/calculatePlanCostForUsage";
 import { bucketDefsFromBucketKeys, MonthlyBucketKeyParseError } from "@/lib/plan-engine/usageBuckets";
 import { requiredBucketsForRateStructure } from "@/lib/plan-engine/requiredBucketsForPlan";
+import { getLatestUsableRawGreenButtonIdForHouse } from "@/modules/realUsageAdapter/greenButton";
 
 export type TdspApplied = {
   perKwhDeliveryChargeCents: number;
@@ -205,6 +206,7 @@ async function ensureMonthlyBucketsForHome(args: {
     return { ok: false, attempted: true, reason: "PARSE_BUCKET_KEY_FAILED", error: e?.message ?? String(e) };
   }
 
+  let greenButtonRawId: string | null = null;
   const latestTs: Date | null =
     intervalSource === "SMT"
       ? await prisma.smtInterval
@@ -215,14 +217,18 @@ async function ensureMonthlyBucketsForHome(args: {
           })
           .then((r: any) => (r?.ts instanceof Date ? r.ts : null))
           .catch(() => null)
-      : await (usagePrisma as any).greenButtonInterval
-          .findFirst({
-            where: { homeId },
-            orderBy: { timestamp: "desc" },
-            select: { timestamp: true },
-          })
-          .then((r: any) => (r?.timestamp instanceof Date ? r.timestamp : null))
-          .catch(() => null);
+      : await (async () => {
+          greenButtonRawId = await getLatestUsableRawGreenButtonIdForHouse(homeId).catch(() => null);
+          if (!greenButtonRawId) return null;
+          return await (usagePrisma as any).greenButtonInterval
+            .findFirst({
+              where: { homeId, rawId: greenButtonRawId },
+              orderBy: { timestamp: "desc" },
+              select: { timestamp: true },
+            })
+            .then((r: any) => (r?.timestamp instanceof Date ? r.timestamp : null))
+            .catch(() => null);
+        })();
 
   if (!latestTs) return { ok: false, attempted: true, reason: "NO_INTERVALS", error: "no_intervals_found" };
 
@@ -246,6 +252,7 @@ async function ensureMonthlyBucketsForHome(args: {
         rangeEnd,
         source,
         intervalSource,
+        rawId: intervalSource === "GREENBUTTON" ? greenButtonRawId : null,
         bucketDefs,
       }),
       110000,

@@ -23,6 +23,7 @@ import { isComputableOverride } from "@/lib/plan-engine/planCalcOverrides";
 import { selectAuthoritativePlanCalc } from "@/lib/plan-engine/authoritativePlanCalc";
 import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
 import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEstimate";
+import { getLatestUsableRawGreenButtonIdForHouse } from "@/modules/realUsageAdapter/greenButton";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -306,21 +307,17 @@ async function fetchSmtUsageWindow(esiid: string): Promise<{ latest: Date; cutof
 
 async function fetchGreenButtonUsageWindow(houseId: string): Promise<{ latest: Date; cutoff: Date; rawId: string } | null> {
   const usageClient = usagePrisma as any;
-  const latestRaw = await usageClient.rawGreenButton.findFirst({
-    where: { homeId: houseId },
-    orderBy: { createdAt: "desc" },
-    select: { id: true },
-  });
-  if (!latestRaw?.id) return null;
+  const rawId = await getLatestUsableRawGreenButtonIdForHouse(houseId);
+  if (!rawId) return null;
 
   const latest = await usageClient.greenButtonInterval.findFirst({
-    where: { homeId: houseId, rawId: latestRaw.id },
+    where: { homeId: houseId, rawId },
     orderBy: { timestamp: "desc" },
     select: { timestamp: true },
   });
   if (!latest?.timestamp) return null;
   const cutoff = new Date(latest.timestamp.getTime() - 365 * DAY_MS);
-  return { latest: latest.timestamp, cutoff, rawId: latestRaw.id };
+  return { latest: latest.timestamp, cutoff, rawId };
 }
 
 function isRateStructurePresent(v: any): boolean {

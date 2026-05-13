@@ -30,6 +30,7 @@ import { getLatestPlanPipelineJob, shouldStartPlanPipelineJob, writePlanPipeline
 import { Prisma } from "@prisma/client";
 import { currentPlanPrisma } from "@/lib/db/currentPlanClient";
 import { computeMonthsRemainingOnContract } from "@/lib/current-plan/contractTerm";
+import { getLatestUsableRawGreenButtonIdForHouse } from "@/modules/realUsageAdapter/greenButton";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -158,15 +159,17 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
   }
   if (!usageWindowEnd) {
     try {
-      const latestGb = await (usagePrisma as any).greenButtonInterval.findFirst({
-        where: { homeId },
-        orderBy: { timestamp: "desc" },
-        select: { timestamp: true, rawId: true },
-      });
+      gbRawId = await getLatestUsableRawGreenButtonIdForHouse(homeId).catch(() => null);
+      const latestGb = gbRawId
+        ? await (usagePrisma as any).greenButtonInterval.findFirst({
+            where: { homeId, rawId: gbRawId },
+            orderBy: { timestamp: "desc" },
+            select: { timestamp: true },
+          })
+        : null;
       if (latestGb?.timestamp) {
         usageWindowEnd = latestGb.timestamp as Date;
         usageSource = "GREEN_BUTTON";
-        gbRawId = typeof latestGb?.rawId === "string" ? latestGb.rawId : null;
       }
     } catch {
       // ignore: lack of GB tables/rows should not throw

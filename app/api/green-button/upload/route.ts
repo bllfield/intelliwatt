@@ -207,6 +207,7 @@ export async function POST(request: Request) {
           await ensureCoreMonthlyBuckets({
             homeId: house.id,
             esiid: house.esiid ?? null,
+            rawId: rawRecord.id,
             rangeStart: earliest,
             rangeEnd: latest,
             source: "GREENBUTTON",
