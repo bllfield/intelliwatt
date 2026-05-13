@@ -301,6 +301,10 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("shouldApplyIntervalPastBlocker &&");
     expect(source).toContain("catch (runError)");
     expect(routeSource).toContain("dispatchPastSimRecalc");
+    expect(routeSource.indexOf('mode === "GREEN_BUTTON" && effectiveRawInputBase.scenarioId')).toBeLessThan(
+      routeSource.indexOf("adaptGreenButtonRawInput(effectiveRawInputBase)")
+    );
+    expect(routeSource).toContain('!includeDebugDiagnostics && effectiveRawInputBase.scenarioId && !isManualMode && mode !== "GREEN_BUTTON"');
     expect(routeSource).toContain("executionMode: \"droplet_async\"");
     expect(routeSource).toContain("action === \"past_recalc_status\"");
     expect(routeSource).toContain("buildPastSimRunReadbackResponse");

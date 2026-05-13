@@ -1488,7 +1488,7 @@ export async function POST(request: NextRequest) {
       correlationId,
     });
     try {
-      if (!includeDebugDiagnostics && effectiveRawInputBase.scenarioId && !isManualMode) {
+      if (!includeDebugDiagnostics && effectiveRawInputBase.scenarioId && !isManualMode && mode !== "GREEN_BUTTON") {
         const readback = await buildPastSimRunReadbackResponse({
           userId: effectiveUserId,
           houseId: effectiveHouseId,
@@ -1513,6 +1513,95 @@ export async function POST(request: NextRequest) {
           );
         }
         return NextResponse.json(readback);
+      }
+      if (mode === "GREEN_BUTTON" && effectiveRawInputBase.scenarioId && !isManualMode) {
+        if (!shouldEnqueuePastSimRecalcRemote()) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error: "past_recalc_requires_droplet_async",
+              message:
+                "One Path admin Green Button Past Sim recalc is too heavy for Vercel inline execution. Configure DROPLET_WEBHOOK_URL and DROPLET_WEBHOOK_SECRET.",
+              correlationId,
+            },
+            { status: 409 }
+          );
+        }
+        const dispatched = await dispatchPastSimRecalc({
+          userId: effectiveUserId,
+          houseId: effectiveHouseId,
+          esiid: smtSourceEsiid,
+          mode: "SMT_BASELINE",
+          scenarioId: effectiveRawInputBase.scenarioId,
+          weatherPreference: effectiveRawInputBase.weatherPreference,
+          persistPastSimBaseline: effectiveRawInputBase.persistRequested,
+          actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
+          validationOnlyDateKeysLocal: effectiveRawInputBase.validationOnlyDateKeysLocal,
+          preLockboxTravelRanges: effectiveRawInputBase.travelRanges,
+          validationDaySelectionMode: (effectiveRawInputBase.validationSelectionMode as any) ?? undefined,
+          validationDayCount: effectiveRawInputBase.validationDayCount ?? undefined,
+          correlationId,
+          runContext: {
+            callerLabel: "one_path_sim_admin",
+            preferredActualSource: "GREEN_BUTTON",
+          },
+        });
+        if (dispatched.executionMode === "droplet_async") {
+          return NextResponse.json(
+            {
+              ok: true,
+              executionMode: "droplet_async",
+              readbackPending: true,
+              runType: "PAST_SIM",
+              jobId: dispatched.jobId,
+              jobStatus: "queued",
+              correlationId: dispatched.correlationId,
+              debugDiagnosticsIncluded: false,
+              engineInput: {
+                inputType: "GREEN_BUTTON",
+                houseId: effectiveHouseId,
+                actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
+                scenarioId: effectiveRawInputBase.scenarioId,
+                preferredActualSource: "GREEN_BUTTON",
+              },
+              artifact: null,
+              readModel: null,
+              runDisplayView: null,
+              manualStageOneView: null,
+            },
+            { status: 202 }
+          );
+        }
+        if (!dispatched.result.ok) {
+          return NextResponse.json(
+            {
+              ok: false,
+              executionMode: "inline",
+              error: dispatched.result.error,
+              message: dispatched.result.error,
+              correlationId: dispatched.correlationId,
+            },
+            { status: dispatched.result.error === "recalc_timeout" ? 504 : 409 }
+          );
+        }
+        const readback = await buildPastSimRunReadbackResponse({
+          userId: effectiveUserId,
+          houseId: effectiveHouseId,
+          scenarioId: effectiveRawInputBase.scenarioId,
+          correlationId: dispatched.correlationId,
+        });
+        if (!readback.ok) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error: readback.code,
+              message: readback.message,
+              correlationId: dispatched.correlationId,
+            },
+            { status: readback.code === "ARTIFACT_MISSING" ? 404 : 500 }
+          );
+        }
+        return NextResponse.json({ ...readback, executionMode: "inline", correlationId: dispatched.correlationId });
       }
       let engineInput =
         mode === "INTERVAL"
@@ -1594,89 +1683,6 @@ export async function POST(request: NextRequest) {
           artifact: null,
           readModel: compactReadModel,
         });
-      }
-      if (mode === "GREEN_BUTTON" && effectiveRawInputBase.scenarioId && !isManualMode) {
-        if (!shouldEnqueuePastSimRecalcRemote()) {
-          return NextResponse.json(
-            {
-              ok: false,
-              error: "past_recalc_requires_droplet_async",
-              message:
-                "One Path admin Past Sim recalc is too heavy for Vercel inline execution. Configure DROPLET_WEBHOOK_URL and DROPLET_WEBHOOK_SECRET, or disable debug diagnostics and read an existing artifact.",
-              correlationId,
-            },
-            { status: 409 }
-          );
-        }
-        const dispatched = await dispatchPastSimRecalc({
-          userId: engineInput.runtime.userId,
-          houseId: engineInput.runtime.houseId,
-          esiid: engineInput.runtime.esiid,
-          mode: engineInput.runtime.mode,
-          scenarioId: engineInput.runtime.scenarioId,
-          weatherPreference: engineInput.runtime.weatherPreference,
-          persistPastSimBaseline: engineInput.runtime.persistPastSimBaseline,
-          actualContextHouseId: engineInput.runtime.actualContextHouseId,
-          validationOnlyDateKeysLocal: engineInput.runtime.validationOnlyDateKeysLocal,
-          preLockboxTravelRanges: engineInput.runtime.preLockboxTravelRanges,
-          validationDaySelectionMode: (engineInput.runtime.validationDaySelectionMode as any) ?? undefined,
-          validationDayCount: engineInput.runtime.validationDayCount ?? undefined,
-          correlationId,
-          runContext: {
-            ...(engineInput.runtime.runContext ?? {}),
-            callerLabel: "one_path_sim_admin",
-          },
-        });
-        if (dispatched.executionMode === "droplet_async") {
-          return NextResponse.json(
-            {
-              ok: true,
-              executionMode: "droplet_async",
-              readbackPending: true,
-              runType: "PAST_SIM",
-              jobId: dispatched.jobId,
-              jobStatus: "queued",
-              correlationId: dispatched.correlationId,
-              debugDiagnosticsIncluded: false,
-              engineInput: slimEngineInput,
-              artifact: null,
-              readModel: null,
-              runDisplayView: null,
-              manualStageOneView: null,
-            },
-            { status: 202 }
-          );
-        }
-        if (!dispatched.result.ok) {
-          return NextResponse.json(
-            {
-              ok: false,
-              executionMode: "inline",
-              error: dispatched.result.error,
-              message: dispatched.result.error,
-              correlationId: dispatched.correlationId,
-            },
-            { status: dispatched.result.error === "recalc_timeout" ? 504 : 409 }
-          );
-        }
-        const readback = await buildPastSimRunReadbackResponse({
-          userId: effectiveUserId,
-          houseId: effectiveHouseId,
-          scenarioId: effectiveRawInputBase.scenarioId,
-          correlationId: dispatched.correlationId,
-        });
-        if (!readback.ok) {
-          return NextResponse.json(
-            {
-              ok: false,
-              error: readback.code,
-              message: readback.message,
-              correlationId: dispatched.correlationId,
-            },
-            { status: readback.code === "ARTIFACT_MISSING" ? 404 : 500 }
-          );
-        }
-        return NextResponse.json({ ...readback, executionMode: "inline", correlationId: dispatched.correlationId });
       }
       let artifact = await runSharedSimulation(engineInput);
       let artifactDataset = asRecord(artifact.dataset);
