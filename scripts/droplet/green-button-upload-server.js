@@ -416,6 +416,154 @@ function normalizeGreenButtonReadingsTo15Min(rawReadings, options) {
   return results;
 }
 
+const CHICAGO_TIMEZONE = "America/Chicago";
+const CHICAGO_DATE_FORMATTER = new Intl.DateTimeFormat("en-CA", {
+  timeZone: CHICAGO_TIMEZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+const CHICAGO_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: CHICAGO_TIMEZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+});
+
+function chicagoPartsForDate(date) {
+  const parts = CHICAGO_DATE_TIME_FORMATTER.formatToParts(date);
+  const get = (type) => parts.find((p) => p.type === type)?.value || "";
+  return {
+    year: Number(get("year")),
+    month: Number(get("month")),
+    day: Number(get("day")),
+    hour: Number(get("hour")),
+    minute: Number(get("minute")),
+    second: Number(get("second")),
+  };
+}
+
+function chicagoDateKeyForTimestamp(timestamp) {
+  const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
+  if (!Number.isFinite(date.getTime())) return null;
+  const parts = CHICAGO_DATE_FORMATTER.formatToParts(date);
+  const year = parts.find((p) => p.type === "year")?.value;
+  const month = parts.find((p) => p.type === "month")?.value;
+  const day = parts.find((p) => p.type === "day")?.value;
+  if (!year || !month || !day) return null;
+  return `${year}-${month}-${day}`;
+}
+
+function parseDateKey(dateKey) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateKey || ""));
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+  return { year, month, day };
+}
+
+function addDaysToDateKey(dateKey, deltaDays) {
+  const parsed = parseDateKey(dateKey);
+  if (!parsed) return null;
+  const d = new Date(Date.UTC(parsed.year, parsed.month - 1, parsed.day + Math.trunc(deltaDays)));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+
+function chicagoLocalTimeToUtcDate(dateKey, hour, minute, second) {
+  const parsed = parseDateKey(dateKey);
+  if (!parsed) return null;
+  const targetLocalMs = Date.UTC(parsed.year, parsed.month - 1, parsed.day, hour, minute, second || 0, 0);
+  let guessMs = targetLocalMs;
+  for (let i = 0; i < 4; i += 1) {
+    const p = chicagoPartsForDate(new Date(guessMs));
+    if (
+      !Number.isFinite(p.year) ||
+      !Number.isFinite(p.month) ||
+      !Number.isFinite(p.day) ||
+      !Number.isFinite(p.hour) ||
+      !Number.isFinite(p.minute) ||
+      !Number.isFinite(p.second)
+    ) {
+      return null;
+    }
+    const actualLocalMs = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second, 0);
+    const diff = targetLocalMs - actualLocalMs;
+    if (diff === 0) break;
+    guessMs += diff;
+  }
+  const out = new Date(guessMs);
+  return Number.isFinite(out.getTime()) ? out : null;
+}
+
+function expectedIntervalsForChicagoDateKey(dateKey) {
+  const start = chicagoLocalTimeToUtcDate(dateKey, 0, 0, 0);
+  const nextDateKey = addDaysToDateKey(dateKey, 1);
+  const end = nextDateKey ? chicagoLocalTimeToUtcDate(nextDateKey, 0, 0, 0) : null;
+  if (!start || !end) return 96;
+  const intervals = Math.round((end.getTime() - start.getTime()) / (15 * 60 * 1000));
+  return Number.isFinite(intervals) && intervals > 0 ? intervals : 96;
+}
+
+function resolveLatestCompleteOrAvailableGreenButtonDateKey(intervals) {
+  const countsByDateKey = new Map();
+  for (const interval of intervals) {
+    const dateKey = chicagoDateKeyForTimestamp(interval.timestamp);
+    if (!dateKey) continue;
+    countsByDateKey.set(dateKey, (countsByDateKey.get(dateKey) || 0) + 1);
+  }
+  const sortedDateKeys = Array.from(countsByDateKey.keys()).sort();
+  if (sortedDateKeys.length === 0) return null;
+  for (let i = sortedDateKeys.length - 1; i >= 0; i -= 1) {
+    const dateKey = sortedDateKeys[i];
+    if ((countsByDateKey.get(dateKey) || 0) >= expectedIntervalsForChicagoDateKey(dateKey)) {
+      return dateKey;
+    }
+  }
+  return sortedDateKeys[sortedDateKeys.length - 1] || null;
+}
+
+function buildUtcRangeForChicagoLocalDateRange(startDateKey, endDateKey) {
+  const startInclusive = chicagoLocalTimeToUtcDate(startDateKey, 0, 0, 0);
+  const dayAfterEnd = addDaysToDateKey(endDateKey, 1);
+  const endExclusive = dayAfterEnd ? chicagoLocalTimeToUtcDate(dayAfterEnd, 0, 0, 0) : null;
+  if (!startInclusive || !endExclusive) return null;
+  return {
+    startInclusive,
+    endExclusive,
+  };
+}
+
+function trimGreenButtonIntervalsToLatestLocalDays(intervals, totalDays) {
+  const sorted = [...intervals].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  const earliestDateKey = sorted.length > 0 ? chicagoDateKeyForTimestamp(sorted[0].timestamp) : null;
+  const endDateKey = resolveLatestCompleteOrAvailableGreenButtonDateKey(sorted);
+  if (!earliestDateKey || !endDateKey) {
+    return { trimmed: sorted, startDateKey: earliestDateKey, endDateKey };
+  }
+  const targetStartDateKey = addDaysToDateKey(endDateKey, -Math.max(0, Math.trunc(totalDays || 365) - 1));
+  const startDateKey =
+    targetStartDateKey && earliestDateKey > targetStartDateKey ? earliestDateKey : targetStartDateKey;
+  const range = startDateKey ? buildUtcRangeForChicagoLocalDateRange(startDateKey, endDateKey) : null;
+  if (!range) {
+    return { trimmed: sorted, startDateKey, endDateKey };
+  }
+  return {
+    trimmed: sorted.filter(
+      (interval) =>
+        interval.timestamp.getTime() >= range.startInclusive.getTime() &&
+        interval.timestamp.getTime() < range.endExclusive.getTime()
+    ),
+    startDateKey,
+    endDateKey,
+  };
+}
+
 function ensureUtcDate(input) {
   try {
     if (input instanceof Date) {
@@ -830,32 +978,17 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       return;
     }
 
-    const sorted = [...normalized].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-    const latestTimestamp = (sorted[sorted.length - 1] && sorted[sorted.length - 1].timestamp) || null;
-    if (!latestTimestamp) {
+    const { trimmed, startDateKey, endDateKey } = trimGreenButtonIntervalsToLatestLocalDays(
+      normalized,
+      MANUAL_USAGE_LIFETIME_DAYS
+    );
+    if (trimmed.length === 0 || !startDateKey || !endDateKey) {
       if (uploadRecordId) {
         await prisma.greenButtonUpload.update({
           where: { id: uploadRecordId },
           data: {
             parseStatus: "error",
-            parseMessage: "Unable to determine timestamp window for intervals.",
-          },
-        });
-      }
-      res.status(422).json({ ok: false, error: "no_recent_readings" });
-      return;
-    }
-
-    const cutoff = new Date(latestTimestamp.getTime() - MANUAL_USAGE_LIFETIME_DAYS * DAY_MS);
-    const trimmed = sorted.filter((interval) => interval.timestamp >= cutoff);
-
-    if (trimmed.length === 0) {
-      if (uploadRecordId) {
-        await prisma.greenButtonUpload.update({
-          where: { id: uploadRecordId },
-          data: {
-            parseStatus: "empty",
-            parseMessage: "No intervals found within the last 365 days.",
+            parseMessage: "Unable to determine a Chicago-local 365-day coverage window for intervals.",
           },
         });
       }
@@ -930,6 +1063,8 @@ app.post("/upload", upload.single("file"), async (req, res) => {
         normalizedIntervals: trimmed.length,
         totalKwh: Number(totalKwh.toFixed(6)),
         appliedWindowDays: MANUAL_USAGE_LIFETIME_DAYS,
+        coverageStartDateKey: startDateKey,
+        coverageEndDateKey: endDateKey,
         warnings: parsed.warnings,
       };
       await prisma.greenButtonUpload.update({
@@ -1053,8 +1188,17 @@ app.use((err, req, res, _next) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(
-    `Green Button upload server listening on port ${PORT}, maxBytes=${MAX_BYTES}, allowOrigin=${ALLOW_ORIGIN}`,
-  );
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(
+      `Green Button upload server listening on port ${PORT}, maxBytes=${MAX_BYTES}, allowOrigin=${ALLOW_ORIGIN}`,
+    );
+  });
+}
+
+module.exports = {
+  trimGreenButtonIntervalsToLatestLocalDays,
+  resolveLatestCompleteOrAvailableGreenButtonDateKey,
+  chicagoDateKeyForTimestamp,
+  expectedIntervalsForChicagoDateKey,
+};
