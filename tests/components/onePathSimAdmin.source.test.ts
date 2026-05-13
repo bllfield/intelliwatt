@@ -297,6 +297,9 @@ describe("One Path Sim Admin harness wiring", () => {
     const source = readRepoFile("components/admin/OnePathSimAdmin.tsx");
     const routeSource = readRepoFile("app/api/admin/tools/one-path-sim/route.ts");
 
+    expect(source).toContain('const shouldApplyIntervalPastBlocker = mode === "INTERVAL";');
+    expect(source).toContain("shouldApplyIntervalPastBlocker &&");
+    expect(source).toContain("catch (runError)");
     expect(routeSource).toContain("dispatchPastSimRecalc");
     expect(routeSource).toContain("executionMode: \"droplet_async\"");
     expect(routeSource).toContain("action === \"past_recalc_status\"");

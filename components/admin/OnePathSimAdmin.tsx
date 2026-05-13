@@ -1037,7 +1037,9 @@ export function OnePathSimAdmin() {
       setError("Load a user and select a house first.");
       return;
     }
+    const shouldApplyIntervalPastBlocker = mode === "INTERVAL";
     const blockedPastRunSummary =
+      shouldApplyIntervalPastBlocker &&
       intervalPastReadinessTrace?.applicableToCurrentPreset !== false &&
       intervalPastReadinessTrace?.status === "blocked_for_interval_past"
         ? String(intervalPastReadinessTrace?.exactBlocker?.failureSummary ?? "").trim()
@@ -1088,29 +1090,38 @@ export function OnePathSimAdmin() {
     if (shouldRealignKnownPresetScenario && effectiveScenarioId !== selectedScenarioId) {
       setSelectedScenarioId(effectiveScenarioId);
     }
-    const res = await fetch("/api/admin/tools/one-path-sim", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "run",
-        email: lookup.email,
-        sourceHouseId: effectiveHouseId,
-        houseId: effectiveMutableHouseId,
-        scenarioId: effectiveScenarioId || null,
-        mode,
-        actualContextHouseId: effectiveActualContextHouseId || null,
-        preferredActualSource: mode === "GREEN_BUTTON" ? "GREEN_BUTTON" : null,
-        weatherPreference,
-        validationSelectionMode,
-        validationDayCount: Number(validationDayCount) || null,
-        validationOnlyDateKeysLocal,
-        travelRanges,
-        persistRequested,
-        runReason,
-        includeDebugDiagnostics: debugDiagnosticsEnabled,
-      }),
-    });
-    const json = await res.json().catch(() => null);
+    let res: Response;
+    let json: any = null;
+    try {
+      res = await fetch("/api/admin/tools/one-path-sim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "run",
+          email: lookup.email,
+          sourceHouseId: effectiveHouseId,
+          houseId: effectiveMutableHouseId,
+          scenarioId: effectiveScenarioId || null,
+          mode,
+          actualContextHouseId: effectiveActualContextHouseId || null,
+          preferredActualSource: mode === "GREEN_BUTTON" ? "GREEN_BUTTON" : null,
+          weatherPreference,
+          validationSelectionMode,
+          validationDayCount: Number(validationDayCount) || null,
+          validationOnlyDateKeysLocal,
+          travelRanges,
+          persistRequested,
+          runReason,
+          includeDebugDiagnostics: debugDiagnosticsEnabled,
+        }),
+      });
+      json = await res.json().catch(() => null);
+    } catch (runError) {
+      setBusy(false);
+      setStatus(null);
+      setError(runError instanceof Error ? runError.message : "One Path run request failed.");
+      return;
+    }
     setBusy(false);
     if (!res.ok || !json?.ok) {
       if (json?.upstreamUsageTruth) {
