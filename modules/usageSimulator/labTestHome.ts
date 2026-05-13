@@ -380,26 +380,24 @@ export async function upsertOnePathLabTestHomeLink(args: {
 }
 
 async function clearOnePathActualUsageState(args: { houseId: string }) {
-  await Promise.all([
-    (usagePrisma as any).greenButtonInterval?.deleteMany?.({
-      where: { homeId: args.houseId },
-    }) ?? Promise.resolve(),
-    (usagePrisma as any).rawGreenButton?.deleteMany?.({
-      where: { homeId: args.houseId },
-    }) ?? Promise.resolve(),
-    (usagePrisma as any).homeMonthlyUsageBucket?.deleteMany?.({
-      where: { homeId: args.houseId },
-    }) ?? Promise.resolve(),
-    (usagePrisma as any).homeDailyUsageBucket?.deleteMany?.({
-      where: { homeId: args.houseId },
-    }) ?? Promise.resolve(),
-    (prisma as any).greenButtonUpload?.deleteMany?.({
-      where: { houseId: args.houseId },
-    }) ?? Promise.resolve(),
-    (prisma as any).manualUsageUpload?.deleteMany?.({
-      where: { houseId: args.houseId, source: "green_button" },
-    }) ?? Promise.resolve(),
-  ]);
+  await (usagePrisma as any).greenButtonInterval?.deleteMany?.({
+    where: { homeId: args.houseId },
+  });
+  await (usagePrisma as any).rawGreenButton?.deleteMany?.({
+    where: { homeId: args.houseId },
+  });
+  await (usagePrisma as any).homeMonthlyUsageBucket?.deleteMany?.({
+    where: { homeId: args.houseId },
+  });
+  await (usagePrisma as any).homeDailyUsageBucket?.deleteMany?.({
+    where: { homeId: args.houseId },
+  });
+  await (prisma as any).greenButtonUpload?.deleteMany?.({
+    where: { houseId: args.houseId },
+  });
+  await (prisma as any).manualUsageUpload?.deleteMany?.({
+    where: { houseId: args.houseId, source: "green_button" },
+  });
 }
 
 async function cloneOnePathGreenButtonUsageFromSource(args: {
@@ -1137,14 +1135,18 @@ export async function replaceGlobalOnePathLabTestHomeFromSource(args: {
       });
     });
 
-    await Promise.all([
-      (usagePrisma as any).pastSimulatedDatasetCache?.deleteMany?.({
+    // Usage DB clients may run with a single connection in production. Keep cleanup sequential
+    // so replacement does not compete with itself for the only pool connection.
+    await (usagePrisma as any).pastSimulatedDatasetCache
+      ?.deleteMany?.({
         where: { houseId: testHome.id },
-      }) ?? Promise.resolve(),
-      (usagePrisma as any).gapfillCompareRunSnapshot?.deleteMany?.({
+      })
+      .catch(() => null);
+    await (usagePrisma as any).gapfillCompareRunSnapshot
+      ?.deleteMany?.({
         where: { houseId: testHome.id },
-      }) ?? Promise.resolve(),
-    ]);
+      })
+      .catch(() => null);
 
     await upsertOnePathLabTestHomeLink({
       ownerUserId: args.ownerUserId,

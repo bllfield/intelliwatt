@@ -8,6 +8,14 @@ function readRepoFile(relativePath: string): string {
   return readFileSync(resolve(ROOT, relativePath), "utf8");
 }
 
+function sourceBetween(source: string, start: string, end: string | null): string {
+  const startIndex = source.indexOf(start);
+  const endIndex = end == null ? source.length : source.indexOf(end, startIndex + start.length);
+  expect(startIndex).toBeGreaterThanOrEqual(0);
+  expect(endIndex).toBeGreaterThan(startIndex);
+  return source.slice(startIndex, endIndex);
+}
+
 describe("one path green button preset wiring", () => {
   it("routes admin Green Button replacements through the usage upload ticket flow", () => {
     const adminSource = readRepoFile("components/admin/OnePathSimAdmin.tsx");
@@ -59,5 +67,25 @@ describe("one path green button preset wiring", () => {
     expect(actualDatasetSource).toContain("preferredSource?: ActualUsageSource | null;");
     expect(actualDatasetSource).toContain("if (preferredSource === \"GREEN_BUTTON\" && greenButton) return greenButton;");
     expect(actualSource).toContain("args.preferredSource === \"GREEN_BUTTON\" && gbMs > 0");
+  });
+
+  it("keeps One Path test-home usage cleanup sequential for single-connection usage DB pools", () => {
+    const labTestHomeSource = readRepoFile("modules/usageSimulator/labTestHome.ts");
+    const actualUsageCleanup = sourceBetween(
+      labTestHomeSource,
+      "async function clearOnePathActualUsageState",
+      "async function cloneOnePathGreenButtonUsageFromSource"
+    );
+    const onePathReplacement = sourceBetween(
+      labTestHomeSource,
+      "export async function replaceGlobalOnePathLabTestHomeFromSource",
+      null
+    );
+
+    expect(actualUsageCleanup).not.toContain("Promise.all");
+    expect(onePathReplacement).toContain("single connection");
+    expect(onePathReplacement).not.toContain("await Promise.all([\n      (usagePrisma as any).pastSimulatedDatasetCache");
+    expect(onePathReplacement).toContain("(usagePrisma as any).pastSimulatedDatasetCache");
+    expect(onePathReplacement).toContain("(usagePrisma as any).gapfillCompareRunSnapshot");
   });
 });
