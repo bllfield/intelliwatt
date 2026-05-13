@@ -37,4 +37,18 @@ describe("one path green button anchor wiring", () => {
     expect(actualDatasetSource).toContain("const selectedWindowStartDate = normalizeDateKey(selected?.summary?.start ?? null);");
     expect(actualDatasetSource).toContain("const rangeStart = selectedWindowStartDate ?? canonicalWindow.startDate;");
   });
+
+  it("threads Green Button actual-source identity into shared Past Sim build inputs", () => {
+    const userServiceSource = readRepoFile("modules/usageSimulator/service.ts");
+    const onePathServiceSource = readRepoFile("modules/onePathSim/usageSimulator/service.ts");
+    const sharedPastSource = readRepoFile("modules/simulatedUsage/simulatePastUsageDataset.ts");
+    const onePathPastSource = readRepoFile("modules/onePathSim/simulatedUsage/simulatePastUsageDataset.ts");
+
+    expect(userServiceSource).toContain("actualSource: built.source?.actualSource ?? actualSource ?? null");
+    expect(onePathServiceSource).toContain("actualSource: built.source?.actualSource ?? actualSource ?? null");
+    expect(sharedPastSource).toContain('intervalActualSource !== "GREEN_BUTTON"');
+    expect(sharedPastSource).toContain("fetchGreenButtonIntervalsForCoverageWindow");
+    expect(onePathPastSource).toContain('intervalActualSource !== "GREEN_BUTTON"');
+    expect(onePathPastSource).toContain("fetchGreenButtonIntervalsForCoverageWindow");
+  });
 });

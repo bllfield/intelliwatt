@@ -13,9 +13,12 @@ describe("one path green button preset wiring", () => {
     const adminSource = readRepoFile("components/admin/OnePathSimAdmin.tsx");
     const lookupRouteSource = readRepoFile("app/api/admin/tools/one-path-sim/route.ts");
     const onePathSource = readRepoFile("modules/onePathSim/onePathSim.ts");
+    const uploadTicketSource = readRepoFile("app/api/admin/tools/one-path-sim/green-button/upload-ticket/route.ts");
+    const writeTargetSource = readRepoFile("app/api/admin/tools/one-path-sim/_helpers.ts");
+    const labTestHomeSource = readRepoFile("modules/usageSimulator/labTestHome.ts");
 
     expect(adminSource).toContain("uploadGreenButtonThroughUsage");
-    expect(adminSource).toContain("/api/green-button/upload-ticket");
+    expect(adminSource).toContain("/api/admin/tools/one-path-sim/green-button/upload-ticket");
     expect(adminSource).toContain("selectedKnownScenario.scenarioType === \"GREEN_BUTTON_TRUTH\"");
     expect(adminSource).toContain("greenButtonSelectedFile");
     expect(adminSource).toContain("The selected file will be uploaded through the usage Green Button pipeline when you load this preset.");
@@ -27,12 +30,17 @@ describe("one path green button preset wiring", () => {
     expect(adminSource).toContain("<option value=\"GREEN_BUTTON\">GREEN_BUTTON</option>");
     expect(lookupRouteSource).toContain("greenButtonUpload: actualContextGreenButtonUpload");
     expect(lookupRouteSource).toContain("mode === \"GREEN_BUTTON\"");
-    expect(lookupRouteSource).toContain("await adaptGreenButtonRawInput(effectiveRawInputBase)");
+    expect(lookupRouteSource).toContain("promise: adaptGreenButtonRawInput(effectiveRawInputBase)");
     expect(lookupRouteSource).toContain("const greenButtonUpload = await loadGreenButtonUploadSummary(previewActualContextHouseId);");
             expect(lookupRouteSource).toContain("hasPersistedUsageIntervals: Boolean(derivedCoverage)");
             expect(lookupRouteSource).toContain("intervalCount: derivedCoverage?.count ?? 0");
     expect(onePathSource).toContain("export async function adaptGreenButtonRawInput");
     expect(onePathSource).toContain("inputType: \"GREEN_BUTTON\"");
+    expect(uploadTicketSource).toContain("id: target.testHomeHouseId");
+    expect(uploadTicketSource).toContain("userId: house.userId");
+    expect(uploadTicketSource).toContain("houseId: house.id");
+    expect(writeTargetSource).toContain("One Path admin writes are pinned to the linked test home only.");
+    expect(labTestHomeSource).toContain("rawId: clonedRaw.id");
   });
 
   it("carries the preferred source through shared actual-usage resolvers", () => {

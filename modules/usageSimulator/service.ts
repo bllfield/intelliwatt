@@ -4132,6 +4132,9 @@ async function recalcSimulatorBuildImpl(args: {
     };
   }
   let actualSource = actualSourceAnchor.source;
+  if (actualSource) {
+    runContext.preferredActualSource = actualSource;
+  }
 
   // Baseline ladder enforcement (V1): SMT_BASELINE requires actual 15-minute intervals (SMT or Green Button).
   if (mode === "SMT_BASELINE" && !actualOk) {
@@ -5026,6 +5029,11 @@ async function recalcSimulatorBuildImpl(args: {
           homeProfile,
           applianceProfile,
           manualUsagePayload,
+          actualSource: built.source?.actualSource ?? actualSource ?? null,
+          actualMonthlyAnchorsByMonth: built.source?.actualMonthlyAnchorsByMonth ?? undefined,
+          actualIntradayShape96: built.source?.actualIntradayShape96 ?? undefined,
+          smtMonthlyAnchorsByMonth: built.source?.smtMonthlyAnchorsByMonth ?? undefined,
+          smtIntradayShape96: built.source?.smtIntradayShape96 ?? undefined,
           weatherSensitivityScore,
           weatherEfficiencyDerivedInput,
         },

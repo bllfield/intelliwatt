@@ -7,6 +7,7 @@ import { resolveIntervalsLayer } from '@/lib/usage/resolveIntervalsLayer';
 import { buildUserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
 import { IntervalSeriesKind } from '@/modules/usageSimulator/kinds';
 import { toPublicHouseLabel } from "@/modules/usageSimulator/houseLabel";
+import { adaptGreenButtonRawInput, runSharedSimulation } from "@/modules/onePathSim/onePathSim";
 import {
   classifySimulationFailure,
   recordSimulationDataAlert,
@@ -17,6 +18,40 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const maxDuration = 120;
 const PER_HOUSE_RESOLVE_TIMEOUT_MS = 45_000;
+
+function isGreenButtonDataset(dataset: any): boolean {
+  const summarySource = String(dataset?.summary?.source ?? "").trim().toUpperCase();
+  const metaSource = String(dataset?.meta?.actualSource ?? "").trim().toUpperCase();
+  return summarySource === "GREEN_BUTTON" || metaSource === "GREEN_BUTTON";
+}
+
+async function applyUserSiteGreenButtonBaselinePassthrough(args: {
+  userId: string;
+  houseId: string;
+  esiid: string | null;
+  resolvedUsage: { dataset: any | null; alternatives: { smt: any; greenButton: any } };
+}): Promise<{ dataset: any | null; alternatives: { smt: any; greenButton: any } }> {
+  if (!isGreenButtonDataset(args.resolvedUsage?.dataset)) return args.resolvedUsage;
+
+  const engineInput = await adaptGreenButtonRawInput({
+    userId: args.userId,
+    houseId: args.houseId,
+    actualContextHouseId: args.houseId,
+    smtSourceEsiid: args.esiid,
+    scenarioId: null,
+    weatherPreference: "LAST_YEAR_WEATHER",
+    validationSelectionMode: null,
+    validationDayCount: null,
+    validationOnlyDateKeysLocal: [],
+    travelRanges: [],
+    persistRequested: true,
+  });
+  const artifact = await runSharedSimulation(engineInput);
+  return {
+    dataset: artifact.dataset,
+    alternatives: args.resolvedUsage.alternatives,
+  };
+}
 
 async function withTaskTimeout<T>(task: Promise<T>, timeoutMs: number, label: string): Promise<T | null> {
   let timer: NodeJS.Timeout | null = null;
@@ -109,6 +144,16 @@ export async function GET(_request: NextRequest) {
         }).catch(() => null);
         result = { dataset: null, alternatives: { smt: null, greenButton: null } };
       }
+      const usageForContract = await applyUserSiteGreenButtonBaselinePassthrough({
+        userId: user.id,
+        houseId: house.id,
+        esiid: house.esiid ?? null,
+        resolvedUsage: result,
+      }).catch((err) => {
+        console.warn("[user/usage] Green Button baseline passthrough failed; using resolved usage", house.id, err);
+        return result;
+      });
+
       results.push(
         await buildUserUsageHouseContract({
           userId: user.id,
@@ -120,7 +165,7 @@ export async function GET(_request: NextRequest) {
             addressState: house.addressState,
             esiid: house.esiid,
           },
-          resolvedUsage: result,
+          resolvedUsage: usageForContract,
         })
       );
     }

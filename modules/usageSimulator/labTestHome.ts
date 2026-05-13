@@ -544,6 +544,7 @@ async function cloneOnePathGreenButtonUsageFromSource(args: {
     await ensureCoreMonthlyBuckets({
       homeId: args.targetHouseId,
       esiid: args.targetEsiid,
+      rawId: clonedRaw.id,
       rangeStart: earliest,
       rangeEnd: latest,
       source: "GREENBUTTON",
