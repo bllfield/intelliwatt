@@ -4132,9 +4132,6 @@ async function recalcSimulatorBuildImpl(args: {
     };
   }
   let actualSource = actualSourceAnchor.source;
-  if (actualSource) {
-    runContext.preferredActualSource = actualSource;
-  }
 
   // Baseline ladder enforcement (V1): SMT_BASELINE requires actual 15-minute intervals (SMT or Green Button).
   if (mode === "SMT_BASELINE" && !actualOk) {
