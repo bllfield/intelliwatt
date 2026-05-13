@@ -7,9 +7,7 @@ import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { refreshUserEntryStatuses } from "@/lib/hitthejackwatt/entryLifecycle";
 import { normalizeEmail } from "@/lib/utils/email";
-import { parseGreenButtonBuffer } from "@/lib/usage/greenButtonParser";
-import { normalizeGreenButtonReadingsTo15Min } from "@/lib/usage/greenButtonNormalize";
-import { trimGreenButtonIntervalsToLatestLocalDays } from "@/lib/usage/greenButtonCoverage";
+import { runGreenButtonUsagePipeline } from "@/lib/usage/greenButtonUsagePipeline";
 import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
 import { runPlanPipelineForHome } from "@/lib/plan-engine/runPlanPipelineForHome";
 
@@ -135,59 +133,27 @@ export async function POST(request: Request) {
     let coverageEnd: Date | null = null;
 
     try {
-      const parsed = parseGreenButtonBuffer(buffer, file.name);
-
-      if (parsed.errors.length > 0) {
-        await (prisma as any).greenButtonUpload.update({
-          where: { id: uploadRecord.id },
-          data: {
-            parseStatus: "error",
-            parseMessage: parsed.errors.join("; "),
-          },
-        });
-
-        return NextResponse.json({ ok: false, error: parsed.errors.join("; ") }, { status: 422 });
-      }
-
-      if (parsed.readings.length === 0) {
-        await (prisma as any).greenButtonUpload.update({
-          where: { id: uploadRecord.id },
-          data: {
-            parseStatus: "empty",
-            parseMessage: "File parsed but no interval data was found.",
-          },
-        });
-
-        return NextResponse.json({ ok: false, error: "no_readings" }, { status: 422 });
-      }
-
-      const normalized = normalizeGreenButtonReadingsTo15Min(parsed.readings, {
-        maxKwhPerInterval: 10, // tighten clamp to filter unrealistic spikes
+      const pipelineResult = runGreenButtonUsagePipeline({
+        buffer,
+        filename: file.name,
+        windowDays: MANUAL_USAGE_LIFETIME_DAYS,
       });
-      if (normalized.length === 0) {
+      if (!pipelineResult.ok) {
         await (prisma as any).greenButtonUpload.update({
           where: { id: uploadRecord.id },
           data: {
-            parseStatus: "empty",
-            parseMessage: "Readings were parsed but could not be normalized to 15-minute intervals.",
+            parseStatus: pipelineResult.parseStatus,
+            parseMessage: pipelineResult.message,
           },
         });
 
-        return NextResponse.json({ ok: false, error: "normalization_empty" }, { status: 422 });
+        return NextResponse.json(
+          { ok: false, error: pipelineResult.error === "parse_errors" ? pipelineResult.message : pipelineResult.error },
+          { status: 422 },
+        );
       }
 
-      const { trimmed, startDateKey, endDateKey } = trimGreenButtonIntervalsToLatestLocalDays(normalized, MANUAL_USAGE_LIFETIME_DAYS);
-      if (trimmed.length === 0 || !startDateKey || !endDateKey) {
-        await (prisma as any).greenButtonUpload.update({
-          where: { id: uploadRecord.id },
-          data: {
-            parseStatus: "error",
-            parseMessage: "Unable to determine a Chicago-local 365-day coverage window for intervals.",
-          },
-        });
-
-        return NextResponse.json({ ok: false, error: "no_recent_readings" }, { status: 422 });
-      }
+      const { trimmed } = pipelineResult;
 
       const cleanupTasks: Array<Promise<unknown>> = [
         (usagePrisma as any).greenButtonInterval.deleteMany({
@@ -268,26 +234,15 @@ export async function POST(request: Request) {
         console.error("[green-button/upload] plan pipeline failed (best-effort)", pipelineErr);
       }
 
-      const totalKwh = trimmed.reduce((sum, row) => sum + row.consumptionKwh, 0);
       const earliest = trimmed[0]?.timestamp ?? null;
       const latest = trimmed[trimmed.length - 1]?.timestamp ?? null;
       coverageEnd = latest;
-
-      parsedSummary = {
-        format: parsed.format,
-        totalRawReadings: parsed.metadata.totalReadings,
-        normalizedIntervals: trimmed.length,
-        totalKwh: Number(totalKwh.toFixed(6)),
-        appliedWindowDays: MANUAL_USAGE_LIFETIME_DAYS,
-        coverageStartDateKey: startDateKey,
-        coverageEndDateKey: endDateKey,
-        warnings: parsed.warnings,
-      };
+      parsedSummary = pipelineResult.summary;
 
       await (prisma as any).greenButtonUpload.update({
         where: { id: uploadRecord.id },
         data: {
-          parseStatus: parsed.warnings.length > 0 ? "complete_with_warnings" : "complete",
+          parseStatus: pipelineResult.parsed.warnings.length > 0 ? "complete_with_warnings" : "complete",
           parseMessage: JSON.stringify(parsedSummary),
           dateRangeStart: earliest,
           dateRangeEnd: latest,

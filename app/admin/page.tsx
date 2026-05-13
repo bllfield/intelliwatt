@@ -939,6 +939,15 @@ export default function AdminDashboard() {
               </div>
             </a>
             <a
+              href="/admin/tools/green-button-pipeline"
+              className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
+            >
+              <div className="font-semibold text-brand-navy mb-1">Green Button Pipeline Check</div>
+              <div className="text-sm text-brand-navy/60">
+                Dry-run a Green Button file through the shared parser, normalizer, and coverage window without writing home data
+              </div>
+            </a>
+            <a
               href="/admin/tools/usage-shape-profile"
               className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
             >

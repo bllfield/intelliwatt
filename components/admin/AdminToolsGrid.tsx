@@ -32,6 +32,11 @@ const TOOL_CARDS = [
     description: "Canonical admin harness for shared interval, manual, annual, and new-build simulation runs.",
   },
   {
+    href: "/admin/tools/green-button-pipeline",
+    title: "Green Button Pipeline Check",
+    description: "Dry-run a Green Button file through the shared usage parser, normalizer, and coverage window.",
+  },
+  {
     href: "/admin/tools/usage-shape-profile",
     title: "Usage Shape Profile",
     description: "Derive and save usage shape from actual 15-minute intervals.",
