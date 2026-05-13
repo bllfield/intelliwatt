@@ -861,27 +861,22 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
       return;
     }
 
-    const cleanupTasks: Array<Promise<unknown>> = [
-      usagePrisma.greenButtonInterval.deleteMany({ where: { homeId: house.id, rawId: { not: rawRecordId } } }),
-      usagePrisma.rawGreenButton.deleteMany({ where: { homeId: house.id, NOT: { id: rawRecordId } } }),
-      (prisma as any).greenButtonUpload.deleteMany({ where: { houseId: house.id, NOT: { id: uploadRecordId } } }),
-    ];
+    // Production Droplet DB clients can run with a single connection. Keep cleanup sequential
+    // so upload replacement does not compete with itself for the pool.
+    await usagePrisma.greenButtonInterval.deleteMany({ where: { homeId: house.id, rawId: { not: rawRecordId } } });
+    await usagePrisma.rawGreenButton.deleteMany({ where: { homeId: house.id, NOT: { id: rawRecordId } } });
+    await (prisma as any).greenButtonUpload.deleteMany({ where: { houseId: house.id, NOT: { id: uploadRecordId } } });
     if (previousRawHomeId && previousRawHomeId !== house.id) {
-      cleanupTasks.push(
-        usagePrisma.greenButtonInterval.deleteMany({
-          where: { homeId: previousRawHomeId, rawId: rawRecordId },
-        })
-      );
-      cleanupTasks.push(
-        (prisma as any).greenButtonUpload.deleteMany({
-          where: { houseId: previousRawHomeId, storageKey },
-        })
-      );
+      await usagePrisma.greenButtonInterval.deleteMany({
+        where: { homeId: previousRawHomeId, rawId: rawRecordId },
+      });
+      await (prisma as any).greenButtonUpload.deleteMany({
+        where: { houseId: previousRawHomeId, storageKey },
+      });
     }
     if (house.esiid) {
-      cleanupTasks.push(prisma.smtInterval.deleteMany({ where: { esiid: house.esiid } }));
+      await prisma.smtInterval.deleteMany({ where: { esiid: house.esiid } });
     }
-    await Promise.all(cleanupTasks);
 
     const intervalData = trimmed.map((interval) => ({
       rawId: rawRecordId!,

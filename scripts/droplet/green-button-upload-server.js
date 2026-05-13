@@ -788,19 +788,20 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       return;
     }
 
-    // Pre-clean existing usage for this home to avoid ballooning data during parse/insert
-    await Promise.all([
-      usagePrisma.greenButtonInterval.deleteMany({ where: { homeId: house.id } }),
-      usagePrisma.rawGreenButton.deleteMany({ where: { homeId: house.id } }),
-      prisma.greenButtonUpload.deleteMany({ where: { houseId: house.id } }),
-      house.esiid ? prisma.smtInterval.deleteMany({ where: { esiid: house.esiid } }) : Promise.resolve(),
-    ]);
-
     if (!acquireHomeLock(payload.houseId)) {
       res.status(429).json({ ok: false, error: "home_upload_in_progress" });
       return;
     }
     homeLockAcquired = true;
+
+    // Production Droplet DB clients can run with a single connection. Keep cleanup sequential
+    // and under the per-home lock so uploads do not compete with themselves for the pool.
+    await usagePrisma.greenButtonInterval.deleteMany({ where: { homeId: house.id } });
+    await usagePrisma.rawGreenButton.deleteMany({ where: { homeId: house.id } });
+    await prisma.greenButtonUpload.deleteMany({ where: { houseId: house.id } });
+    if (house.esiid) {
+      await prisma.smtInterval.deleteMany({ where: { esiid: house.esiid } });
+    }
 
     const buffer = file.buffer;
     const sha256 = createHash("sha256").update(buffer).digest("hex");
@@ -996,27 +997,20 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       return;
     }
 
-    const cleanupTasks = [
-      usagePrisma.greenButtonInterval.deleteMany({ where: { homeId: house.id, rawId: { not: rawRecordId } } }),
-      usagePrisma.rawGreenButton.deleteMany({ where: { homeId: house.id, NOT: { id: rawRecordId } } }),
-      prisma.greenButtonUpload.deleteMany({ where: { houseId: house.id, NOT: { id: uploadRecordId } } }),
-    ];
+    await usagePrisma.greenButtonInterval.deleteMany({ where: { homeId: house.id, rawId: { not: rawRecordId } } });
+    await usagePrisma.rawGreenButton.deleteMany({ where: { homeId: house.id, NOT: { id: rawRecordId } } });
+    await prisma.greenButtonUpload.deleteMany({ where: { houseId: house.id, NOT: { id: uploadRecordId } } });
     if (previousRawHomeId && previousRawHomeId !== house.id) {
-      cleanupTasks.push(
-        usagePrisma.greenButtonInterval.deleteMany({
-          where: { homeId: previousRawHomeId, rawId: rawRecordId },
-        })
-      );
-      cleanupTasks.push(
-        prisma.greenButtonUpload.deleteMany({
-          where: { houseId: previousRawHomeId, storageKey },
-        })
-      );
+      await usagePrisma.greenButtonInterval.deleteMany({
+        where: { homeId: previousRawHomeId, rawId: rawRecordId },
+      });
+      await prisma.greenButtonUpload.deleteMany({
+        where: { houseId: previousRawHomeId, storageKey },
+      });
     }
     if (house.esiid) {
-      cleanupTasks.push(prisma.smtInterval.deleteMany({ where: { esiid: house.esiid } }));
+      await prisma.smtInterval.deleteMany({ where: { esiid: house.esiid } });
     }
-    await Promise.all(cleanupTasks);
 
     // Protect DB/CPU: cap interval inserts to ~60k (15-min for ~2.5 years); reject larger files.
     const MAX_INTERVALS = 60000;
