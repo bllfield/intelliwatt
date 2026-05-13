@@ -8,6 +8,8 @@ const usageQueryRaw = vi.fn();
 const getLatestUsableRawGreenButtonIdForHouse = vi.fn();
 const getLatestGreenButtonFullDayDateKey = vi.fn();
 const buildUsageBucketsForEstimate = vi.fn();
+const ensureHouseWeatherBackfill = vi.fn();
+const getHouseWeatherDays = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   prisma: {},
@@ -39,6 +41,14 @@ vi.mock("@/modules/usageSimulator/metadataWindow", () => ({
   }),
 }));
 
+vi.mock("@/modules/weather/backfill", () => ({
+  ensureHouseWeatherBackfill: (...args: any[]) => ensureHouseWeatherBackfill(...args),
+}));
+
+vi.mock("@/modules/weather/repo", () => ({
+  getHouseWeatherDays: (...args: any[]) => getHouseWeatherDays(...args),
+}));
+
 describe("actualDatasetForHouse lightweight green button", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -49,8 +59,26 @@ describe("actualDatasetForHouse lightweight green button", () => {
     getLatestUsableRawGreenButtonIdForHouse.mockReset();
     getLatestGreenButtonFullDayDateKey.mockReset();
     buildUsageBucketsForEstimate.mockReset();
+    ensureHouseWeatherBackfill.mockReset();
+    getHouseWeatherDays.mockReset();
     getLatestUsableRawGreenButtonIdForHouse.mockResolvedValue("raw-1");
     getLatestGreenButtonFullDayDateKey.mockResolvedValue("2026-04-14");
+    ensureHouseWeatherBackfill.mockResolvedValue({ fetched: 1, stubbed: 0 });
+    getHouseWeatherDays.mockResolvedValue(
+      new Map([
+        [
+          "2026-04-14",
+          {
+            tAvgF: 70,
+            tMinF: 60,
+            tMaxF: 80,
+            hdd65: 0,
+            cdd65: 5,
+            source: "open-meteo",
+          },
+        ],
+      ]),
+    );
     greenButtonFindFirst.mockResolvedValue({ timestamp: new Date("2026-04-15T04:45:00.000Z") });
     greenButtonAggregate.mockResolvedValue({
       _count: { _all: 96 },
@@ -103,5 +131,24 @@ describe("actualDatasetForHouse lightweight green button", () => {
       { hhmm: "00:15", avgKw: 4.4 },
     ]);
     expect(result.dataset?.insights?.peakHour).toEqual({ hour: 18, kw: 6.2 });
+    expect(ensureHouseWeatherBackfill).toHaveBeenCalledWith(
+      expect.objectContaining({
+        houseId: "house-1",
+        startDate: "2026-04-14",
+        endDate: "2026-04-15",
+        allowOutsideCanonicalCoverage: true,
+      }),
+    );
+    expect(result.dataset?.dailyWeather).toEqual({
+      "2026-04-14": {
+        tAvgF: 70,
+        tMinF: 60,
+        tMaxF: 80,
+        hdd65: 0,
+        cdd65: 5,
+        source: "open-meteo",
+      },
+    });
+    expect(result.dataset?.meta?.weatherSourceSummary).toBe("actual_only");
   });
 });

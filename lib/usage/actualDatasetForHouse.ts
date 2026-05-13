@@ -10,7 +10,7 @@ import { usagePrisma } from "@/lib/db/usageClient";
 import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEstimate";
 import { getHouseWeatherDays } from "@/modules/weather/repo";
 import { ensureHouseWeatherBackfill } from "@/modules/weather/backfill";
-import { WEATHER_STUB_VERSION } from "@/modules/weather/types";
+import { WEATHER_STUB_SOURCE, WEATHER_STUB_VERSION } from "@/modules/weather/types";
 import { chooseActualSource, type ActualUsageSource } from "@/modules/realUsageAdapter/actual";
 import {
   getLatestGreenButtonFullDayDateKey,
@@ -112,7 +112,7 @@ export type ActualHouseDataset = {
   totals: ImportExportTotals;
   meta?: Record<string, unknown> | null;
   /** When set, daily usage table shows Avg °F, Min °F, Max °F, HDD65, CDD65. */
-  dailyWeather?: Record<string, { tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number }> | null;
+  dailyWeather?: Record<string, { tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number; source?: string }> | null;
 };
 
 function decimalToNumber(value: Prisma.Decimal | number | null | undefined): number {
@@ -314,6 +314,87 @@ function deriveMonthlyTotalsFromDailyTotals(
   return Array.from(byMonth.entries())
     .sort((a, b) => (a[0] < b[0] ? -1 : 1))
     .map(([month, kwh]) => ({ month, kwh }));
+}
+
+async function hydrateActualUsageDailyWeather(args: {
+  houseId: string;
+  dataset: ActualHouseDataset | null;
+}): Promise<void> {
+  const dataset = args.dataset;
+  if (!dataset || !Array.isArray(dataset.daily) || dataset.daily.length === 0) return;
+
+  const dateKeys = dataset.daily
+    .map((row) => String(row?.date ?? "").slice(0, 10))
+    .filter((dateKey, index, all) => YYYY_MM_DD.test(dateKey) && all.indexOf(dateKey) === index)
+    .sort();
+  const firstDateKey = dateKeys[0] ?? null;
+  const lastDateKey = dateKeys[dateKeys.length - 1] ?? null;
+  if (!firstDateKey || !lastDateKey) return;
+
+  let fallbackReason: "missing_lat_lng" | "api_failure_or_no_data" | "partial_coverage" | null = null;
+  try {
+    const backfill = await ensureHouseWeatherBackfill({
+      houseId: args.houseId,
+      startDate: firstDateKey,
+      endDate: lastDateKey,
+      allowOutsideCanonicalCoverage: true,
+    });
+    if (backfill.skippedLatLng) fallbackReason = "missing_lat_lng";
+  } catch {
+    fallbackReason = "api_failure_or_no_data";
+  }
+
+  const wxMap = await getHouseWeatherDays({
+    houseId: args.houseId,
+    dateKeys,
+    kind: "ACTUAL_LAST_YEAR",
+    version: WEATHER_STUB_VERSION,
+  }).catch(() => new Map());
+
+  let weatherActualRowCount = 0;
+  let weatherStubRowCount = 0;
+  if (wxMap.size > 0) {
+    dataset.dailyWeather = Object.fromEntries(
+      Array.from(wxMap.entries()).map(([dateKey, w]) => {
+        const source = String(w.source ?? "");
+        if (source && source !== WEATHER_STUB_SOURCE) weatherActualRowCount += 1;
+        else weatherStubRowCount += 1;
+        return [
+          dateKey,
+          {
+            tAvgF: w.tAvgF,
+            tMinF: w.tMinF,
+            tMaxF: w.tMaxF,
+            hdd65: w.hdd65,
+            cdd65: w.cdd65,
+            source,
+          },
+        ];
+      })
+    );
+  }
+
+  const missingDateCount = Math.max(0, dateKeys.length - wxMap.size);
+  if (!fallbackReason && missingDateCount > 0) fallbackReason = "partial_coverage";
+  const weatherSourceSummary =
+    wxMap.size === 0
+      ? "none"
+      : weatherActualRowCount > 0 && weatherStubRowCount === 0
+        ? "actual_only"
+        : weatherActualRowCount === 0 && weatherStubRowCount > 0
+          ? "stub_only"
+          : "mixed_actual_and_stub";
+
+  dataset.meta = {
+    ...(dataset.meta ?? {}),
+    weatherSourceSummary,
+    weatherFallbackReason: fallbackReason,
+    weatherCoverageStart: firstDateKey,
+    weatherCoverageEnd: lastDateKey,
+    weatherActualRowCount,
+    weatherStubRowCount,
+    weatherMissingDateCount: missingDateCount,
+  };
 }
 
 function daysInMonthFromYearMonth(yearMonth: string): number | null {
@@ -1263,6 +1344,7 @@ export async function getActualUsageDatasetForHouse(
         canonicalEndMonth: canonicalMonths.length > 0 ? canonicalMonths[canonicalMonths.length - 1] ?? null : null,
       },
     };
+    await hydrateActualUsageDailyWeather({ houseId, dataset });
     return {
       dataset,
       alternatives: {
@@ -1458,36 +1540,7 @@ export async function getActualUsageDatasetForHouse(
       }
     : null;
 
-  if (dataset && dataset.daily.length > 0) {
-    try {
-      const dateKeys = dataset.daily.map((d) => d.date);
-      const firstDateKey = dateKeys[0] ?? null;
-      const lastDateKey = dateKeys[dateKeys.length - 1] ?? null;
-      if (firstDateKey && lastDateKey) {
-        await ensureHouseWeatherBackfill({
-          houseId,
-          startDate: firstDateKey,
-          endDate: lastDateKey,
-        }).catch(() => null);
-      }
-      const wxMap = await getHouseWeatherDays({
-        houseId,
-        dateKeys,
-        kind: "ACTUAL_LAST_YEAR",
-        version: WEATHER_STUB_VERSION,
-      });
-      if (wxMap.size > 0) {
-        dataset.dailyWeather = Object.fromEntries(
-          Array.from(wxMap.entries()).map(([dateKey, w]) => [
-            dateKey,
-            { tAvgF: w.tAvgF, tMinF: w.tMinF, tMaxF: w.tMaxF, hdd65: w.hdd65, cdd65: w.cdd65 },
-          ])
-        );
-      }
-    } catch {
-      // optional: leave dailyWeather unset
-    }
-  }
+  await hydrateActualUsageDailyWeather({ houseId, dataset });
 
   return {
     dataset,
