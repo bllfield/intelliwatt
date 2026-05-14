@@ -271,7 +271,9 @@ describe("one path baseline passthrough", () => {
       })
     );
     expect(artifact.dataset.summary.source).toBe("SMT");
-    expect(artifact.dataset.daily).toEqual(upstreamDataset.daily);
+    expect(artifact.dataset.daily).toEqual([
+      { date: "2026-04-01", kwh: 7.4, source: "ACTUAL", sourceDetail: "ACTUAL" },
+    ]);
     expect(artifact.dataset.monthly).toEqual([{ month: "2026-04", kwh: 7.4 }]);
     expect(artifact.dataset.series.intervals15).toEqual(upstreamDataset.series.intervals15);
     expect(artifact.dataset.meta.baselinePassthrough).toBe(true);
@@ -378,10 +380,10 @@ describe("one path baseline passthrough", () => {
     expect(artifact.dataset.summary.end).toBe("2025-12-31");
     expect(artifact.dataset.summary.totalKwh).toBe(100);
     expect(artifact.dataset.daily).toEqual([
-      { date: "2025-04-25", kwh: 10 },
-      { date: "2025-04-26", kwh: 20 },
-      { date: "2025-04-27", kwh: 30 },
-      { date: "2025-12-31", kwh: 40 },
+      { date: "2025-04-25", kwh: 10, source: "ACTUAL", sourceDetail: "ACTUAL" },
+      { date: "2025-04-26", kwh: 20, source: "ACTUAL", sourceDetail: "ACTUAL" },
+      { date: "2025-04-27", kwh: 30, source: "ACTUAL", sourceDetail: "ACTUAL" },
+      { date: "2025-12-31", kwh: 40, source: "ACTUAL", sourceDetail: "ACTUAL" },
     ]);
     expect(artifact.dataset.monthly).toEqual([
       { month: "2025-04", kwh: 60 },
@@ -458,8 +460,13 @@ describe("one path baseline passthrough", () => {
 
     expect(artifact.dataset.summary.start).toBe("2024-12-02");
     expect(artifact.dataset.summary.end).toBe("2025-12-01");
-    expect(artifact.dataset.daily[0]).toEqual({ date: "2024-12-02", kwh: 10 });
-    expect(artifact.dataset.daily[artifact.dataset.daily.length - 1]).toEqual({ date: "2025-12-01", kwh: 30 });
+    expect(artifact.dataset.daily[0]).toEqual({ date: "2024-12-02", kwh: 10, source: "ACTUAL", sourceDetail: "ACTUAL" });
+    expect(artifact.dataset.daily[artifact.dataset.daily.length - 1]).toEqual({
+      date: "2025-12-01",
+      kwh: 30,
+      source: "ACTUAL",
+      sourceDetail: "ACTUAL",
+    });
     expect(artifact.dataset.meta.upstreamDatasetSummaryStart).toBe("2024-12-02");
     expect(artifact.dataset.meta.upstreamDatasetSummaryEnd).toBe("2025-12-01");
   });
@@ -1097,6 +1104,52 @@ describe("one path baseline passthrough", () => {
     expect(readModel.curveCompareActualIntervals15).toEqual([]);
     expect(readModel.curveCompareSimulatedIntervals15).toEqual([]);
     expect(readModel.curveCompareSimulatedDailyRows).toEqual([]);
+  });
+
+  it("marks Green Button baseline passthrough daily rows as actual when upstream rows omit source labels", async () => {
+    resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue(
+      buildUsageTruth({
+        summary: {
+          source: "GREEN_BUTTON",
+          totalKwh: 14.8,
+          start: "2024-12-02",
+          end: "2024-12-03",
+          latest: "2024-12-03",
+        },
+        daily: [
+          { date: "2024-12-02", kwh: 7.4 },
+          { date: "2024-12-03", kwh: 7.4 },
+        ],
+        monthly: [{ month: "2024-12", kwh: 14.8 }],
+        series: {
+          intervals15: [{ timestamp: "2024-12-02T00:00:00.000Z", kwh: 0.25 }],
+        },
+        meta: { datasetKind: "ACTUAL", actualSource: "GREEN_BUTTON" },
+      })
+    );
+
+    const { runSharedSimulation } = await import("@/modules/onePathSim/onePathSim");
+    const artifact = await runSharedSimulation(
+      buildBaseEngineInput({
+        actualSource: "GREEN_BUTTON",
+        simulatorMode: "GREEN_BUTTON",
+        coverageWindowStart: "2024-12-02",
+        coverageWindowEnd: "2024-12-03",
+        runtime: {
+          ...buildBaseEngineInput().runtime,
+          mode: "GREEN_BUTTON",
+        },
+      })
+    );
+
+    expect(artifact.dataset.daily).toEqual([
+      { date: "2024-12-02", kwh: 7.4, source: "ACTUAL", sourceDetail: "ACTUAL" },
+      { date: "2024-12-03", kwh: 7.4, source: "ACTUAL", sourceDetail: "ACTUAL" },
+    ]);
+    expect(artifact.dataset.series.daily).toEqual([
+      { timestamp: "2024-12-02T00:00:00.000Z", kwh: 7.4, source: "ACTUAL", sourceDetail: "ACTUAL" },
+      { timestamp: "2024-12-03T00:00:00.000Z", kwh: 7.4, source: "ACTUAL", sourceDetail: "ACTUAL" },
+    ]);
   });
 
   it("keeps Past Sim-only curve compare payloads on Past read models", async () => {

@@ -399,7 +399,7 @@ function sumSignedKwhRows(rows: Array<{ kwh: number }>) {
 function buildDailyRowsFromBoundedIntervals(
   rows: Array<{ timestamp: string; kwh: number }>,
   timezone: string
-): Array<{ date: string; kwh: number }> {
+): Array<{ date: string; kwh: number; source: "ACTUAL"; sourceDetail: "ACTUAL" }> {
   const byDate = new Map<string, number>();
   for (const row of rows) {
     const dateKey = dateKeyInTimezone(String(row.timestamp ?? ""), timezone);
@@ -408,7 +408,7 @@ function buildDailyRowsFromBoundedIntervals(
   }
   return Array.from(byDate.entries())
     .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-    .map(([date, kwh]) => ({ date, kwh: Number(kwh.toFixed(2)) }));
+    .map(([date, kwh]) => ({ date, kwh: Number(kwh.toFixed(2)), source: "ACTUAL", sourceDetail: "ACTUAL" }));
 }
 
 function buildMonthlyRowsFromDailyRows(
@@ -595,8 +595,8 @@ function buildIntervalBaselinePassthroughDataset(args: {
     Array.isArray((sourceDataset as any).daily) && (sourceDataset as any).daily.length > 0
       ? ((sourceDataset as any).daily as Array<{ date?: unknown; kwh?: unknown; source?: unknown; sourceDetail?: unknown }>)
           .map((row) => ({
-            ...(typeof row?.source === "string" ? { source: row.source } : {}),
-            ...(typeof row?.sourceDetail === "string" ? { sourceDetail: row.sourceDetail } : {}),
+            source: typeof row?.source === "string" ? row.source : "ACTUAL",
+            sourceDetail: typeof row?.sourceDetail === "string" ? row.sourceDetail : "ACTUAL",
             date: String(row?.date ?? "").slice(0, 10),
             kwh: Number(row?.kwh ?? 0) || 0,
           }))
@@ -685,6 +685,8 @@ function buildIntervalBaselinePassthroughDataset(args: {
       daily: boundedDaily.map((row) => ({
         timestamp: `${row.date}T00:00:00.000Z`,
         kwh: row.kwh,
+        source: row.source,
+        sourceDetail: row.sourceDetail,
       })),
       monthly: monthlyRows.map((row) => ({
         timestamp: `${row.month}-01T00:00:00.000Z`,
