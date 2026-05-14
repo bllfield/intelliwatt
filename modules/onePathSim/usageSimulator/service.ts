@@ -4230,14 +4230,57 @@ async function recalcSimulatorBuildImpl(args: {
     scenarioId,
     mode,
   });
+  const traceCoreContextStep = async <T>(step: string, run: () => Promise<T>): Promise<T> => {
+    const stepStartedAt = Date.now();
+    emitRecalcPreIntervalStageEvent({
+      event: `recalc_pre_interval_core_context_${step}_start`,
+      correlationId: args.correlationId,
+      houseId,
+      actualContextHouseId,
+      scenarioId,
+      mode,
+    });
+    try {
+      const result = await run();
+      emitRecalcPreIntervalStageEvent({
+        event: `recalc_pre_interval_core_context_${step}_success`,
+        correlationId: args.correlationId,
+        houseId,
+        actualContextHouseId,
+        scenarioId,
+        mode,
+        durationMs: Date.now() - stepStartedAt,
+      });
+      return result;
+    } catch (error) {
+      emitRecalcPreIntervalStageEvent({
+        event: `recalc_pre_interval_core_context_${step}_failure`,
+        correlationId: args.correlationId,
+        houseId,
+        actualContextHouseId,
+        scenarioId,
+        mode,
+        durationMs: Date.now() - stepStartedAt,
+        failureCode: "pre_core_step_failed",
+        failureMessage: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  };
 
   // Manual totals runs under a very small Prisma pool in admin environments, so avoid
   // fan-out here and keep the One Path recalc lean before the persisted readback loads richer diagnostics.
-  const manualRec = await (prisma as any).manualUsageInput
-    .findUnique({ where: { userId_houseId: { userId, houseId } }, select: { payload: true } })
-    .catch(() => null);
-  const homeRec = await getHomeProfileSimulatedByUserHouse({ userId, houseId });
-  const applianceRec = await getApplianceProfileSimulatedByUserHouse({ userId, houseId });
+  const manualRec = await traceCoreContextStep("manual_usage_load", () =>
+    (prisma as any).manualUsageInput
+      .findUnique({ where: { userId_houseId: { userId, houseId } }, select: { payload: true } })
+      .catch(() => null)
+  );
+  const homeRec = await traceCoreContextStep("home_profile_load", () =>
+    getHomeProfileSimulatedByUserHouse({ userId, houseId })
+  );
+  const applianceRec = await traceCoreContextStep("appliance_profile_load", () =>
+    getApplianceProfileSimulatedByUserHouse({ userId, houseId })
+  );
 
   let manualUsagePayload = args.manualUsagePayload ?? (manualRec?.payload as any) ?? null;
 
@@ -4251,12 +4294,14 @@ async function recalcSimulatorBuildImpl(args: {
     greenButtonAnchorEndDate: null as string | null,
   };
   if (!isLeanManualTotalsMode(mode)) {
-    const resolvedActualSourceAnchor = await resolveActualUsageSourceAnchor({
-      houseId: actualContextHouseId,
-      esiid: esiid ?? null,
-      timezone: "America/Chicago",
-      preferredSource: preferredActualSource ?? null,
-    });
+    const resolvedActualSourceAnchor = await traceCoreContextStep("actual_source_anchor", () =>
+      resolveActualUsageSourceAnchor({
+        houseId: actualContextHouseId,
+        esiid: esiid ?? null,
+        timezone: "America/Chicago",
+        preferredSource: preferredActualSource ?? null,
+      })
+    );
     actualSourceAnchor = {
       source: resolvedActualSourceAnchor.source,
       anchorEndDate: resolvedActualSourceAnchor.anchorEndDate,
@@ -4274,12 +4319,14 @@ async function recalcSimulatorBuildImpl(args: {
     now: args.now,
   });
   const actualOk = mode === "SMT_BASELINE"
-    ? await hasActualIntervals({
-        houseId: actualContextHouseId,
-        esiid: esiid ?? null,
-        canonicalMonths: canonical.months,
-        preferredSource: preferredActualSource ?? null,
-      })
+    ? await traceCoreContextStep("actual_interval_check", () =>
+        hasActualIntervals({
+          houseId: actualContextHouseId,
+          esiid: esiid ?? null,
+          canonicalMonths: canonical.months,
+          preferredSource: preferredActualSource ?? null,
+        })
+      )
     : false;
 
   // Baseline ladder enforcement (V1): SMT_BASELINE requires actual 15-minute intervals (SMT or Green Button).
@@ -4295,21 +4342,25 @@ async function recalcSimulatorBuildImpl(args: {
   let scenario: { id: string; name: string } | null = null;
   let scenarioEvents: Array<{ id: string; effectiveMonth: string; kind: string; payloadJson: any }> = [];
   if (scenarioId) {
-    scenario = await (prisma as any).usageSimulatorScenario
-      .findFirst({
-        where: { id: scenarioId, userId, houseId, archivedAt: null },
-        select: { id: true, name: true },
-      })
-      .catch(() => null);
+    scenario = await traceCoreContextStep("scenario_load", () =>
+      (prisma as any).usageSimulatorScenario
+        .findFirst({
+          where: { id: scenarioId, userId, houseId, archivedAt: null },
+          select: { id: true, name: true },
+        })
+        .catch(() => null)
+    );
     if (!scenario) return { ok: false, error: "scenario_not_found" };
 
-    scenarioEvents = await (prisma as any).usageSimulatorScenarioEvent
-      .findMany({
-        where: { scenarioId: scenarioId },
-        select: { id: true, effectiveMonth: true, kind: true, payloadJson: true },
-        orderBy: [{ effectiveMonth: "asc" }, { createdAt: "asc" }, { id: "asc" }],
-      })
-      .catch(() => []);
+    scenarioEvents = await traceCoreContextStep("scenario_events_load", () =>
+      (prisma as any).usageSimulatorScenarioEvent
+        .findMany({
+          where: { scenarioId: scenarioId },
+          select: { id: true, effectiveMonth: true, kind: true, payloadJson: true },
+          orderBy: [{ effectiveMonth: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+        })
+        .catch(() => [])
+    );
   }
 
   const scenarioTravelRanges =
@@ -4326,20 +4377,24 @@ async function recalcSimulatorBuildImpl(args: {
   let pastOverlay: ReturnType<typeof computeMonthlyOverlay> | null = null;
 
   if (isFutureScenario) {
-    pastScenario = await (prisma as any).usageSimulatorScenario
-      .findFirst({
-        where: { userId, houseId, name: WORKSPACE_PAST_NAME, archivedAt: null },
-        select: { id: true, name: true },
-      })
-      .catch(() => null);
-    if (pastScenario?.id) {
-      pastEventsForOverlay = await (prisma as any).usageSimulatorScenarioEvent
-        .findMany({
-          where: { scenarioId: pastScenario.id },
-          select: { id: true, effectiveMonth: true, kind: true, payloadJson: true },
-          orderBy: [{ effectiveMonth: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+    pastScenario = await traceCoreContextStep("past_scenario_load", () =>
+      (prisma as any).usageSimulatorScenario
+        .findFirst({
+          where: { userId, houseId, name: WORKSPACE_PAST_NAME, archivedAt: null },
+          select: { id: true, name: true },
         })
-        .catch(() => []);
+        .catch(() => null)
+    );
+    if (pastScenario?.id) {
+      pastEventsForOverlay = await traceCoreContextStep("past_scenario_events_load", () =>
+        (prisma as any).usageSimulatorScenarioEvent
+          .findMany({
+            where: { scenarioId: pastScenario.id },
+            select: { id: true, effectiveMonth: true, kind: true, payloadJson: true },
+            orderBy: [{ effectiveMonth: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+          })
+          .catch(() => [])
+      );
       pastTravelRanges =
         requestedPreLockboxTravelRanges.length > 0
           ? []
@@ -4377,7 +4432,9 @@ async function recalcSimulatorBuildImpl(args: {
         : mode === "MANUAL_TOTALS"
           ? "MANUAL_MONTHLY"
           : "INTERVAL";
-  const simulationVariableOverrides = await getSimulationVariableOverrides();
+  const simulationVariableOverrides = await traceCoreContextStep("simulation_variable_overrides_load", () =>
+    getSimulationVariableOverrides()
+  );
   const simulationVariableResolution = resolveSimulationVariablePolicyForInputType(
     simulationVariableInputType,
     simulationVariableOverrides
@@ -4390,20 +4447,24 @@ async function recalcSimulatorBuildImpl(args: {
       actualContextHouseId.trim().length > 0;
     const weatherSensitivityActualDataset = shouldLoadWeatherSensitivityActualDataset
       ? (
-          await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null, {
-            skipFullYearIntervalFetch: true,
-            preferredSource: preferredActualSource ?? null,
-          })
+          await traceCoreContextStep("weather_actual_dataset_load", () =>
+            getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null, {
+              skipFullYearIntervalFetch: true,
+              preferredSource: preferredActualSource ?? null,
+            })
+          )
         )?.dataset ?? null
       : null;
-    const weatherSensitivityEnvelope = await resolveSharedWeatherSensitivityEnvelope({
-      actualDataset: weatherSensitivityActualDataset,
-      manualUsagePayload: manualUsagePayload as any,
-      homeProfile,
-      applianceProfile,
-      weatherHouseId: actualContextHouseId,
-      simulationVariablePolicy,
-    });
+    const weatherSensitivityEnvelope = await traceCoreContextStep("weather_sensitivity_envelope", () =>
+      resolveSharedWeatherSensitivityEnvelope({
+        actualDataset: weatherSensitivityActualDataset,
+        manualUsagePayload: manualUsagePayload as any,
+        homeProfile,
+        applianceProfile,
+        weatherHouseId: actualContextHouseId,
+        simulationVariablePolicy,
+      })
+    );
     weatherSensitivityScore = weatherSensitivityEnvelope.score;
     weatherEfficiencyDerivedInput = weatherSensitivityEnvelope.derivedInput
       ? {
@@ -4420,12 +4481,14 @@ async function recalcSimulatorBuildImpl(args: {
   let canonicalForBuild = canonical;
   let baselineInputsForRecalc: any = null;
   if (scenarioId) {
-    const baselineBuild = await (prisma as any).usageSimulatorBuild
-      .findUnique({
-        where: { userId_houseId_scenarioKey: { userId, houseId, scenarioKey: "BASELINE" } },
-        select: { buildInputs: true },
-      })
-      .catch(() => null);
+    const baselineBuild = await traceCoreContextStep("baseline_build_load", () =>
+      (prisma as any).usageSimulatorBuild
+        .findUnique({
+          where: { userId_houseId_scenarioKey: { userId, houseId, scenarioKey: "BASELINE" } },
+          select: { buildInputs: true },
+        })
+        .catch(() => null)
+    );
     const baselineInputs = baselineBuild?.buildInputs as any;
     baselineInputsForRecalc = baselineInputs;
     if (
