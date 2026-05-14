@@ -85,6 +85,17 @@ function shiftIsoTimestampByWholeYears(timestamp: string, years: number): string
   ).toISOString();
 }
 
+function shiftDateKeyByWholeYears(dateKey: string, years: number): string | null {
+  const normalized = normalizeDateKey(dateKey);
+  if (!normalized) return null;
+  const parsed = new Date(`${normalized}T12:00:00.000Z`);
+  if (!Number.isFinite(parsed.getTime())) return null;
+  const targetYear = parsed.getUTCFullYear() + years;
+  const monthIndex = parsed.getUTCMonth();
+  const clampedDay = Math.min(parsed.getUTCDate(), new Date(Date.UTC(targetYear, monthIndex + 1, 0)).getUTCDate());
+  return new Date(Date.UTC(targetYear, monthIndex, clampedDay, 12, 0, 0, 0)).toISOString().slice(0, 10);
+}
+
 function coverageWindowFromCanonicalMonths(months: string[]): { startDate: string; endDate: string } | null {
   const first = parseYearMonth(months[0] ?? "");
   const last = parseYearMonth(months[months.length - 1] ?? "");
@@ -297,17 +308,40 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
 
     for (const row of rows) {
       const rawTimestamp = (row.ts instanceof Date ? row.ts : new Date(row.ts)).toISOString();
+      const sourceDateKey = chicagoDateKeyFromIsoTimestamp(rawTimestamp);
+      if (!sourceDateKey) continue;
+      const sourceSlot = chicagoSlot96FromIsoTimestamp(rawTimestamp);
+      if (args.timestampMode === "utcDayGrid") {
+        if (sourceSlot == null) continue;
+        let targetDateKey = sourceDateKey;
+        let yearsShifted = 0;
+        while (targetDateKey < coverageStartDate) {
+          const advanced = shiftDateKeyByWholeYears(sourceDateKey, yearsShifted + 1);
+          if (!advanced || advanced === targetDateKey) break;
+          targetDateKey = advanced;
+          yearsShifted += 1;
+        }
+        if (targetDateKey < coverageStartDate || targetDateKey > coverageEndDate) continue;
+        if (excludeTargetDateKeys.has(targetDateKey)) continue;
+        if (yearsShifted > 0) {
+          shiftedIntervalCount += 1;
+          shiftedDateKeys.add(targetDateKey);
+        }
+        const outputTimestamp = utcGridTimestampForDateSlot(targetDateKey, sourceSlot);
+        byTimestamp.set(outputTimestamp, (byTimestamp.get(outputTimestamp) ?? 0) + (Number(row.kwh) || 0));
+        continue;
+      }
       let rebasedTimestamp = rawTimestamp;
-      let targetDateKey = chicagoDateKeyFromIsoTimestamp(rebasedTimestamp);
-      if (!targetDateKey) continue;
+      let targetDateKey = sourceDateKey;
       let shifted = false;
       while (targetDateKey < coverageStartDate) {
         const advanced = shiftIsoTimestampByWholeYears(rebasedTimestamp, 1);
         if (!advanced || advanced === rebasedTimestamp) break;
         rebasedTimestamp = advanced;
-        targetDateKey = chicagoDateKeyFromIsoTimestamp(rebasedTimestamp);
+        const nextDateKey = chicagoDateKeyFromIsoTimestamp(rebasedTimestamp);
+        if (!nextDateKey) break;
+        targetDateKey = nextDateKey;
         shifted = true;
-        if (!targetDateKey) break;
       }
       if (!targetDateKey || targetDateKey < coverageStartDate || targetDateKey > coverageEndDate) continue;
       if (excludeTargetDateKeys.has(targetDateKey)) continue;
@@ -315,15 +349,7 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
         shiftedIntervalCount += 1;
         shiftedDateKeys.add(targetDateKey);
       }
-      const outputTimestamp =
-        args.timestampMode === "utcDayGrid"
-          ? (() => {
-              const slot = chicagoSlot96FromIsoTimestamp(rebasedTimestamp);
-              return slot == null ? null : utcGridTimestampForDateSlot(targetDateKey, slot);
-            })()
-          : rebasedTimestamp;
-      if (!outputTimestamp) continue;
-      byTimestamp.set(outputTimestamp, (byTimestamp.get(outputTimestamp) ?? 0) + (Number(row.kwh) || 0));
+      byTimestamp.set(rebasedTimestamp, (byTimestamp.get(rebasedTimestamp) ?? 0) + (Number(row.kwh) || 0));
     }
 
     const intervals = Array.from(byTimestamp.entries())

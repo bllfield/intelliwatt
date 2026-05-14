@@ -110,4 +110,30 @@ describe("green button full-day anchor", () => {
     expect(out.intervals[0]).toEqual({ timestamp: "2025-09-01T00:00:00.000Z", kwh: 0.5 });
     expect(out.intervals[95]).toEqual({ timestamp: "2025-09-01T23:45:00.000Z", kwh: 0.5 });
   });
+
+  it("preserves original local slots when shifting Green Button days across DST boundaries", async () => {
+    const sourceLocalDayIntervals = Array.from({ length: 96 }, (_, slot) => ({
+      ts: new Date(new Date("2025-03-08T06:00:00.000Z").getTime() + slot * 15 * 60 * 1000),
+      kwh: 0.25,
+    }));
+    usageQueryRaw
+      .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2025-03-09T05:45:00.000Z") }])
+      .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2025-03-09T05:45:00.000Z") }])
+      .mockResolvedValueOnce([{ bucket: new Date("2025-03-08T06:00:00.000Z"), intervalscount: 96 }])
+      .mockResolvedValueOnce(sourceLocalDayIntervals);
+
+    const mod = await import("@/modules/realUsageAdapter/greenButton");
+    const out = await mod.fetchGreenButtonIntervalsForCoverageWindow({
+      houseId: "house-1",
+      coverageStartDate: "2026-03-08",
+      coverageEndDate: "2026-03-08",
+      timestampMode: "utcDayGrid",
+    });
+
+    expect(out.intervals).toHaveLength(96);
+    expect(out.intervals[0]).toEqual({ timestamp: "2026-03-08T00:00:00.000Z", kwh: 0.25 });
+    expect(out.intervals[95]).toEqual({ timestamp: "2026-03-08T23:45:00.000Z", kwh: 0.25 });
+    expect(out.shiftedIntervalCount).toBe(96);
+    expect(out.shiftedDateCount).toBe(1);
+  });
 });
