@@ -1,5 +1,6 @@
 const TIMELINE_BASE =
   "https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline";
+const DEFAULT_WEATHER_FETCH_TIMEOUT_MS = 30_000;
 
 export type VisualCrossingHourlyRow = {
   timestampUtc: Date;
@@ -50,6 +51,11 @@ function toNum(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function weatherFetchTimeoutMs(): number {
+  const raw = Number(process.env.WEATHER_FETCH_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? Math.min(Math.max(raw, 5_000), 120_000) : DEFAULT_WEATHER_FETCH_TIMEOUT_MS;
+}
+
 async function fetchTimelineJson(args: {
   lat: number;
   lon: number;
@@ -70,10 +76,14 @@ async function fetchTimelineJson(args: {
   const url = `${TIMELINE_BASE}/${path}?${params.toString()}`;
 
   let res: Response;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), weatherFetchTimeoutMs());
   try {
-    res = await fetch(url);
+    res = await fetch(url, { signal: controller.signal });
   } catch (err) {
     throw new Error(`Visual Crossing fetch failed: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    clearTimeout(timeout);
   }
 
   if (!res.ok) {

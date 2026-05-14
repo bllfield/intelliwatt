@@ -5,6 +5,7 @@
 
 const ARCHIVE_BASE = "https://archive-api.open-meteo.com/v1/archive";
 const HISTORICAL_NORMALS_MODEL = "era5";
+const DEFAULT_WEATHER_FETCH_TIMEOUT_MS = 30_000;
 
 export type OpenMeteoHourlyRow = {
   timestampUtc: Date;
@@ -48,14 +49,23 @@ function toNum(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function weatherFetchTimeoutMs(): number {
+  const raw = Number(process.env.WEATHER_FETCH_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? Math.min(Math.max(raw, 5_000), 120_000) : DEFAULT_WEATHER_FETCH_TIMEOUT_MS;
+}
+
 async function fetchArchiveJson(params: URLSearchParams): Promise<ArchiveResponse> {
   const url = `${ARCHIVE_BASE}?${params.toString()}`;
 
   let res: Response;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), weatherFetchTimeoutMs());
   try {
-    res = await fetch(url);
+    res = await fetch(url, { signal: controller.signal });
   } catch (err) {
     throw new Error(`Open-Meteo fetch failed: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    clearTimeout(timeout);
   }
 
   if (!res.ok) {
