@@ -146,8 +146,9 @@ function parseGreenButtonXml(xml) {
     throw new Error(`XML parse error: ${(error === null || error === void 0 ? void 0 : error.message) || error}`);
   }
 
+  const defaultReadingUnit = resolveXmlDefaultReadingUnit(root);
   const readings = [];
-  collectXmlReadings(root, readings);
+  collectXmlReadings(root, readings, defaultReadingUnit);
 
   if (readings.length === 0) {
     warnings.push("Parsed XML successfully, but no interval readings were found.");
@@ -166,11 +167,24 @@ function parseGreenButtonXml(xml) {
   };
 }
 
-function collectXmlReadings(node, out) {
+function resolveXmlDefaultReadingUnit(root) {
+  const title = findFirstScalar(root, "title");
+  const readingType = findFirstNode(root, "ReadingType");
+  const uom = getScalar(readingType?.uom);
+  const multiplier = getScalar(readingType?.powerOfTenMultiplier);
+  if (uom === "72") {
+    return multiplier === "3" ? "kWh" : "Wh";
+  }
+  if (/\bKWH\b/i.test(String(title || ""))) return "kWh";
+  if (/\bWH\b/i.test(String(title || ""))) return "Wh";
+  return null;
+}
+
+function collectXmlReadings(node, out, defaultUnit) {
   if (!node) return;
   if (Array.isArray(node)) {
     for (const entry of node) {
-      collectXmlReadings(entry, out);
+      collectXmlReadings(entry, out, defaultUnit);
     }
     return;
   }
@@ -179,17 +193,17 @@ function collectXmlReadings(node, out) {
     return;
   }
 
-  const reading = readingFromNode(node);
+  const reading = readingFromNode(node, defaultUnit);
   if (reading) {
     out.push(reading);
   }
 
   for (const value of Object.values(node)) {
-    collectXmlReadings(value, out);
+    collectXmlReadings(value, out, defaultUnit);
   }
 }
 
-function readingFromNode(node) {
+function readingFromNode(node, defaultUnit) {
   const start = getScalar(node.start);
   const duration = parseIntOrNull(getScalar(node.duration));
   const value = getScalar(node.value);
@@ -204,7 +218,7 @@ function readingFromNode(node) {
       timestamp: start,
       durationSeconds: duration || undefined,
       value,
-      unit,
+      unit: unit || defaultUnit || undefined,
     };
   }
 
@@ -220,7 +234,7 @@ function readingFromNode(node) {
         timestamp: intervalStart,
         durationSeconds: intervalDuration || undefined,
         value: intervalValue,
-        unit: intervalUnit,
+        unit: intervalUnit || defaultUnit || undefined,
       };
     }
   }
@@ -241,6 +255,30 @@ function getFirstObject(value) {
   }
   if (typeof value === "object") {
     return value;
+  }
+  return null;
+}
+
+function findFirstNode(node, key) {
+  if (!node) return null;
+  if (Array.isArray(node)) {
+    for (const entry of node) {
+      const found = findFirstNode(entry, key);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (typeof node !== "object") return null;
+
+  if (key in node) {
+    const value = node[key];
+    if (value && typeof value === "object" && !Array.isArray(value)) return value;
+    const nested = getFirstObject(value);
+    if (nested) return nested;
+  }
+  for (const value of Object.values(node)) {
+    const found = findFirstNode(value, key);
+    if (found) return found;
   }
   return null;
 }

@@ -48,7 +48,7 @@ function pastDayFallbackToEngineLevel(level: PastDayFallbackLevel): PastFallback
 const DAY_MS = 24 * 60 * 60 * 1000;
 const INTERVAL_MINUTES = 15;
 const INTERVALS_PER_DAY = (24 * 60) / INTERVAL_MINUTES; // 96
-const MIN_TRUSTED_ACTUAL_INTERVALS_PER_DAY = 92;
+const MIN_TRUSTED_ACTUAL_INTERVALS_PER_DAY = 90;
 
 function isYearMonth(s: string): boolean {
   return /^\d{4}-\d{2}$/.test(String(s ?? "").trim());

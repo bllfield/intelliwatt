@@ -15,7 +15,7 @@ describe("shared actual day completeness", () => {
   it("keeps near-complete SMT/interval days actual instead of simulating extra usage", () => {
     const intervals = intervalsForSlots(
       "2026-01-01",
-      Array.from({ length: 92 }, (_, slot) => slot),
+      Array.from({ length: 90 }, (_, slot) => slot),
       1
     );
 
@@ -27,14 +27,14 @@ describe("shared actual day completeness", () => {
     });
 
     expect(completed).toHaveLength(96);
-    expect(completed.reduce((sum, row) => sum + row.kwh, 0)).toBe(92);
-    expect(completed.slice(92).every((row) => row.kwh === 0)).toBe(true);
+    expect(completed.reduce((sum, row) => sum + row.kwh, 0)).toBe(90);
+    expect(completed.slice(90).every((row) => row.kwh === 0)).toBe(true);
   });
 
   it("still simulates substantially incomplete interval days", () => {
     const intervals = intervalsForSlots(
       "2026-01-01",
-      Array.from({ length: 91 }, (_, slot) => slot),
+      Array.from({ length: 89 }, (_, slot) => slot),
       1
     );
 
@@ -46,7 +46,7 @@ describe("shared actual day completeness", () => {
     });
 
     expect(completed).toHaveLength(96);
-    expect(completed.reduce((sum, row) => sum + row.kwh, 0)).not.toBe(91);
+    expect(completed.reduce((sum, row) => sum + row.kwh, 0)).not.toBe(89);
   });
 
   it("labels near-complete actual days as ACTUAL in the shared Past Sim engine", () => {
@@ -56,7 +56,7 @@ describe("shared actual day completeness", () => {
     buildPastSimulatedBaselineV1({
       actualIntervals: intervalsForSlots(
         "2026-01-01",
-        Array.from({ length: 92 }, (_, slot) => slot),
+        Array.from({ length: 90 }, (_, slot) => slot),
         1
       ),
       canonicalDayStartsMs: [dayStartMs],
