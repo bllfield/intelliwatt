@@ -1861,6 +1861,28 @@ export async function POST(request: NextRequest) {
 
   if ((action === "lookup" || !action) && (!includeDebugDiagnostics || lightweightLookupRequested)) {
     const travelRangesFromDb = await getOnePathTravelRangesFromDb(effectiveUserId, effectiveHouseId).catch(() => []);
+    const includeLightweightProfiles = lightweightLookupRequested || previewMode === "GREEN_BUTTON";
+    const lightweightHomeProfilePromise = !includeLightweightProfiles
+      ? Promise.resolve(null)
+      : syncedPinnedProfiles?.homeProfile
+        ? Promise.resolve(syncedPinnedProfiles.homeProfile)
+        : getHomeProfileReadOnlyByUserHouse({ userId: effectiveUserId, houseId: effectiveHouseId }).catch(() => null);
+    const lightweightApplianceProfilePromise = !includeLightweightProfiles
+      ? Promise.resolve(null)
+      : syncedPinnedProfiles?.applianceProfile
+        ? Promise.resolve(syncedPinnedProfiles.applianceProfile)
+        : getApplianceProfileSimulatedByUserHouse({ userId: effectiveUserId, houseId: effectiveHouseId }).catch(() => null);
+    const [lightweightHomeProfile, lightweightApplianceProfileRecord] = await Promise.all([
+      lightweightHomeProfilePromise,
+      lightweightApplianceProfilePromise,
+    ]);
+    const lightweightFallbackHomeProfile =
+      includeLightweightProfiles && lightweightHomeProfile == null && syncedPinnedProfiles?.homeProfile == null
+        ? await getHomeProfileSimulatedByUserHouse({ userId: effectiveUserId, houseId: effectiveHouseId }).catch(() => null)
+        : null;
+    const lightweightApplianceProfile = normalizeStoredApplianceProfile(
+      (lightweightApplianceProfileRecord as any)?.appliancesJson ?? null
+    );
     const previewActualContextHouseId =
       typeof body?.actualContextHouseId === "string" && body.actualContextHouseId.trim()
         ? defaultActualContextHouseId
@@ -1900,6 +1922,8 @@ export async function POST(request: NextRequest) {
         debugDiagnosticsIncluded: false,
         onePathTestHome: onePathTestHomeSummary,
         travelRangesFromDb,
+        homeProfile: lightweightHomeProfile ?? lightweightFallbackHomeProfile ?? null,
+        applianceProfile: lightweightApplianceProfile,
         greenButtonUpload,
         ...(effectiveManualUsagePayload
           ? {

@@ -1483,7 +1483,7 @@ export async function adaptGreenButtonRawInput(raw: IntervalRawInput): Promise<C
     seedUsageTruthIfMissing: false,
     weatherScoringMode: "interval",
     preferredActualSource: "GREEN_BUTTON",
-    skipOptionalEnrichment: true,
+    skipOptionalEnrichment: isBaselineGreenButtonRun,
     skipLightweightInsightRecompute: true,
   });
   return buildCanonicalEngineInput({

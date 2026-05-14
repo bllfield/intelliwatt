@@ -774,6 +774,53 @@ describe("admin one path sim route", () => {
     );
   });
 
+  it("keeps home and appliance profiles in lightweight green button lookup responses", async () => {
+    getHomeProfileReadOnlyByUserHouse.mockResolvedValueOnce({
+      squareFeet: 2400,
+      occupantsWork: 1,
+      occupantsSchool: 1,
+      occupantsHomeAllDay: 0,
+      fuelConfiguration: "all_electric",
+      hvacType: "central",
+      heatingType: "heat_pump",
+    });
+    getApplianceProfileSimulatedByUserHouse.mockResolvedValueOnce({
+      appliancesJson: { fuelConfiguration: "all_electric", appliances: [{ type: "pool_pump" }] },
+    });
+    normalizeStoredApplianceProfile.mockReturnValueOnce({
+      fuelConfiguration: "all_electric",
+      appliances: [{ type: "pool_pump" }],
+    });
+
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const res = await POST(
+      buildRequest({
+        action: "lookup",
+        email: "customer@example.com",
+        houseId: "house-1",
+        actualContextHouseId: "house-1",
+        mode: "GREEN_BUTTON",
+        includeDebugDiagnostics: false,
+        lightweightLookup: true,
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.sourceContext.homeProfile).toEqual(
+      expect.objectContaining({
+        squareFeet: 2400,
+        occupantsWork: 1,
+        occupantsSchool: 1,
+      })
+    );
+    expect(json.sourceContext.applianceProfile).toEqual(
+      expect.objectContaining({
+        fuelConfiguration: "all_electric",
+      })
+    );
+  });
+
   it("returns a compact baseline view for green button lookup debug mode", async () => {
     const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
     const res = await POST(
