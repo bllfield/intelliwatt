@@ -1664,6 +1664,21 @@ export async function POST(request: NextRequest) {
           readModel: asRecord(readModel),
         }) ??
         null;
+      if (mode === "GREEN_BUTTON" && effectiveRawInputBase.scenarioId) {
+        return NextResponse.json({
+          ok: true,
+          debugDiagnosticsIncluded: false,
+          debugDiagnosticsSuppressedReason: "green_button_past_sim_compact_response",
+          runType: "PAST_SIM",
+          engineInput: slimEngineInput,
+          smtRefreshCheck,
+          smtIncompleteMeterRetry,
+          manualStageOneView: readModel.manualStageOneView ?? null,
+          runDisplayView,
+          artifact: null,
+          readModel: null,
+        });
+      }
       if (!includeDebugDiagnostics) {
         return NextResponse.json({
           ok: true,

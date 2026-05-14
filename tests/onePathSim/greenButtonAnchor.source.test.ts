@@ -38,6 +38,17 @@ describe("one path green button anchor wiring", () => {
     expect(actualDatasetSource).toContain("const rangeStart = selectedWindowStartDate ?? canonicalWindow.startDate;");
   });
 
+  it("keeps Green Button raw selection on latest uploaded usable raw before timestamp fallback", () => {
+    const greenButtonSource = readRepoFile("modules/realUsageAdapter/greenButton.ts");
+    const uploadIdentityIndex = greenButtonSource.indexOf("latestUsableRawByUploadIdentity");
+    const timestampFallbackIndex = greenButtonSource.indexOf("latestUsableRawFromIntervals");
+
+    expect(uploadIdentityIndex).toBeGreaterThanOrEqual(0);
+    expect(timestampFallbackIndex).toBeGreaterThanOrEqual(0);
+    expect(uploadIdentityIndex).toBeLessThan(timestampFallbackIndex);
+    expect(greenButtonSource).toContain('ORDER BY r."createdAt" DESC');
+  });
+
   it("threads Green Button actual-source identity into shared Past Sim build inputs", () => {
     const userServiceSource = readRepoFile("modules/usageSimulator/service.ts");
     const onePathServiceSource = readRepoFile("modules/onePathSim/usageSimulator/service.ts");
