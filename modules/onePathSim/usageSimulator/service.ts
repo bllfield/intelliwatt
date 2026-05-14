@@ -4452,6 +4452,7 @@ async function recalcSimulatorBuildImpl(args: {
             getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null, {
               skipFullYearIntervalFetch: true,
               preferredSource: preferredActualSource ?? null,
+              skipLightweightInsightRecompute: true,
             })
           )
         )?.dataset ?? null
@@ -4558,6 +4559,7 @@ async function recalcSimulatorBuildImpl(args: {
       const sourceUsageDataset = await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null, {
         skipFullYearIntervalFetch: true,
         preferredSource: preferredActualSource ?? null,
+        skipLightweightInsightRecompute: true,
       }).catch(() => ({ dataset: null }));
       if (!actualSource) {
         const sourceFromDataset = String(sourceUsageDataset?.dataset?.summary?.source ?? "").trim().toUpperCase();
@@ -4949,7 +4951,9 @@ async function recalcSimulatorBuildImpl(args: {
   if (simMode === "SMT_BASELINE") {
     try {
       const actualResult = await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null, {
+        skipFullYearIntervalFetch: true,
         preferredSource: preferredActualSource ?? null,
+        skipLightweightInsightRecompute: true,
       });
       const start = actualResult?.dataset?.summary?.start ? String(actualResult.dataset.summary.start).slice(0, 10) : null;
       const end = actualResult?.dataset?.summary?.end ? String(actualResult.dataset.summary.end).slice(0, 10) : null;
