@@ -1396,7 +1396,12 @@ export async function POST(request: NextRequest) {
     } as const;
     const effectiveRawInputBase = {
       ...rawInputBase,
-      preferredActualSource: mode === "GREEN_BUTTON" ? "GREEN_BUTTON" : rawInputBase.preferredActualSource,
+      preferredActualSource:
+        mode === "INTERVAL"
+          ? "SMT"
+          : mode === "GREEN_BUTTON"
+            ? "GREEN_BUTTON"
+            : rawInputBase.preferredActualSource,
     } as const;
     const adminManualSeeds =
       isManualMode

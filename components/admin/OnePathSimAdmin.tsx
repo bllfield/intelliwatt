@@ -1104,7 +1104,7 @@ export function OnePathSimAdmin() {
           scenarioId: effectiveScenarioId || null,
           mode,
           actualContextHouseId: effectiveActualContextHouseId || null,
-          preferredActualSource: mode === "GREEN_BUTTON" ? "GREEN_BUTTON" : null,
+          preferredActualSource: mode === "INTERVAL" ? "SMT" : mode === "GREEN_BUTTON" ? "GREEN_BUTTON" : null,
           weatherPreference,
           validationSelectionMode,
           validationDayCount: Number(validationDayCount) || null,

@@ -308,4 +308,15 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(onePathSource).toContain("skipLightweightInsightRecompute: true");
     expect(routeSource).toContain("buildPastSimRunReadbackResponse");
   });
+
+  it("hard-gates admin interval runs to SMT and Green Button runs to Green Button", () => {
+    const source = readRepoFile("components/admin/OnePathSimAdmin.tsx");
+    const routeSource = readRepoFile("app/api/admin/tools/one-path-sim/route.ts");
+
+    expect(source).toContain('preferredActualSource: mode === "INTERVAL" ? "SMT" : mode === "GREEN_BUTTON" ? "GREEN_BUTTON" : null');
+    expect(routeSource).toContain('mode === "INTERVAL"');
+    expect(routeSource).toContain('? "SMT"');
+    expect(routeSource).toContain('mode === "GREEN_BUTTON"');
+    expect(routeSource).toContain('? "GREEN_BUTTON"');
+  });
 });
