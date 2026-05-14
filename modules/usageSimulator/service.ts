@@ -4073,8 +4073,10 @@ async function recalcSimulatorBuildImpl(args: {
     buildPathKind: args.runContext?.buildPathKind ?? "recalc",
     persistRequested: args.runContext?.persistRequested ?? (args.persistPastSimBaseline === true),
     adminLabTreatmentMode: args.runContext?.adminLabTreatmentMode ?? args.adminLabTreatmentMode ?? undefined,
+    preferredActualSource: args.runContext?.preferredActualSource ?? undefined,
     asyncMetadata: args.runContext?.asyncMetadata ?? undefined,
   });
+  const preferredActualSource = runContext.preferredActualSource ?? undefined;
   const initialLockboxInput = buildInitialPastSimLockboxInput({
     houseId,
     actualContextHouseId,
@@ -4133,6 +4135,7 @@ async function recalcSimulatorBuildImpl(args: {
       houseId: actualContextHouseId,
       esiid: esiid ?? null,
       timezone: "America/Chicago",
+      preferredSource: preferredActualSource ?? null,
     });
     actualSourceAnchor = {
       source: resolvedActualSourceAnchor.source,

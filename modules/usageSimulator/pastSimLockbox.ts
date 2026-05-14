@@ -58,6 +58,7 @@ export type PastSimRunContext = {
   buildPathKind: "recalc" | "cold_build" | "lab_validation" | "cache_restore";
   persistRequested: boolean;
   adminLabTreatmentMode?: string;
+  preferredActualSource?: "SMT" | "GREEN_BUTTON";
   asyncMetadata?: { jobId?: string; queueFlags?: Record<string, unknown> };
 };
 
@@ -162,6 +163,7 @@ export function buildPastSimRunContext(args: {
   buildPathKind?: "recalc" | "cold_build" | "lab_validation" | "cache_restore";
   persistRequested?: boolean;
   adminLabTreatmentMode?: string | null;
+  preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
   asyncMetadata?: { jobId?: string; queueFlags?: Record<string, unknown> } | null;
 }): PastSimRunContext {
   return {
@@ -170,6 +172,7 @@ export function buildPastSimRunContext(args: {
     buildPathKind: args.buildPathKind ?? "recalc",
     persistRequested: args.persistRequested === true,
     ...(args.adminLabTreatmentMode ? { adminLabTreatmentMode: String(args.adminLabTreatmentMode) } : {}),
+    ...(args.preferredActualSource ? { preferredActualSource: args.preferredActualSource } : {}),
     ...(args.asyncMetadata ? { asyncMetadata: args.asyncMetadata } : {}),
   };
 }
