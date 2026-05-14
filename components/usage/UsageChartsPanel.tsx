@@ -80,6 +80,8 @@ export function UsageChartsPanel(props: {
   dailyWeather?: Record<string, { tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number; source?: string }> | null;
   /** When set and daily table shows weather, display this truthful basis (e.g. stub/test vs actual cached). */
   weatherBasisLabel?: string | null;
+  /** Optional read-only disclosure shown below the daily chart/table. */
+  dailyUsageDisclosureNote?: string | null;
   fifteenCurve: FifteenMinuteAverage[];
   emptyFifteenCurveMessage?: string | null;
   summaryTotalKwh?: number | null;
@@ -102,6 +104,7 @@ export function UsageChartsPanel(props: {
     daily,
     dailyWeather,
     weatherBasisLabel,
+    dailyUsageDisclosureNote,
     fifteenCurve,
     emptyFifteenCurveMessage,
     summaryTotalKwh,
@@ -562,6 +565,9 @@ export function UsageChartsPanel(props: {
                 </table>
               </div>
               )}
+              {dailyUsageDisclosureNote ? (
+                <p className="mt-2 text-xs text-neutral-500">{dailyUsageDisclosureNote}</p>
+              ) : null}
             </>
           ) : (
             <p className="text-xs text-neutral-500">No daily data available yet.</p>

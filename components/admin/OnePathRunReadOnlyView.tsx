@@ -185,6 +185,7 @@ export function OnePathRunReadOnlyView(props: {
         daily={view.dailyRows}
         dailyWeather={view.dailyWeather ?? undefined}
         weatherBasisLabel={view.summary.weatherBasisLabel ?? undefined}
+        dailyUsageDisclosureNote={view.summary.dailyUsageDisclosureNote ?? undefined}
         fifteenCurve={view.fifteenMinuteAverages}
         summaryTotalKwh={view.summary.totals.netKwh}
         coverageStart={view.summary.coverageStart}

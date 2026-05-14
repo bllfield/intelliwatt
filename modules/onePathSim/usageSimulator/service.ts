@@ -158,12 +158,27 @@ async function attachSelectedDailyWeatherForDataset(args: {
   const timezone =
     String(args.buildInputs.timezone ?? args.fallbackTimezone ?? "America/Chicago").trim() ||
     "America/Chicago";
+  const sourceDateByTargetDate =
+    dataset?.meta?.greenButtonSourceDateByTargetDate &&
+    typeof dataset.meta.greenButtonSourceDateByTargetDate === "object" &&
+    !Array.isArray(dataset.meta.greenButtonSourceDateByTargetDate)
+      ? (dataset.meta.greenButtonSourceDateByTargetDate as Record<string, unknown>)
+      : null;
+  const weatherLookupDateByDisplayDate = new Map<string, string>();
+  for (const dateKey of dateKeys) {
+    const sourceDateKey = String(sourceDateByTargetDate?.[dateKey] ?? dateKey).slice(0, 10);
+    weatherLookupDateByDisplayDate.set(
+      dateKey,
+      /^\d{4}-\d{2}-\d{2}$/.test(sourceDateKey) ? sourceDateKey : dateKey
+    );
+  }
+  const weatherLookupDateKeys = Array.from(new Set(Array.from(weatherLookupDateByDisplayDate.values()))).sort();
   let skippedLatLng = false;
   if (weatherLogicMode === "LAST_YEAR_ACTUAL_WEATHER") {
     const backfill = await ensureHouseWeatherBackfill({
       houseId: weatherHouseId,
-      startDate: dateKeys[0]!,
-      endDate: dateKeys[dateKeys.length - 1]!,
+      startDate: weatherLookupDateKeys[0]!,
+      endDate: weatherLookupDateKeys[weatherLookupDateKeys.length - 1]!,
       timezone,
       allowOutsideCanonicalCoverage: true,
     });
@@ -176,11 +191,20 @@ async function attachSelectedDailyWeatherForDataset(args: {
     skippedLatLng = backfill.skippedLatLng === true;
   }
   const weatherKind = resolveWeatherKindForLogicMode(weatherLogicMode);
-  const wxMap = await getHouseWeatherDays({
+  const lookupWxMap = await getHouseWeatherDays({
     houseId: weatherHouseId,
-    dateKeys,
+    dateKeys: weatherLookupDateKeys,
     kind: weatherKind,
   });
+  const wxMap = new Map(
+    dateKeys
+      .map((dateKey: string) => {
+        const lookupDateKey = weatherLookupDateByDisplayDate.get(dateKey) ?? dateKey;
+        const weather = lookupWxMap.get(lookupDateKey);
+        return weather ? ([dateKey, weather] as const) : null;
+      })
+      .filter((entry): entry is readonly [string, NonNullable<ReturnType<typeof lookupWxMap.get>>] => entry != null)
+  );
   const weatherAvailability = summarizeOnePathWeatherAvailability({
     expectedDateKeys: dateKeys,
     wxMap,
@@ -203,6 +227,13 @@ async function attachSelectedDailyWeatherForDataset(args: {
   (dataset as any).meta.weatherCoverageEnd = weatherAvailability.weatherCoverageEnd;
   (dataset as any).meta.weatherStubRowCount = weatherAvailability.weatherStubRowCount;
   (dataset as any).meta.weatherActualRowCount = weatherAvailability.weatherActualRowCount;
+  if (sourceDateByTargetDate) {
+    const shiftedWeatherDisplayDateCount = Array.from(weatherLookupDateByDisplayDate.entries()).filter(
+      ([displayDate, lookupDate]) => displayDate !== lookupDate
+    ).length;
+    (dataset as any).meta.greenButtonShiftedWeatherDisplayDateCount = shiftedWeatherDisplayDateCount || undefined;
+    (dataset as any).meta.greenButtonWeatherDisplayUsesSourceDateMap = shiftedWeatherDisplayDateCount > 0 || undefined;
+  }
   (dataset as any).meta.weatherMissingDateCount = weatherAvailability.missingDateCount;
   (dataset as any).meta.weatherMissingDateKeys = weatherAvailability.missingDateKeys;
   (dataset as any).meta.weatherTrustStatus = weatherGuard.weatherTrustStatus;

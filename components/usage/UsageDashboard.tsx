@@ -996,6 +996,7 @@ export const UsageDashboard: React.FC<Props> = ({
               daily={derived.daily}
               dailyWeather={derived.dailyWeather ?? undefined}
               weatherBasisLabel={coverage?.weatherBasisLabel ?? undefined}
+              dailyUsageDisclosureNote={coverage?.dailyUsageDisclosureNote ?? undefined}
               fifteenCurve={derived.fifteenCurve}
               summaryTotalKwh={derived.totalKwh}
               coverageStart={coverage?.start ?? null}

@@ -35,6 +35,33 @@ function getWeatherBasisLabel(meta: Record<string, unknown>): string | null {
   return null;
 }
 
+function buildGreenButtonShiftDisclosure(meta: Record<string, unknown>): string | null {
+  const sourceMap =
+    meta.greenButtonSourceDateByTargetDate &&
+    typeof meta.greenButtonSourceDateByTargetDate === "object" &&
+    !Array.isArray(meta.greenButtonSourceDateByTargetDate)
+      ? (meta.greenButtonSourceDateByTargetDate as Record<string, unknown>)
+      : null;
+  if (!sourceMap) return null;
+  const shiftedPairs = Object.entries(sourceMap)
+    .map(([targetDate, sourceDate]) => [asDateKey(targetDate), asDateKey(sourceDate)] as const)
+    .filter(
+      (pair): pair is readonly [string, string] =>
+        pair[0] != null &&
+        pair[1] != null &&
+        pair[0] !== pair[1]
+    );
+  if (shiftedPairs.length === 0) return null;
+  const targetDates = shiftedPairs.map(([targetDate]) => targetDate).sort();
+  const sourceDates = shiftedPairs.map(([, sourceDate]) => sourceDate).sort();
+  const targetStart = targetDates[0];
+  const targetEnd = targetDates[targetDates.length - 1];
+  const sourceStart = sourceDates[0];
+  const sourceEnd = sourceDates[sourceDates.length - 1];
+  if (!targetStart || !targetEnd || !sourceStart || !sourceEnd) return null;
+  return `Green Button disclosure: usage intervals from ${sourceStart} - ${sourceEnd} were shifted to display on ${targetStart} - ${targetEnd}; the interval usage and weather shown are real historical records from the original source dates.`;
+}
+
 function deriveTotalsFromRows(rows: Array<{ kwh: number }>) {
   let importKwh = 0;
   let exportKwh = 0;
@@ -167,6 +194,7 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
     intervalsCount: dataset?.summary?.intervalsCount ?? null,
     hasSimulatedFill,
     weatherBasisLabel: getWeatherBasisLabel(meta),
+    dailyUsageDisclosureNote: buildGreenButtonShiftDisclosure(meta),
     sourceOfDaySimulationCore: (meta.sourceOfDaySimulationCore as string) || null,
   };
 

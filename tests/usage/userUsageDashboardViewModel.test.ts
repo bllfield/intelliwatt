@@ -234,4 +234,39 @@ describe("user usage dashboard view model", () => {
       { month: "2026-04", kwh: 1656.48 },
     ]);
   });
+
+  it("discloses shifted Green Button source-date intervals and weather", () => {
+    const viewModel = buildUserUsageDashboardViewModel({
+      dataset: {
+        summary: {
+          source: "GREEN_BUTTON",
+          intervalsCount: 192,
+          totalKwh: 20,
+          start: "2026-01-01",
+          end: "2026-01-02",
+        },
+        totals: { importKwh: 20, exportKwh: 0, netKwh: 20 },
+        monthly: [{ month: "2026-01", kwh: 20 }],
+        daily: [
+          { date: "2026-01-01", kwh: 10, source: "ACTUAL", sourceDetail: "ACTUAL" },
+          { date: "2026-01-02", kwh: 10, source: "ACTUAL", sourceDetail: "ACTUAL" },
+        ],
+        meta: {
+          datasetKind: "SIMULATED",
+          actualSource: "GREEN_BUTTON",
+          coverageStart: "2026-01-01",
+          coverageEnd: "2026-01-02",
+          greenButtonSourceDateByTargetDate: {
+            "2026-01-01": "2025-01-01",
+            "2026-01-02": "2025-01-02",
+          },
+        },
+      },
+      datasetError: null,
+    });
+
+    expect(viewModel?.coverage.dailyUsageDisclosureNote).toBe(
+      "Green Button disclosure: usage intervals from 2025-01-01 - 2025-01-02 were shifted to display on 2026-01-01 - 2026-01-02; the interval usage and weather shown are real historical records from the original source dates."
+    );
+  });
 });

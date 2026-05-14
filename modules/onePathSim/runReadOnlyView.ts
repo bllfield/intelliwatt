@@ -93,6 +93,7 @@ export type OnePathRunReadOnlyView = {
     displayWindowNote: string | null;
     intervalsCount: number | null;
     weatherBasisLabel: string | null;
+    dailyUsageDisclosureNote: string | null;
     sourceOfDaySimulationCore: string | null;
     hasSimulatedFill: boolean;
     totals: { importKwh: number; exportKwh: number; netKwh: number };
@@ -341,6 +342,7 @@ export function buildOnePathRunReadOnlyView(args: {
           : null,
       intervalsCount: viewModel.coverage.intervalsCount,
       weatherBasisLabel: viewModel.coverage.weatherBasisLabel,
+      dailyUsageDisclosureNote: viewModel.coverage.dailyUsageDisclosureNote,
       sourceOfDaySimulationCore: viewModel.coverage.sourceOfDaySimulationCore,
       hasSimulatedFill: Boolean(viewModel.coverage.hasSimulatedFill),
       totals: viewModel.derived.totals,

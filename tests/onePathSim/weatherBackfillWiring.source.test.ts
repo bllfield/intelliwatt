@@ -34,4 +34,13 @@ describe("one path weather backfill wiring", () => {
     expect(liveUsageRouteSource).not.toContain("resolveOnePathWeatherGuardDecision");
     expect(liveUsageRouteSource).not.toContain("summarizeOnePathWeatherAvailability");
   });
+
+  it("uses Green Button source-date weather when shifted intervals are displayed on target dates", () => {
+    const onePathSource = readRepoFile("modules/onePathSim/usageSimulator/service.ts");
+
+    expect(onePathSource).toContain("greenButtonSourceDateByTargetDate");
+    expect(onePathSource).toContain("weatherLookupDateByDisplayDate");
+    expect(onePathSource).toContain("greenButtonWeatherDisplayUsesSourceDateMap");
+    expect(onePathSource).toContain("dateKeys: weatherLookupDateKeys");
+  });
 });
