@@ -59,6 +59,7 @@ describe("one path green button preset wiring", () => {
     const actualSource = readRepoFile("modules/realUsageAdapter/actual.ts");
     const onePathBuildSource = readRepoFile("modules/onePathSim/usageSimulator/build.ts");
     const onePathServiceSource = readRepoFile("modules/onePathSim/usageSimulator/service.ts");
+    const usageServiceSource = readRepoFile("modules/usageSimulator/service.ts");
 
     expect(onePathSource).toContain("preferredActualSource?: \"SMT\" | \"GREEN_BUTTON\" | null;");
     expect(onePathSource).toContain("preferredActualSource: raw.preferredActualSource ?? null");
@@ -74,6 +75,7 @@ describe("one path green button preset wiring", () => {
     expect(onePathBuildSource).toContain("preferredSource: args.preferredActualSource ?? null");
     expect(onePathServiceSource).toContain("preferredSource: preferredActualSource ?? null");
     expect(onePathServiceSource).toContain("preferredActualSource: preferredActualSource ?? null");
+    expect(usageServiceSource).toContain("preferredSource: preferredActualSource ?? null");
   });
 
   it("keeps One Path test-home usage cleanup sequential for single-connection usage DB pools", () => {

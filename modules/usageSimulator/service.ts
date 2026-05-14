@@ -4249,9 +4249,15 @@ async function recalcSimulatorBuildImpl(args: {
   const simulationVariablePolicy = simulationVariableResolution.effective;
   try {
     const shouldLoadWeatherSensitivityActualDataset =
+      mode !== "MANUAL_TOTALS" &&
       typeof actualContextHouseId === "string" && actualContextHouseId.trim().length > 0;
     const weatherSensitivityActualDataset = shouldLoadWeatherSensitivityActualDataset
-      ? (await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null, { skipFullYearIntervalFetch: true }))?.dataset ?? null
+      ? (
+          await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null, {
+            skipFullYearIntervalFetch: true,
+            preferredSource: preferredActualSource ?? null,
+          })
+        )?.dataset ?? null
       : null;
     const weatherSensitivityEnvelope = await resolveSharedWeatherSensitivityEnvelope({
       actualDataset: weatherSensitivityActualDataset,
@@ -4345,6 +4351,7 @@ async function recalcSimulatorBuildImpl(args: {
           : null;
       const sourceUsageDataset = await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null, {
         skipFullYearIntervalFetch: true,
+        preferredSource: preferredActualSource ?? null,
       }).catch(() => ({ dataset: null }));
       if (!actualSource) {
         const sourceFromDataset = String(sourceUsageDataset?.dataset?.summary?.source ?? "").trim().toUpperCase();
@@ -4737,7 +4744,9 @@ async function recalcSimulatorBuildImpl(args: {
   let validationSetupFailed = false;
   if (simMode === "SMT_BASELINE") {
     try {
-      const actualResult = await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null);
+      const actualResult = await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null, {
+        preferredSource: preferredActualSource ?? null,
+      });
       const start = actualResult?.dataset?.summary?.start ? String(actualResult.dataset.summary.start).slice(0, 10) : null;
       const end = actualResult?.dataset?.summary?.end ? String(actualResult.dataset.summary.end).slice(0, 10) : null;
       if (start && end && /^\d{4}-\d{2}-\d{2}$/.test(start) && /^\d{4}-\d{2}-\d{2}$/.test(end)) {
@@ -6111,6 +6120,7 @@ export async function recalcSimulatorBuild(
     userId: args.userId,
     houseId: args.houseId,
     mode: String(args.mode),
+    preferredActualSource: args.runContext?.preferredActualSource ?? null,
     scenarioId: scenarioIdForLog,
     source: "recalcSimulatorBuild",
   });
@@ -6125,6 +6135,7 @@ export async function recalcSimulatorBuild(
         userId: args.userId,
         houseId: args.houseId,
         mode: String(args.mode),
+        preferredActualSource: args.runContext?.preferredActualSource ?? null,
         scenarioId: scenarioIdForLog,
         buildInputsHash: result.buildInputsHash,
         source: "recalcSimulatorBuild",
@@ -6141,6 +6152,7 @@ export async function recalcSimulatorBuild(
         userId: args.userId,
         houseId: args.houseId,
         mode: String(args.mode),
+        preferredActualSource: args.runContext?.preferredActualSource ?? null,
         scenarioId: scenarioIdForLog,
         failureCode: result.error,
         failureMessage,
@@ -6157,6 +6169,7 @@ export async function recalcSimulatorBuild(
       userId: args.userId,
       houseId: args.houseId,
       mode: String(args.mode),
+      preferredActualSource: args.runContext?.preferredActualSource ?? null,
       scenarioId: scenarioIdForLog,
       failureCode: "exception",
       failureMessage: e instanceof Error ? e.message : String(e),
