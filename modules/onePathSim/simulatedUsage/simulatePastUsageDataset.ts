@@ -815,6 +815,81 @@ function collectMissingOrStubWeatherDateKeys(args: {
   });
 }
 
+function weatherRowIsActual(row: unknown): boolean {
+  if (!row || typeof row !== "object") return false;
+  const source = String((row as { source?: unknown }).source ?? "").trim();
+  return source.length > 0 && source !== WEATHER_STUB_SOURCE;
+}
+
+async function remapShiftedGreenButtonWeatherToSourceDays<T>(args: {
+  houseId: string;
+  timezone?: string | null;
+  baseWeatherByTargetDate: Map<string, T>;
+  sourceDateByTargetDate?: Record<string, string> | null;
+}): Promise<{
+  weatherByTargetDate: Map<string, T>;
+  shiftedWeatherDateCount: number;
+  sourceWeatherCoverageStart: string | null;
+  sourceWeatherCoverageEnd: string | null;
+}> {
+  const shiftedPairs = Object.entries(args.sourceDateByTargetDate ?? {})
+    .map(([targetDate, sourceDate]) => [String(targetDate).slice(0, 10), String(sourceDate).slice(0, 10)] as const)
+    .filter(
+      ([targetDate, sourceDate]) =>
+        /^\d{4}-\d{2}-\d{2}$/.test(targetDate) &&
+        /^\d{4}-\d{2}-\d{2}$/.test(sourceDate) &&
+        targetDate !== sourceDate
+    );
+  if (shiftedPairs.length === 0) {
+    return {
+      weatherByTargetDate: args.baseWeatherByTargetDate,
+      shiftedWeatherDateCount: 0,
+      sourceWeatherCoverageStart: null,
+      sourceWeatherCoverageEnd: null,
+    };
+  }
+
+  const sourceDateKeys = Array.from(new Set(shiftedPairs.map(([, sourceDate]) => sourceDate))).sort();
+  const sourceStart = sourceDateKeys[0] ?? null;
+  const sourceEnd = sourceDateKeys[sourceDateKeys.length - 1] ?? null;
+  if (sourceStart && sourceEnd) {
+    await ensureHouseWeatherBackfill({
+      houseId: args.houseId,
+      startDate: sourceStart,
+      endDate: sourceEnd,
+      timezone: args.timezone ?? "America/Chicago",
+      allowOutsideCanonicalCoverage: true,
+    });
+  }
+
+  const sourceWeatherByDate = await getHouseWeatherDays({
+    houseId: args.houseId,
+    dateKeys: sourceDateKeys,
+    kind: "ACTUAL_LAST_YEAR",
+  });
+  const missingSourceWeather = sourceDateKeys.filter((sourceDate) => !weatherRowIsActual(sourceWeatherByDate.get(sourceDate)));
+  if (missingSourceWeather.length > 0) {
+    throw new Error(
+      `actual_weather_required:green_button_shifted_source_weather_missing:${missingSourceWeather.slice(0, 5).join(",")}`
+    );
+  }
+
+  const remapped = new Map(args.baseWeatherByTargetDate);
+  let shiftedWeatherDateCount = 0;
+  for (const [targetDate, sourceDate] of shiftedPairs) {
+    const sourceWeather = sourceWeatherByDate.get(sourceDate);
+    if (!sourceWeather) continue;
+    remapped.set(targetDate, sourceWeather as T);
+    shiftedWeatherDateCount += 1;
+  }
+  return {
+    weatherByTargetDate: remapped,
+    shiftedWeatherDateCount,
+    sourceWeatherCoverageStart: sourceStart,
+    sourceWeatherCoverageEnd: sourceEnd,
+  };
+}
+
 function prevDateKey(dateKey: string): string | null {
   const key = String(dateKey ?? "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return null;
@@ -1778,7 +1853,27 @@ export async function simulatePastUsageDataset(
     if (!weatherLoaded) {
       throw new Error("weather_load_unavailable");
     }
-    const { actualWxByDateKey, normalWxByDateKey, selectedWeatherByDateKey, provenance } = weatherLoaded;
+    let { actualWxByDateKey, normalWxByDateKey, selectedWeatherByDateKey, provenance } = weatherLoaded;
+    let greenButtonShiftedWeatherDateCount = 0;
+    let greenButtonWeatherSourceCoverageStart: string | null = null;
+    let greenButtonWeatherSourceCoverageEnd: string | null = null;
+    if (
+      intervalActualSource === "GREEN_BUTTON" &&
+      greenButtonCoverageIntervals?.shiftedDateCount &&
+      provenance.weatherLogicMode !== "LONG_TERM_AVERAGE_WEATHER"
+    ) {
+      const remappedActualWeather = await remapShiftedGreenButtonWeatherToSourceDays({
+        houseId: actualHouseId,
+        timezone,
+        baseWeatherByTargetDate: actualWxByDateKey,
+        sourceDateByTargetDate: greenButtonCoverageIntervals.sourceDateByTargetDate,
+      });
+      actualWxByDateKey = remappedActualWeather.weatherByTargetDate;
+      selectedWeatherByDateKey = remappedActualWeather.weatherByTargetDate;
+      greenButtonShiftedWeatherDateCount = remappedActualWeather.shiftedWeatherDateCount;
+      greenButtonWeatherSourceCoverageStart = remappedActualWeather.sourceWeatherCoverageStart;
+      greenButtonWeatherSourceCoverageEnd = remappedActualWeather.sourceWeatherCoverageEnd;
+    }
     const postWeatherPrepStartedAt = Date.now();
     logSimPipelineEvent("day_simulation_post_weather_prep_start", {
       correlationId,
@@ -2517,6 +2612,10 @@ export async function simulatePastUsageDataset(
           greenButtonSourceCoverageEnd: greenButtonCoverageIntervals?.sourceCoverageEnd ?? undefined,
           greenButtonShiftedIntervalCount: greenButtonCoverageIntervals?.shiftedIntervalCount ?? undefined,
           greenButtonShiftedDateCount: greenButtonCoverageIntervals?.shiftedDateCount ?? undefined,
+          greenButtonSourceDateByTargetDate: greenButtonCoverageIntervals?.sourceDateByTargetDate ?? undefined,
+          greenButtonShiftedWeatherDateCount: greenButtonShiftedWeatherDateCount || undefined,
+          greenButtonWeatherSourceCoverageStart: greenButtonWeatherSourceCoverageStart ?? undefined,
+          greenButtonWeatherSourceCoverageEnd: greenButtonWeatherSourceCoverageEnd ?? undefined,
           actualDayCount:
             typeof pastDayCounts.totalDays === "number" && typeof pastDayCounts.simulatedDays === "number"
               ? pastDayCounts.totalDays - pastDayCounts.simulatedDays
@@ -2566,7 +2665,9 @@ export async function simulatePastUsageDataset(
           weatherUsed,
           weatherNote: weatherUsed
             ? smtBaselineStrictWeather
-              ? `Weather integrated in shared past path (${provenance.weatherSourceSummary}).`
+              ? greenButtonShiftedWeatherDateCount > 0
+                ? `Weather integrated in shared past path (${provenance.weatherSourceSummary}); shifted Green Button days use matching source-day weather.`
+                : `Weather integrated in shared past path (${provenance.weatherSourceSummary}).`
               : `Weather integrated in shared past path (${provenance.weatherSourceSummary}${
                   normalFilledDateKeyCount > 0
                     ? `; normal-climate gap-fill ${normalFilledDateKeyCount} day(s)`

@@ -83,6 +83,8 @@ describe("green button full-day anchor", () => {
     expect(out.shiftedIntervalCount).toBe(1);
     expect(out.shiftedDateCount).toBe(1);
     expect(String(out.displayWindowNote ?? "")).toContain("shifted into the current coverage window");
+    expect(String(out.displayWindowNote ?? "")).toContain("matching source-day weather");
+    expect(out.sourceDateByTargetDate?.["2026-01-15"]).toBe("2025-01-15");
     expect(out.sourceCoverageStart).toBe("2024-12-02");
     expect(out.sourceCoverageEnd).toBe("2025-12-01");
   });
@@ -111,6 +113,38 @@ describe("green button full-day anchor", () => {
     expect(out.intervals[95]).toEqual({ timestamp: "2025-09-01T23:45:00.000Z", kwh: 0.5 });
   });
 
+  it("repairs duplicate Green Button timestamps into adjacent missing Past Sim slots", async () => {
+    const localDayStartMs = new Date("2025-09-01T05:00:00.000Z").getTime();
+    const localDayIntervals = [
+      { ts: new Date(localDayStartMs), kwh: 0.1 },
+      { ts: new Date(localDayStartMs), kwh: 0.2 },
+      ...Array.from({ length: 94 }, (_, index) => ({
+        ts: new Date(localDayStartMs + (index + 2) * 15 * 60 * 1000),
+        kwh: 0.5,
+      })),
+    ];
+    usageQueryRaw
+      .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2025-09-02T04:45:00.000Z") }])
+      .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2025-09-02T04:45:00.000Z") }])
+      .mockResolvedValueOnce([{ bucket: new Date("2025-09-01T05:00:00.000Z"), intervalscount: 96 }])
+      .mockResolvedValueOnce(localDayIntervals);
+
+    const mod = await import("@/modules/realUsageAdapter/greenButton");
+    const out = await mod.fetchGreenButtonIntervalsForCoverageWindow({
+      houseId: "house-1",
+      coverageStartDate: "2025-09-01",
+      coverageEndDate: "2025-09-01",
+      timestampMode: "utcDayGrid",
+    });
+
+    expect(out.intervals).toHaveLength(96);
+    expect(out.repairedDuplicateIntervalCount).toBe(1);
+    expect(out.repairedDuplicateDateCount).toBe(1);
+    expect(out.paddedIntervalCount).toBe(0);
+    expect(out.intervals[0]).toEqual({ timestamp: "2025-09-01T00:00:00.000Z", kwh: 0.1 });
+    expect(out.intervals[1]).toEqual({ timestamp: "2025-09-01T00:15:00.000Z", kwh: 0.2 });
+  });
+
   it("preserves original local slots when shifting Green Button days across DST boundaries", async () => {
     const sourceLocalDayIntervals = Array.from({ length: 96 }, (_, slot) => ({
       ts: new Date(new Date("2025-03-08T06:00:00.000Z").getTime() + slot * 15 * 60 * 1000),
@@ -135,6 +169,7 @@ describe("green button full-day anchor", () => {
     expect(out.intervals[95]).toEqual({ timestamp: "2026-03-08T23:45:00.000Z", kwh: 0.25 });
     expect(out.shiftedIntervalCount).toBe(96);
     expect(out.shiftedDateCount).toBe(1);
+    expect(out.sourceDateByTargetDate?.["2026-03-08"]).toBe("2025-03-08");
   });
 
   it("pads complete DST-short Green Button days onto the Past Sim 96-slot grid", async () => {

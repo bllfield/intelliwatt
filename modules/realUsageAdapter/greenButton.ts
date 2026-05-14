@@ -125,6 +125,9 @@ export type GreenButtonCoverageWindowIntervals = {
   shiftedDateCount: number;
   paddedIntervalCount?: number;
   paddedDateCount?: number;
+  repairedDuplicateIntervalCount?: number;
+  repairedDuplicateDateCount?: number;
+  sourceDateByTargetDate?: Record<string, string>;
   displayWindowNote: string | null;
 };
 
@@ -253,6 +256,7 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
       sourceCoverageEnd: null,
       shiftedIntervalCount: 0,
       shiftedDateCount: 0,
+      sourceDateByTargetDate: {},
       displayWindowNote: null,
     };
   }
@@ -265,6 +269,7 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
       sourceCoverageEnd: null,
       shiftedIntervalCount: 0,
       shiftedDateCount: 0,
+      sourceDateByTargetDate: {},
       displayWindowNote: null,
     };
   }
@@ -278,6 +283,7 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
       sourceCoverageEnd: null,
       shiftedIntervalCount: 0,
       shiftedDateCount: 0,
+      sourceDateByTargetDate: {},
       displayWindowNote: null,
     };
   }
@@ -309,9 +315,12 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
     const sourceSlotCountsByDate = new Map<string, number>();
     const sourceDateByTargetDate = new Map<string, string>();
     const targetSlotsByDate = new Map<string, Set<number>>();
+    const targetSlotValuesByDate = new Map<string, Map<number, number[]>>();
     let shiftedIntervalCount = 0;
     let paddedIntervalCount = 0;
     let paddedDateCount = 0;
+    let repairedDuplicateIntervalCount = 0;
+    let repairedDuplicateDateCount = 0;
 
     for (const row of rows) {
       const rawTimestamp = (row.ts instanceof Date ? row.ts : new Date(row.ts)).toISOString();
@@ -341,6 +350,11 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
         const targetSlots = targetSlotsByDate.get(targetDateKey) ?? new Set<number>();
         targetSlots.add(sourceSlot);
         targetSlotsByDate.set(targetDateKey, targetSlots);
+        const slotValues = targetSlotValuesByDate.get(targetDateKey) ?? new Map<number, number[]>();
+        const values = slotValues.get(sourceSlot) ?? [];
+        values.push(Number(row.kwh) || 0);
+        slotValues.set(sourceSlot, values);
+        targetSlotValuesByDate.set(targetDateKey, slotValues);
         continue;
       }
       let rebasedTimestamp = rawTimestamp;
@@ -361,10 +375,37 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
         shiftedIntervalCount += 1;
         shiftedDateKeys.add(targetDateKey);
       }
+      sourceDateByTargetDate.set(targetDateKey, sourceDateKey);
       byTimestamp.set(rebasedTimestamp, (byTimestamp.get(rebasedTimestamp) ?? 0) + (Number(row.kwh) || 0));
     }
 
     if (args.timestampMode === "utcDayGrid") {
+      for (const [targetDateKey, slotValues] of Array.from(targetSlotValuesByDate.entries())) {
+        const slots = targetSlotsByDate.get(targetDateKey);
+        if (!slots) continue;
+        const missingSlots = Array.from({ length: 96 }, (_, slot) => slot).filter((slot) => !slots.has(slot));
+        if (missingSlots.length === 0) continue;
+        const duplicateExtras: number[] = [];
+        for (const [slot, values] of Array.from(slotValues.entries()).sort(([left], [right]) => left - right)) {
+          if (values.length <= 1) continue;
+          const timestamp = utcGridTimestampForDateSlot(targetDateKey, slot);
+          byTimestamp.set(timestamp, values[0] ?? 0);
+          duplicateExtras.push(...values.slice(1));
+        }
+        if (duplicateExtras.length === 0) continue;
+        let repairedThisDate = 0;
+        for (const slot of missingSlots) {
+          const value = duplicateExtras.shift();
+          if (value == null) break;
+          const timestamp = utcGridTimestampForDateSlot(targetDateKey, slot);
+          byTimestamp.set(timestamp, value);
+          slots.add(slot);
+          repairedDuplicateIntervalCount += 1;
+          repairedThisDate += 1;
+        }
+        if (repairedThisDate > 0) repairedDuplicateDateCount += 1;
+      }
+
       for (const [targetDateKey, slots] of Array.from(targetSlotsByDate.entries())) {
         if (slots.size === 0 || slots.size >= 96) continue;
         const sourceDateKey = sourceDateByTargetDate.get(targetDateKey);
@@ -398,7 +439,7 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
       .sort((left, right) => (left.timestamp < right.timestamp ? -1 : left.timestamp > right.timestamp ? 1 : 0));
     const displayWindowNote =
       shiftedIntervalCount > 0
-        ? "Historical Green Button intervals were shifted into the current coverage window so available actual data stays in the Past Sim pool up to the current date. Travel/Vacant dates remain excluded."
+        ? "Historical Green Button intervals and their matching source-day weather were shifted into the current coverage window so available actual data stays in the Past Sim pool up to the current date. Travel/Vacant dates remain excluded."
         : null;
 
     return {
@@ -410,6 +451,11 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
       shiftedDateCount: shiftedDateKeys.size,
       paddedIntervalCount,
       paddedDateCount,
+      repairedDuplicateIntervalCount,
+      repairedDuplicateDateCount,
+      sourceDateByTargetDate: Object.fromEntries(
+        Array.from(sourceDateByTargetDate.entries()).sort(([left], [right]) => left.localeCompare(right))
+      ),
       displayWindowNote,
     };
   } catch {
@@ -420,6 +466,7 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
       sourceCoverageEnd: sourceCoverageWindow.endDate,
       shiftedIntervalCount: 0,
       shiftedDateCount: 0,
+      sourceDateByTargetDate: {},
       displayWindowNote: null,
     };
   }
