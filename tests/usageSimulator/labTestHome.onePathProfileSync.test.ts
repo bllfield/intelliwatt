@@ -193,4 +193,83 @@ describe("syncOnePathMissingProfilesFromSource", () => {
       occupantsHomeAllDay: 0,
     });
   });
+
+  it("repairs an invalid existing test-home profile from a valid source profile before run", async () => {
+    getHomeProfileSimulatedByUserHouse
+      .mockResolvedValueOnce({
+        homeAge: 8,
+        homeStyle: "brick",
+        squareFeet: 2100,
+        stories: 2,
+        insulationType: "fiberglass",
+        windowType: "double_pane",
+        foundation: "slab",
+        ledLights: true,
+        smartThermostat: true,
+        summerTemp: 73,
+        winterTemp: 68,
+        occupantsWork: 0,
+        occupantsSchool: 0,
+        occupantsHomeAllDay: 0,
+        fuelConfiguration: "all_electric",
+        hvacType: "central",
+        heatingType: "heat_pump",
+        hasPool: false,
+        poolPumpType: null,
+        poolPumpHp: null,
+        poolSummerRunHoursPerDay: null,
+        poolWinterRunHoursPerDay: null,
+        hasPoolHeater: false,
+        poolHeaterType: null,
+      })
+      .mockResolvedValueOnce({
+        homeAge: 8,
+        homeStyle: "brick",
+        squareFeet: 2100,
+        stories: 2,
+        insulationType: "fiberglass",
+        windowType: "double_pane",
+        foundation: "slab",
+        ledLights: true,
+        smartThermostat: true,
+        summerTemp: 73,
+        winterTemp: 68,
+        occupantsWork: 2,
+        occupantsSchool: 0,
+        occupantsHomeAllDay: 0,
+        fuelConfiguration: "all_electric",
+        hvacType: "central",
+        heatingType: "heat_pump",
+        hasPool: false,
+        poolPumpType: null,
+        poolPumpHp: null,
+        poolSummerRunHoursPerDay: null,
+        poolWinterRunHoursPerDay: null,
+        hasPoolHeater: false,
+        poolHeaterType: null,
+      });
+    getApplianceProfileSimulatedByUserHouse.mockResolvedValue(null);
+
+    const { syncOnePathMissingProfilesFromSource } = await import("@/modules/usageSimulator/labTestHome");
+
+    const result = await syncOnePathMissingProfilesFromSource({
+      ownerUserId: "owner-1",
+      sourceUserId: "source-1",
+      sourceHouseId: "source-house-1",
+      testHomeHouseId: "test-home-1",
+    });
+
+    expect(homeProfileUpsert).toHaveBeenCalledTimes(1);
+    const payload = homeProfileUpsert.mock.calls[0]?.[0];
+    expect(payload.update).toMatchObject({
+      occupantsWork: 2,
+      occupantsSchool: 0,
+      occupantsHomeAllDay: 0,
+    });
+    expect(result.homeProfile).toMatchObject({
+      occupantsWork: 2,
+      occupantsSchool: 0,
+      occupantsHomeAllDay: 0,
+    });
+  });
 });

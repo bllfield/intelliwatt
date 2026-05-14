@@ -702,9 +702,8 @@ export async function syncOnePathMissingProfilesFromSource(args: {
   if (
     sourceHomeProfileForPersistence &&
     (!syncedHomeProfile ||
-      (shouldOverwriteExisting &&
-        shouldRepairTargetHomeProfile &&
-        JSON.stringify(syncedHomeProfile) !== JSON.stringify(sourceHomeProfile)))
+      (shouldRepairTargetHomeProfile && JSON.stringify(syncedHomeProfile) !== JSON.stringify(sourceHomeProfile)) ||
+      (shouldOverwriteExisting && JSON.stringify(syncedHomeProfile) !== JSON.stringify(sourceHomeProfile)))
   ) {
     await (homeDetailsPrisma as any).homeProfileSimulated.upsert({
       where: { userId_houseId: { userId: args.ownerUserId, houseId: args.testHomeHouseId } },
