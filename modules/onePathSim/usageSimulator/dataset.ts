@@ -977,6 +977,8 @@ export type SimulatorBuildInputsV1 = {
    * These keys remain ACTUAL in baseline display surfaces and are used for compare projection sidecar output.
    */
   validationOnlyDateKeysLocal?: string[];
+  /** Actual validation-day totals from the same source interval pool used by the selector. */
+  validationActualDailyKwhByDateLocal?: Record<string, number>;
   /** Effective selector used for this build's validation-day selection. */
   effectiveValidationSelectionMode?:
     | "manual"
@@ -1138,6 +1140,8 @@ export type SimulatedUsageDatasetMeta = {
    * These keys stay actual in baseline display/totals and are used by compare projection surfaces.
    */
   validationOnlyDateKeysLocal?: string[];
+  /** Actual validation-day totals from the same source interval pool used by the selector. */
+  validationActualDailyKwhByDateLocal?: Record<string, number>;
   /** Effective selector used when this artifact/build was generated. */
   effectiveValidationSelectionMode?:
     | "manual"
@@ -1383,6 +1387,7 @@ export function buildSimulatedUsageDatasetFromBuildInputs(
       filledMonths: buildInputs.filledMonths ?? [],
       monthlyTargetConstructionDiagnostics: buildInputs.monthlyTargetConstructionDiagnostics ?? null,
       manualMonthlyInputState: buildInputs.manualMonthlyInputState ?? null,
+      validationActualDailyKwhByDateLocal: buildInputs.validationActualDailyKwhByDateLocal,
       excludedDays: curve.meta.excludedDays,
       renormalized: curve.meta.renormalized,
       sharedProducerPathUsed: false,
@@ -1457,6 +1462,7 @@ export function buildSimulatedUsageDatasetFromCurve(
     sharedProducerPathUsed?: boolean;
     weatherSensitivityScore?: WeatherSensitivityScore | null;
     weatherEfficiencyDerivedInput?: WeatherEfficiencyDerivedInput | null;
+    validationActualDailyKwhByDateLocal?: Record<string, number>;
   },
   options?: {
     excludedDateKeys?: Set<string>;
@@ -1787,6 +1793,7 @@ export function buildSimulatedUsageDatasetFromCurve(
       sharedProducerPathUsed: meta.sharedProducerPathUsed ?? false,
       weatherSensitivityScore: meta.weatherSensitivityScore ?? null,
       weatherEfficiencyDerivedInput: meta.weatherEfficiencyDerivedInput ?? null,
+      validationActualDailyKwhByDateLocal: meta.validationActualDailyKwhByDateLocal,
       canonicalArtifactSimulatedDayTotalsByDate,
       simulatedTravelVacantDateKeysLocal,
       simulatedTestModeledDateKeysLocal,

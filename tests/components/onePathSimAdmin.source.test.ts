@@ -319,4 +319,15 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(routeSource).toContain('mode === "GREEN_BUTTON"');
     expect(routeSource).toContain('? "GREEN_BUTTON"');
   });
+
+  it("keeps Green Button compare selection tied to the actual simulation interval pool", () => {
+    const serviceSource = readRepoFile("modules/onePathSim/usageSimulator/service.ts");
+    const datasetSource = readRepoFile("modules/onePathSim/usageSimulator/dataset.ts");
+
+    expect(serviceSource).toContain('scenarioIdentity: `past_shared:${actualSource ?? preferredActualSource ?? "AUTO"}:${scenarioId ?? "BASELINE"}`');
+    expect(serviceSource).toContain("returnIntervalsForWindow: true");
+    expect(serviceSource).toContain("buildActualDailyKwhByDateLocalFromIntervals");
+    expect(serviceSource).toContain("validationActualDailyKwhByDateLocal");
+    expect(datasetSource).toContain("validationActualDailyKwhByDateLocal?: Record<string, number>;");
+  });
 });
