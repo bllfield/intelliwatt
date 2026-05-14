@@ -1,14 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const getActualIntervalsForRangeMock = vi.fn();
+const fetchGreenButtonIntervalsForCoverageWindowMock = vi.fn();
 
 vi.mock("@/lib/usage/actualDatasetForHouse", () => ({
   getActualIntervalsForRange: (...args: unknown[]) => getActualIntervalsForRangeMock(...args),
 }));
 
+vi.mock("@/modules/realUsageAdapter/greenButton", () => ({
+  fetchGreenButtonIntervalsForCoverageWindow: (...args: unknown[]) =>
+    fetchGreenButtonIntervalsForCoverageWindowMock(...args),
+}));
+
 describe("recalc interval preload context", () => {
   beforeEach(() => {
     getActualIntervalsForRangeMock.mockReset();
+    fetchGreenButtonIntervalsForCoverageWindowMock.mockReset();
   });
 
   it("reuses full-window intervals for repeated same-window requests", async () => {
@@ -34,6 +41,9 @@ describe("recalc interval preload context", () => {
     expect(first.intervals.length).toBe(2);
     expect(second.intervals.length).toBe(2);
     expect(getActualIntervalsForRangeMock).toHaveBeenCalledTimes(1);
+    expect(getActualIntervalsForRangeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ preferredSource: null })
+    );
     expect(ctx.getStats()).toMatchObject({
       fetchCount: 1,
       reuseCount: 1,
@@ -83,6 +93,32 @@ describe("recalc interval preload context", () => {
     expect(validationLoad.cacheHit).toBe(false);
     expect(simulationLoad.cacheHit).toBe(true);
     expect(getActualIntervalsForRangeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rebases Green Button preload intervals onto the shared UTC day grid", async () => {
+    fetchGreenButtonIntervalsForCoverageWindowMock.mockResolvedValue({
+      intervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.4 }],
+    });
+    const { createRecalcIntervalPreloadContext } = await import(
+      "@/modules/usageSimulator/recalcIntervalPreload"
+    );
+    const ctx = createRecalcIntervalPreloadContext({
+      houseId: "h1",
+      esiid: "e1",
+      preferredSource: "GREEN_BUTTON",
+      source: "test",
+    });
+
+    const out = await ctx.getIntervals({ startDate: "2026-01-01", endDate: "2026-12-31" });
+
+    expect(out.intervals).toEqual([{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.4 }]);
+    expect(fetchGreenButtonIntervalsForCoverageWindowMock).toHaveBeenCalledWith({
+      houseId: "h1",
+      coverageStartDate: "2026-01-01",
+      coverageEndDate: "2026-12-31",
+      timestampMode: "utcDayGrid",
+    });
+    expect(getActualIntervalsForRangeMock).not.toHaveBeenCalled();
   });
 });
 

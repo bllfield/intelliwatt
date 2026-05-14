@@ -1,4 +1,6 @@
 import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
+import { fetchGreenButtonIntervalsForCoverageWindow } from "@/modules/realUsageAdapter/greenButton";
+import type { ActualUsageSource } from "@/modules/realUsageAdapter/actual";
 import { getMemoryRssMb, logSimPipelineEvent } from "@/modules/usageSimulator/simObservability";
 
 export type RecalcIntervalPoint = { timestamp: string; kwh: number };
@@ -11,6 +13,7 @@ type IntervalWindowLoad = {
 export function createRecalcIntervalPreloadContext(args: {
   houseId: string;
   esiid: string | null;
+  preferredSource?: ActualUsageSource | null;
   correlationId?: string;
   source?: string;
 }) {
@@ -48,17 +51,26 @@ export function createRecalcIntervalPreloadContext(args: {
     }
 
     const startedAt = Date.now();
-    const loadPromise = getActualIntervalsForRange({
-      houseId: args.houseId,
-      esiid: args.esiid,
-      startDate: windowArgs.startDate,
-      endDate: windowArgs.endDate,
-    }).then((rows) =>
-      (rows ?? []).map((row) => ({
-        timestamp: String(row?.timestamp ?? ""),
-        kwh: Number(row?.kwh) || 0,
-      }))
-    );
+    const loadPromise =
+      args.preferredSource === "GREEN_BUTTON"
+        ? fetchGreenButtonIntervalsForCoverageWindow({
+            houseId: args.houseId,
+            coverageStartDate: windowArgs.startDate,
+            coverageEndDate: windowArgs.endDate,
+            timestampMode: "utcDayGrid",
+          }).then((out) => out.intervals)
+        : getActualIntervalsForRange({
+            houseId: args.houseId,
+            esiid: args.esiid,
+            startDate: windowArgs.startDate,
+            endDate: windowArgs.endDate,
+            preferredSource: args.preferredSource ?? null,
+          }).then((rows) =>
+            (rows ?? []).map((row) => ({
+              timestamp: String(row?.timestamp ?? ""),
+              kwh: Number(row?.kwh) || 0,
+            }))
+          );
     cache.set(key, loadPromise);
     fetchCount += 1;
     const intervals = await loadPromise;

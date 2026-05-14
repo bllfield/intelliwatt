@@ -4854,10 +4854,14 @@ async function recalcSimulatorBuildImpl(args: {
   const pastSharedSimChainModes: SimulatorBuildInputsV1["mode"][] = ["SMT_BASELINE", "MANUAL_TOTALS", "NEW_BUILD_ESTIMATE"];
   const shouldUseSharedPastProducer = scenario?.name === WORKSPACE_PAST_NAME && pastSharedSimChainModes.includes(simMode);
   const recalcIntervalPreload =
-    simMode === "SMT_BASELINE" && scenario?.name === WORKSPACE_PAST_NAME && actualSource !== "GREEN_BUTTON"
+    simMode === "SMT_BASELINE" &&
+    scenario?.name === WORKSPACE_PAST_NAME &&
+    actualSource !== "GREEN_BUTTON" &&
+    preferredActualSource !== "GREEN_BUTTON"
       ? createRecalcIntervalPreloadContext({
           houseId: actualContextHouseId,
           esiid: esiid ?? null,
+          preferredSource: preferredActualSource ?? null,
           correlationId: args.correlationId,
           source: "recalcSimulatorBuildImpl",
         })
@@ -5117,7 +5121,7 @@ async function recalcSimulatorBuildImpl(args: {
           homeProfile,
           applianceProfile,
           manualUsagePayload,
-          actualSource: built.source?.actualSource ?? actualSource ?? null,
+          actualSource: preferredActualSource ?? built.source?.actualSource ?? actualSource ?? null,
           actualMonthlyAnchorsByMonth: built.source?.actualMonthlyAnchorsByMonth ?? undefined,
           actualIntradayShape96: built.source?.actualIntradayShape96 ?? undefined,
           smtMonthlyAnchorsByMonth: built.source?.smtMonthlyAnchorsByMonth ?? undefined,
