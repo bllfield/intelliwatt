@@ -58,6 +58,7 @@ export type SimObservabilityRecalcPayload = {
   userId?: string;
   houseId?: string;
   mode?: string;
+  preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
   scenarioId?: string | null;
   buildInputsHash?: string;
   failureCode?: string;
