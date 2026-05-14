@@ -304,7 +304,7 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(routeSource).toContain("runSharedSimulation(engineInput)");
     expect(routeSource).not.toContain("past_recalc_requires_droplet_async");
     expect(routeSource).not.toContain("dispatchPastSimRecalc");
-    expect(onePathSource).toContain("skipOptionalEnrichment: true");
+    expect(onePathSource).toContain("skipOptionalEnrichment: isBaselineGreenButtonRun");
     expect(onePathSource).toContain("skipLightweightInsightRecompute: true");
     expect(routeSource).toContain("buildPastSimRunReadbackResponse");
     expect(routeSource).toContain("debugDiagnosticsSuppressedReason: \"past_sim_compact_response\"");

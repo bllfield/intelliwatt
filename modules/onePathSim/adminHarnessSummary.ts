@@ -50,7 +50,11 @@ export function buildOnePathSandboxHarnessSummary(args: {
   const datasetMeta = asRecord(dataset.meta);
   const datasetSummary = asRecord(dataset.summary);
   const compareProjection = asRecord(readModel.compareProjection);
-  const compareRows = asArray(compareProjection.rows);
+  const displayCompare = asRecord(runDisplayView.compare);
+  const compareRows = asArray(compareProjection.rows).length
+    ? asArray(compareProjection.rows)
+    : asArray(displayCompare.rows);
+  const compareMetrics = compareProjection.metrics ?? displayCompare.metrics ?? null;
   const actualMonthlyReference = asRecord(engineInput.actualMonthlyReference);
   const datasetMonthlyRows =
     asArray<Record<string, unknown>>(dataset.monthly).length > 0
@@ -125,7 +129,7 @@ export function buildOnePathSandboxHarnessSummary(args: {
       datasetSummary: displaySummary,
       datasetMonthlyRows,
       datasetMonthlyTotalKwh: sumMonthlyRows(datasetMonthlyRows),
-      compareProjectionMetrics: compareProjection.metrics ?? null,
+      compareProjectionMetrics: compareMetrics,
       manualMonthlyReconciliation: readModel.manualMonthlyReconciliation ?? null,
       manualParitySummary: readModel.manualParitySummary ?? null,
     },
@@ -143,7 +147,7 @@ export function buildOnePathSandboxHarnessSummary(args: {
     },
     compareVisibility: {
       compareProjectionRowsCount: compareRows.length,
-      compareProjectionMetrics: compareProjection.metrics ?? null,
+      compareProjectionMetrics: compareMetrics,
       actualCurveIntervalsCount: asArray(readModel.curveCompareActualIntervals15).length,
       simulatedCurveIntervalsCount: asArray(readModel.curveCompareSimulatedIntervals15).length,
       simulatedCurveDailyRowsCount: asArray(readModel.curveCompareSimulatedDailyRows).length,

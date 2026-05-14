@@ -481,6 +481,73 @@ describe("one path simulation variable copy payload", () => {
     );
   });
 
+  it("copies compact Past display compare rows when read model is suppressed", () => {
+    const payload = buildSimulationVariableCopyPayload({
+      mode: "GREEN_BUTTON",
+      response: {
+        familyMeta: {},
+        defaults: {},
+        effectiveByMode: { GREEN_BUTTON: {} },
+        overrides: {},
+      },
+      engineInput: {
+        inputType: "GREEN_BUTTON",
+        simulatorMode: "GREEN_BUTTON",
+        scenarioId: "past-scenario-1",
+      },
+      readModel: null,
+      runDisplayView: {
+        summary: {
+          source: "GREEN_BUTTON with simulated fill for Travel/Vacant",
+          coverageStart: "2025-05-13",
+          coverageEnd: "2026-05-12",
+          intervalsCount: 35040,
+          weatherBasisLabel: "Weather basis: actual cached weather data",
+        },
+        monthlyRows: [{ month: "2026-05", kwh: 1619.69 }],
+        dailyRows: [{ date: "2026-05-12", kwh: 60.02, source: "ACTUAL" }],
+        fifteenMinuteAverages: [{ hhmm: "00:00", avgKw: 1.34 }],
+        fifteenMinuteCurveSourceOwner: "buildUserUsageDashboardViewModel(...).derived.fifteenCurve",
+        stitchedMonth: null,
+        compare: {
+          rows: [{ localDate: "2025-06-02", actualDayKwh: 64.76, simulatedDayKwh: 65.37 }],
+          metrics: { wape: 12.11, mae: 8.27, rmse: 11.67 },
+        },
+      },
+      sandboxSummary: {
+        runStatus: {
+          runType: "PAST_SIM",
+        },
+      },
+      intervalPastReadinessTrace: {
+        status: "blocked_for_interval_past",
+        compareCapableNow: false,
+        exactBlocker: null,
+      },
+    } as any);
+
+    expect((payload.runDisplayContract as any)?.compare).toEqual(
+      expect.objectContaining({
+        rowsCount: 1,
+        metrics: { wape: 12.11, mae: 8.27, rmse: 11.67 },
+        sourceOwner: "runDisplayView.compare",
+      })
+    );
+    expect((payload.runResults as any)).toEqual(
+      expect.objectContaining({
+        compareProjectionRowsCount: 1,
+        compareProjectionMetrics: { wape: 12.11, mae: 8.27, rmse: 11.67 },
+        compactResponseReadModelSuppressed: true,
+      })
+    );
+    expect((payload.intervalPastReadinessTrace as any)).toEqual(
+      expect.objectContaining({
+        status: "ready_for_interval_past",
+        compareCapableNow: true,
+      })
+    );
+  });
+
   it("derives a baseline display contract from readModel dataset when compact baseline view is missing", () => {
     const payload = buildSimulationVariableCopyPayload({
       mode: "GREEN_BUTTON",

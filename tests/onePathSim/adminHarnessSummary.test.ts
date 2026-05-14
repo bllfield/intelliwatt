@@ -343,4 +343,41 @@ describe("one path sandbox harness summary", () => {
       targetMaeMax: 5,
     });
   });
+
+  it("falls back to compact Past display compare rows when read model is suppressed", () => {
+    const summary = buildOnePathSandboxHarnessSummary({
+      knownScenario: {
+        scenarioKey: "keeper-green-button-past-primary",
+        label: "Brian green button Past Sim primary",
+        scenarioType: "GREEN_BUTTON_TRUTH",
+      },
+      runResult: {
+        runType: "PAST_SIM",
+        engineInput: {
+          inputType: "GREEN_BUTTON",
+          scenarioId: "past-scenario-1",
+          actualContextHouseId: "house-1",
+        },
+        readModel: null,
+        runDisplayView: {
+          summary: {
+            source: "GREEN_BUTTON with simulated fill for Travel/Vacant",
+            coverageStart: "2025-05-13",
+            coverageEnd: "2026-05-12",
+            intervalsCount: 35040,
+          },
+          monthlyRows: [{ month: "2026-05", kwh: 1619.69 }],
+          compare: {
+            rows: [{ localDate: "2025-06-02", actualDayKwh: 64.76, simulatedDayKwh: 65.37 }],
+            metrics: { wape: 12.11, mae: 8.27, rmse: 11.67 },
+          },
+        },
+      },
+    });
+
+    expect(summary.runStatus.runType).toBe("PAST_SIM");
+    expect(summary.monthlyTruthCompare.compareProjectionMetrics).toEqual({ wape: 12.11, mae: 8.27, rmse: 11.67 });
+    expect(summary.compareVisibility.compareProjectionRowsCount).toBe(1);
+    expect(summary.compareVisibility.compareProjectionMetrics).toEqual({ wape: 12.11, mae: 8.27, rmse: 11.67 });
+  });
 });

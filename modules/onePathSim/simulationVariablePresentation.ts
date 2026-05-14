@@ -304,7 +304,11 @@ export function buildSimulationVariableCopyPayload(args: {
         : "current_admin_mode_resolution";
   const familyKeys = Object.keys(args.response.familyMeta ?? {});
   const compareProjection = (readModel.compareProjection as Record<string, unknown> | undefined) ?? null;
-  const rows = Array.isArray(compareProjection?.rows) ? compareProjection.rows : [];
+  const displayCompare = asRecord(runDisplayView?.compare);
+  const rows = Array.isArray(compareProjection?.rows) && compareProjection.rows.length
+    ? compareProjection.rows
+    : asArray(displayCompare.rows);
+  const compareMetrics = compareProjection?.metrics ?? displayCompare.metrics ?? null;
   const variableFamilies = familyKeys
     .map((familyKey) =>
       buildSimulationVariableFamilyAdminView({
@@ -391,7 +395,30 @@ export function buildSimulationVariableCopyPayload(args: {
   const baselineParityReport = args.baselineParityReport ?? loadedSourceContext.baselineParityReport ?? null;
   const baselineParityAudit = args.baselineParityAudit ?? loadedSourceContext.baselineParityAudit ?? null;
   const runtimeEnvParityTrace = args.runtimeEnvParityTrace ?? loadedSourceContext.runtimeEnvParityTrace ?? null;
-  const intervalPastReadinessTrace = args.intervalPastReadinessTrace ?? null;
+  const intervalPastReadinessTrace =
+    args.intervalPastReadinessTrace && rows.length > 0
+      ? {
+          ...args.intervalPastReadinessTrace,
+          status:
+            args.intervalPastReadinessTrace.status === "blocked_for_interval_past" &&
+            args.intervalPastReadinessTrace.exactBlocker == null
+              ? "ready_for_interval_past"
+              : args.intervalPastReadinessTrace.status,
+          compareCapableNow:
+            args.intervalPastReadinessTrace.compareCapableNow === false &&
+            args.intervalPastReadinessTrace.exactBlocker == null
+              ? true
+              : args.intervalPastReadinessTrace.compareCapableNow,
+          runDisplayCompareEvidence: {
+            rowsCount: rows.length,
+            metrics: compareMetrics,
+            sourceOwner:
+              compareProjection?.rows && Array.isArray(compareProjection.rows) && compareProjection.rows.length
+                ? "readModel.compareProjection"
+                : "runDisplayView.compare",
+          },
+        }
+      : args.intervalPastReadinessTrace ?? null;
   const readOnlyAudit = args.readOnlyAudit ?? loadedSourceContext.readOnlyAudit ?? null;
   const hasCompactRunResponse =
     Object.keys(asRecord(args.engineInput)).length > 0 &&
@@ -441,6 +468,17 @@ export function buildSimulationVariableCopyPayload(args: {
         rawMonthlyRows,
         monthlyRowsDifferFromRaw: JSON.stringify(effectiveRunDisplayView.monthlyRows) !== JSON.stringify(rawMonthlyRows),
         stitchedMonth: effectiveRunDisplayView.stitchedMonth,
+        compare: {
+          rowsCount: rows.length,
+          metrics: compareMetrics,
+          rowsPreview: rows.slice(0, 14),
+          sourceOwner:
+            compareProjection?.rows && Array.isArray(compareProjection.rows) && compareProjection.rows.length
+              ? "readModel.compareProjection"
+              : rows.length
+                ? "runDisplayView.compare"
+                : null,
+        },
         fifteenMinuteCurve: {
           rowsCount: effectiveRunDisplayView.fifteenMinuteAverages.length,
           preview: effectiveRunDisplayView.fifteenMinuteAverages.slice(0, 12),
@@ -543,7 +581,7 @@ export function buildSimulationVariableCopyPayload(args: {
           datasetSummary: readModel.dataset && typeof readModel.dataset === "object"
             ? ((readModel.dataset as Record<string, unknown>).summary ?? null)
             : null,
-          compareProjectionMetrics: compareProjection?.metrics ?? null,
+          compareProjectionMetrics: compareMetrics,
           compareProjectionRowsCount: rows.length,
           tuningSummary: readModel.tuningSummary ?? null,
           dailyShapeTuning: readModel.dailyShapeTuning ?? null,
@@ -563,6 +601,23 @@ export function buildSimulationVariableCopyPayload(args: {
               }
             : null,
         }
+      : effectiveRunDisplayView
+        ? {
+            datasetSummary: effectiveRunDisplayView.summary ?? null,
+            compareProjectionMetrics: compareMetrics,
+            compareProjectionRowsCount: rows.length,
+            compareProjectionRowsPreview: rows.slice(0, 14),
+            tuningSummary: null,
+            dailyShapeTuning: null,
+            manualParitySummary: null,
+            manualMonthlyReconciliation: null,
+            sharedDiagnostics: null,
+            sourceOfTruthSummary: null,
+            readModelRunIdentity: null,
+            artifactSummary: null,
+            compactResponseReadModelSuppressed: true,
+            compareSourceOwner: rows.length ? "runDisplayView.compare" : null,
+          }
       : null,
     curveShapingSummary: {
       note: "Highest-priority shape-sensitive shared variables first. Use this section before the full family dump when tuning curves with AI.",
