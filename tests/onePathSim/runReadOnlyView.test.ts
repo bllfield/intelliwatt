@@ -200,6 +200,11 @@ describe("buildOnePathRunReadOnlyView", () => {
 
     expect(view?.summary.coverageEnd).toBe("2026-05-03");
     expect(view?.dailyRows.map((row) => row.date)).toEqual(["2026-05-01", "2026-05-02", "2026-05-03"]);
+    expect(view?.dailyRows[2]).toMatchObject({
+      date: "2026-05-03",
+      source: "ACTUAL",
+      sourceDetail: "ACTUAL",
+    });
   });
 
   it("reuses shared stitched-month display metadata so One Path monthly rows match the user chart contract", () => {

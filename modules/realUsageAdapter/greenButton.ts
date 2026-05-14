@@ -123,6 +123,8 @@ export type GreenButtonCoverageWindowIntervals = {
   sourceCoverageEnd: string | null;
   shiftedIntervalCount: number;
   shiftedDateCount: number;
+  paddedIntervalCount?: number;
+  paddedDateCount?: number;
   displayWindowNote: string | null;
 };
 
@@ -304,13 +306,19 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
 
     const byTimestamp = new Map<string, number>();
     const shiftedDateKeys = new Set<string>();
+    const sourceSlotCountsByDate = new Map<string, number>();
+    const sourceDateByTargetDate = new Map<string, string>();
+    const targetSlotsByDate = new Map<string, Set<number>>();
     let shiftedIntervalCount = 0;
+    let paddedIntervalCount = 0;
+    let paddedDateCount = 0;
 
     for (const row of rows) {
       const rawTimestamp = (row.ts instanceof Date ? row.ts : new Date(row.ts)).toISOString();
       const sourceDateKey = chicagoDateKeyFromIsoTimestamp(rawTimestamp);
       if (!sourceDateKey) continue;
       const sourceSlot = chicagoSlot96FromIsoTimestamp(rawTimestamp);
+      sourceSlotCountsByDate.set(sourceDateKey, (sourceSlotCountsByDate.get(sourceDateKey) ?? 0) + 1);
       if (args.timestampMode === "utcDayGrid") {
         if (sourceSlot == null) continue;
         let targetDateKey = sourceDateKey;
@@ -329,6 +337,10 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
         }
         const outputTimestamp = utcGridTimestampForDateSlot(targetDateKey, sourceSlot);
         byTimestamp.set(outputTimestamp, (byTimestamp.get(outputTimestamp) ?? 0) + (Number(row.kwh) || 0));
+        sourceDateByTargetDate.set(targetDateKey, sourceDateKey);
+        const targetSlots = targetSlotsByDate.get(targetDateKey) ?? new Set<number>();
+        targetSlots.add(sourceSlot);
+        targetSlotsByDate.set(targetDateKey, targetSlots);
         continue;
       }
       let rebasedTimestamp = rawTimestamp;
@@ -352,6 +364,32 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
       byTimestamp.set(rebasedTimestamp, (byTimestamp.get(rebasedTimestamp) ?? 0) + (Number(row.kwh) || 0));
     }
 
+    if (args.timestampMode === "utcDayGrid") {
+      for (const [targetDateKey, slots] of Array.from(targetSlotsByDate.entries())) {
+        if (slots.size === 0 || slots.size >= 96) continue;
+        const sourceDateKey = sourceDateByTargetDate.get(targetDateKey);
+        if (!sourceDateKey) continue;
+        const sourceSlotCount = sourceSlotCountsByDate.get(sourceDateKey) ?? 0;
+        const expectedSourceSlotCount = expectedIntervalsForDateISO(sourceDateKey);
+        // Some Green Button exports land on the UTC Past Sim grid with a repeated
+        // one-hour gap after local-time/year rebasing. Keep those high-coverage
+        // actual days actual, but do not hide genuinely sparse partial days.
+        const minimumSourceCompleteSlotCount = Math.min(expectedSourceSlotCount, 92);
+        if (sourceSlotCount < minimumSourceCompleteSlotCount) continue;
+
+        let paddedThisDate = 0;
+        for (let slot = 0; slot < 96; slot += 1) {
+          if (slots.has(slot)) continue;
+          const timestamp = utcGridTimestampForDateSlot(targetDateKey, slot);
+          if (byTimestamp.has(timestamp)) continue;
+          byTimestamp.set(timestamp, 0);
+          paddedIntervalCount += 1;
+          paddedThisDate += 1;
+        }
+        if (paddedThisDate > 0) paddedDateCount += 1;
+      }
+    }
+
     const intervals = Array.from(byTimestamp.entries())
       .map(([timestamp, kwh]) => ({
         timestamp,
@@ -370,6 +408,8 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
       sourceCoverageEnd: sourceCoverageWindow.endDate,
       shiftedIntervalCount,
       shiftedDateCount: shiftedDateKeys.size,
+      paddedIntervalCount,
+      paddedDateCount,
       displayWindowNote,
     };
   } catch {

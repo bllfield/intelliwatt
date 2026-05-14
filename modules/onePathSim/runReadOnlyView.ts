@@ -180,8 +180,8 @@ function buildLocalDailyRowsFromIntervals15(args: {
       return dailyRowFieldsFromSourceRow({
         date,
         kwh: round2(kwh),
-        source: existing?.source ?? (simulatedSourceDetail ? "SIMULATED" : undefined),
-        sourceDetail: existing?.sourceDetail ?? simulatedSourceDetail,
+        source: existing?.source ?? (simulatedSourceDetail ? "SIMULATED" : "ACTUAL"),
+        sourceDetail: existing?.sourceDetail ?? simulatedSourceDetail ?? "ACTUAL",
       });
     });
 }

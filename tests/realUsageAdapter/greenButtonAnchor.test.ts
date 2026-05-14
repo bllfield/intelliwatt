@@ -136,4 +136,34 @@ describe("green button full-day anchor", () => {
     expect(out.shiftedIntervalCount).toBe(96);
     expect(out.shiftedDateCount).toBe(1);
   });
+
+  it("pads complete DST-short Green Button days onto the Past Sim 96-slot grid", async () => {
+    const dstShortLocalDayIntervals = Array.from({ length: 92 }, (_, slot) => ({
+      ts: new Date(new Date("2025-03-09T06:00:00.000Z").getTime() + slot * 15 * 60 * 1000),
+      kwh: 0.25,
+    }));
+    usageQueryRaw
+      .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2025-03-10T04:45:00.000Z") }])
+      .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2025-03-10T04:45:00.000Z") }])
+      .mockResolvedValueOnce([{ bucket: new Date("2025-03-09T06:00:00.000Z"), intervalscount: 92 }])
+      .mockResolvedValueOnce(dstShortLocalDayIntervals);
+
+    const mod = await import("@/modules/realUsageAdapter/greenButton");
+    const out = await mod.fetchGreenButtonIntervalsForCoverageWindow({
+      houseId: "house-1",
+      coverageStartDate: "2026-03-09",
+      coverageEndDate: "2026-03-09",
+      timestampMode: "utcDayGrid",
+    });
+
+    expect(out.intervals).toHaveLength(96);
+    expect(out.paddedIntervalCount).toBe(4);
+    expect(out.paddedDateCount).toBe(1);
+    expect(out.intervals.slice(8, 12)).toEqual([
+      { timestamp: "2026-03-09T02:00:00.000Z", kwh: 0 },
+      { timestamp: "2026-03-09T02:15:00.000Z", kwh: 0 },
+      { timestamp: "2026-03-09T02:30:00.000Z", kwh: 0 },
+      { timestamp: "2026-03-09T02:45:00.000Z", kwh: 0 },
+    ]);
+  });
 });

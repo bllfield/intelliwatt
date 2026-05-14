@@ -1755,8 +1755,8 @@ export async function simulatePastUsageDataset(
           houseId: actualHouseId,
           timezone,
           canonicalMonths,
-          ...(intervalActualSource === "GREEN_BUTTON" ? { preferredActualSource: intervalActualSource } : {}),
-          ...(intervalActualSource === "GREEN_BUTTON" ? { preloadedActualIntervals: sourceActualIntervals } : {}),
+          ...(intervalActualSource ? { preferredActualSource: intervalActualSource } : {}),
+          ...(sourceActualIntervals.length > 0 ? { preloadedActualIntervals: sourceActualIntervals } : {}),
         }),
       ]);
       homeProfileForPast = homeRecForPast ? { ...homeRecForPast } : homeProfileForPast;
