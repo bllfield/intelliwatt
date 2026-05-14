@@ -43,6 +43,19 @@ function chicagoDateKeyFromIsoTimestamp(timestamp: string): string | null {
   return dateTimePartsInTimezone(parsed, "America/Chicago")?.dateKey ?? parsed.toISOString().slice(0, 10);
 }
 
+function chicagoSlot96FromIsoTimestamp(timestamp: string): number | null {
+  const parsed = new Date(timestamp);
+  if (!Number.isFinite(parsed.getTime())) return null;
+  const parts = dateTimePartsInTimezone(parsed, "America/Chicago");
+  if (!parts) return null;
+  const slot = parts.hour * 4 + Math.floor(parts.minute / 15);
+  return Number.isFinite(slot) && slot >= 0 && slot < 96 ? slot : null;
+}
+
+function utcGridTimestampForDateSlot(dateKey: string, slot: number): string {
+  return new Date(new Date(`${dateKey}T00:00:00.000Z`).getTime() + slot * 15 * 60 * 1000).toISOString();
+}
+
 function normalizeDateKey(value: unknown): string | null {
   const text = String(value ?? "").slice(0, 10);
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
@@ -215,6 +228,7 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
   coverageEndDate: string;
   excludeDateKeys?: string[];
   travelRanges?: Array<{ startDate: string; endDate: string }>;
+  timestampMode?: "raw" | "utcDayGrid";
 }): Promise<GreenButtonCoverageWindowIntervals> {
   const coverageStartDate = normalizeDateKey(args.coverageStartDate);
   const coverageEndDate = normalizeDateKey(args.coverageEndDate);
@@ -301,7 +315,15 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
         shiftedIntervalCount += 1;
         shiftedDateKeys.add(targetDateKey);
       }
-      byTimestamp.set(rebasedTimestamp, (byTimestamp.get(rebasedTimestamp) ?? 0) + (Number(row.kwh) || 0));
+      const outputTimestamp =
+        args.timestampMode === "utcDayGrid"
+          ? (() => {
+              const slot = chicagoSlot96FromIsoTimestamp(rebasedTimestamp);
+              return slot == null ? null : utcGridTimestampForDateSlot(targetDateKey, slot);
+            })()
+          : rebasedTimestamp;
+      if (!outputTimestamp) continue;
+      byTimestamp.set(outputTimestamp, (byTimestamp.get(outputTimestamp) ?? 0) + (Number(row.kwh) || 0));
     }
 
     const intervals = Array.from(byTimestamp.entries())

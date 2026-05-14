@@ -1525,6 +1525,7 @@ export async function simulatePastUsageDataset(
             houseId: actualHouseId,
             coverageStartDate: startDate,
             coverageEndDate: endDate,
+            timestampMode: "utcDayGrid",
           });
     const fetchedActualIntervals = greenButtonCoverageIntervals
       ? greenButtonCoverageIntervals.intervals

@@ -86,4 +86,28 @@ describe("green button full-day anchor", () => {
     expect(out.sourceCoverageStart).toBe("2024-12-02");
     expect(out.sourceCoverageEnd).toBe("2025-12-01");
   });
+
+  it("can normalize Green Button local-day intervals onto the Past Sim UTC day grid", async () => {
+    const localDayIntervals = Array.from({ length: 96 }, (_, slot) => ({
+      ts: new Date(new Date("2025-09-01T05:00:00.000Z").getTime() + slot * 15 * 60 * 1000),
+      kwh: 0.5,
+    }));
+    usageQueryRaw
+      .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2025-09-02T04:45:00.000Z") }])
+      .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2025-09-02T04:45:00.000Z") }])
+      .mockResolvedValueOnce([{ bucket: new Date("2025-09-01T05:00:00.000Z"), intervalscount: 96 }])
+      .mockResolvedValueOnce(localDayIntervals);
+
+    const mod = await import("@/modules/realUsageAdapter/greenButton");
+    const out = await mod.fetchGreenButtonIntervalsForCoverageWindow({
+      houseId: "house-1",
+      coverageStartDate: "2025-09-01",
+      coverageEndDate: "2025-09-01",
+      timestampMode: "utcDayGrid",
+    });
+
+    expect(out.intervals).toHaveLength(96);
+    expect(out.intervals[0]).toEqual({ timestamp: "2025-09-01T00:00:00.000Z", kwh: 0.5 });
+    expect(out.intervals[95]).toEqual({ timestamp: "2025-09-01T23:45:00.000Z", kwh: 0.5 });
+  });
 });
