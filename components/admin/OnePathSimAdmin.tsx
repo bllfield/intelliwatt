@@ -1387,7 +1387,7 @@ export function OnePathSimAdmin() {
                 type="button"
                 onClick={() => void loadKnownScenarioPreset()}
                 disabled={busy || greenButtonUploadBusy || !selectedKnownScenarioKey}
-                className="w-full rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-brand-navy disabled:opacity-60"
+                className="w-full rounded-lg bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-navy disabled:opacity-60"
               >
                 {greenButtonUploadBusy ? "Uploading Green Button file..." : "Load known scenario preset"}
               </button>
