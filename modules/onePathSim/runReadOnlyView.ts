@@ -155,6 +155,7 @@ function buildLocalDailyRowsFromIntervals15(args: {
   coverageStart: string | null;
   coverageEnd: string | null;
   existingRows: Array<ReturnType<typeof dailyRowFieldsFromSourceRow>>;
+  simulatedSourceDetailByDate?: Record<string, string> | null;
 }): Array<ReturnType<typeof dailyRowFieldsFromSourceRow>> {
   const coverageStart = asDateKey(args.coverageStart);
   const coverageEnd = asDateKey(args.coverageEnd);
@@ -175,11 +176,12 @@ function buildLocalDailyRowsFromIntervals15(args: {
     .sort((left, right) => (left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0))
     .map(([date, kwh]) => {
       const existing = existingByDate.get(date);
+      const simulatedSourceDetail = args.simulatedSourceDetailByDate?.[date];
       return dailyRowFieldsFromSourceRow({
         date,
         kwh: round2(kwh),
-        source: existing?.source,
-        sourceDetail: existing?.sourceDetail,
+        source: existing?.source ?? (simulatedSourceDetail ? "SIMULATED" : undefined),
+        sourceDetail: existing?.sourceDetail ?? simulatedSourceDetail,
       });
     });
 }
@@ -283,6 +285,12 @@ export function buildOnePathRunReadOnlyView(args: {
     coverageStart: viewModel.coverage.start,
     coverageEnd: viewModel.coverage.end,
     existingRows: datasetDailyRows,
+    simulatedSourceDetailByDate:
+      meta?.simulatedSourceDetailByDate &&
+      typeof meta.simulatedSourceDetailByDate === "object" &&
+      !Array.isArray(meta.simulatedSourceDetailByDate)
+        ? (meta.simulatedSourceDetailByDate as Record<string, string>)
+        : null,
   });
   const datasetDailyEnd = datasetDailyRows.length > 0 ? datasetDailyRows[datasetDailyRows.length - 1]?.date ?? null : null;
   const localDailyEnd =

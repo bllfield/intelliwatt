@@ -164,6 +164,7 @@ async function attachSelectedDailyWeatherForDataset(args: {
       startDate: dateKeys[0]!,
       endDate: dateKeys[dateKeys.length - 1]!,
       timezone,
+      allowOutsideCanonicalCoverage: true,
     }).catch(() => null);
   } else if (weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER") {
     await ensureHouseWeatherNormalAvgBackfill({
@@ -194,14 +195,18 @@ async function attachSelectedDailyWeatherForDataset(args: {
     (dataset as any).meta = {};
   }
   (dataset as any).meta.weatherLogicMode = weatherLogicMode;
-  if (
-    weatherLogicMode === "LAST_YEAR_ACTUAL_WEATHER" &&
-    (dataset as any).meta.weatherSourceSummary == null
-  ) {
-    (dataset as any).meta.weatherSourceSummary = "actual_only";
+  if (weatherLogicMode === "LAST_YEAR_ACTUAL_WEATHER" && (dataset as any).meta.weatherSourceSummary == null) {
+    const actualRowCount = Array.from(wxMap.values()).filter((w: any) => {
+      const source = String(w?.source ?? "").trim();
+      return source && source !== "STUB_V1";
+    }).length;
+    (dataset as any).meta.weatherSourceSummary = actualRowCount === dateKeys.length ? "actual_only" : "mixed_actual_and_stub";
   }
   if ((dataset as any).meta.weatherFallbackReason == null) {
-    (dataset as any).meta.weatherFallbackReason = null;
+    (dataset as any).meta.weatherFallbackReason =
+      weatherLogicMode === "LAST_YEAR_ACTUAL_WEATHER" && (dataset as any).meta.weatherSourceSummary !== "actual_only"
+        ? "partial_coverage"
+        : null;
   }
 }
 import {
@@ -4269,6 +4274,10 @@ async function recalcSimulatorBuildImpl(args: {
 
   const adminLabManualConstraint =
     Boolean(args.adminLabTreatmentMode) && isAdminLabManualConstraintTreatmentMode(args.adminLabTreatmentMode);
+  const isGreenButtonPastSharedProducer =
+    mode === "SMT_BASELINE" &&
+    scenario?.name === WORKSPACE_PAST_NAME &&
+    preferredActualSource === "GREEN_BUTTON";
 
   // NEW_BUILD_ESTIMATE completeness enforcement uses existing validators via requirements.
   const req = computeRequirements(
@@ -4280,12 +4289,14 @@ async function recalcSimulatorBuildImpl(args: {
     },
     mode,
   );
-  if (!req.canRecalc && !adminLabManualConstraint) {
+  if (!req.canRecalc && !adminLabManualConstraint && !isGreenButtonPastSharedProducer) {
     return { ok: false, error: "requirements_unmet", missingItems: req.missingItems };
   }
 
-  if (!homeProfile) return { ok: false, error: "homeProfile_required" };
-  if (!applianceProfile?.fuelConfiguration) return { ok: false, error: "applianceProfile_required" };
+  if (!isGreenButtonPastSharedProducer) {
+    if (!homeProfile) return { ok: false, error: "homeProfile_required" };
+    if (!applianceProfile?.fuelConfiguration) return { ok: false, error: "applianceProfile_required" };
+  }
 
   let weatherSensitivityScore: import("@/modules/weatherSensitivity/shared").WeatherSensitivityScore | null = null;
   let weatherEfficiencyDerivedInput: import("@/modules/weatherSensitivity/shared").WeatherEfficiencyDerivedInput | null = null;
@@ -4922,6 +4933,7 @@ async function recalcSimulatorBuildImpl(args: {
               houseId: actualContextHouseId,
               coverageStartDate: selectionStart,
               coverageEndDate: selectionEnd,
+              timestampMode: "utcDayGrid",
             });
             return rebased.intervals;
           }
@@ -4937,6 +4949,7 @@ async function recalcSimulatorBuildImpl(args: {
             esiid: esiid ?? null,
             startDate: selectionStart,
             endDate: selectionEnd,
+            preferredSource: preferredActualSource ?? null,
           });
         },
       });

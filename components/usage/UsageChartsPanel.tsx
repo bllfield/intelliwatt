@@ -151,7 +151,10 @@ export function UsageChartsPanel(props: {
     if (row.source === "ACTUAL" && row.sourceDetail === "ACTUAL_VALIDATION_TEST_DAY") {
       return "ACTUAL (VALIDATION/TEST)";
     }
-    return row.source ?? "ACTUAL";
+    if (row.source === "MISSING_REFERENCE") {
+      return "MISSING REFERENCE";
+    }
+    return row.source ?? "SOURCE UNKNOWN";
   };
 
   if (manualMonthlyStageOneRows?.length) {
@@ -472,7 +475,12 @@ export function UsageChartsPanel(props: {
             </div>
           </div>
           {daily.length ? (
-            dailyView === "chart" ? (
+            <>
+              {dailyWeather && Object.keys(dailyWeather).length > 0 && weatherBasisLabel ? (
+                <p className="mb-2 text-xs text-neutral-500">{weatherBasisLabel}</p>
+              ) : null}
+              <p className="mb-2 text-xs text-neutral-500">Source notation: <span className="font-medium text-neutral-700">ACTUAL</span> or <span className="font-medium text-neutral-700">SIMULATED</span>.</p>
+              {dailyView === "chart" ? (
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
@@ -488,9 +496,21 @@ export function UsageChartsPanel(props: {
                     <XAxis dataKey="label" />
                     <YAxis />
                     <Tooltip
-                      formatter={(value, key) => {
-                        const label = key === "consumed" ? "Imported" : "Exported";
-                        return `${Number(value ?? 0).toFixed(1)} kWh (${label})`;
+                      content={(tooltip: any) => {
+                        if (!tooltip?.active || !Array.isArray(tooltip?.payload) || tooltip.payload.length === 0) {
+                          return null;
+                        }
+                        const row = tooltip.payload[0]?.payload as DailyRow & { consumed?: number; exported?: number; label?: string };
+                        const wx = dailyWeather?.[row.date];
+                        return (
+                          <div className="rounded-md border border-neutral-200 bg-white p-2 text-xs shadow-sm">
+                            <div className="font-semibold text-neutral-700">{row.date}</div>
+                            <div>Imported: {Number(row.consumed ?? 0).toFixed(1)} kWh</div>
+                            <div>Exported: {Number(row.exported ?? 0).toFixed(1)} kWh</div>
+                            <div>Source: {sourceLabelForRow(row)}</div>
+                            {wx ? <div>Avg weather: {Number(wx.tAvgF).toFixed(1)} °F</div> : null}
+                          </div>
+                        );
                       }}
                     />
                     <Legend />
@@ -501,12 +521,6 @@ export function UsageChartsPanel(props: {
               </div>
             ) : (
               <div className="max-h-80 overflow-auto rounded-lg border border-neutral-200 select-text">
-                {dailyWeather && Object.keys(dailyWeather).length > 0 && weatherBasisLabel ? (
-                  <p className="mb-2 text-xs text-neutral-500">{weatherBasisLabel}</p>
-                ) : null}
-                {daily.some((d) => d.source === "SIMULATED") ? (
-                  <p className="mb-2 text-xs text-neutral-500">Source notation: <span className="font-medium text-neutral-700">ACTUAL</span> or <span className="font-medium text-neutral-700">SIMULATED</span>.</p>
-                ) : null}
                 <table className="min-w-[280px] w-full text-sm font-mono">
                   <thead className="sticky top-0 z-10 bg-neutral-50 text-neutral-600">
                     <tr>
@@ -547,7 +561,8 @@ export function UsageChartsPanel(props: {
                   </tbody>
                 </table>
               </div>
-            )
+              )}
+            </>
           ) : (
             <p className="text-xs text-neutral-500">No daily data available yet.</p>
           )}

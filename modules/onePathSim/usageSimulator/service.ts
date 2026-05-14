@@ -165,6 +165,7 @@ async function attachSelectedDailyWeatherForDataset(args: {
       startDate: dateKeys[0]!,
       endDate: dateKeys[dateKeys.length - 1]!,
       timezone,
+      allowOutsideCanonicalCoverage: true,
     });
     skippedLatLng = backfill.skippedLatLng === true;
   } else if (weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER") {
@@ -4405,6 +4406,10 @@ async function recalcSimulatorBuildImpl(args: {
 
   const adminLabManualConstraint =
     Boolean(args.adminLabTreatmentMode) && isAdminLabManualConstraintTreatmentMode(args.adminLabTreatmentMode);
+  const isGreenButtonPastSharedProducer =
+    mode === "SMT_BASELINE" &&
+    scenario?.name === WORKSPACE_PAST_NAME &&
+    preferredActualSource === "GREEN_BUTTON";
 
   // NEW_BUILD_ESTIMATE completeness enforcement uses existing validators via requirements.
   const req = computeRequirements(
@@ -4416,12 +4421,14 @@ async function recalcSimulatorBuildImpl(args: {
     },
     mode,
   );
-  if (!req.canRecalc && !adminLabManualConstraint) {
+  if (!req.canRecalc && !adminLabManualConstraint && !isGreenButtonPastSharedProducer) {
     return { ok: false, error: "requirements_unmet", missingItems: req.missingItems };
   }
 
-  if (!homeProfile) return { ok: false, error: "homeProfile_required" };
-  if (!applianceProfile?.fuelConfiguration) return { ok: false, error: "applianceProfile_required" };
+  if (!isGreenButtonPastSharedProducer) {
+    if (!homeProfile) return { ok: false, error: "homeProfile_required" };
+    if (!applianceProfile?.fuelConfiguration) return { ok: false, error: "applianceProfile_required" };
+  }
 
   let weatherSensitivityScore: import("@/modules/onePathSim/weatherSensitivityShared").WeatherSensitivityScore | null = null;
   let weatherEfficiencyDerivedInput: import("@/modules/onePathSim/weatherSensitivityShared").WeatherEfficiencyDerivedInput | null = null;
@@ -5064,6 +5071,7 @@ async function recalcSimulatorBuildImpl(args: {
               houseId: actualContextHouseId,
               coverageStartDate: selectionStart,
               coverageEndDate: selectionEnd,
+              timestampMode: "utcDayGrid",
             });
             return rebased.intervals;
           }
