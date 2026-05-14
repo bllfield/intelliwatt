@@ -57,6 +57,8 @@ describe("one path green button preset wiring", () => {
     const intervalsLayerSource = readRepoFile("lib/usage/resolveIntervalsLayer.ts");
     const actualDatasetSource = readRepoFile("lib/usage/actualDatasetForHouse.ts");
     const actualSource = readRepoFile("modules/realUsageAdapter/actual.ts");
+    const onePathBuildSource = readRepoFile("modules/onePathSim/usageSimulator/build.ts");
+    const onePathServiceSource = readRepoFile("modules/onePathSim/usageSimulator/service.ts");
 
     expect(onePathSource).toContain("preferredActualSource?: \"SMT\" | \"GREEN_BUTTON\" | null;");
     expect(onePathSource).toContain("preferredActualSource: raw.preferredActualSource ?? null");
@@ -67,6 +69,11 @@ describe("one path green button preset wiring", () => {
     expect(actualDatasetSource).toContain("preferredSource?: ActualUsageSource | null;");
     expect(actualDatasetSource).toContain("if (preferredSource === \"GREEN_BUTTON\" && greenButton) return greenButton;");
     expect(actualSource).toContain("args.preferredSource === \"GREEN_BUTTON\" && gbMs > 0");
+    expect(actualSource).toContain("preferredSource?: ActualUsageSource | null;");
+    expect(onePathBuildSource).toContain("preferredActualSource?: ActualUsageSource | null;");
+    expect(onePathBuildSource).toContain("preferredSource: args.preferredActualSource ?? null");
+    expect(onePathServiceSource).toContain("preferredSource: preferredActualSource ?? null");
+    expect(onePathServiceSource).toContain("preferredActualSource: preferredActualSource ?? null");
   });
 
   it("keeps One Path test-home usage cleanup sequential for single-connection usage DB pools", () => {

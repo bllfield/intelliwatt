@@ -79,8 +79,17 @@ export async function chooseActualSource(args: {
   return resolved.source;
 }
 
-export async function hasActualIntervals(args: { houseId: string; esiid: string | null; canonicalMonths: string[] }): Promise<boolean> {
-  const source = await chooseActualSource({ houseId: args.houseId, esiid: args.esiid });
+export async function hasActualIntervals(args: {
+  houseId: string;
+  esiid: string | null;
+  canonicalMonths: string[];
+  preferredSource?: ActualUsageSource | null;
+}): Promise<boolean> {
+  const source = await chooseActualSource({
+    houseId: args.houseId,
+    esiid: args.esiid,
+    preferredSource: args.preferredSource ?? null,
+  });
   if (!source) return false;
   if (source === "SMT") {
     if (!args.esiid) return false;
@@ -93,12 +102,17 @@ export async function fetchActualCanonicalMonthlyTotals(args: {
   houseId: string;
   esiid: string | null;
   canonicalMonths: string[];
+  preferredSource?: ActualUsageSource | null;
   /** Exclude these date keys (YYYY-MM-DD) from aggregation (e.g. Travel/Vacant). */
   excludeDateKeys?: string[];
   /** Travel/Vacant ranges: dates in these ranges are excluded from aggregation. */
   travelRanges?: Array<{ startDate: string; endDate: string }>;
 }): Promise<{ source: ActualUsageSource | null; intervalsCount: number; monthlyKwhByMonth: Record<string, number> }> {
-  const source = await chooseActualSource({ houseId: args.houseId, esiid: args.esiid });
+  const source = await chooseActualSource({
+    houseId: args.houseId,
+    esiid: args.esiid,
+    preferredSource: args.preferredSource ?? null,
+  });
   if (!source) return { source: null, intervalsCount: 0, monthlyKwhByMonth: {} };
   if (source === "SMT") {
     if (!args.esiid) return { source: "SMT", intervalsCount: 0, monthlyKwhByMonth: {} };
@@ -123,8 +137,13 @@ export async function fetchActualCanonicalDailyTotals(args: {
   houseId: string;
   esiid: string | null;
   canonicalMonths: string[];
+  preferredSource?: ActualUsageSource | null;
 }): Promise<{ source: ActualUsageSource | null; intervalsCount: number; dailyKwhByDateKey: Record<string, number> }> {
-  const source = await chooseActualSource({ houseId: args.houseId, esiid: args.esiid });
+  const source = await chooseActualSource({
+    houseId: args.houseId,
+    esiid: args.esiid,
+    preferredSource: args.preferredSource ?? null,
+  });
   if (!source) return { source: null, intervalsCount: 0, dailyKwhByDateKey: {} };
   if (source === "SMT") {
     if (!args.esiid) return { source: "SMT", intervalsCount: 0, dailyKwhByDateKey: {} };
@@ -145,12 +164,17 @@ export async function fetchActualIntradayShape96(args: {
   houseId: string;
   esiid: string | null;
   canonicalMonths: string[];
+  preferredSource?: ActualUsageSource | null;
   /** Exclude these date keys (YYYY-MM-DD) from shape derivation (e.g. Travel/Vacant). */
   excludeDateKeys?: string[];
   /** Travel/Vacant ranges: dates in these ranges are excluded from shape derivation. */
   travelRanges?: Array<{ startDate: string; endDate: string }>;
 }): Promise<{ source: ActualUsageSource | null; shape96: number[] | null }> {
-  const source = await chooseActualSource({ houseId: args.houseId, esiid: args.esiid });
+  const source = await chooseActualSource({
+    houseId: args.houseId,
+    esiid: args.esiid,
+    preferredSource: args.preferredSource ?? null,
+  });
   if (!source) return { source: null, shape96: null };
   if (source === "SMT") {
     if (!args.esiid) return { source: "SMT", shape96: null };

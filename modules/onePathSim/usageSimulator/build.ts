@@ -15,7 +15,7 @@ import {
   type SourceDerivedMonthlyTargetResolution,
 } from "@/modules/onePathSim/usageSimulator/monthlyTargetConstruction";
 import { getGenericWeekdayShape96, getGenericWeekendShape96, normalizeShape96, type Shape96 } from "@/modules/onePathSim/simulatedUsage/intradayTemplates";
-import { fetchActualCanonicalMonthlyTotals, fetchActualIntradayShape96 } from "@/modules/realUsageAdapter/actual";
+import { fetchActualCanonicalMonthlyTotals, fetchActualIntradayShape96, type ActualUsageSource } from "@/modules/realUsageAdapter/actual";
 import { reshapeMonthlyTotalsFromBaseline } from "@/modules/onePathSim/usageSimulator/reshape";
 import { enumerateDateKeysInclusive } from "@/lib/time/chicago";
 
@@ -140,6 +140,7 @@ export async function buildSimulatorInputs(args: {
   baselineHomeProfile?: HomeProfileInput | null;
   baselineApplianceProfile?: ApplianceProfilePayloadV1 | null;
   canonicalMonths?: string[]; // optional override (V1 determinism)
+  preferredActualSource?: ActualUsageSource | null;
   /** Travel/Vacant ranges: dates in these ranges are excluded from actual shape derivation. */
   travelRanges?: Array<{ startDate: string; endDate: string }>;
   now?: Date;
@@ -242,6 +243,7 @@ export async function buildSimulatorInputs(args: {
     houseId: houseIdForActual,
     esiid,
     canonicalMonths,
+    preferredSource: args.preferredActualSource ?? null,
     excludeDateKeys,
     travelRanges: args.travelRanges,
   });
@@ -249,6 +251,7 @@ export async function buildSimulatorInputs(args: {
     houseId: houseIdForActual,
     esiid,
     canonicalMonths,
+    preferredSource: args.preferredActualSource ?? null,
     excludeDateKeys,
     travelRanges: args.travelRanges,
   });

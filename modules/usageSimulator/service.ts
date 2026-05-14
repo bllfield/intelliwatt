@@ -1407,6 +1407,15 @@ function hasLegacyWeatherEfficiencySimulationActivation(value: unknown): boolean
   return false;
 }
 
+function resolvePreferredActualSourceFromBuildInputs(buildInputs: unknown): "SMT" | "GREEN_BUTTON" | null {
+  const input = buildInputs && typeof buildInputs === "object" ? (buildInputs as Record<string, any>) : null;
+  const snapshotSource = input?.snapshots?.actualSource;
+  if (snapshotSource === "SMT" || snapshotSource === "GREEN_BUTTON") return snapshotSource;
+  const runContextSource = input?.lockboxRunContext?.preferredActualSource;
+  if (runContextSource === "SMT" || runContextSource === "GREEN_BUTTON") return runContextSource;
+  return null;
+}
+
 function normalizeLegacyWeatherEfficiencyBuildInputs<T extends Record<string, unknown>>(buildInputs: T): T {
   return buildInputs;
 }
@@ -4110,6 +4119,7 @@ async function recalcSimulatorBuildImpl(args: {
         houseId: actualContextHouseId,
         esiid: esiid ?? null,
         canonicalMonths: canonical.months,
+        preferredSource: preferredActualSource ?? null,
       })
     : false;
   let actualSourceAnchor = {
@@ -4450,6 +4460,7 @@ async function recalcSimulatorBuildImpl(args: {
       baselineHomeProfile: homeProfile,
       baselineApplianceProfile: applianceProfile,
       canonicalMonths: canonicalForBuild.months,
+      preferredActualSource: preferredActualSource ?? null,
       travelRanges: travelRangesForBuild,
       now: args.now,
     });
@@ -5610,6 +5621,7 @@ async function recalcSimulatorBuildImpl(args: {
         esiid: canonicalActualIdentity.esiid,
         startDate: identityWindow.startDate,
         endDate: identityWindow.endDate,
+        preferredSource: resolvePreferredActualSourceFromBuildInputs(buildInputs),
       });
       const usageShapeProfileIdentity = isLeanManualTotalsMode(simMode)
         ? {
@@ -6660,6 +6672,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
           esiid: canonicalActualIdentity.esiid,
           startDate: window.startDate,
           endDate: window.endDate,
+          preferredSource: resolvePreferredActualSourceFromBuildInputs(buildInputs),
         });
         const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(args.houseId);
         const weatherIdentity = await computePastWeatherIdentity({
@@ -7175,6 +7188,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
             esiid: house.esiid ?? null,
             startDate,
             endDate,
+            preferredSource: resolvePreferredActualSourceFromBuildInputs(buildInputs),
           });
           const inputHash = computePastInputHash({
             engineVersion: PAST_ENGINE_VERSION,
