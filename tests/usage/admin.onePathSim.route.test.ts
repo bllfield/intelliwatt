@@ -1165,7 +1165,11 @@ describe("admin one path sim route", () => {
         postRetryIncompleteDateKeys: [],
       })
     );
-    expect(json.readModel.runIdentity.artifactId).toBe("artifact-2");
+    expect(json.debugDiagnosticsIncluded).toBe(false);
+    expect(json.debugDiagnosticsSuppressedReason).toBe("past_sim_compact_response");
+    expect(json.readModel).toBeNull();
+    expect(json.artifact).toBeNull();
+    expect(json.runDisplayView).toBeTruthy();
   });
 
   it("defaults lookup requests to lean debug-off source context when debug is not requested", async () => {

@@ -307,6 +307,10 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(onePathSource).toContain("skipOptionalEnrichment: true");
     expect(onePathSource).toContain("skipLightweightInsightRecompute: true");
     expect(routeSource).toContain("buildPastSimRunReadbackResponse");
+    expect(routeSource).toContain("debugDiagnosticsSuppressedReason: \"past_sim_compact_response\"");
+    expect(routeSource).toContain("effectiveRawInputBase.scenarioId && !isManualMode");
+    expect(routeSource).toContain("one_path_admin_past_compare_sidecar_success");
+    expect(routeSource).toContain("one_path_admin_past_response_ready");
   });
 
   it("hard-gates admin interval runs to SMT and Green Button runs to Green Button", () => {

@@ -196,15 +196,15 @@ async function attachSelectedDailyWeatherForDataset(args: {
     dateKeys: weatherLookupDateKeys,
     kind: weatherKind,
   });
-  const wxMap = new Map(
-    dateKeys
-      .map((dateKey: string) => {
-        const lookupDateKey = weatherLookupDateByDisplayDate.get(dateKey) ?? dateKey;
-        const weather = lookupWxMap.get(lookupDateKey);
-        return weather ? ([dateKey, weather] as const) : null;
-      })
-      .filter((entry): entry is readonly [string, NonNullable<ReturnType<typeof lookupWxMap.get>>] => entry != null)
-  );
+  const wxEntries: Array<readonly [string, NonNullable<ReturnType<typeof lookupWxMap.get>>]> = [];
+  for (const dateKey of dateKeys) {
+    const lookupDateKey = weatherLookupDateByDisplayDate.get(dateKey) ?? dateKey;
+    const weather = lookupWxMap.get(lookupDateKey);
+    if (weather) {
+      wxEntries.push([dateKey, weather] as const);
+    }
+  }
+  const wxMap = new Map(wxEntries);
   const weatherAvailability = summarizeOnePathWeatherAvailability({
     expectedDateKeys: dateKeys,
     wxMap,

@@ -496,6 +496,15 @@ async function buildPastSimRunReadbackResponse(args: {
   readMode?: "artifact_only" | "allow_rebuild";
 }) {
   const readMode = args.readMode ?? "artifact_only";
+  const startedAt = Date.now();
+  logSimPipelineEvent("one_path_admin_past_readback_start", {
+    correlationId: args.correlationId ?? null,
+    houseId: args.houseId,
+    scenarioId: args.scenarioId,
+    readMode,
+    source: "buildPastSimRunReadbackResponse",
+    memoryRssMb: getMemoryRssMb(),
+  });
   const readback = await readOnePathSimulatedUsageScenario({
     userId: args.userId,
     houseId: args.houseId,
@@ -509,6 +518,16 @@ async function buildPastSimRunReadbackResponse(args: {
     },
   });
   if (!readback.ok) {
+    logSimPipelineEvent("one_path_admin_past_readback_failure", {
+      correlationId: args.correlationId ?? null,
+      houseId: args.houseId,
+      scenarioId: args.scenarioId,
+      readMode,
+      code: readback.code,
+      durationMs: Date.now() - startedAt,
+      source: "buildPastSimRunReadbackResponse",
+      memoryRssMb: getMemoryRssMb(),
+    });
     return {
       ok: false as const,
       code: readback.code,
@@ -516,17 +535,57 @@ async function buildPastSimRunReadbackResponse(args: {
     };
   }
 
+  logSimPipelineEvent("one_path_admin_past_readback_success", {
+    correlationId: args.correlationId ?? null,
+    houseId: args.houseId,
+    scenarioId: args.scenarioId,
+    readMode,
+    durationMs: Date.now() - startedAt,
+    source: "buildPastSimRunReadbackResponse",
+    memoryRssMb: getMemoryRssMb(),
+  });
+  const sidecarStartedAt = Date.now();
   const compareProjection = buildValidationCompareProjectionSidecar(readback.dataset);
+  logSimPipelineEvent("one_path_admin_past_compare_sidecar_success", {
+    correlationId: args.correlationId ?? null,
+    houseId: args.houseId,
+    scenarioId: args.scenarioId,
+    rowCount: Array.isArray(compareProjection.rows) ? compareProjection.rows.length : 0,
+    durationMs: Date.now() - sidecarStartedAt,
+    source: "buildPastSimRunReadbackResponse",
+    memoryRssMb: getMemoryRssMb(),
+  });
+  const scenarioEventsStartedAt = Date.now();
   const scenarioEvents = await listOnePathScenarioEvents({
     userId: args.userId,
     houseId: args.houseId,
     scenarioId: args.scenarioId,
   }).catch(() => ({ ok: false as const, events: [] as unknown[] }));
+  logSimPipelineEvent("one_path_admin_past_scenario_events_success", {
+    correlationId: args.correlationId ?? null,
+    houseId: args.houseId,
+    scenarioId: args.scenarioId,
+    ok: scenarioEvents.ok,
+    eventCount: scenarioEvents.ok && Array.isArray(scenarioEvents.events) ? scenarioEvents.events.length : 0,
+    durationMs: Date.now() - scenarioEventsStartedAt,
+    source: "buildPastSimRunReadbackResponse",
+    memoryRssMb: getMemoryRssMb(),
+  });
+  const displayViewStartedAt = Date.now();
   const runDisplayViewBase =
     buildOnePathRunReadOnlyView({
       dataset: asRecord(readback.dataset),
       readModel: { compareProjection },
     }) ?? null;
+  logSimPipelineEvent("one_path_admin_past_display_view_success", {
+    correlationId: args.correlationId ?? null,
+    houseId: args.houseId,
+    scenarioId: args.scenarioId,
+    hasDisplayView: runDisplayViewBase != null,
+    durationMs: Date.now() - displayViewStartedAt,
+    source: "buildPastSimRunReadbackResponse",
+    memoryRssMb: getMemoryRssMb(),
+  });
   const pastVariables =
     scenarioEvents.ok && Array.isArray(scenarioEvents.events)
       ? scenarioEvents.events
@@ -534,6 +593,15 @@ async function buildPastSimRunReadbackResponse(args: {
           .filter((event): event is NonNullable<ReturnType<typeof asScenarioVariable>> => event != null)
       : [];
 
+  logSimPipelineEvent("one_path_admin_past_response_ready", {
+    correlationId: args.correlationId ?? null,
+    houseId: args.houseId,
+    scenarioId: args.scenarioId,
+    pastVariableCount: pastVariables.length,
+    durationMs: Date.now() - startedAt,
+    source: "buildPastSimRunReadbackResponse",
+    memoryRssMb: getMemoryRssMb(),
+  });
   return {
     ok: true as const,
     debugDiagnosticsIncluded: false,
@@ -1669,11 +1737,11 @@ export async function POST(request: NextRequest) {
           readModel: asRecord(readModel),
         }) ??
         null;
-      if (mode === "GREEN_BUTTON" && effectiveRawInputBase.scenarioId) {
+      if (effectiveRawInputBase.scenarioId && !isManualMode) {
         return NextResponse.json({
           ok: true,
           debugDiagnosticsIncluded: false,
-          debugDiagnosticsSuppressedReason: "green_button_past_sim_compact_response",
+          debugDiagnosticsSuppressedReason: "past_sim_compact_response",
           runType: "PAST_SIM",
           engineInput: slimEngineInput,
           smtRefreshCheck,
