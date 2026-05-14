@@ -48,6 +48,7 @@ function pastDayFallbackToEngineLevel(level: PastDayFallbackLevel): PastFallback
 const DAY_MS = 24 * 60 * 60 * 1000;
 const INTERVAL_MINUTES = 15;
 const INTERVALS_PER_DAY = (24 * 60) / INTERVAL_MINUTES; // 96
+const MIN_TRUSTED_ACTUAL_INTERVALS_PER_DAY = 92;
 
 function isYearMonth(s: string): boolean {
   return /^\d{4}-\d{2}$/.test(String(s ?? "").trim());
@@ -802,6 +803,20 @@ export function generateSimulatedCurve(args: {
 
 const SLOT_MS = INTERVAL_MINUTES * 60 * 1000;
 
+function countPresentSlotsForDay(
+  intervals: Array<{ timestamp: string; kwh: number }>,
+  dayStartMs: number
+): number {
+  const slots = new Set<number>();
+  for (const p of intervals) {
+    const t = new Date(p.timestamp).getTime();
+    if (!Number.isFinite(t)) continue;
+    const slot = Math.floor((t - dayStartMs) / SLOT_MS);
+    if (slot >= 0 && slot < INTERVALS_PER_DAY) slots.add(slot);
+  }
+  return slots.size;
+}
+
 /**
  * Completes actual 15-min intervals over the canonical window: fills excluded (travel/vacant) days,
  * and optionally fills any day with missing/incomplete intervals using hourly-then-quarter simulation.
@@ -838,7 +853,13 @@ export function completeActualIntervalsV1(args: {
 
   const usableDays = new Set<string>();
   for (const [dk, list] of Array.from(dayIntervals.entries())) {
-    if (!excludedDateKeys.has(dk) && list.length === INTERVALS_PER_DAY) usableDays.add(dk);
+    const dayStartMs = new Date(dk + "T00:00:00.000Z").getTime();
+    if (
+      !excludedDateKeys.has(dk) &&
+      countPresentSlotsForDay(list, dayStartMs) >= MIN_TRUSTED_ACTUAL_INTERVALS_PER_DAY
+    ) {
+      usableDays.add(dk);
+    }
   }
 
   // Build slot-aligned kWh per day from timestamp-derived slot index so we don't assume list[i] = grid slot i.
@@ -958,7 +979,11 @@ export function completeActualIntervalsV1(args: {
     const ym = dk.slice(0, 7);
     const dow = day.getUTCDay();
     const list = dayIntervals.get(dk) ?? [];
-    const needSimulate = excludedDateKeys.has(dk) || (simulateIncompleteDays && list.length !== INTERVALS_PER_DAY);
+    const presentSlotCount = countPresentSlotsForDay(list, day.getTime());
+    const needSimulate =
+      excludedDateKeys.has(dk) ||
+      (simulateIncompleteDays && presentSlotCount > 0 && presentSlotCount < MIN_TRUSTED_ACTUAL_INTERVALS_PER_DAY) ||
+      (simulateIncompleteDays && presentSlotCount === 0);
     const gridTs = getDayGridTimestamps(day.getTime());
 
     if (needSimulate) {
@@ -1725,7 +1750,7 @@ export function buildPastSimulatedBaselineV1(args: {
       !dayIsExcluded &&
       !dayIsLeadingMissing &&
       presentSlotCount > 0 &&
-      presentSlotCount < INTERVALS_PER_DAY;
+      presentSlotCount < MIN_TRUSTED_ACTUAL_INTERVALS_PER_DAY;
     const shouldSimulateDay =
       dayIsForcedSimulate ||
       dayIsExcluded ||
