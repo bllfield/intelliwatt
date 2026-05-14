@@ -154,9 +154,55 @@ describe("buildOnePathRunReadOnlyView", () => {
     });
 
     expect(view?.fifteenMinuteAverages).toEqual([
-      { hhmm: "00:00", avgKw: 2 },
-      { hhmm: "00:15", avgKw: 3 },
+      { hhmm: "19:00", avgKw: 2 },
+      { hhmm: "19:15", avgKw: 3 },
     ]);
+    expect(view?.fifteenMinuteCurveSourceOwner).toBe("buildOnePathRunReadOnlyView(...).dataset.series.intervals15");
+  });
+
+  it("prefers current run intervals over stored 15-minute insights to avoid stale display curves", () => {
+    const view = buildOnePathRunReadOnlyView({
+      dataset: {
+        summary: {
+          source: "GREEN_BUTTON with simulated fill for Travel/Vacant",
+          intervalsCount: 4,
+        },
+        daily: [{ date: "2026-01-02", kwh: 2.5, source: "ACTUAL" }],
+        monthly: [{ month: "2026-01", kwh: 2.5 }],
+        insights: {
+          fifteenMinuteAverages: [
+            { hhmm: "17:00", avgKw: 99 },
+            { hhmm: "17:15", avgKw: 1 },
+          ],
+          weekdayVsWeekend: { weekday: 2.5, weekend: 0 },
+          timeOfDayBuckets: [],
+          peakDay: null,
+          peakHour: null,
+          baseload: 1,
+        },
+        series: {
+          intervals15: [
+            { timestamp: "2026-01-02T23:00:00.000Z", kwh: 0.25 },
+            { timestamp: "2026-01-02T23:15:00.000Z", kwh: 0.5 },
+            { timestamp: "2026-01-02T23:30:00.000Z", kwh: 0.75 },
+            { timestamp: "2026-01-02T23:45:00.000Z", kwh: 1 },
+          ],
+        },
+        meta: {
+          datasetKind: "SIMULATED",
+          actualSource: "GREEN_BUTTON",
+          timezone: "America/Chicago",
+        },
+      },
+    });
+
+    expect(view?.fifteenMinuteAverages).toEqual([
+      { hhmm: "17:00", avgKw: 1 },
+      { hhmm: "17:15", avgKw: 2 },
+      { hhmm: "17:30", avgKw: 3 },
+      { hhmm: "17:45", avgKw: 4 },
+    ]);
+    expect(view?.fifteenMinuteCurveSourceOwner).toBe("buildOnePathRunReadOnlyView(...).dataset.series.intervals15");
   });
 
   it("prefers Chicago-local daily rows from intervals when stored UTC daily rows stop before the coverage end", () => {

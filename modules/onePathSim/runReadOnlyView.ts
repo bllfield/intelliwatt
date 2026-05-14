@@ -17,6 +17,27 @@ function round2(value: number): number {
   return Math.round((Number(value) || 0) * 100) / 100;
 }
 
+function hhmmInTimezone(timestamp: string, timezone: string): string | null {
+  try {
+    const ts = new Date(timestamp);
+    if (!Number.isFinite(ts.getTime())) return null;
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+      hourCycle: "h23",
+    });
+    const parts = formatter.formatToParts(ts);
+    const hour = parts.find((part) => part.type === "hour")?.value ?? "";
+    const minute = parts.find((part) => part.type === "minute")?.value ?? "";
+    const hhmm = `${hour.padStart(2, "0")}:${minute.padStart(2, "0")}`;
+    return /^\d{2}:\d{2}$/.test(hhmm) ? hhmm : null;
+  } catch {
+    return null;
+  }
+}
+
 function asStitchedMonthRecord(
   value: unknown
 ):
@@ -58,12 +79,13 @@ function asStitchedMonthRecord(
 }
 
 function buildFifteenMinuteAveragesFromIntervals15(
-  value: unknown
+  value: unknown,
+  timezone: string
 ): Array<{ hhmm: string; avgKw: number }> {
   const buckets = new Map<string, { sumKw: number; count: number }>();
   for (const row of asArray<Record<string, unknown>>(value)) {
-    const hhmm = String(row.timestamp ?? "").slice(11, 16);
-    if (!/^\d{2}:\d{2}$/.test(hhmm)) continue;
+    const hhmm = hhmmInTimezone(String(row.timestamp ?? ""), timezone);
+    if (!hhmm) continue;
     const kwh = Number(row.kwh ?? row.consumption_kwh);
     if (!Number.isFinite(kwh)) continue;
     const current = buckets.get(hhmm) ?? { sumKw: 0, count: 0 };
@@ -280,9 +302,10 @@ export function buildOnePathRunReadOnlyView(args: {
         .filter((value) => value.payloadJson.startDate && value.payloadJson.endDate)
     : [];
   const datasetDailyRows = buildDisplayDailyRows(dataset.daily);
+  const timezone = typeof meta?.timezone === "string" && meta.timezone.trim() ? meta.timezone : "America/Chicago";
   const intervalBackedLocalDailyRows = buildLocalDailyRowsFromIntervals15({
     intervals15: asRecord(dataset.series)?.intervals15,
-    timezone: typeof meta?.timezone === "string" ? meta.timezone : "America/Chicago",
+    timezone,
     coverageStart: viewModel.coverage.start,
     coverageEnd: viewModel.coverage.end,
     existingRows: datasetDailyRows,
@@ -313,13 +336,14 @@ export function buildOnePathRunReadOnlyView(args: {
   const compareRowsPrimary = asCompareRows(compareProjection.rows);
   const selectedValidationRows = asArray<Record<string, unknown>>(tuningSummary.selectedValidationRows);
   const compareRows = compareRowsPrimary.length ? compareRowsPrimary : asCompareRows(selectedValidationRows);
-  const rebuiltFifteenMinuteAverages = buildFifteenMinuteAveragesFromIntervals15(asRecord(dataset.series)?.intervals15);
-  const fifteenMinuteAverages = viewModel.derived.fifteenCurve.length
-    ? viewModel.derived.fifteenCurve
-    : rebuiltFifteenMinuteAverages;
-  const fifteenMinuteCurveSourceOwner = viewModel.derived.fifteenCurve.length
-    ? "buildUserUsageDashboardViewModel(...).derived.fifteenCurve"
-    : rebuiltFifteenMinuteAverages.length
+  const rebuiltFifteenMinuteAverages = buildFifteenMinuteAveragesFromIntervals15(
+    asRecord(dataset.series)?.intervals15,
+    timezone
+  );
+  const fifteenMinuteAverages = rebuiltFifteenMinuteAverages.length
+    ? rebuiltFifteenMinuteAverages
+    : viewModel.derived.fifteenCurve;
+  const fifteenMinuteCurveSourceOwner = rebuiltFifteenMinuteAverages.length
       ? "buildOnePathRunReadOnlyView(...).dataset.series.intervals15"
       : "buildUserUsageDashboardViewModel(...).derived.fifteenCurve";
   const compareMetrics =

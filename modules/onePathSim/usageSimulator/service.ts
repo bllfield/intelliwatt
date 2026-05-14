@@ -867,6 +867,7 @@ export async function rebuildGapfillSharedPastArtifact(args: {
     esiid: houseResolved.esiid ?? null,
     startDate: identityWindowResolved.startDate,
     endDate: identityWindowResolved.endDate,
+    preferredSource: resolvePreferredActualSourceFromBuildInputs(buildInputs),
   });
   const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(args.houseId);
   const sourceHouseIdForWeather = String((buildInputs as any)?.actualContextHouseId ?? args.houseId);
@@ -1864,6 +1865,7 @@ export async function buildGapfillCompareSimShared(args: {
       esiid: houseResolved.esiid ?? null,
       startDate: identityWindowResolved.startDate,
       endDate: identityWindowResolved.endDate,
+      preferredSource: resolvePreferredActualSourceFromBuildInputs(buildInputs),
     });
     const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(houseId);
     const sourceHouseIdForWeather = String((buildInputs as any)?.actualContextHouseId ?? houseId);
