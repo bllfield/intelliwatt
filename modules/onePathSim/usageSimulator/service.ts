@@ -4270,7 +4270,7 @@ async function recalcSimulatorBuildImpl(args: {
 
   // Manual totals runs under a very small Prisma pool in admin environments, so avoid
   // fan-out here and keep the One Path recalc lean before the persisted readback loads richer diagnostics.
-  const manualRec = await traceCoreContextStep("manual_usage_load", () =>
+  const manualRec: { payload?: unknown } | null = await traceCoreContextStep("manual_usage_load", () =>
     (prisma as any).manualUsageInput
       .findUnique({ where: { userId_houseId: { userId, houseId } }, select: { payload: true } })
       .catch(() => null)
@@ -4386,10 +4386,11 @@ async function recalcSimulatorBuildImpl(args: {
         .catch(() => null)
     );
     if (pastScenario?.id) {
+      const pastScenarioId = String(pastScenario.id);
       pastEventsForOverlay = await traceCoreContextStep("past_scenario_events_load", () =>
         (prisma as any).usageSimulatorScenarioEvent
           .findMany({
-            where: { scenarioId: pastScenario.id },
+            where: { scenarioId: pastScenarioId },
             select: { id: true, effectiveMonth: true, kind: true, payloadJson: true },
             orderBy: [{ effectiveMonth: "asc" }, { createdAt: "asc" }, { id: "asc" }],
           })
@@ -4481,7 +4482,7 @@ async function recalcSimulatorBuildImpl(args: {
   let canonicalForBuild = canonical;
   let baselineInputsForRecalc: any = null;
   if (scenarioId) {
-    const baselineBuild = await traceCoreContextStep("baseline_build_load", () =>
+    const baselineBuild: { buildInputs?: unknown } | null = await traceCoreContextStep("baseline_build_load", () =>
       (prisma as any).usageSimulatorBuild
         .findUnique({
           where: { userId_houseId_scenarioKey: { userId, houseId, scenarioKey: "BASELINE" } },
