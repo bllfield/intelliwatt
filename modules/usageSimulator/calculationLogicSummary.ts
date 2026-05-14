@@ -221,7 +221,12 @@ function bandForSourceDetail(detail: string): Exclude<PriorityBand, "Not Used"> 
   if (detail === "ACTUAL" || detail === "ACTUAL_VALIDATION_TEST_DAY") return "Hard Truth";
   if (detail === "SIMULATED_TEST_DAY") return "Primary Driver";
   if (detail === "SIMULATED_MANUAL_CONSTRAINED" || detail === "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL") return "Hard Constraint";
-  if (detail === "SIMULATED_TRAVEL_VACANT" || detail === "SIMULATED_INCOMPLETE_METER" || detail === "SIMULATED_LEADING_MISSING") {
+  if (
+    detail === "SIMULATED_TRAVEL_VACANT" ||
+    detail === "SIMULATED_INCOMPLETE_METER" ||
+    detail === "SIMULATED_DAILY_USAGE_MISSING" ||
+    detail === "SIMULATED_LEADING_MISSING"
+  ) {
     return "Exclusion";
   }
   return "Fallback Only";
@@ -242,7 +247,9 @@ function explanationForSourceDetail(detail: string): string {
     case "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL":
       return "Modeled underneath a monthly constraint even though the day is not a travel/vacant exclusion.";
     case "SIMULATED_INCOMPLETE_METER":
-      return "Modeled because incomplete meter coverage disqualified the day from trusted actual truth.";
+      return "Modeled because partial meter coverage disqualified the day from trusted actual truth.";
+    case "SIMULATED_DAILY_USAGE_MISSING":
+      return "Modeled because no daily usage intervals were present for that day.";
     case "SIMULATED_LEADING_MISSING":
       return "Modeled because leading missing coverage prevented use as trusted reference truth.";
     default:

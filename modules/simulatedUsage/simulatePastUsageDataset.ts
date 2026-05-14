@@ -1860,6 +1860,7 @@ export async function simulatePastUsageDataset(
       trustedIntervalFingerprintDayCount?: number;
       excludedTravelVacantFingerprintDayCount?: number;
       excludedIncompleteMeterFingerprintDayCount?: number;
+      excludedDailyUsageMissingFingerprintDayCount?: number;
       excludedLeadingMissingFingerprintDayCount?: number;
       excludedOtherUntrustedFingerprintDayCount?: number;
       fingerprintMonthBucketsUsed?: string[];
@@ -2415,6 +2416,7 @@ export async function simulatePastUsageDataset(
           intervalUsageFingerprintIdentity: pastDayCounts.intervalUsageFingerprintIdentity,
           excludedTravelVacantFingerprintDayCount: pastDayCounts.excludedTravelVacantFingerprintDayCount,
           excludedIncompleteMeterFingerprintDayCount: pastDayCounts.excludedIncompleteMeterFingerprintDayCount,
+          excludedDailyUsageMissingFingerprintDayCount: pastDayCounts.excludedDailyUsageMissingFingerprintDayCount,
           excludedLeadingMissingFingerprintDayCount: pastDayCounts.excludedLeadingMissingFingerprintDayCount,
           excludedOtherUntrustedFingerprintDayCount: pastDayCounts.excludedOtherUntrustedFingerprintDayCount,
           fingerprintMonthBucketsUsed: pastDayCounts.fingerprintMonthBucketsUsed,

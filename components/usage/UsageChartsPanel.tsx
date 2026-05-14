@@ -28,6 +28,7 @@ type DailyRow = {
     | "SIMULATED_MANUAL_CONSTRAINED"
     | "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL"
     | "SIMULATED_INCOMPLETE_METER"
+    | "SIMULATED_DAILY_USAGE_MISSING"
     | "SIMULATED_LEADING_MISSING"
     | "SIMULATED_OTHER"
     | "ACTUAL_VALIDATION_TEST_DAY"
@@ -137,6 +138,9 @@ export function UsageChartsPanel(props: {
     }
     if (row.source === "SIMULATED" && row.sourceDetail === "SIMULATED_INCOMPLETE_METER") {
       return "SIMULATED (INCOMPLETE METER)";
+    }
+    if (row.source === "SIMULATED" && row.sourceDetail === "SIMULATED_DAILY_USAGE_MISSING") {
+      return "SIMULATED (DAILY USAGE MISSING)";
     }
     if (row.source === "SIMULATED" && row.sourceDetail === "SIMULATED_LEADING_MISSING") {
       return "SIMULATED (LEADING MISSING)";

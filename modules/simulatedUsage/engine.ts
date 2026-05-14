@@ -1015,6 +1015,7 @@ export type PastSimulatedDayDiagnostic = {
   simulatedReason:
     | "EXCLUDED"
     | "LEADING_MISSING"
+    | "DAILY_USAGE_MISSING"
     | "LOW_DATA_CONSTRAINED"
     | "INCOMPLETE"
     | "FORCED_SELECTED_DAY"
@@ -1080,6 +1081,7 @@ export type PastSimulationDebug = {
   trustedIntervalFingerprintDayCount?: number;
   excludedTravelVacantFingerprintDayCount?: number;
   excludedIncompleteMeterFingerprintDayCount?: number;
+  excludedDailyUsageMissingFingerprintDayCount?: number;
   excludedLeadingMissingFingerprintDayCount?: number;
   excludedOtherUntrustedFingerprintDayCount?: number;
   fingerprintMonthBucketsUsed?: string[];
@@ -1599,7 +1601,11 @@ export function buildPastSimulatedBaselineV1(args: {
    */
   forceModeledOutputKeepReferencePoolDateKeys?: Set<string>;
   modeledKeepRefReasonCode?: "TEST_MODELED_KEEP_REF" | "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY" | "MANUAL_CONSTRAINED_DAY";
-  defaultModeledReasonCode?: "INCOMPLETE_METER_DAY" | "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY" | "MANUAL_CONSTRAINED_DAY";
+  defaultModeledReasonCode?:
+    | "INCOMPLETE_METER_DAY"
+    | "DAILY_USAGE_MISSING_DAY"
+    | "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
+    | "MANUAL_CONSTRAINED_DAY";
   /**
    * Optional: when false, omit passthrough actual intervals for non-simulated days.
    * Useful for selected-day fresh compare scoring where only simulated-day intervals are needed.
@@ -1709,21 +1715,28 @@ export function buildPastSimulatedBaselineV1(args: {
       !dayIsLeadingMissing &&
       !dayIsForcedSimulate &&
       !dayIsForceModeledKeepRef;
+    const dayIsDailyUsageMissing =
+      !dayIsLowDataSyntheticModeled &&
+      !dayIsExcluded &&
+      !dayIsLeadingMissing &&
+      presentSlotCount === 0;
     const dayIsIncomplete =
       !dayIsLowDataSyntheticModeled &&
       !dayIsExcluded &&
       !dayIsLeadingMissing &&
+      presentSlotCount > 0 &&
       presentSlotCount < INTERVALS_PER_DAY;
     const shouldSimulateDay =
       dayIsForcedSimulate ||
       dayIsExcluded ||
       dayIsLeadingMissing ||
+      dayIsDailyUsageMissing ||
       dayIsIncomplete ||
       dayIsForceModeledKeepRef ||
       dayIsLowDataSyntheticModeled;
     /** Reference pool: good at-home days only; excludes travel (forced elsewhere) and incomplete/leading; includes Gap-Fill test days (keep-ref modeled). */
     const isReferenceDayForPool =
-      !dayIsForcedSimulate && !dayIsExcluded && !dayIsLeadingMissing && !dayIsIncomplete;
+      !dayIsForcedSimulate && !dayIsExcluded && !dayIsLeadingMissing && !dayIsDailyUsageMissing && !dayIsIncomplete;
     return {
       gridTs,
       dateKey,
@@ -1732,6 +1745,7 @@ export function buildPastSimulatedBaselineV1(args: {
       dayIsForceModeledKeepRef,
       dayIsExcluded,
       dayIsLeadingMissing,
+      dayIsDailyUsageMissing,
       dayIsLowDataSyntheticModeled,
       dayIsIncomplete,
       shouldSimulateDay,
@@ -1755,6 +1769,7 @@ export function buildPastSimulatedBaselineV1(args: {
   }> = [];
   let excludedTravelVacantFingerprintDayCount = 0;
   let excludedIncompleteMeterFingerprintDayCount = 0;
+  let excludedDailyUsageMissingFingerprintDayCount = 0;
   let excludedLeadingMissingFingerprintDayCount = 0;
   let excludedOtherUntrustedFingerprintDayCount = 0;
   const referencePrepStartedAt = Date.now();
@@ -1766,6 +1781,7 @@ export function buildPastSimulatedBaselineV1(args: {
       if (!day.isReferenceDayForPool) {
         if (day.dayIsExcluded) excludedTravelVacantFingerprintDayCount += 1;
         else if (day.dayIsIncomplete) excludedIncompleteMeterFingerprintDayCount += 1;
+        else if (day.dayIsDailyUsageMissing) excludedDailyUsageMissingFingerprintDayCount += 1;
         else if (day.dayIsLeadingMissing) excludedLeadingMissingFingerprintDayCount += 1;
         else if (day.dayIsForcedSimulate) excludedOtherUntrustedFingerprintDayCount += 1;
         continue;
@@ -1831,6 +1847,7 @@ export function buildPastSimulatedBaselineV1(args: {
     trustedReferenceDayCount: referenceDays.length,
     excludedTravelVacantFingerprintDayCount,
     excludedIncompleteMeterFingerprintDayCount,
+    excludedDailyUsageMissingFingerprintDayCount,
     excludedLeadingMissingFingerprintDayCount,
     excludedOtherUntrustedFingerprintDayCount,
   });
@@ -2524,6 +2541,7 @@ export function buildPastSimulatedBaselineV1(args: {
       | "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
       | "FORCED_SELECTED_DAY"
       | "INCOMPLETE_METER_DAY"
+      | "DAILY_USAGE_MISSING_DAY"
       | "LEADING_MISSING_DAY";
     modeledResult: SimulatedDayResult;
     fingerprintIdentity?: string | null;
@@ -2579,6 +2597,7 @@ export function buildPastSimulatedBaselineV1(args: {
       const simulatedReason:
         | "EXCLUDED"
         | "LEADING_MISSING"
+        | "DAILY_USAGE_MISSING"
         | "LOW_DATA_CONSTRAINED"
         | "INCOMPLETE"
         | "FORCED_SELECTED_DAY"
@@ -2591,6 +2610,8 @@ export function buildPastSimulatedBaselineV1(args: {
               ? "EXCLUDED"
               : day.dayIsLeadingMissing
                 ? "LEADING_MISSING"
+                : day.dayIsDailyUsageMissing
+                  ? "DAILY_USAGE_MISSING"
                 : day.dayIsLowDataSyntheticModeled
                   ? "LOW_DATA_CONSTRAINED"
                 : "INCOMPLETE";
@@ -2601,6 +2622,7 @@ export function buildPastSimulatedBaselineV1(args: {
         | "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
         | "FORCED_SELECTED_DAY"
         | "INCOMPLETE_METER_DAY"
+        | "DAILY_USAGE_MISSING_DAY"
         | "LEADING_MISSING_DAY" =
         simulatedReason === "EXCLUDED"
           ? "TRAVEL_VACANT"
@@ -2612,6 +2634,8 @@ export function buildPastSimulatedBaselineV1(args: {
               ? "FORCED_SELECTED_DAY"
               : simulatedReason === "LEADING_MISSING"
                 ? "LEADING_MISSING_DAY"
+                : simulatedReason === "DAILY_USAGE_MISSING"
+                  ? "DAILY_USAGE_MISSING_DAY"
                 : defaultModeledReasonCode;
       const wx = args.actualWxByDateKey?.get(dateKey) ?? null;
       const weatherForDay = wx ? engineWxToPastDayWeather(wx) : null;
@@ -2858,6 +2882,7 @@ export function buildPastSimulatedBaselineV1(args: {
     args.debug.out.trustedIntervalFingerprintDayCount = referenceDays.length;
     args.debug.out.excludedTravelVacantFingerprintDayCount = excludedTravelVacantFingerprintDayCount;
     args.debug.out.excludedIncompleteMeterFingerprintDayCount = excludedIncompleteMeterFingerprintDayCount;
+    args.debug.out.excludedDailyUsageMissingFingerprintDayCount = excludedDailyUsageMissingFingerprintDayCount;
     args.debug.out.excludedLeadingMissingFingerprintDayCount = excludedLeadingMissingFingerprintDayCount;
     args.debug.out.excludedOtherUntrustedFingerprintDayCount = excludedOtherUntrustedFingerprintDayCount;
     args.debug.out.fingerprintMonthBucketsUsed = fingerprintMonthBucketsUsed;

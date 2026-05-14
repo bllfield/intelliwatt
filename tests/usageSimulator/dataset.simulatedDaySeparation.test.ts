@@ -92,15 +92,16 @@ describe("dataset simulated day separation", () => {
     expect(dataset.meta.simulatedTravelVacantDateKeysLocal).toEqual([]);
   });
 
-  it("maps INCOMPLETE_METER_DAY and LEADING_MISSING_DAY to explicit subtypes (not TEST or TRAVEL_VACANT)", () => {
+  it("maps incomplete, missing, and leading missing days to explicit subtypes (not TEST or TRAVEL/VACANT)", () => {
     const intervals = [
       ...makeUtcDayIntervals("2025-10-01", 0.1),
       ...makeUtcDayIntervals("2025-10-02", 0.1),
       ...makeUtcDayIntervals("2025-10-03", 0.1),
+      ...makeUtcDayIntervals("2025-10-04", 0.1),
     ];
     const curve: SimulatedCurve = {
       start: "2025-10-01",
-      end: "2025-10-03",
+      end: "2025-10-04",
       intervals,
       monthlyTotals: [],
       annualTotalKwh: 0,
@@ -113,12 +114,14 @@ describe("dataset simulated day separation", () => {
         simulatedDayResults: [
           { localDate: "2025-10-02", displayDayKwh: 1, simulatedReasonCode: "INCOMPLETE_METER_DAY" } as any,
           { localDate: "2025-10-03", displayDayKwh: 2, simulatedReasonCode: "LEADING_MISSING_DAY" } as any,
+          { localDate: "2025-10-04", displayDayKwh: 3, simulatedReasonCode: "DAILY_USAGE_MISSING_DAY" } as any,
         ],
       }
     );
     const byDate = new Map(dataset.daily.map((row) => [row.date, row]));
     expect(byDate.get("2025-10-02")?.sourceDetail).toBe("SIMULATED_INCOMPLETE_METER");
     expect(byDate.get("2025-10-03")?.sourceDetail).toBe("SIMULATED_LEADING_MISSING");
+    expect(byDate.get("2025-10-04")?.sourceDetail).toBe("SIMULATED_DAILY_USAGE_MISSING");
     expect(dataset.meta.simulatedTestModeledDateKeysLocal).toEqual([]);
     expect(dataset.meta.simulatedTravelVacantDateKeysLocal).toEqual([]);
   });

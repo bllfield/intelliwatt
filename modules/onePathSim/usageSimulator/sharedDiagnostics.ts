@@ -180,6 +180,7 @@ export function buildSharedPastSimDiagnostics(args: {
         trustedIntervalFingerprintDayCount: meta.trustedIntervalFingerprintDayCount ?? null,
         excludedTravelVacantFingerprintDayCount: meta.excludedTravelVacantFingerprintDayCount ?? null,
         excludedIncompleteMeterFingerprintDayCount: meta.excludedIncompleteMeterFingerprintDayCount ?? null,
+        excludedDailyUsageMissingFingerprintDayCount: meta.excludedDailyUsageMissingFingerprintDayCount ?? null,
         excludedLeadingMissingFingerprintDayCount: meta.excludedLeadingMissingFingerprintDayCount ?? null,
         excludedOtherUntrustedFingerprintDayCount: meta.excludedOtherUntrustedFingerprintDayCount ?? null,
         fingerprintMonthBucketsUsed: Array.isArray(meta.fingerprintMonthBucketsUsed)

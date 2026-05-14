@@ -75,6 +75,7 @@ export type PastSimulatedDaySourceDetail =
   | "SIMULATED_MANUAL_CONSTRAINED"
   | "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL"
   | "SIMULATED_INCOMPLETE_METER"
+  | "SIMULATED_DAILY_USAGE_MISSING"
   | "SIMULATED_LEADING_MISSING"
   | "SIMULATED_OTHER";
 
@@ -720,7 +721,9 @@ export function enrichPastDailyRowsWithSourceDetailFromMeta(
         detail === "SIMULATED_MANUAL_CONSTRAINED" ||
         detail === "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL"
           ? detail
-          : detail === "SIMULATED_INCOMPLETE_METER" || detail === "SIMULATED_LEADING_MISSING"
+          : detail === "SIMULATED_INCOMPLETE_METER" ||
+              detail === "SIMULATED_DAILY_USAGE_MISSING" ||
+              detail === "SIMULATED_LEADING_MISSING"
             ? detail
             : "SIMULATED_OTHER";
       return { date: dk, kwh: row.kwh, source: "SIMULATED" as const, sourceDetail };
@@ -732,6 +735,7 @@ export function enrichPastDailyRowsWithSourceDetailFromMeta(
       legacyDetail === "SIMULATED_MANUAL_CONSTRAINED" ||
       legacyDetail === "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL" ||
       legacyDetail === "SIMULATED_INCOMPLETE_METER" ||
+      legacyDetail === "SIMULATED_DAILY_USAGE_MISSING" ||
       legacyDetail === "SIMULATED_LEADING_MISSING"
     ) {
       return { date: dk, kwh: row.kwh, source: "SIMULATED" as const, sourceDetail: legacyDetail as PastSimulatedDaySourceDetail };
@@ -1570,6 +1574,8 @@ export function buildSimulatedUsageDatasetFromCurve(
               ? "SIMULATED_TEST_DAY"
               : reason === "INCOMPLETE_METER_DAY"
                 ? "SIMULATED_INCOMPLETE_METER"
+                : reason === "DAILY_USAGE_MISSING_DAY"
+                  ? "SIMULATED_DAILY_USAGE_MISSING"
                 : reason === "LEADING_MISSING_DAY"
                   ? "SIMULATED_LEADING_MISSING"
                   : "SIMULATED_OTHER";

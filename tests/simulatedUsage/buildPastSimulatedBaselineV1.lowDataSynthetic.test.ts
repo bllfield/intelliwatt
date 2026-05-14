@@ -20,6 +20,38 @@ describe("buildPastSimulatedBaselineV1 low-data synthetic branch", () => {
     logPipeline.mockReset();
   });
 
+  it("labels zero-slot days as daily usage missing and partial-slot days as incomplete meter", () => {
+    const day1StartMs = new Date("2026-02-01T00:00:00.000Z").getTime();
+    const day2StartMs = new Date("2026-02-02T00:00:00.000Z").getTime();
+    const day3StartMs = new Date("2026-02-03T00:00:00.000Z").getTime();
+    const day1Grid = getDayGridTimestamps(day1StartMs);
+    const day2Grid = getDayGridTimestamps(day2StartMs);
+    const debugOut: Record<string, unknown> = {};
+
+    const out = buildPastSimulatedBaselineV1({
+      actualIntervals: [
+        ...day1Grid.map((timestamp) => ({ timestamp, kwh: 0.25 })),
+        { timestamp: day2Grid[0]!, kwh: 0.25 },
+      ],
+      canonicalDayStartsMs: [day1StartMs, day2StartMs, day3StartMs],
+      excludedDateKeys: new Set<string>(),
+      dateKeyFromTimestamp,
+      getDayGridTimestamps,
+      collectSimulatedDayResults: true,
+      usageShapeProfile: {
+        weekdayAvgByMonthKey: { "2026-02": 24 },
+        weekendAvgByMonthKey: { "2026-02": 18 },
+      },
+      debug: { out: debugOut as any },
+    });
+
+    const reasonByDate = new Map(out.dayResults.map((row) => [row.localDate, row.simulatedReasonCode]));
+    expect(reasonByDate.get("2026-02-02")).toBe("INCOMPLETE_METER_DAY");
+    expect(reasonByDate.get("2026-02-03")).toBe("DAILY_USAGE_MISSING_DAY");
+    expect(debugOut.excludedIncompleteMeterFingerprintDayCount).toBe(1);
+    expect(debugOut.excludedDailyUsageMissingFingerprintDayCount).toBe(1);
+  });
+
   it("emits internal stage observability and completes via the low-data synthetic fast path", () => {
     const day1StartMs = new Date("2026-01-05T00:00:00.000Z").getTime();
     const day2StartMs = new Date("2026-01-06T00:00:00.000Z").getTime();

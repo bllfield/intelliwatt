@@ -89,6 +89,7 @@ export type PastSimPerDayTrace = {
     | "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
     | "FORCED_SELECTED_DAY"
     | "INCOMPLETE_METER_DAY"
+    | "DAILY_USAGE_MISSING_DAY"
     | "LEADING_MISSING_DAY"
     | null;
   fallbackLevel: string | null;
