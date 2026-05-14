@@ -1157,10 +1157,13 @@ describe("admin one path sim route", () => {
   });
 
   it("requests a targeted SMT refresh and reruns once when the first result has incomplete meter days", async () => {
-    buildSharedSimulationReadModel
-      .mockReturnValueOnce({
-        runIdentity: { artifactId: "artifact-1" },
+    runSharedSimulation
+      .mockResolvedValueOnce({
+        artifactId: "artifact-1",
+        artifactInputHash: "artifact-hash-1",
+        engineInput: {},
         manualStageOneView: null,
+        compareProjection: { rows: [], metrics: null },
         dataset: {
           summary: { source: "SIMULATED", start: "2025-04-16", end: "2026-04-15" },
           meta: {
@@ -1176,14 +1179,21 @@ describe("admin one path sim route", () => {
               sourceDetail: "SIMULATED_INCOMPLETE_METER",
             },
           ],
+          monthly: [{ month: "2026-04", kwh: 22 }],
+          series: { intervals15: [] },
         },
       })
-      .mockReturnValueOnce({
-        runIdentity: { artifactId: "artifact-2" },
+      .mockResolvedValueOnce({
+        artifactId: "artifact-2",
+        artifactInputHash: "artifact-hash-2",
+        engineInput: {},
         manualStageOneView: null,
+        compareProjection: { rows: [], metrics: null },
         dataset: {
           summary: { source: "SIMULATED", start: "2025-04-16", end: "2026-04-15" },
           daily: [{ date: "2026-04-10", kwh: 22, source: "ACTUAL", sourceDetail: "ACTUAL" }],
+          monthly: [{ month: "2026-04", kwh: 22 }],
+          series: { intervals15: [] },
         },
       });
 
@@ -1204,7 +1214,7 @@ describe("admin one path sim route", () => {
     expect(requestUsageRefreshForUserHouse).toHaveBeenCalledWith({ userId: "user-1", houseId: "house-1" });
     expect(adaptIntervalRawInput).toHaveBeenCalledTimes(2);
     expect(runSharedSimulation).toHaveBeenCalledTimes(2);
-    expect(buildSharedSimulationReadModel).toHaveBeenCalledTimes(2);
+    expect(buildSharedSimulationReadModel).not.toHaveBeenCalled();
     expect(json.smtIncompleteMeterRetry).toEqual(
       expect.objectContaining({
         attempted: true,

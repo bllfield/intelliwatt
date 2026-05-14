@@ -1665,7 +1665,7 @@ export async function POST(request: NextRequest) {
           readModel: compactReadModel,
         });
       }
-      let readModel = buildSharedSimulationReadModel(artifact);
+      const shouldReturnCompactPastResponse = Boolean(effectiveRawInputBase.scenarioId && !isManualMode);
       let smtIncompleteMeterRetry: OnePathIncompleteMeterBackfillRetry | null =
         await maybeRetryOnePathIncompleteMeterBackfill({
           mode,
@@ -1676,7 +1676,7 @@ export async function POST(request: NextRequest) {
           effectiveHouseId,
           actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
           correlationId,
-          incompleteDateKeys: extractIncompleteMeterDateKeysFromDataset(readModel.dataset ?? artifactDataset),
+          incompleteDateKeys: extractIncompleteMeterDateKeysFromDataset(artifactDataset),
         });
       if (smtIncompleteMeterRetry?.attempted) {
         engineInput = await adaptIntervalRawInput(effectiveRawInputBase);
@@ -1684,12 +1684,33 @@ export async function POST(request: NextRequest) {
         artifact = await runSharedSimulation(engineInput);
         artifactDataset = asRecord(artifact.dataset);
         artifactDatasetMeta = asRecord(artifactDataset?.meta);
-        readModel = buildSharedSimulationReadModel(artifact);
         smtIncompleteMeterRetry = {
           ...smtIncompleteMeterRetry,
-          postRetryIncompleteDateKeys: extractIncompleteMeterDateKeysFromDataset(readModel.dataset ?? artifactDataset),
+          postRetryIncompleteDateKeys: extractIncompleteMeterDateKeysFromDataset(artifactDataset),
         };
       }
+      if (shouldReturnCompactPastResponse) {
+        const compactRunDisplayView =
+          buildOnePathRunReadOnlyView({
+            dataset: artifactDataset,
+            engineInput: asRecord(engineInput),
+            readModel: { compareProjection: artifact.compareProjection },
+          }) ?? null;
+        return NextResponse.json({
+          ok: true,
+          debugDiagnosticsIncluded: false,
+          debugDiagnosticsSuppressedReason: "past_sim_compact_response",
+          runType: "PAST_SIM",
+          engineInput: slimEngineInput,
+          smtRefreshCheck,
+          smtIncompleteMeterRetry,
+          manualStageOneView: artifact.manualStageOneView ?? null,
+          runDisplayView: compactRunDisplayView,
+          artifact: null,
+          readModel: null,
+        });
+      }
+      let readModel = buildSharedSimulationReadModel(artifact);
       const actualDatasetForManualRun =
         isManualMode
           ? (
@@ -1737,21 +1758,6 @@ export async function POST(request: NextRequest) {
           readModel: asRecord(readModel),
         }) ??
         null;
-      if (effectiveRawInputBase.scenarioId && !isManualMode) {
-        return NextResponse.json({
-          ok: true,
-          debugDiagnosticsIncluded: false,
-          debugDiagnosticsSuppressedReason: "past_sim_compact_response",
-          runType: "PAST_SIM",
-          engineInput: slimEngineInput,
-          smtRefreshCheck,
-          smtIncompleteMeterRetry,
-          manualStageOneView: readModel.manualStageOneView ?? null,
-          runDisplayView,
-          artifact: null,
-          readModel: null,
-        });
-      }
       if (!includeDebugDiagnostics) {
         return NextResponse.json({
           ok: true,
