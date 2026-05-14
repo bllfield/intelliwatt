@@ -293,23 +293,19 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("scenarioId: effectiveScenarioId || null,");
   });
 
-  it("polls Droplet-backed One Path Past Sim jobs instead of waiting in the Vercel request", () => {
+  it("keeps Green Button Past Sim on the inline One Path run path", () => {
     const source = readRepoFile("components/admin/OnePathSimAdmin.tsx");
     const routeSource = readRepoFile("app/api/admin/tools/one-path-sim/route.ts");
+    const onePathSource = readRepoFile("modules/onePathSim/onePathSim.ts");
 
     expect(source).toContain('const shouldApplyIntervalPastBlocker = mode === "INTERVAL";');
     expect(source).toContain("shouldApplyIntervalPastBlocker &&");
     expect(source).toContain("catch (runError)");
-    expect(routeSource).toContain("dispatchPastSimRecalc");
-    expect(routeSource.indexOf('mode === "GREEN_BUTTON" && effectiveRawInputBase.scenarioId')).toBeLessThan(
-      routeSource.indexOf("adaptGreenButtonRawInput(effectiveRawInputBase)")
-    );
-    expect(routeSource).toContain('!includeDebugDiagnostics && effectiveRawInputBase.scenarioId && !isManualMode && mode !== "GREEN_BUTTON"');
-    expect(routeSource).toContain("executionMode: \"droplet_async\"");
-    expect(routeSource).toContain("action === \"past_recalc_status\"");
+    expect(routeSource).toContain("runSharedSimulation(engineInput)");
+    expect(routeSource).not.toContain("past_recalc_requires_droplet_async");
+    expect(routeSource).not.toContain("dispatchPastSimRecalc");
+    expect(onePathSource).toContain("skipOptionalEnrichment: true");
+    expect(onePathSource).toContain("skipLightweightInsightRecompute: true");
     expect(routeSource).toContain("buildPastSimRunReadbackResponse");
-    expect(source).toContain("json?.executionMode === \"droplet_async\"");
-    expect(source).toContain("action: \"past_recalc_status\"");
-    expect(source).toContain("Past Sim is still running on the Droplet");
   });
 });

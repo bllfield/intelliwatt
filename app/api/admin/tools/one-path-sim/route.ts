@@ -55,9 +55,6 @@ import { buildOnePathManualStageOnePreview, buildOnePathManualStageOneView } fro
 import { buildOnePathRunReadOnlyView } from "@/modules/onePathSim/runReadOnlyView";
 import type { ManualUsagePayload } from "@/modules/onePathSim/simulatedUsage/types";
 import { buildValidationCompareProjectionSidecar } from "@/modules/onePathSim/usageSimulator/compareProjection";
-import { shouldEnqueuePastSimRecalcRemote } from "@/modules/onePathSim/usageSimulator/dropletSimWebhook";
-import { dispatchPastSimRecalc } from "@/modules/onePathSim/usageSimulator/pastSimRecalcDispatch";
-import { getPastSimRecalcJobForUser } from "@/modules/onePathSim/usageSimulator/simDropletJob";
 import { createSimCorrelationId, getMemoryRssMb, logSimPipelineEvent } from "@/modules/onePathSim/usageSimulator/simObservability";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/onePathSim/usageSimulator/metadataWindow";
 import { buildRuntimeEnvParityTrace } from "@/modules/onePathSim/runtimeEnvParityTrace";
@@ -66,7 +63,7 @@ import { listScenarios } from "@/modules/usageSimulator/service";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
-const GREEN_BUTTON_BASELINE_ROUTE_STAGE_TIMEOUT_MS = 25_000;
+const GREEN_BUTTON_ROUTE_STAGE_TIMEOUT_MS = 120_000;
 
 class AdminRouteStageTimeoutError extends Error {
   code = "one_path_admin_timeout" as const;
@@ -1357,48 +1354,6 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  if (action === "past_recalc_status") {
-    const jobId = typeof body?.jobId === "string" ? body.jobId.trim() : "";
-    const scenarioId = typeof body?.scenarioId === "string" ? body.scenarioId.trim() : "";
-    if (!jobId || !scenarioId) {
-      return NextResponse.json({ ok: false, error: "job_id_and_scenario_required" }, { status: 400 });
-    }
-    const job = await getPastSimRecalcJobForUser({ jobId, userId: effectiveUserId });
-    if (!job.ok) {
-      return NextResponse.json({ ok: false, error: "past_recalc_job_not_found" }, { status: 404 });
-    }
-    if (job.status !== "succeeded") {
-      return NextResponse.json({
-        ok: true,
-        executionMode: "droplet_async",
-        readbackPending: true,
-        jobId,
-        jobStatus: job.status,
-        failureMessage: job.failureMessage,
-        correlationId: job.payload.correlationId ?? null,
-      });
-    }
-    const readback = await buildPastSimRunReadbackResponse({
-      userId: effectiveUserId,
-      houseId: effectiveHouseId,
-      scenarioId,
-      correlationId: job.payload.correlationId ?? null,
-    });
-    if (!readback.ok) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: readback.code,
-          message: readback.message,
-          jobId,
-          jobStatus: job.status,
-        },
-        { status: readback.code === "ARTIFACT_MISSING" ? 404 : 500 }
-      );
-    }
-    return NextResponse.json({ ...readback, jobId, jobStatus: job.status });
-  }
-
   if (action === "run") {
     const mode = normalizeMode(body?.mode);
     const correlationId = createSimCorrelationId();
@@ -1488,7 +1443,7 @@ export async function POST(request: NextRequest) {
       correlationId,
     });
     try {
-      if (!includeDebugDiagnostics && effectiveRawInputBase.scenarioId && !isManualMode && mode !== "GREEN_BUTTON") {
+      if (!includeDebugDiagnostics && effectiveRawInputBase.scenarioId && !isManualMode) {
         const readback = await buildPastSimRunReadbackResponse({
           userId: effectiveUserId,
           houseId: effectiveHouseId,
@@ -1514,95 +1469,6 @@ export async function POST(request: NextRequest) {
         }
         return NextResponse.json(readback);
       }
-      if (mode === "GREEN_BUTTON" && effectiveRawInputBase.scenarioId && !isManualMode) {
-        if (!shouldEnqueuePastSimRecalcRemote()) {
-          return NextResponse.json(
-            {
-              ok: false,
-              error: "past_recalc_requires_droplet_async",
-              message:
-                "One Path admin Green Button Past Sim recalc is too heavy for Vercel inline execution. Configure DROPLET_WEBHOOK_URL and DROPLET_WEBHOOK_SECRET.",
-              correlationId,
-            },
-            { status: 409 }
-          );
-        }
-        const dispatched = await dispatchPastSimRecalc({
-          userId: effectiveUserId,
-          houseId: effectiveHouseId,
-          esiid: smtSourceEsiid,
-          mode: "SMT_BASELINE",
-          scenarioId: effectiveRawInputBase.scenarioId,
-          weatherPreference: effectiveRawInputBase.weatherPreference,
-          persistPastSimBaseline: effectiveRawInputBase.persistRequested,
-          actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
-          validationOnlyDateKeysLocal: effectiveRawInputBase.validationOnlyDateKeysLocal,
-          preLockboxTravelRanges: effectiveRawInputBase.travelRanges,
-          validationDaySelectionMode: (effectiveRawInputBase.validationSelectionMode as any) ?? undefined,
-          validationDayCount: effectiveRawInputBase.validationDayCount ?? undefined,
-          correlationId,
-          runContext: {
-            callerLabel: "one_path_sim_admin",
-            preferredActualSource: "GREEN_BUTTON",
-          },
-        });
-        if (dispatched.executionMode === "droplet_async") {
-          return NextResponse.json(
-            {
-              ok: true,
-              executionMode: "droplet_async",
-              readbackPending: true,
-              runType: "PAST_SIM",
-              jobId: dispatched.jobId,
-              jobStatus: "queued",
-              correlationId: dispatched.correlationId,
-              debugDiagnosticsIncluded: false,
-              engineInput: {
-                inputType: "GREEN_BUTTON",
-                houseId: effectiveHouseId,
-                actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
-                scenarioId: effectiveRawInputBase.scenarioId,
-                preferredActualSource: "GREEN_BUTTON",
-              },
-              artifact: null,
-              readModel: null,
-              runDisplayView: null,
-              manualStageOneView: null,
-            },
-            { status: 202 }
-          );
-        }
-        if (!dispatched.result.ok) {
-          return NextResponse.json(
-            {
-              ok: false,
-              executionMode: "inline",
-              error: dispatched.result.error,
-              message: dispatched.result.error,
-              correlationId: dispatched.correlationId,
-            },
-            { status: dispatched.result.error === "recalc_timeout" ? 504 : 409 }
-          );
-        }
-        const readback = await buildPastSimRunReadbackResponse({
-          userId: effectiveUserId,
-          houseId: effectiveHouseId,
-          scenarioId: effectiveRawInputBase.scenarioId,
-          correlationId: dispatched.correlationId,
-        });
-        if (!readback.ok) {
-          return NextResponse.json(
-            {
-              ok: false,
-              error: readback.code,
-              message: readback.message,
-              correlationId: dispatched.correlationId,
-            },
-            { status: readback.code === "ARTIFACT_MISSING" ? 404 : 500 }
-          );
-        }
-        return NextResponse.json({ ...readback, executionMode: "inline", correlationId: dispatched.correlationId });
-      }
       let engineInput =
         mode === "INTERVAL"
           ? await adaptIntervalRawInput(effectiveRawInputBase)
@@ -1610,7 +1476,7 @@ export async function POST(request: NextRequest) {
             ? await withAdminRouteStageTimeout({
                 stage: "adapt_green_button_raw_input",
                 correlationId,
-                timeoutMs: GREEN_BUTTON_BASELINE_ROUTE_STAGE_TIMEOUT_MS,
+                timeoutMs: GREEN_BUTTON_ROUTE_STAGE_TIMEOUT_MS,
                 mode,
                 houseId: effectiveHouseId,
                 stageTimingsMs,
@@ -1633,7 +1499,7 @@ export async function POST(request: NextRequest) {
           await withAdminRouteStageTimeout({
             stage: "build_green_button_baseline_dataset",
             correlationId,
-            timeoutMs: GREEN_BUTTON_BASELINE_ROUTE_STAGE_TIMEOUT_MS,
+            timeoutMs: GREEN_BUTTON_ROUTE_STAGE_TIMEOUT_MS,
             mode,
             houseId: effectiveHouseId,
             stageTimingsMs,
@@ -1648,7 +1514,7 @@ export async function POST(request: NextRequest) {
             await withAdminRouteStageTimeout({
               stage: "build_green_button_baseline_view",
               correlationId,
-              timeoutMs: GREEN_BUTTON_BASELINE_ROUTE_STAGE_TIMEOUT_MS,
+              timeoutMs: GREEN_BUTTON_ROUTE_STAGE_TIMEOUT_MS,
               mode,
               houseId: effectiveHouseId,
               stageTimingsMs,

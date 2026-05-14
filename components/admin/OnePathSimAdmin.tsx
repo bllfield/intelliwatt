@@ -1150,48 +1150,6 @@ export function OnePathSimAdmin() {
       setError(surfacedMessage);
       return;
     }
-    if (json?.executionMode === "droplet_async" && typeof json.jobId === "string" && json.jobId.trim()) {
-      const jobId = json.jobId.trim();
-      setStatus("One Path Past Sim is running on the Droplet. Waiting for artifact readback...");
-      let finalJson: any = null;
-      for (let attempt = 0; attempt < 90; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, attempt < 5 ? 1500 : 3000));
-        const pollRes = await fetch("/api/admin/tools/one-path-sim", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "past_recalc_status",
-            jobId,
-            email: lookup.email,
-            sourceHouseId: effectiveHouseId,
-            houseId: effectiveMutableHouseId,
-            scenarioId: effectiveScenarioId || null,
-            mode,
-            actualContextHouseId: effectiveActualContextHouseId || null,
-          }),
-        });
-        const pollJson = await pollRes.json().catch(() => null);
-        if (!pollRes.ok || !pollJson?.ok) {
-          setStatus(null);
-          setError(pollJson?.message ?? pollJson?.error ?? `Past Sim status check failed (${pollRes.status})`);
-          return;
-        }
-        if (pollJson.readbackPending !== true) {
-          finalJson = pollJson;
-          break;
-        }
-        setStatus(`One Path Past Sim is running on the Droplet (${String(pollJson.jobStatus ?? "queued")})...`);
-      }
-      if (!finalJson) {
-        setStatus(null);
-        setError("Past Sim is still running on the Droplet. Try Run again in a minute to read the finished artifact.");
-        return;
-      }
-      setRunResult(finalJson);
-      setLastRunKnownScenarioKey(selectedKnownScenario?.scenarioKey ?? "");
-      setStatus("One Path run completed and read back from the canonical artifact/read-model path.");
-      return;
-    }
     setRunResult(json);
     setLastRunKnownScenarioKey(selectedKnownScenario?.scenarioKey ?? "");
     setStatus("One Path run completed and read back from the canonical artifact/read-model path.");

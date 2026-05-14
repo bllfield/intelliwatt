@@ -1024,7 +1024,7 @@ describe("admin one path sim route", () => {
       })
     );
 
-    await vi.advanceTimersByTimeAsync(25_000);
+    await vi.advanceTimersByTimeAsync(120_000);
     const res = await pending;
     const json = await res.json();
 
@@ -1035,7 +1035,7 @@ describe("admin one path sim route", () => {
         error: "one_path_admin_timeout",
         stage: "adapt_green_button_raw_input",
         correlationId: expect.any(String),
-        timeoutMs: 25_000,
+        timeoutMs: 120_000,
       })
     );
   });
