@@ -289,6 +289,47 @@ describe("buildOnePathRunReadOnlyView", () => {
     ]);
   });
 
+  it("splits the next Green Button interval into padded zero slots so the displayed curve keeps day energy", () => {
+    const view = buildOnePathRunReadOnlyView({
+      dataset: {
+        summary: {
+          source: "GREEN_BUTTON with simulated fill for Travel/Vacant",
+          intervalsCount: 4,
+        },
+        daily: [{ date: "2026-05-12", kwh: 1.5, source: "ACTUAL" }],
+        monthly: [{ month: "2026-05", kwh: 1.5 }],
+        insights: {
+          fifteenMinuteAverages: [],
+          weekdayVsWeekend: { weekday: 1.5, weekend: 0 },
+          timeOfDayBuckets: [],
+          peakDay: null,
+          peakHour: null,
+          baseload: 1,
+        },
+        series: {
+          intervals15: [
+            { timestamp: "2026-05-12T19:15:00.000Z", kwh: 0 },
+            { timestamp: "2026-05-13T19:15:00.000Z", kwh: 0.5 },
+            { timestamp: "2026-05-12T19:30:00.000Z", kwh: 0.25 },
+            { timestamp: "2026-05-13T19:30:00.000Z", kwh: 0.75 },
+          ],
+        },
+        meta: {
+          datasetKind: "SIMULATED",
+          actualSource: "GREEN_BUTTON",
+          timezone: "America/Chicago",
+          greenButtonIntervalTimestampMode: "utcDayGrid",
+          greenButtonPaddedIntervalCount: 1,
+        },
+      },
+    });
+
+    expect(view?.fifteenMinuteAverages).toEqual([
+      { hhmm: "19:15", avgKw: 1.25 },
+      { hhmm: "19:30", avgKw: 1.75 },
+    ]);
+  });
+
   it("prefers Chicago-local daily rows from intervals when stored UTC daily rows stop before the coverage end", () => {
     const intervals15: Array<{ timestamp: string; kwh: number }> = [];
     const start = new Date("2026-05-01T00:00:00.000Z").getTime();

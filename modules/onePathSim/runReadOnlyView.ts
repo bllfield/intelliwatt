@@ -64,6 +64,27 @@ function resolveIntervalTimestampMode(meta: Record<string, unknown> | null): "ti
   return "timezone";
 }
 
+function redistributeGreenButtonGridZeroSamples(
+  rows: Array<{ timestamp: string; kwh: number }>
+): Array<{ timestamp: string; kwh: number }> {
+  const out = rows
+    .map((row) => ({ ...row }))
+    .sort((left, right) => (left.timestamp < right.timestamp ? -1 : left.timestamp > right.timestamp ? 1 : 0));
+  for (let index = 0; index < out.length - 1; index += 1) {
+    const current = out[index]!;
+    const next = out[index + 1]!;
+    if (current.kwh !== 0 || next.kwh <= 0) continue;
+    if (dateKeyFromUtcGridTimestamp(current.timestamp) !== dateKeyFromUtcGridTimestamp(next.timestamp)) continue;
+    const currentTs = new Date(current.timestamp).getTime();
+    const nextTs = new Date(next.timestamp).getTime();
+    if (!Number.isFinite(currentTs) || nextTs - currentTs !== 15 * 60 * 1000) continue;
+    const splitKwh = next.kwh / 2;
+    current.kwh = splitKwh;
+    next.kwh = splitKwh;
+  }
+  return out;
+}
+
 function asStitchedMonthRecord(
   value: unknown
 ):
@@ -107,16 +128,28 @@ function asStitchedMonthRecord(
 function buildFifteenMinuteAveragesFromIntervals15(
   value: unknown,
   timezone: string,
-  timestampMode: "timezone" | "utcDayGrid" = "timezone"
+  timestampMode: "timezone" | "utcDayGrid" = "timezone",
+  options?: { redistributeZeroKwhSamples?: boolean }
 ): Array<{ hhmm: string; avgKw: number }> {
   const buckets = new Map<string, { sumKw: number; count: number }>();
-  for (const row of asArray<Record<string, unknown>>(value)) {
-    const timestamp = String(row.timestamp ?? "");
+  const rows = asArray<Record<string, unknown>>(value)
+    .map((row) => {
+      const timestamp = String(row.timestamp ?? "");
+      const kwh = Number(row.kwh ?? row.consumption_kwh);
+      return timestamp && Number.isFinite(kwh) ? { timestamp, kwh } : null;
+    })
+    .filter((row): row is { timestamp: string; kwh: number } => row != null);
+  const rowsForAverage =
+    options?.redistributeZeroKwhSamples && timestampMode === "utcDayGrid"
+      ? redistributeGreenButtonGridZeroSamples(rows)
+      : rows;
+
+  for (const row of rowsForAverage) {
+    const timestamp = row.timestamp;
     const hhmm =
       timestampMode === "utcDayGrid" ? hhmmFromUtcGridTimestamp(timestamp) : hhmmInTimezone(timestamp, timezone);
     if (!hhmm) continue;
-    const kwh = Number(row.kwh ?? row.consumption_kwh);
-    if (!Number.isFinite(kwh)) continue;
+    const kwh = row.kwh;
     const current = buckets.get(hhmm) ?? { sumKw: 0, count: 0 };
     current.sumKw += kwh * 4;
     current.count += 1;
@@ -370,10 +403,13 @@ export function buildOnePathRunReadOnlyView(args: {
   const compareRowsPrimary = asCompareRows(compareProjection.rows);
   const selectedValidationRows = asArray<Record<string, unknown>>(tuningSummary.selectedValidationRows);
   const compareRows = compareRowsPrimary.length ? compareRowsPrimary : asCompareRows(selectedValidationRows);
+  const shouldIgnoreGreenButtonGridZeroSamples =
+    intervalTimestampMode === "utcDayGrid" && Number(meta?.greenButtonPaddedIntervalCount ?? 0) > 0;
   const rebuiltFifteenMinuteAverages = buildFifteenMinuteAveragesFromIntervals15(
     asRecord(dataset.series)?.intervals15,
     timezone,
-    intervalTimestampMode
+    intervalTimestampMode,
+    { redistributeZeroKwhSamples: shouldIgnoreGreenButtonGridZeroSamples }
   );
   const fifteenMinuteAverages = rebuiltFifteenMinuteAverages.length
     ? rebuiltFifteenMinuteAverages
