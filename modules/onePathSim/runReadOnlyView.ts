@@ -38,6 +38,32 @@ function hhmmInTimezone(timestamp: string, timezone: string): string | null {
   }
 }
 
+function hhmmFromUtcGridTimestamp(timestamp: string): string | null {
+  const ts = new Date(timestamp);
+  if (!Number.isFinite(ts.getTime())) return null;
+  const hhmm = `${String(ts.getUTCHours()).padStart(2, "0")}:${String(ts.getUTCMinutes()).padStart(2, "0")}`;
+  return /^\d{2}:\d{2}$/.test(hhmm) ? hhmm : null;
+}
+
+function dateKeyFromUtcGridTimestamp(timestamp: string): string | null {
+  const ts = new Date(timestamp);
+  if (!Number.isFinite(ts.getTime())) return null;
+  return ts.toISOString().slice(0, 10);
+}
+
+function resolveIntervalTimestampMode(meta: Record<string, unknown> | null): "timezone" | "utcDayGrid" {
+  if (meta?.greenButtonIntervalTimestampMode === "utcDayGrid") return "utcDayGrid";
+  if (
+    meta?.greenButtonSourceDateByTargetDate &&
+    typeof meta.greenButtonSourceDateByTargetDate === "object" &&
+    !Array.isArray(meta.greenButtonSourceDateByTargetDate) &&
+    (meta.actualSource === "GREEN_BUTTON" || typeof meta.greenButtonCoverageIntervalCount === "number")
+  ) {
+    return "utcDayGrid";
+  }
+  return "timezone";
+}
+
 function asStitchedMonthRecord(
   value: unknown
 ):
@@ -80,11 +106,14 @@ function asStitchedMonthRecord(
 
 function buildFifteenMinuteAveragesFromIntervals15(
   value: unknown,
-  timezone: string
+  timezone: string,
+  timestampMode: "timezone" | "utcDayGrid" = "timezone"
 ): Array<{ hhmm: string; avgKw: number }> {
   const buckets = new Map<string, { sumKw: number; count: number }>();
   for (const row of asArray<Record<string, unknown>>(value)) {
-    const hhmm = hhmmInTimezone(String(row.timestamp ?? ""), timezone);
+    const timestamp = String(row.timestamp ?? "");
+    const hhmm =
+      timestampMode === "utcDayGrid" ? hhmmFromUtcGridTimestamp(timestamp) : hhmmInTimezone(timestamp, timezone);
     if (!hhmm) continue;
     const kwh = Number(row.kwh ?? row.consumption_kwh);
     if (!Number.isFinite(kwh)) continue;
@@ -175,6 +204,7 @@ function buildDisplayDailyRows(value: unknown): Array<ReturnType<typeof dailyRow
 function buildLocalDailyRowsFromIntervals15(args: {
   intervals15: unknown;
   timezone: string;
+  timestampMode?: "timezone" | "utcDayGrid";
   coverageStart: string | null;
   coverageEnd: string | null;
   existingRows: Array<ReturnType<typeof dailyRowFieldsFromSourceRow>>;
@@ -187,7 +217,9 @@ function buildLocalDailyRowsFromIntervals15(args: {
   for (const row of asArray<Record<string, unknown>>(args.intervals15)) {
     const timestamp = String(row?.timestamp ?? "");
     if (!timestamp) continue;
-    const date = asDateKey(dateKeyInTimezone(timestamp, args.timezone));
+    const date = asDateKey(
+      args.timestampMode === "utcDayGrid" ? dateKeyFromUtcGridTimestamp(timestamp) : dateKeyInTimezone(timestamp, args.timezone)
+    );
     if (!date) continue;
     if (coverageStart && date < coverageStart) continue;
     if (coverageEnd && date > coverageEnd) continue;
@@ -303,9 +335,11 @@ export function buildOnePathRunReadOnlyView(args: {
     : [];
   const datasetDailyRows = buildDisplayDailyRows(dataset.daily);
   const timezone = typeof meta?.timezone === "string" && meta.timezone.trim() ? meta.timezone : "America/Chicago";
+  const intervalTimestampMode = resolveIntervalTimestampMode(meta);
   const intervalBackedLocalDailyRows = buildLocalDailyRowsFromIntervals15({
     intervals15: asRecord(dataset.series)?.intervals15,
     timezone,
+    timestampMode: intervalTimestampMode,
     coverageStart: viewModel.coverage.start,
     coverageEnd: viewModel.coverage.end,
     existingRows: datasetDailyRows,
@@ -338,7 +372,8 @@ export function buildOnePathRunReadOnlyView(args: {
   const compareRows = compareRowsPrimary.length ? compareRowsPrimary : asCompareRows(selectedValidationRows);
   const rebuiltFifteenMinuteAverages = buildFifteenMinuteAveragesFromIntervals15(
     asRecord(dataset.series)?.intervals15,
-    timezone
+    timezone,
+    intervalTimestampMode
   );
   const fifteenMinuteAverages = rebuiltFifteenMinuteAverages.length
     ? rebuiltFifteenMinuteAverages

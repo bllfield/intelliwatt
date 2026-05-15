@@ -205,6 +205,90 @@ describe("buildOnePathRunReadOnlyView", () => {
     expect(view?.fifteenMinuteCurveSourceOwner).toBe("buildOnePathRunReadOnlyView(...).dataset.series.intervals15");
   });
 
+  it("keeps Green Button UTC day-grid intervals on their preserved local HH:mm slots", () => {
+    const view = buildOnePathRunReadOnlyView({
+      dataset: {
+        summary: {
+          source: "GREEN_BUTTON with simulated fill for Travel/Vacant",
+          intervalsCount: 4,
+        },
+        daily: [{ date: "2026-05-12", kwh: 2.5, source: "ACTUAL" }],
+        monthly: [{ month: "2026-05", kwh: 2.5 }],
+        insights: {
+          fifteenMinuteAverages: [{ hhmm: "14:00", avgKw: 99 }],
+          weekdayVsWeekend: { weekday: 2.5, weekend: 0 },
+          timeOfDayBuckets: [],
+          peakDay: null,
+          peakHour: null,
+          baseload: 1,
+        },
+        series: {
+          intervals15: [
+            { timestamp: "2026-05-12T19:00:00.000Z", kwh: 0.25 },
+            { timestamp: "2026-05-12T19:15:00.000Z", kwh: 0.5 },
+            { timestamp: "2026-05-12T19:30:00.000Z", kwh: 0.75 },
+            { timestamp: "2026-05-12T19:45:00.000Z", kwh: 1 },
+          ],
+        },
+        meta: {
+          datasetKind: "SIMULATED",
+          actualSource: "GREEN_BUTTON",
+          timezone: "America/Chicago",
+          greenButtonIntervalTimestampMode: "utcDayGrid",
+        },
+      },
+    });
+
+    expect(view?.fifteenMinuteAverages).toEqual([
+      { hhmm: "19:00", avgKw: 1 },
+      { hhmm: "19:15", avgKw: 2 },
+      { hhmm: "19:30", avgKw: 3 },
+      { hhmm: "19:45", avgKw: 4 },
+    ]);
+    expect(view?.fifteenMinuteCurveSourceOwner).toBe("buildOnePathRunReadOnlyView(...).dataset.series.intervals15");
+  });
+
+  it("infers Green Button UTC day-grid mode for cached artifacts created before the explicit metadata flag", () => {
+    const view = buildOnePathRunReadOnlyView({
+      dataset: {
+        summary: {
+          source: "GREEN_BUTTON with simulated fill for Travel/Vacant",
+          intervalsCount: 2,
+        },
+        daily: [{ date: "2026-05-12", kwh: 0.75, source: "ACTUAL" }],
+        monthly: [{ month: "2026-05", kwh: 0.75 }],
+        insights: {
+          fifteenMinuteAverages: [],
+          weekdayVsWeekend: { weekday: 0.75, weekend: 0 },
+          timeOfDayBuckets: [],
+          peakDay: null,
+          peakHour: null,
+          baseload: 1,
+        },
+        series: {
+          intervals15: [
+            { timestamp: "2026-05-12T19:00:00.000Z", kwh: 0.25 },
+            { timestamp: "2026-05-12T19:15:00.000Z", kwh: 0.5 },
+          ],
+        },
+        meta: {
+          datasetKind: "SIMULATED",
+          actualSource: "GREEN_BUTTON",
+          timezone: "America/Chicago",
+          greenButtonCoverageIntervalCount: 2,
+          greenButtonSourceDateByTargetDate: {
+            "2026-05-12": "2025-05-12",
+          },
+        },
+      },
+    });
+
+    expect(view?.fifteenMinuteAverages).toEqual([
+      { hhmm: "19:00", avgKw: 1 },
+      { hhmm: "19:15", avgKw: 2 },
+    ]);
+  });
+
   it("prefers Chicago-local daily rows from intervals when stored UTC daily rows stop before the coverage end", () => {
     const intervals15: Array<{ timestamp: string; kwh: number }> = [];
     const start = new Date("2026-05-01T00:00:00.000Z").getTime();

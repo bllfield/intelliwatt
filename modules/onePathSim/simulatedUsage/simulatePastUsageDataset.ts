@@ -2608,6 +2608,7 @@ export async function simulatePastUsageDataset(
           coverageStart: dataset?.summary?.start ?? startDate,
           coverageEnd: dataset?.summary?.end ?? endDate,
           displayWindowNote: greenButtonCoverageIntervals?.displayWindowNote ?? undefined,
+          greenButtonIntervalTimestampMode: greenButtonCoverageIntervals ? "utcDayGrid" : undefined,
           greenButtonSourceCoverageStart: greenButtonCoverageIntervals?.sourceCoverageStart ?? undefined,
           greenButtonSourceCoverageEnd: greenButtonCoverageIntervals?.sourceCoverageEnd ?? undefined,
           greenButtonCoverageIntervalCount: greenButtonCoverageIntervals?.intervalsCount ?? undefined,
