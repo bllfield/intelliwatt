@@ -70,17 +70,34 @@ function redistributeGreenButtonGridZeroSamples(
   const out = rows
     .map((row) => ({ ...row }))
     .sort((left, right) => (left.timestamp < right.timestamp ? -1 : left.timestamp > right.timestamp ? 1 : 0));
-  for (let index = 0; index < out.length - 1; index += 1) {
+  const isAdjacentSameDay = (
+    left: { timestamp: string; kwh: number } | undefined,
+    right: { timestamp: string; kwh: number } | undefined
+  ): boolean => {
+    if (!left || !right) return false;
+    if (dateKeyFromUtcGridTimestamp(left.timestamp) !== dateKeyFromUtcGridTimestamp(right.timestamp)) return false;
+    const leftTs = new Date(left.timestamp).getTime();
+    const rightTs = new Date(right.timestamp).getTime();
+    return Number.isFinite(leftTs) && Number.isFinite(rightTs) && rightTs - leftTs === 15 * 60 * 1000;
+  };
+
+  for (let index = 0; index < out.length; index += 1) {
+    const previous = out[index - 1];
     const current = out[index]!;
-    const next = out[index + 1]!;
-    if (current.kwh !== 0 || next.kwh <= 0) continue;
-    if (dateKeyFromUtcGridTimestamp(current.timestamp) !== dateKeyFromUtcGridTimestamp(next.timestamp)) continue;
-    const currentTs = new Date(current.timestamp).getTime();
-    const nextTs = new Date(next.timestamp).getTime();
-    if (!Number.isFinite(currentTs) || nextTs - currentTs !== 15 * 60 * 1000) continue;
-    const splitKwh = next.kwh / 2;
+    const next = out[index + 1];
+    if (current.kwh !== 0) continue;
+    const previousCandidate = isAdjacentSameDay(previous, current) && previous && previous.kwh > 0 ? previous : null;
+    const nextCandidate = isAdjacentSameDay(current, next) && next && next.kwh > 0 ? next : null;
+    const donor =
+      previousCandidate && nextCandidate
+        ? previousCandidate.kwh >= nextCandidate.kwh
+          ? previousCandidate
+          : nextCandidate
+        : previousCandidate ?? nextCandidate;
+    if (!donor) continue;
+    const splitKwh = donor.kwh / 2;
     current.kwh = splitKwh;
-    next.kwh = splitKwh;
+    donor.kwh = splitKwh;
   }
   return out;
 }

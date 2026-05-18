@@ -330,6 +330,53 @@ describe("buildOnePathRunReadOnlyView", () => {
     ]);
   });
 
+  it("splits the previous Green Button dump into a padded zero slot when the duplicated energy lands before the gap", () => {
+    const view = buildOnePathRunReadOnlyView({
+      dataset: {
+        summary: {
+          source: "GREEN_BUTTON with simulated fill for Travel/Vacant",
+          intervalsCount: 6,
+        },
+        daily: [
+          { date: "2026-05-12", kwh: 1.25, source: "ACTUAL" },
+          { date: "2026-05-13", kwh: 1, source: "ACTUAL" },
+        ],
+        monthly: [{ month: "2026-05", kwh: 2.25 }],
+        insights: {
+          fifteenMinuteAverages: [],
+          weekdayVsWeekend: { weekday: 2.25, weekend: 0 },
+          timeOfDayBuckets: [],
+          peakDay: null,
+          peakHour: null,
+          baseload: 1,
+        },
+        series: {
+          intervals15: [
+            { timestamp: "2026-05-12T19:00:00.000Z", kwh: 1 },
+            { timestamp: "2026-05-12T19:15:00.000Z", kwh: 0 },
+            { timestamp: "2026-05-12T19:30:00.000Z", kwh: 0.25 },
+            { timestamp: "2026-05-13T19:00:00.000Z", kwh: 0.25 },
+            { timestamp: "2026-05-13T19:15:00.000Z", kwh: 0.5 },
+            { timestamp: "2026-05-13T19:30:00.000Z", kwh: 0.25 },
+          ],
+        },
+        meta: {
+          datasetKind: "SIMULATED",
+          actualSource: "GREEN_BUTTON",
+          timezone: "America/Chicago",
+          greenButtonIntervalTimestampMode: "utcDayGrid",
+          greenButtonPaddedIntervalCount: 1,
+        },
+      },
+    });
+
+    expect(view?.fifteenMinuteAverages).toEqual([
+      { hhmm: "19:00", avgKw: 1.5 },
+      { hhmm: "19:15", avgKw: 2 },
+      { hhmm: "19:30", avgKw: 1 },
+    ]);
+  });
+
   it("prefers Chicago-local daily rows from intervals when stored UTC daily rows stop before the coverage end", () => {
     const intervals15: Array<{ timestamp: string; kwh: number }> = [];
     const start = new Date("2026-05-01T00:00:00.000Z").getTime();
