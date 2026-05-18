@@ -146,6 +146,10 @@ describe("one path simulation variable copy payload", () => {
     expect((payload.userUsageDashboardViewModel as any).fifteenMinuteCurve).toEqual(
       expect.objectContaining({
         rowsCount: 2,
+        rows: [
+          { hhmm: "00:00", avgKw: 1.2 },
+          { hhmm: "00:15", avgKw: 1.4 },
+        ],
       })
     );
     expect((payload.displayTotalsAudit as any)).toEqual(
@@ -472,6 +476,14 @@ describe("one path simulation variable copy payload", () => {
     expect((payload.runDisplayContract as any)).toEqual(
       expect.objectContaining({
         monthlyDisplayRows: [{ month: "2026-04", kwh: 13542.3 }],
+        dailyUsage: expect.objectContaining({
+          rowsCount: 1,
+          rows: [{ date: "2026-04-14", kwh: 42.1, source: "ACTUAL" }],
+        }),
+        fifteenMinuteCurve: expect.objectContaining({
+          rowsCount: 1,
+          rows: [{ hhmm: "00:00", avgKw: 1.2 }],
+        }),
       })
     );
     expect(payload.engineInput).toEqual(
@@ -530,7 +542,20 @@ describe("one path simulation variable copy payload", () => {
       expect.objectContaining({
         rowsCount: 1,
         metrics: { wape: 12.11, mae: 8.27, rmse: 11.67 },
+        rows: [{ localDate: "2025-06-02", actualDayKwh: 64.76, simulatedDayKwh: 65.37 }],
         sourceOwner: "runDisplayView.compare",
+      })
+    );
+    expect((payload.runDisplayContract as any)?.dailyUsage).toEqual(
+      expect.objectContaining({
+        rowsCount: 1,
+        rows: [{ date: "2026-05-12", kwh: 60.02, source: "ACTUAL" }],
+      })
+    );
+    expect((payload.runDisplayContract as any)?.fifteenMinuteCurve).toEqual(
+      expect.objectContaining({
+        rowsCount: 1,
+        rows: [{ hhmm: "00:00", avgKw: 1.34 }],
       })
     );
     expect((payload.runResults as any)).toEqual(

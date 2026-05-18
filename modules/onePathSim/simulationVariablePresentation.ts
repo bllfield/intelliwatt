@@ -366,7 +366,7 @@ export function buildSimulationVariableCopyPayload(args: {
         dailyRowsCount: dashboardViewModel.derived.daily.length,
         fifteenMinuteCurve: {
           rowsCount: dashboardViewModel.derived.fifteenCurve.length,
-          preview: dashboardViewModel.derived.fifteenCurve.slice(0, 12),
+          rows: dashboardViewModel.derived.fifteenCurve,
           sourceOfDaySimulationCore: dashboardViewModel.coverage?.sourceOfDaySimulationCore ?? null,
           weatherBasisLabel: dashboardViewModel.coverage?.weatherBasisLabel ?? null,
           sourceOwner: "buildUserUsageDashboardViewModel(...).derived.fifteenCurve",
@@ -468,10 +468,17 @@ export function buildSimulationVariableCopyPayload(args: {
         rawMonthlyRows,
         monthlyRowsDifferFromRaw: JSON.stringify(effectiveRunDisplayView.monthlyRows) !== JSON.stringify(rawMonthlyRows),
         stitchedMonth: effectiveRunDisplayView.stitchedMonth,
+        dailyUsage: {
+          rowsCount: effectiveRunDisplayView.dailyRows.length,
+          rows: effectiveRunDisplayView.dailyRows,
+          dailyWeather: effectiveRunDisplayView.dailyWeather ?? null,
+          sourceOwner:
+            runDisplayView != null ? "runResult.runDisplayView.dailyRows" : "buildOnePathRunReadOnlyView(...).dailyRows",
+        },
         compare: {
           rowsCount: rows.length,
           metrics: compareMetrics,
-          rowsPreview: rows.slice(0, 14),
+          rows,
           sourceOwner:
             compareProjection?.rows && Array.isArray(compareProjection.rows) && compareProjection.rows.length
               ? "readModel.compareProjection"
@@ -481,7 +488,7 @@ export function buildSimulationVariableCopyPayload(args: {
         },
         fifteenMinuteCurve: {
           rowsCount: effectiveRunDisplayView.fifteenMinuteAverages.length,
-          preview: effectiveRunDisplayView.fifteenMinuteAverages.slice(0, 12),
+          rows: effectiveRunDisplayView.fifteenMinuteAverages,
           sourceOwner: effectiveRunDisplayView.fifteenMinuteCurveSourceOwner,
         },
         coverage: {
