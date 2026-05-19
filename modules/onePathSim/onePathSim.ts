@@ -1673,47 +1673,46 @@ async function buildArtifactFromEngineInput(args: {
       },
     })
     .catch(() => null);
-  const actualDataset =
-    (
-      await resolveOnePathUpstreamUsageTruthForSimulation({
-        userId: args.engineInput.runtime.userId,
-        houseId: args.engineInput.houseId,
-        actualContextHouseId: args.engineInput.actualContextHouseId,
-        smtSourceEsiid: args.engineInput.runtime.esiid,
-        seedIfMissing: false,
-        preferredActualSource: args.engineInput.runtime.runContext?.preferredActualSource ?? null,
-      }).catch(() => null)
-    )?.dataset ?? null;
   const compareProjection = buildOnePathValidationCompareProjectionSidecar(datasetRead.dataset);
   const manualReadResult =
     args.engineInput.inputType === "MANUAL_MONTHLY" || args.engineInput.inputType === "MANUAL_ANNUAL"
-      ? await buildOnePathManualArtifactDecorations({
-          userId: args.engineInput.runtime.userId,
-          houseId: args.engineInput.houseId,
-          scenarioId: args.engineInput.scenarioId,
-          dataset: datasetRead.dataset,
-          displayDataset: remapManualDisplayDatasetToCanonicalWindow({
+      ? await (async () => {
+          const actualDataset =
+            (
+              await resolveOnePathUpstreamUsageTruthForSimulation({
+                userId: args.engineInput.runtime.userId,
+                houseId: args.engineInput.houseId,
+                actualContextHouseId: args.engineInput.actualContextHouseId,
+                smtSourceEsiid: args.engineInput.runtime.esiid,
+                seedIfMissing: false,
+                preferredActualSource: args.engineInput.runtime.runContext?.preferredActualSource ?? null,
+              }).catch(() => null)
+            )?.dataset ?? null;
+          return buildOnePathManualArtifactDecorations({
+            userId: args.engineInput.runtime.userId,
+            houseId: args.engineInput.houseId,
+            scenarioId: args.engineInput.scenarioId,
             dataset: datasetRead.dataset,
+            displayDataset: remapManualDisplayDatasetToCanonicalWindow({
+              dataset: datasetRead.dataset,
+              usageInputMode: args.engineInput.inputType,
+            }),
+            callerType: args.callerType,
             usageInputMode: args.engineInput.inputType,
-          }),
-          callerType: args.callerType,
-          usageInputMode: args.engineInput.inputType,
-          weatherLogicMode: args.engineInput.weatherLogicMode,
-          artifactId: buildRec?.id ? String(buildRec.id) : null,
-          artifactInputHash:
-            typeof (datasetRead.dataset as any)?.meta?.artifactInputHash === "string"
-              ? String((datasetRead.dataset as any).meta.artifactInputHash)
-              : null,
-          artifactEngineVersion:
-            typeof (datasetRead.dataset as any)?.meta?.engineVersion === "string"
-              ? String((datasetRead.dataset as any).meta.engineVersion)
-              : null,
-          manualUsagePayload:
-            args.engineInput.inputType === "MANUAL_MONTHLY" || args.engineInput.inputType === "MANUAL_ANNUAL"
-              ? buildManualPayloadFromEngineInput(args.engineInput)
-              : null,
-          actualDataset,
-        })
+            weatherLogicMode: args.engineInput.weatherLogicMode,
+            artifactId: buildRec?.id ? String(buildRec.id) : null,
+            artifactInputHash:
+              typeof (datasetRead.dataset as any)?.meta?.artifactInputHash === "string"
+                ? String((datasetRead.dataset as any).meta.artifactInputHash)
+                : null,
+            artifactEngineVersion:
+              typeof (datasetRead.dataset as any)?.meta?.engineVersion === "string"
+                ? String((datasetRead.dataset as any).meta.engineVersion)
+                : null,
+            manualUsagePayload: buildManualPayloadFromEngineInput(args.engineInput),
+            actualDataset,
+          });
+        })()
       : null;
   const sharedDiagnostics =
     manualReadResult
