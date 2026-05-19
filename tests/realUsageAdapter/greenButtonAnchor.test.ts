@@ -235,6 +235,36 @@ describe("green button full-day anchor", () => {
     expect(String(out.displayWindowNote ?? "")).toContain("matching source-day weather");
   });
 
+  it("prefers a trusted current-year UTC-grid day over a shifted prior-year day for the same target date", async () => {
+    const shiftedSourceDayIntervals = Array.from({ length: 95 }, (_, slot) => ({
+      ts: new Date(new Date("2025-05-14T00:00:00.000Z").getTime() + slot * 15 * 60 * 1000),
+      kwh: 0.25,
+    }));
+    const trustedCurrentYearDayIntervals = Array.from({ length: 96 }, (_, slot) => ({
+      ts: new Date(new Date("2026-05-14T00:00:00.000Z").getTime() + slot * 15 * 60 * 1000),
+      kwh: 0.75,
+    }));
+    usageQueryRaw
+      .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-05-20T23:45:00.000Z") }])
+      .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-05-20T23:45:00.000Z") }])
+      .mockResolvedValueOnce([{ bucket: new Date("2026-05-20T05:00:00.000Z"), intervalscount: 96 }])
+      .mockResolvedValueOnce([...shiftedSourceDayIntervals, ...trustedCurrentYearDayIntervals]);
+
+    const mod = await import("@/modules/realUsageAdapter/greenButton");
+    const out = await mod.fetchGreenButtonIntervalsForCoverageWindow({
+      houseId: "house-1",
+      coverageStartDate: "2025-05-17",
+      coverageEndDate: "2026-05-16",
+      timestampMode: "utcDayGrid",
+    });
+
+    const targetDayRows = out.intervals.filter((row) => row.timestamp.startsWith("2026-05-14T"));
+    expect(targetDayRows).toHaveLength(96);
+    expect(targetDayRows.every((row) => row.kwh === 0.75)).toBe(true);
+    expect(out.sourceDateByTargetDate?.["2026-05-14"]).toBe("2026-05-14");
+    expect(out.paddedDateCount).toBe(0);
+  });
+
   it("passes padded trusted shifted Green Button days downstream as actual-backed", async () => {
     const shiftedSourceDayIntervals = Array.from({ length: 95 }, (_, slot) => ({
       ts: new Date(new Date("2025-05-14T00:00:00.000Z").getTime() + slot * 15 * 60 * 1000),
