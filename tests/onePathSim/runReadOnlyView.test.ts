@@ -377,6 +377,48 @@ describe("buildOnePathRunReadOnlyView", () => {
     ]);
   });
 
+  it("does not apply display redistribution again when the simulation pool already corrected Green Button intervals", () => {
+    const view = buildOnePathRunReadOnlyView({
+      dataset: {
+        summary: {
+          source: "GREEN_BUTTON with simulated fill for Travel/Vacant",
+          intervalsCount: 3,
+        },
+        daily: [{ date: "2026-05-12", kwh: 1.25, source: "ACTUAL" }],
+        monthly: [{ month: "2026-05", kwh: 1.25 }],
+        insights: {
+          fifteenMinuteAverages: [],
+          weekdayVsWeekend: { weekday: 1.25, weekend: 0 },
+          timeOfDayBuckets: [],
+          peakDay: null,
+          peakHour: null,
+          baseload: 1,
+        },
+        series: {
+          intervals15: [
+            { timestamp: "2026-05-12T19:00:00.000Z", kwh: 0.25 },
+            { timestamp: "2026-05-12T19:15:00.000Z", kwh: 0.5 },
+            { timestamp: "2026-05-12T19:30:00.000Z", kwh: 0.5 },
+          ],
+        },
+        meta: {
+          datasetKind: "SIMULATED",
+          actualSource: "GREEN_BUTTON",
+          timezone: "America/Chicago",
+          greenButtonIntervalTimestampMode: "utcDayGrid",
+          greenButtonPaddedIntervalCount: 1,
+          greenButtonZeroRedistributedIntervalCount: 1,
+        },
+      },
+    });
+
+    expect(view?.fifteenMinuteAverages).toEqual([
+      { hhmm: "19:00", avgKw: 1 },
+      { hhmm: "19:15", avgKw: 2 },
+      { hhmm: "19:30", avgKw: 2 },
+    ]);
+  });
+
   it("prefers Chicago-local daily rows from intervals when stored UTC daily rows stop before the coverage end", () => {
     const intervals15: Array<{ timestamp: string; kwh: number }> = [];
     const start = new Date("2026-05-01T00:00:00.000Z").getTime();

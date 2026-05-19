@@ -2,6 +2,7 @@ import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
 import { fetchGreenButtonIntervalsForCoverageWindow } from "@/modules/realUsageAdapter/greenButton";
 import type { ActualUsageSource } from "@/modules/realUsageAdapter/actual";
 import { getMemoryRssMb, logSimPipelineEvent } from "@/modules/onePathSim/usageSimulator/simObservability";
+import { redistributeGreenButtonGridZeroSamples } from "@/modules/onePathSim/greenButtonIntervalCorrections";
 
 export type RecalcIntervalPoint = { timestamp: string; kwh: number };
 
@@ -58,7 +59,7 @@ export function createRecalcIntervalPreloadContext(args: {
             coverageStartDate: windowArgs.startDate,
             coverageEndDate: windowArgs.endDate,
             timestampMode: "utcDayGrid",
-          }).then((out) => out.intervals)
+          }).then((out) => redistributeGreenButtonGridZeroSamples(out.intervals).intervals)
         : getActualIntervalsForRange({
             houseId: args.houseId,
             esiid: args.esiid,

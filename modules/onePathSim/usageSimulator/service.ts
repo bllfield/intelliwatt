@@ -15,6 +15,7 @@ import {
   getActualUsageDatasetForHouse,
   getIntervalDataFingerprint,
 } from "@/lib/usage/actualDatasetForHouse";
+import { redistributeGreenButtonGridZeroSamples } from "@/modules/onePathSim/greenButtonIntervalCorrections";
 import { upsertSimulatedUsageBuckets } from "@/lib/usage/simulatedUsageBuckets";
 import { usagePrisma } from "@/lib/db/usageClient";
 import {
@@ -5160,7 +5161,7 @@ async function recalcSimulatorBuildImpl(args: {
               coverageEndDate: selectionEnd,
               timestampMode: "utcDayGrid",
             });
-            return rebased.intervals;
+            return redistributeGreenButtonGridZeroSamples(rebased.intervals).intervals;
           }
           if (recalcIntervalPreload) {
             const preloaded = await recalcIntervalPreload.getIntervals({

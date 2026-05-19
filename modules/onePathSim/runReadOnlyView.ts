@@ -3,6 +3,7 @@ import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboard
 import { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
 import type { ValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
 import type { WeatherSensitivityScore } from "@/modules/weatherSensitivity/shared";
+import { redistributeGreenButtonGridZeroSamples } from "@/modules/onePathSim/greenButtonIntervalCorrections";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
@@ -64,44 +65,6 @@ function resolveIntervalTimestampMode(meta: Record<string, unknown> | null): "ti
   return "timezone";
 }
 
-function redistributeGreenButtonGridZeroSamples(
-  rows: Array<{ timestamp: string; kwh: number }>
-): Array<{ timestamp: string; kwh: number }> {
-  const out = rows
-    .map((row) => ({ ...row }))
-    .sort((left, right) => (left.timestamp < right.timestamp ? -1 : left.timestamp > right.timestamp ? 1 : 0));
-  const isAdjacentSameDay = (
-    left: { timestamp: string; kwh: number } | undefined,
-    right: { timestamp: string; kwh: number } | undefined
-  ): boolean => {
-    if (!left || !right) return false;
-    if (dateKeyFromUtcGridTimestamp(left.timestamp) !== dateKeyFromUtcGridTimestamp(right.timestamp)) return false;
-    const leftTs = new Date(left.timestamp).getTime();
-    const rightTs = new Date(right.timestamp).getTime();
-    return Number.isFinite(leftTs) && Number.isFinite(rightTs) && rightTs - leftTs === 15 * 60 * 1000;
-  };
-
-  for (let index = 0; index < out.length; index += 1) {
-    const previous = out[index - 1];
-    const current = out[index]!;
-    const next = out[index + 1];
-    if (current.kwh !== 0) continue;
-    const previousCandidate = isAdjacentSameDay(previous, current) && previous && previous.kwh > 0 ? previous : null;
-    const nextCandidate = isAdjacentSameDay(current, next) && next && next.kwh > 0 ? next : null;
-    const donor =
-      previousCandidate && nextCandidate
-        ? previousCandidate.kwh >= nextCandidate.kwh
-          ? previousCandidate
-          : nextCandidate
-        : previousCandidate ?? nextCandidate;
-    if (!donor) continue;
-    const splitKwh = donor.kwh / 2;
-    current.kwh = splitKwh;
-    donor.kwh = splitKwh;
-  }
-  return out;
-}
-
 function asStitchedMonthRecord(
   value: unknown
 ):
@@ -158,7 +121,7 @@ function buildFifteenMinuteAveragesFromIntervals15(
     .filter((row): row is { timestamp: string; kwh: number } => row != null);
   const rowsForAverage =
     options?.redistributeZeroKwhSamples && timestampMode === "utcDayGrid"
-      ? redistributeGreenButtonGridZeroSamples(rows)
+      ? redistributeGreenButtonGridZeroSamples(rows).intervals
       : rows;
 
   for (const row of rowsForAverage) {
@@ -421,7 +384,9 @@ export function buildOnePathRunReadOnlyView(args: {
   const selectedValidationRows = asArray<Record<string, unknown>>(tuningSummary.selectedValidationRows);
   const compareRows = compareRowsPrimary.length ? compareRowsPrimary : asCompareRows(selectedValidationRows);
   const shouldIgnoreGreenButtonGridZeroSamples =
-    intervalTimestampMode === "utcDayGrid" && Number(meta?.greenButtonPaddedIntervalCount ?? 0) > 0;
+    intervalTimestampMode === "utcDayGrid" &&
+    Number(meta?.greenButtonPaddedIntervalCount ?? 0) > 0 &&
+    Number(meta?.greenButtonZeroRedistributedIntervalCount ?? 0) <= 0;
   const rebuiltFifteenMinuteAverages = buildFifteenMinuteAveragesFromIntervals15(
     asRecord(dataset.series)?.intervals15,
     timezone,

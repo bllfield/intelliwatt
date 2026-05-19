@@ -55,6 +55,7 @@ import {
   DEFAULT_SIMULATION_VARIABLE_POLICY,
   type SimulationVariablePolicy,
 } from "@/modules/onePathSim/usageSimulator/simulationVariablePolicy";
+import { redistributeGreenButtonGridZeroSamples } from "@/modules/onePathSim/greenButtonIntervalCorrections";
 
 export type BuildPathKind = PastProducerBuildPathKind;
 export { normalizePastProducerBuildPathKind } from "@/modules/onePathSim/simulatedUsage/pastProducerBuildPath";
@@ -1746,7 +1747,14 @@ export async function simulatePastUsageDataset(
           timestamp: p.timestamp,
           kwh: p.kwh,
         }));
-    const sourceActualIntervals = preloadedIntervals != null ? preloadedIntervals : fetchedActualIntervals ?? [];
+    const rawSourceActualIntervals = preloadedIntervals != null ? preloadedIntervals : fetchedActualIntervals ?? [];
+    const correctedGreenButtonIntervals =
+      intervalActualSource === "GREEN_BUTTON"
+        ? redistributeGreenButtonGridZeroSamples(rawSourceActualIntervals)
+        : null;
+    const sourceActualIntervals = correctedGreenButtonIntervals?.intervals ?? rawSourceActualIntervals;
+    const greenButtonZeroRedistributedIntervalCount =
+      correctedGreenButtonIntervals?.redistributedIntervalCount ?? 0;
     const actualIntervals =
       useWholeHomeOnlyLowDataFastPath || lowDataSyntheticContextBase ? [] : sourceActualIntervals;
     const sourceActualIntervalsCount = sourceActualIntervals.length;
@@ -2616,6 +2624,7 @@ export async function simulatePastUsageDataset(
           greenButtonShiftedDateCount: greenButtonCoverageIntervals?.shiftedDateCount ?? undefined,
           greenButtonPaddedIntervalCount: greenButtonCoverageIntervals?.paddedIntervalCount ?? undefined,
           greenButtonPaddedDateCount: greenButtonCoverageIntervals?.paddedDateCount ?? undefined,
+          greenButtonZeroRedistributedIntervalCount: greenButtonZeroRedistributedIntervalCount || undefined,
           greenButtonRepairedDuplicateIntervalCount: greenButtonCoverageIntervals?.repairedDuplicateIntervalCount ?? undefined,
           greenButtonRepairedDuplicateDateCount: greenButtonCoverageIntervals?.repairedDuplicateDateCount ?? undefined,
           greenButtonSourceDateByTargetDate: greenButtonCoverageIntervals?.sourceDateByTargetDate ?? undefined,
