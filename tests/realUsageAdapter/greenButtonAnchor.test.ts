@@ -203,6 +203,78 @@ describe("green button full-day anchor", () => {
     expect(out.sourceDateByTargetDate?.["2026-05-14"]).toBe("2025-05-14");
   });
 
+  it("pads trusted shifted Green Button UTC-grid days and keeps current-year partials from downgrading them", async () => {
+    const shiftedSourceDayIntervals = Array.from({ length: 95 }, (_, slot) => ({
+      ts: new Date(new Date("2025-05-14T00:00:00.000Z").getTime() + slot * 15 * 60 * 1000),
+      kwh: 0.25,
+    }));
+    const trailingPartialCurrentYearDay = [{ ts: new Date("2026-05-14T23:45:00.000Z"), kwh: 10 }];
+    usageQueryRaw
+      .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-05-20T23:45:00.000Z") }])
+      .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-05-20T23:45:00.000Z") }])
+      .mockResolvedValueOnce([{ bucket: new Date("2026-05-20T05:00:00.000Z"), intervalscount: 96 }])
+      .mockResolvedValueOnce([...shiftedSourceDayIntervals, ...trailingPartialCurrentYearDay]);
+
+    const mod = await import("@/modules/realUsageAdapter/greenButton");
+    const out = await mod.fetchGreenButtonIntervalsForCoverageWindow({
+      houseId: "house-1",
+      coverageStartDate: "2025-05-17",
+      coverageEndDate: "2026-05-16",
+      timestampMode: "utcDayGrid",
+    });
+
+    const targetDayRows = out.intervals.filter((row) => row.timestamp.startsWith("2026-05-14T"));
+    expect(targetDayRows).toHaveLength(96);
+    expect(targetDayRows[94]).toEqual({ timestamp: "2026-05-14T23:30:00.000Z", kwh: 0.25 });
+    expect(targetDayRows[95]).toEqual({ timestamp: "2026-05-14T23:45:00.000Z", kwh: 0 });
+    expect(out.shiftedIntervalCount).toBe(95);
+    expect(out.shiftedDateCount).toBe(1);
+    expect(out.paddedIntervalCount).toBe(1);
+    expect(out.paddedDateCount).toBe(1);
+    expect(out.sourceDateByTargetDate?.["2026-05-14"]).toBe("2025-05-14");
+    expect(String(out.displayWindowNote ?? "")).toContain("matching source-day weather");
+  });
+
+  it("passes padded trusted shifted Green Button days downstream as actual-backed", async () => {
+    const shiftedSourceDayIntervals = Array.from({ length: 95 }, (_, slot) => ({
+      ts: new Date(new Date("2025-05-14T00:00:00.000Z").getTime() + slot * 15 * 60 * 1000),
+      kwh: 0.25,
+    }));
+    usageQueryRaw
+      .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-05-20T23:45:00.000Z") }])
+      .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-05-20T23:45:00.000Z") }])
+      .mockResolvedValueOnce([{ bucket: new Date("2026-05-20T05:00:00.000Z"), intervalscount: 96 }])
+      .mockResolvedValueOnce(shiftedSourceDayIntervals);
+
+    const greenButton = await import("@/modules/realUsageAdapter/greenButton");
+    const adapterOut = await greenButton.fetchGreenButtonIntervalsForCoverageWindow({
+      houseId: "house-1",
+      coverageStartDate: "2025-05-17",
+      coverageEndDate: "2026-05-16",
+      timestampMode: "utcDayGrid",
+    });
+    const engine = await import("@/modules/onePathSim/simulatedUsage/engine");
+    const stitchedCurve = await import("@/modules/onePathSim/usageSimulator/pastStitchedCurve");
+    const debugOut: Record<string, unknown> = {};
+
+    const out = engine.buildPastSimulatedBaselineV1({
+      actualIntervals: adapterOut.intervals,
+      canonicalDayStartsMs: [new Date("2026-05-14T00:00:00.000Z").getTime()],
+      excludedDateKeys: new Set<string>(),
+      dateKeyFromTimestamp: stitchedCurve.dateKeyFromTimestamp,
+      getDayGridTimestamps: stitchedCurve.getDayGridTimestamps,
+      collectSimulatedDayResults: true,
+      debug: { out: debugOut as any },
+    });
+
+    expect(adapterOut.intervals.filter((row) => row.timestamp.startsWith("2026-05-14T"))).toHaveLength(96);
+    expect(out.dayResults.find((row) => row.localDate === "2026-05-14")?.simulatedReasonCode).not.toBe(
+      "INCOMPLETE_METER_DAY"
+    );
+    expect(debugOut.excludedIncompleteMeterFingerprintDayCount).toBe(0);
+    expect(debugOut.referenceDaysUsed).toBe(1);
+  });
+
   it("pads complete DST-short Green Button days onto the Past Sim 96-slot grid", async () => {
     const dstShortUtcGridDayIntervals = Array.from({ length: 92 }, (_, slot) => ({
       ts: new Date(new Date("2025-03-09T00:00:00.000Z").getTime() + slot * 15 * 60 * 1000),

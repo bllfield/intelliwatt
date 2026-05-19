@@ -331,14 +331,60 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
     const byTimestamp = new Map<string, number>();
     const shiftedDateKeys = new Set<string>();
     const sourceSlotCountsByDate = new Map<string, number>();
+    const sourceSlotsByDate = new Map<string, Set<number>>();
+    const trustedShiftedSourceDateByTargetDate = new Map<string, string>();
     const sourceDateByTargetDate = new Map<string, string>();
     const targetSlotsByDate = new Map<string, Set<number>>();
     const targetSlotValuesByDate = new Map<string, Map<number, number[]>>();
+    const currentTrustedTargetDateResets = new Set<string>();
     let shiftedIntervalCount = 0;
     let paddedIntervalCount = 0;
     let paddedDateCount = 0;
     let repairedDuplicateIntervalCount = 0;
     let repairedDuplicateDateCount = 0;
+
+    const resolveUtcGridTargetDate = (sourceDateKey: string): { targetDateKey: string; yearsShifted: number } | null => {
+      let targetDateKey = sourceDateKey;
+      let yearsShifted = 0;
+      while (targetDateKey < coverageStartDate) {
+        const advanced = shiftDateKeyByWholeYears(sourceDateKey, yearsShifted + 1);
+        if (!advanced || advanced === targetDateKey) break;
+        targetDateKey = advanced;
+        yearsShifted += 1;
+      }
+      if (yearsShifted === 0 && sourceDateKey > sourceCoverageWindow.endDate) return null;
+      if (targetDateKey < coverageStartDate || targetDateKey > coverageEndDate) return null;
+      if (excludeTargetDateKeys.has(targetDateKey)) return null;
+      return { targetDateKey, yearsShifted };
+    };
+
+    if (args.timestampMode === "utcDayGrid") {
+      for (const row of rows) {
+        const rawTimestamp = (row.ts instanceof Date ? row.ts : new Date(row.ts)).toISOString();
+        const sourceDateKey = utcDateKeyFromIsoTimestamp(rawTimestamp);
+        const sourceSlot = utcSlot96FromIsoTimestamp(rawTimestamp);
+        if (!sourceDateKey || sourceSlot == null) continue;
+        const slots = sourceSlotsByDate.get(sourceDateKey) ?? new Set<number>();
+        slots.add(sourceSlot);
+        sourceSlotsByDate.set(sourceDateKey, slots);
+      }
+      for (const [sourceDateKey, slots] of sourceSlotsByDate.entries()) {
+        sourceSlotCountsByDate.set(sourceDateKey, slots.size);
+        if (slots.size < minimumTrustedGreenButtonSlotCount(sourceDateKey)) continue;
+        const resolved = resolveUtcGridTargetDate(sourceDateKey);
+        if (!resolved || resolved.yearsShifted <= 0) continue;
+        const targetDateSourceSlots = sourceSlotsByDate.get(resolved.targetDateKey);
+        if (
+          targetDateSourceSlots &&
+          targetDateSourceSlots.size >= minimumTrustedGreenButtonSlotCount(resolved.targetDateKey)
+        ) {
+          continue;
+        }
+        if (!trustedShiftedSourceDateByTargetDate.has(resolved.targetDateKey)) {
+          trustedShiftedSourceDateByTargetDate.set(resolved.targetDateKey, sourceDateKey);
+        }
+      }
+    }
 
     for (const row of rows) {
       const rawTimestamp = (row.ts instanceof Date ? row.ts : new Date(row.ts)).toISOString();
@@ -351,20 +397,16 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
         args.timestampMode === "utcDayGrid"
           ? utcSlot96FromIsoTimestamp(rawTimestamp)
           : chicagoSlot96FromIsoTimestamp(rawTimestamp);
-      sourceSlotCountsByDate.set(sourceDateKey, (sourceSlotCountsByDate.get(sourceDateKey) ?? 0) + 1);
+      if (args.timestampMode !== "utcDayGrid") {
+        sourceSlotCountsByDate.set(sourceDateKey, (sourceSlotCountsByDate.get(sourceDateKey) ?? 0) + 1);
+      }
       if (args.timestampMode === "utcDayGrid") {
         if (sourceSlot == null) continue;
-        let targetDateKey = sourceDateKey;
-        let yearsShifted = 0;
-        while (targetDateKey < coverageStartDate) {
-          const advanced = shiftDateKeyByWholeYears(sourceDateKey, yearsShifted + 1);
-          if (!advanced || advanced === targetDateKey) break;
-          targetDateKey = advanced;
-          yearsShifted += 1;
-        }
-        if (yearsShifted === 0 && sourceDateKey > sourceCoverageWindow.endDate) continue;
-        if (targetDateKey < coverageStartDate || targetDateKey > coverageEndDate) continue;
-        if (excludeTargetDateKeys.has(targetDateKey)) continue;
+        const resolvedTarget = resolveUtcGridTargetDate(sourceDateKey);
+        if (!resolvedTarget) continue;
+        const { targetDateKey, yearsShifted } = resolvedTarget;
+        const trustedShiftedSourceDateKey = trustedShiftedSourceDateByTargetDate.get(targetDateKey);
+        if (trustedShiftedSourceDateKey && trustedShiftedSourceDateKey !== sourceDateKey) continue;
         if (yearsShifted > 0) {
           shiftedIntervalCount += 1;
           shiftedDateKeys.add(targetDateKey);
@@ -377,8 +419,17 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
           sourceDateKey === targetDateKey
         ) {
           const existingSourceSlotCount = sourceSlotCountsByDate.get(existingSourceDateKey) ?? 0;
+          const currentSourceSlotCount = sourceSlotCountsByDate.get(sourceDateKey) ?? 0;
           if (existingSourceSlotCount >= minimumTrustedGreenButtonSlotCount(existingSourceDateKey)) {
-            continue;
+            if (currentSourceSlotCount < minimumTrustedGreenButtonSlotCount(sourceDateKey)) continue;
+            if (!currentTrustedTargetDateResets.has(targetDateKey)) {
+              for (let slot = 0; slot < 96; slot += 1) {
+                byTimestamp.delete(utcGridTimestampForDateSlot(targetDateKey, slot));
+              }
+              targetSlotsByDate.set(targetDateKey, new Set<number>());
+              targetSlotValuesByDate.set(targetDateKey, new Map<number, number[]>());
+              currentTrustedTargetDateResets.add(targetDateKey);
+            }
           }
         }
         const outputTimestamp = utcGridTimestampForDateSlot(targetDateKey, sourceSlot);
