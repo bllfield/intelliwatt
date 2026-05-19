@@ -155,8 +155,15 @@ export type HouseUsage = {
 function houseNeedsSmtIngestionPoll(house: HouseUsage | null | undefined): boolean {
   if (!house?.esiid) return false;
   if (!house.dataset) return true;
-  if (house.usageIngestion && house.usageIngestion.tailReady === false) return true;
-  return house.dataset.insights?.stitchedMonth?.mode === "PRIOR_YEAR_TAIL";
+  const ingestion = house.usageIngestion;
+  if (!ingestion) return false;
+  return ingestion.tailRefreshAttempted && !ingestion.tailReady && !ingestion.tailTimedOut;
+}
+
+function houseShowsSmtTailFinishingState(house: HouseUsage | null | undefined): boolean {
+  if (!house?.esiid) return false;
+  if (!house.dataset) return true;
+  return houseNeedsSmtIngestionPoll(house);
 }
 
 type UsageApiResponse =
@@ -558,7 +565,7 @@ export const UsageDashboard: React.FC<Props> = ({
 
   const smtTailIngestionPending = useMemo(() => {
     if (effectiveFetchMode !== "REAL") return false;
-    return houseNeedsSmtIngestionPoll(activeHouse);
+    return houseShowsSmtTailFinishingState(activeHouse);
   }, [activeHouse, effectiveFetchMode]);
 
   useEffect(() => {

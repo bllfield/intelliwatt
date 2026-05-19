@@ -10,7 +10,7 @@ export const SMT_TAIL_REQUIRED_INTERVALS_PER_DAY = 96;
 export const SMT_TAIL_WAIT_TIMEOUT_MS = 60_000;
 export const SMT_TAIL_WAIT_INTERVAL_MS = 2_000;
 /** User-facing usage route budget: leave headroom when multiple homes are loaded. */
-export const USER_USAGE_SMT_TAIL_WAIT_TIMEOUT_MS = 45_000;
+export const USER_USAGE_SMT_TAIL_WAIT_TIMEOUT_MS = 8_000;
 
 const smtCoverageDateFmt = new Intl.DateTimeFormat("en-CA", {
   timeZone: "America/Chicago",
@@ -103,6 +103,66 @@ export function normalizeDateKeys(values: unknown[]): string[] {
 
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+export function latestUsageCoverageDateKeyFromDataset(dataset: unknown): string | null {
+  const summary = asRecord(asRecord(dataset).summary);
+  const latest = String(summary.latest ?? summary.end ?? "").trim();
+  if (!latest) return null;
+  if (latest.includes("T")) {
+    const parsed = new Date(latest);
+    return Number.isFinite(parsed.getTime()) ? smtCoverageDateKey(parsed) : latest.slice(0, 10);
+  }
+  return latest.slice(0, 10);
+}
+
+/** True when the resolved usage dataset already includes the canonical tail day. */
+export function isResolvedDatasetTailDisplayReady(dataset: unknown, targetEndDate: string): boolean {
+  const latestKey = latestUsageCoverageDateKeyFromDataset(dataset);
+  return Boolean(latestKey && latestKey >= targetEndDate);
+}
+
+export type UsageIngestionStatusLike = {
+  tailReady: boolean;
+  targetEndDate: string;
+  tailRefreshAttempted: boolean;
+  tailRefreshReason: "coverage_tail_current" | "refresh_requested" | "refresh_disabled";
+  tailTimedOut: boolean;
+  incompleteTailDateKeys: string[];
+  coverageEndDate: string | null;
+};
+
+export function reconcileUsageIngestionWithDataset(args: {
+  ingestion: UsageIngestionStatusLike | null;
+  dataset: unknown;
+  targetEndDate: string;
+}): UsageIngestionStatusLike | null {
+  const latestKey = latestUsageCoverageDateKeyFromDataset(args.dataset);
+  if (!isResolvedDatasetTailDisplayReady(args.dataset, args.targetEndDate)) {
+    return args.ingestion;
+  }
+  if (!args.ingestion) {
+    return {
+      tailReady: true,
+      targetEndDate: args.targetEndDate,
+      tailRefreshAttempted: false,
+      tailRefreshReason: "coverage_tail_current",
+      tailTimedOut: false,
+      incompleteTailDateKeys: [],
+      coverageEndDate: latestKey,
+    };
+  }
+  return {
+    ...args.ingestion,
+    tailReady: true,
+    tailTimedOut: false,
+    incompleteTailDateKeys: [],
+    coverageEndDate: args.ingestion.coverageEndDate ?? latestKey,
+  };
 }
 
 export function isGreenButtonPrimaryDataset(dataset: unknown): boolean {
@@ -212,7 +272,7 @@ export async function loadSmtTailCoverage(args: {
   const uniqueTsByDate = new Map<string, Set<string>>();
   for (const row of tailRows) {
     const ts = row?.ts instanceof Date ? row.ts : row?.ts ? new Date(row.ts) : null;
-    const dateKey = smtUtcDateKey(ts);
+    const dateKey = smtCoverageDateKey(ts);
     if (!dateKey || !tailDateSet.has(dateKey) || !ts) continue;
     const bucket = uniqueTsByDate.get(dateKey) ?? new Set<string>();
     bucket.add(ts.toISOString());
@@ -329,11 +389,15 @@ export async function ensureSmtTailCoverageForUserHouse(args: {
       message: `refresh_failed:${error instanceof Error ? error.message : String(error)}`,
     };
   }
-  const wait = await waitForSmtTailCoverage({
-    esiid: args.esiid,
-    targetEndDate,
-    timeoutMs: args.waitTimeoutMs ?? SMT_TAIL_WAIT_TIMEOUT_MS,
-  });
+  const waitTimeoutMs = args.waitTimeoutMs ?? SMT_TAIL_WAIT_TIMEOUT_MS;
+  const wait =
+    waitTimeoutMs > 0
+      ? await waitForSmtTailCoverage({
+          esiid: args.esiid,
+          targetEndDate,
+          timeoutMs: waitTimeoutMs,
+        })
+      : null;
   coverage = await loadSmtTailCoverage({ esiid: args.esiid, targetEndDate });
   return {
     attempted: true,

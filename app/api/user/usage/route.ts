@@ -9,8 +9,11 @@ import {
   buildUsageIngestionStatusFromTailEnsure,
   ensureSmtTailCoverageForUserHouse,
   isGreenButtonPrimaryDataset,
+  isResolvedDatasetTailDisplayReady,
+  reconcileUsageIngestionWithDataset,
   USER_USAGE_SMT_TAIL_WAIT_TIMEOUT_MS,
 } from "@/lib/usage/smtTailCoverage";
+import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 import { IntervalSeriesKind } from '@/modules/usageSimulator/kinds';
 import { toPublicHouseLabel } from "@/modules/usageSimulator/houseLabel";
 import { adaptGreenButtonRawInput, runSharedSimulation } from "@/modules/onePathSim/onePathSim";
@@ -105,28 +108,12 @@ export async function GET(_request: NextRequest) {
     });
 
     const results = [];
+    const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
     const perHouseTailWaitMs =
       houses.length > 1
-        ? Math.max(15_000, Math.floor(USER_USAGE_SMT_TAIL_WAIT_TIMEOUT_MS / houses.length))
+        ? Math.max(3_000, Math.floor(USER_USAGE_SMT_TAIL_WAIT_TIMEOUT_MS / houses.length))
         : USER_USAGE_SMT_TAIL_WAIT_TIMEOUT_MS;
     for (const house of houses) {
-      let usageIngestion = null;
-      const esiid = house.esiid ? String(house.esiid).trim() : "";
-      if (esiid) {
-        const tailEnsure = await ensureSmtTailCoverageForUserHouse({
-          userId: user.id,
-          houseId: house.id,
-          esiid,
-          waitTimeoutMs: perHouseTailWaitMs,
-        }).catch((error) => {
-          console.warn("[user/usage] SMT tail ensure failed; continuing with current persisted usage", house.id, error);
-          return null;
-        });
-        if (tailEnsure) {
-          usageIngestion = buildUsageIngestionStatusFromTailEnsure(tailEnsure);
-        }
-      }
-
       let result: { dataset: any | null; alternatives: { smt: any; greenButton: any } };
       try {
         const resolved = await withTaskTimeout(
@@ -193,18 +180,33 @@ export async function GET(_request: NextRequest) {
         },
         resolvedUsage: usageForContract,
       });
+      let usageIngestion = null;
+      const esiid = house.esiid ? String(house.esiid).trim() : "";
       const resolvedDataset = contract.dataset;
-      if (
-        usageIngestion &&
-        resolvedDataset &&
-        isGreenButtonPrimaryDataset(resolvedDataset) &&
-        usageIngestion.tailRefreshAttempted
-      ) {
-        usageIngestion = {
-          ...usageIngestion,
-          tailRefreshReason: "refresh_disabled",
-          tailRefreshAttempted: false,
-        };
+      if (esiid && resolvedDataset && !isGreenButtonPrimaryDataset(resolvedDataset)) {
+        if (isResolvedDatasetTailDisplayReady(resolvedDataset, canonicalCoverage.endDate)) {
+          usageIngestion = reconcileUsageIngestionWithDataset({
+            ingestion: null,
+            dataset: resolvedDataset,
+            targetEndDate: canonicalCoverage.endDate,
+          });
+        } else {
+          const tailEnsure = await ensureSmtTailCoverageForUserHouse({
+            userId: user.id,
+            houseId: house.id,
+            esiid,
+            targetEndDate: canonicalCoverage.endDate,
+            waitTimeoutMs: perHouseTailWaitMs,
+          }).catch((error) => {
+            console.warn("[user/usage] SMT tail ensure failed; continuing with current persisted usage", house.id, error);
+            return null;
+          });
+          usageIngestion = reconcileUsageIngestionWithDataset({
+            ingestion: tailEnsure ? buildUsageIngestionStatusFromTailEnsure(tailEnsure) : null,
+            dataset: resolvedDataset,
+            targetEndDate: canonicalCoverage.endDate,
+          });
+        }
       }
       results.push({
         ...contract,
