@@ -357,6 +357,7 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
           targetDateKey = advanced;
           yearsShifted += 1;
         }
+        if (yearsShifted === 0 && sourceDateKey > sourceCoverageWindow.endDate) continue;
         if (targetDateKey < coverageStartDate || targetDateKey > coverageEndDate) continue;
         if (excludeTargetDateKeys.has(targetDateKey)) continue;
         if (yearsShifted > 0) {

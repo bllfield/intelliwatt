@@ -172,6 +172,37 @@ describe("green button full-day anchor", () => {
     expect(out.sourceDateByTargetDate?.["2026-03-08"]).toBe("2025-03-08");
   });
 
+  it("prefers shifted complete Green Button UTC-grid days over trailing partial current-year days", async () => {
+    const shiftedSourceDayIntervals = Array.from({ length: 96 }, (_, slot) => ({
+      ts: new Date(new Date("2025-05-14T00:00:00.000Z").getTime() + slot * 15 * 60 * 1000),
+      kwh: 0.25,
+    }));
+    const trailingPartialCurrentYearDay = [{ ts: new Date("2026-05-14T00:00:00.000Z"), kwh: 10 }];
+    usageQueryRaw
+      .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-05-14T00:00:00.000Z") }])
+      .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-05-14T00:00:00.000Z") }])
+      .mockResolvedValueOnce([
+        { bucket: new Date("2026-05-14T05:00:00.000Z"), intervalscount: 1 },
+        { bucket: new Date("2026-05-13T05:00:00.000Z"), intervalscount: 96 },
+      ])
+      .mockResolvedValueOnce([...shiftedSourceDayIntervals, ...trailingPartialCurrentYearDay]);
+
+    const mod = await import("@/modules/realUsageAdapter/greenButton");
+    const out = await mod.fetchGreenButtonIntervalsForCoverageWindow({
+      houseId: "house-1",
+      coverageStartDate: "2025-05-17",
+      coverageEndDate: "2026-05-16",
+      timestampMode: "utcDayGrid",
+    });
+
+    const targetDayRows = out.intervals.filter((row) => row.timestamp.startsWith("2026-05-14T"));
+    expect(targetDayRows).toHaveLength(96);
+    expect(targetDayRows[0]).toEqual({ timestamp: "2026-05-14T00:00:00.000Z", kwh: 0.25 });
+    expect(out.shiftedIntervalCount).toBe(96);
+    expect(out.shiftedDateCount).toBe(1);
+    expect(out.sourceDateByTargetDate?.["2026-05-14"]).toBe("2025-05-14");
+  });
+
   it("pads complete DST-short Green Button days onto the Past Sim 96-slot grid", async () => {
     const dstShortUtcGridDayIntervals = Array.from({ length: 92 }, (_, slot) => ({
       ts: new Date(new Date("2025-03-09T00:00:00.000Z").getTime() + slot * 15 * 60 * 1000),
