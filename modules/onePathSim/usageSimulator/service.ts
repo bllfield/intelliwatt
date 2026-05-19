@@ -4166,6 +4166,22 @@ function baseKindFromMode(mode: SimulatorMode): BaseKind {
   return "SMT_ACTUAL_BASELINE";
 }
 
+function simulationVariableInputTypeForRecalc(args: {
+  mode: SimulatorMode;
+  manualUsagePayload: ManualUsagePayloadAny | null;
+  actualSource: "SMT" | "GREEN_BUTTON" | null;
+  preferredActualSource: "SMT" | "GREEN_BUTTON" | null | undefined;
+}): SimulationVariableInputType {
+  if (args.mode === "NEW_BUILD_ESTIMATE") return "NEW_BUILD";
+  if (args.mode === "MANUAL_TOTALS") {
+    return String((args.manualUsagePayload as any)?.mode ?? "").trim().toUpperCase() === "ANNUAL"
+      ? "MANUAL_ANNUAL"
+      : "MANUAL_MONTHLY";
+  }
+  if (args.actualSource === "GREEN_BUTTON" || args.preferredActualSource === "GREEN_BUTTON") return "GREEN_BUTTON";
+  return "INTERVAL";
+}
+
 function isLeanManualTotalsMode(mode: SimulatorMode): boolean {
   return mode === "MANUAL_TOTALS";
 }
@@ -4518,14 +4534,12 @@ async function recalcSimulatorBuildImpl(args: {
 
   let weatherSensitivityScore: import("@/modules/onePathSim/weatherSensitivityShared").WeatherSensitivityScore | null = null;
   let weatherEfficiencyDerivedInput: import("@/modules/onePathSim/weatherSensitivityShared").WeatherEfficiencyDerivedInput | null = null;
-  const simulationVariableInputType: SimulationVariableInputType =
-    mode === "NEW_BUILD_ESTIMATE"
-      ? "NEW_BUILD"
-      : mode === "MANUAL_TOTALS" && String((manualUsagePayload as any)?.mode ?? "").trim().toUpperCase() === "ANNUAL"
-        ? "MANUAL_ANNUAL"
-        : mode === "MANUAL_TOTALS"
-          ? "MANUAL_MONTHLY"
-          : "INTERVAL";
+  const simulationVariableInputType = simulationVariableInputTypeForRecalc({
+    mode,
+    manualUsagePayload,
+    actualSource,
+    preferredActualSource,
+  });
   const simulationVariableOverrides = await traceCoreContextStep("simulation_variable_overrides_load", () =>
     getSimulationVariableOverrides()
   );

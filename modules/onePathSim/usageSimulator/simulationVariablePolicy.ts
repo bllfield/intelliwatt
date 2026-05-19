@@ -768,6 +768,7 @@ function resolveModeBucketKey(inputType: SimulationVariableInputType): Exclude<S
       return "manualAnnualOverrides";
     case "NEW_BUILD":
       return "newBuildOverrides";
+    case "GREEN_BUTTON":
     case "INTERVAL":
     default:
       return "intervalOverrides";

@@ -316,12 +316,16 @@ describe("One Path Sim Admin harness wiring", () => {
   it("hard-gates admin interval runs to SMT and Green Button runs to Green Button", () => {
     const source = readRepoFile("components/admin/OnePathSimAdmin.tsx");
     const routeSource = readRepoFile("app/api/admin/tools/one-path-sim/route.ts");
+    const serviceSource = readRepoFile("modules/onePathSim/usageSimulator/service.ts");
 
     expect(source).toContain('preferredActualSource: mode === "INTERVAL" ? "SMT" : mode === "GREEN_BUTTON" ? "GREEN_BUTTON" : null');
     expect(routeSource).toContain('mode === "INTERVAL"');
     expect(routeSource).toContain('? "SMT"');
     expect(routeSource).toContain('mode === "GREEN_BUTTON"');
     expect(routeSource).toContain('? "GREEN_BUTTON"');
+    expect(serviceSource).toContain('args.actualSource === "GREEN_BUTTON" || args.preferredActualSource === "GREEN_BUTTON"');
+    expect(serviceSource).toContain('return "GREEN_BUTTON";');
+    expect(readRepoFile("modules/onePathSim/usageSimulator/simulationVariablePolicy.ts")).toContain('case "GREEN_BUTTON":');
   });
 
   it("keeps Green Button compare selection tied to the actual simulation interval pool", () => {
