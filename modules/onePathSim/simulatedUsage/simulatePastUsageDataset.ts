@@ -2159,6 +2159,9 @@ export async function simulatePastUsageDataset(
         applianceProfile: applianceProfileForPast,
         usageShapeProfile: usageShapeProfileSnap ?? undefined,
         timezoneForProfile: timezone ?? undefined,
+        trustedActualDateKeys: greenButtonCoverageIntervals?.trustedActualDateKeys
+          ? new Set(greenButtonCoverageIntervals.trustedActualDateKeys)
+          : undefined,
         actualWxByDateKey: weatherByDateKeyForSimulation,
         _normalWxByDateKey: normalWxByDateKey,
         collectSimulatedDayResults: collectSimulatedDayResultsForDiagnostics,

@@ -5,6 +5,7 @@ import { expectedIntervalsForDateISO } from "@/lib/analysis/dst";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MIN_TRUSTED_GREEN_BUTTON_INTERVALS_PER_DAY = 90;
+const MIN_SPLIT_GRID_GREEN_BUTTON_INTERVALS_PER_DAY = 72;
 const USAGE_DB_ENABLED = Boolean((process.env.USAGE_DATABASE_URL ?? "").trim());
 
 function parseYearMonth(ym: string): { year: number; month1: number } | null {
@@ -84,6 +85,10 @@ function shiftDateKeyByDays(dateKey: string, days: number): string {
   return new Date(parsed.getTime() + days * DAY_MS).toISOString().slice(0, 10);
 }
 
+function neighboringDateKeys(dateKey: string): string[] {
+  return [shiftDateKeyByDays(dateKey, -1), dateKey, shiftDateKeyByDays(dateKey, 1)];
+}
+
 function shiftIsoTimestampByWholeYears(timestamp: string, years: number): string | null {
   const parsed = new Date(timestamp);
   if (!Number.isFinite(parsed.getTime())) return null;
@@ -146,6 +151,7 @@ export type GreenButtonCoverageWindowIntervals = {
   repairedDuplicateIntervalCount?: number;
   repairedDuplicateDateCount?: number;
   sourceDateByTargetDate?: Record<string, string>;
+  trustedActualDateKeys?: string[];
   displayWindowNote: string | null;
 };
 
@@ -332,6 +338,7 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
     const shiftedDateKeys = new Set<string>();
     const sourceSlotCountsByDate = new Map<string, number>();
     const sourceSlotsByDate = new Map<string, Set<number>>();
+    const canonicalSourceSlotsByDate = new Map<string, Set<number>>();
     const trustedShiftedSourceDateByTargetDate = new Map<string, string>();
     const sourceDateByTargetDate = new Map<string, string>();
     const targetSlotsByDate = new Map<string, Set<number>>();
@@ -358,6 +365,21 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
       return { targetDateKey, yearsShifted };
     };
 
+    const canonicalSourceSlotCountForUtcGridDate = (sourceDateKey: string, fallbackSlotCount: number): number => {
+      let bestCanonicalSlotCount = 0;
+      for (const candidateDateKey of neighboringDateKeys(sourceDateKey)) {
+        bestCanonicalSlotCount = Math.max(
+          bestCanonicalSlotCount,
+          canonicalSourceSlotsByDate.get(candidateDateKey)?.size ?? 0
+        );
+      }
+      if (bestCanonicalSlotCount < minimumTrustedGreenButtonSlotCount(sourceDateKey)) return fallbackSlotCount;
+      // A trusted Chicago-local source day can split across adjacent UTC-grid days.
+      // Require substantial UTC-grid coverage so an isolated partial day does not get padded as trusted.
+      if (fallbackSlotCount < MIN_SPLIT_GRID_GREEN_BUTTON_INTERVALS_PER_DAY) return fallbackSlotCount;
+      return bestCanonicalSlotCount;
+    };
+
     if (args.timestampMode === "utcDayGrid") {
       for (const row of rows) {
         const rawTimestamp = (row.ts instanceof Date ? row.ts : new Date(row.ts)).toISOString();
@@ -367,10 +389,19 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
         const slots = sourceSlotsByDate.get(sourceDateKey) ?? new Set<number>();
         slots.add(sourceSlot);
         sourceSlotsByDate.set(sourceDateKey, slots);
+
+        const canonicalSourceDateKey = chicagoDateKeyFromIsoTimestamp(rawTimestamp);
+        const canonicalSourceSlot = chicagoSlot96FromIsoTimestamp(rawTimestamp);
+        if (canonicalSourceDateKey && canonicalSourceSlot != null) {
+          const canonicalSlots = canonicalSourceSlotsByDate.get(canonicalSourceDateKey) ?? new Set<number>();
+          canonicalSlots.add(canonicalSourceSlot);
+          canonicalSourceSlotsByDate.set(canonicalSourceDateKey, canonicalSlots);
+        }
       }
       for (const [sourceDateKey, slots] of Array.from(sourceSlotsByDate.entries())) {
         sourceSlotCountsByDate.set(sourceDateKey, slots.size);
-        if (slots.size < minimumTrustedGreenButtonSlotCount(sourceDateKey)) continue;
+        const canonicalSourceSlotCount = canonicalSourceSlotCountForUtcGridDate(sourceDateKey, slots.size);
+        if (canonicalSourceSlotCount < minimumTrustedGreenButtonSlotCount(sourceDateKey)) continue;
         const resolved = resolveUtcGridTargetDate(sourceDateKey);
         if (!resolved || resolved.yearsShifted <= 0) continue;
         const targetDateSourceSlots = sourceSlotsByDate.get(resolved.targetDateKey);
@@ -499,11 +530,12 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
         const sourceDateKey = sourceDateByTargetDate.get(targetDateKey);
         if (!sourceDateKey) continue;
         const sourceSlotCount = sourceSlotCountsByDate.get(sourceDateKey) ?? 0;
+        const canonicalSourceSlotCount = canonicalSourceSlotCountForUtcGridDate(sourceDateKey, sourceSlotCount);
         // Some Green Button exports land on the UTC Past Sim grid with a repeated
         // one-hour gap after local-time/year rebasing. Keep those high-coverage
         // actual days actual, but do not hide genuinely sparse partial days.
         const minimumSourceCompleteSlotCount = minimumTrustedGreenButtonSlotCount(sourceDateKey);
-        if (sourceSlotCount < minimumSourceCompleteSlotCount) continue;
+        if (canonicalSourceSlotCount < minimumSourceCompleteSlotCount) continue;
 
         let paddedThisDate = 0;
         for (let slot = 0; slot < 96; slot += 1) {
@@ -543,6 +575,9 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
       sourceDateByTargetDate: Object.fromEntries(
         Array.from(sourceDateByTargetDate.entries()).sort(([left], [right]) => left.localeCompare(right))
       ),
+      trustedActualDateKeys: Array.from(trustedShiftedSourceDateByTargetDate.keys()).sort((left, right) =>
+        left.localeCompare(right)
+      ),
       displayWindowNote,
     };
   } catch {
@@ -554,6 +589,7 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
       shiftedIntervalCount: 0,
       shiftedDateCount: 0,
       sourceDateByTargetDate: {},
+      trustedActualDateKeys: [],
       displayWindowNote: null,
     };
   }

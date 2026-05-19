@@ -1576,6 +1576,7 @@ export function buildPastSimulatedBaselineV1(args: {
   actualIntervals: Array<{ timestamp: string; kwh: number }>;
   canonicalDayStartsMs: number[];
   excludedDateKeys: Set<string>;
+  trustedActualDateKeys?: Set<string>;
   dateKeyFromTimestamp: (ts: string) => string;
   getDayGridTimestamps: (dayStartMs: number) => string[];
   homeProfile?: any;
@@ -1671,6 +1672,7 @@ export function buildPastSimulatedBaselineV1(args: {
   const engineProfilePolicy = simulationVariablePolicy.engineProfile;
   const forcedDateKeys = args.forceSimulateDateKeys ?? new Set<string>();
   const keepRefModeledKeys = args.forceModeledOutputKeepReferencePoolDateKeys ?? new Set<string>();
+  const trustedActualDateKeys = args.trustedActualDateKeys ?? new Set<string>();
   const emitAllIntervals = args.emitAllIntervals !== false;
   const lowDataSyntheticContext = args.lowDataSyntheticContext ?? null;
   const useLowDataSyntheticContext = Boolean(lowDataSyntheticContext);
@@ -1730,6 +1732,7 @@ export function buildPastSimulatedBaselineV1(args: {
     const dayIsExcluded = Boolean(dateKey) && args.excludedDateKeys.has(dateKey);
     const dayIsForcedSimulate = Boolean(dateKey) && forcedDateKeys.has(dateKey);
     const dayIsForceModeledKeepRef = Boolean(dateKey) && keepRefModeledKeys.has(dateKey);
+    const dayIsTrustedActual = Boolean(dateKey) && trustedActualDateKeys.has(dateKey);
     const dayIsLeadingMissing =
       oldestActualTsMs !== Number.POSITIVE_INFINITY &&
       gridTs.length > 0 &&
@@ -1749,6 +1752,7 @@ export function buildPastSimulatedBaselineV1(args: {
       !dayIsLowDataSyntheticModeled &&
       !dayIsExcluded &&
       !dayIsLeadingMissing &&
+      !dayIsTrustedActual &&
       presentSlotCount > 0 &&
       presentSlotCount < MIN_TRUSTED_ACTUAL_INTERVALS_PER_DAY;
     const shouldSimulateDay =

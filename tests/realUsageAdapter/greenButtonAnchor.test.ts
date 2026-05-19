@@ -271,6 +271,7 @@ describe("green button full-day anchor", () => {
 
     const out = engine.buildPastSimulatedBaselineV1({
       actualIntervals: adapterOut.intervals,
+      trustedActualDateKeys: new Set(adapterOut.trustedActualDateKeys ?? []),
       canonicalDayStartsMs: [new Date("2026-05-14T00:00:00.000Z").getTime()],
       excludedDateKeys: new Set<string>(),
       dateKeyFromTimestamp: stitchedCurve.dateKeyFromTimestamp,
@@ -348,6 +349,7 @@ describe("green button full-day anchor", () => {
     });
 
     expect(adapterOut.intervals.filter((row) => row.timestamp.startsWith("2026-05-14T"))).toHaveLength(96);
+    expect(adapterOut.trustedActualDateKeys).toContain("2026-05-14");
     expect(out.dayResults.find((row) => row.localDate === "2026-05-14")?.simulatedReasonCode).not.toBe(
       "INCOMPLETE_METER_DAY"
     );
