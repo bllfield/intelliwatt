@@ -20,6 +20,16 @@ export type UserUsageHouseSelection = {
   esiid?: string | null;
 };
 
+export type UserUsageIngestionStatus = {
+  tailReady: boolean;
+  targetEndDate: string;
+  tailRefreshAttempted: boolean;
+  tailRefreshReason: "coverage_tail_current" | "refresh_requested" | "refresh_disabled";
+  tailTimedOut: boolean;
+  incompleteTailDateKeys: string[];
+  coverageEndDate: string | null;
+};
+
 export type UserUsageHouseContract = {
   houseId: string;
   label: string | null;
@@ -38,6 +48,7 @@ export type UserUsageHouseContract = {
     code: string;
     explanation: string;
   } | null;
+  usageIngestion?: UserUsageIngestionStatus | null;
   weatherSensitivityScore: WeatherSensitivityScore | null;
   weatherEfficiencyDerivedInput: WeatherEfficiencyDerivedInput | null;
 };

@@ -5,6 +5,12 @@ import { prisma } from '@/lib/db';
 import { normalizeEmail } from '@/lib/utils/email';
 import { resolveIntervalsLayer } from '@/lib/usage/resolveIntervalsLayer';
 import { buildUserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
+import {
+  buildUsageIngestionStatusFromTailEnsure,
+  ensureSmtTailCoverageForUserHouse,
+  isGreenButtonPrimaryDataset,
+  USER_USAGE_SMT_TAIL_WAIT_TIMEOUT_MS,
+} from "@/lib/usage/smtTailCoverage";
 import { IntervalSeriesKind } from '@/modules/usageSimulator/kinds';
 import { toPublicHouseLabel } from "@/modules/usageSimulator/houseLabel";
 import { adaptGreenButtonRawInput, runSharedSimulation } from "@/modules/onePathSim/onePathSim";
@@ -99,7 +105,28 @@ export async function GET(_request: NextRequest) {
     });
 
     const results = [];
+    const perHouseTailWaitMs =
+      houses.length > 1
+        ? Math.max(15_000, Math.floor(USER_USAGE_SMT_TAIL_WAIT_TIMEOUT_MS / houses.length))
+        : USER_USAGE_SMT_TAIL_WAIT_TIMEOUT_MS;
     for (const house of houses) {
+      let usageIngestion = null;
+      const esiid = house.esiid ? String(house.esiid).trim() : "";
+      if (esiid) {
+        const tailEnsure = await ensureSmtTailCoverageForUserHouse({
+          userId: user.id,
+          houseId: house.id,
+          esiid,
+          waitTimeoutMs: perHouseTailWaitMs,
+        }).catch((error) => {
+          console.warn("[user/usage] SMT tail ensure failed; continuing with current persisted usage", house.id, error);
+          return null;
+        });
+        if (tailEnsure) {
+          usageIngestion = buildUsageIngestionStatusFromTailEnsure(tailEnsure);
+        }
+      }
+
       let result: { dataset: any | null; alternatives: { smt: any; greenButton: any } };
       try {
         const resolved = await withTaskTimeout(
@@ -154,20 +181,35 @@ export async function GET(_request: NextRequest) {
         return result;
       });
 
-      results.push(
-        await buildUserUsageHouseContract({
-          userId: user.id,
-          house: {
-            id: house.id,
-            label: house.label,
-            addressLine1: house.addressLine1,
-            addressCity: house.addressCity,
-            addressState: house.addressState,
-            esiid: house.esiid,
-          },
-          resolvedUsage: usageForContract,
-        })
-      );
+      const contract = await buildUserUsageHouseContract({
+        userId: user.id,
+        house: {
+          id: house.id,
+          label: house.label,
+          addressLine1: house.addressLine1,
+          addressCity: house.addressCity,
+          addressState: house.addressState,
+          esiid: house.esiid,
+        },
+        resolvedUsage: usageForContract,
+      });
+      const resolvedDataset = contract.dataset;
+      if (
+        usageIngestion &&
+        resolvedDataset &&
+        isGreenButtonPrimaryDataset(resolvedDataset) &&
+        usageIngestion.tailRefreshAttempted
+      ) {
+        usageIngestion = {
+          ...usageIngestion,
+          tailRefreshReason: "refresh_disabled",
+          tailRefreshAttempted: false,
+        };
+      }
+      results.push({
+        ...contract,
+        usageIngestion,
+      });
     }
 
     return NextResponse.json(

@@ -1,8 +1,17 @@
 import { prisma } from "@/lib/db";
 import { resolveIntervalsLayer } from "@/lib/usage/resolveIntervalsLayer";
 import { requestUsageRefreshForUserHouse } from "@/lib/usage/userUsageRefresh";
+import {
+  ensureSmtTailCoverageForUserHouse,
+  isGreenButtonPrimaryDataset,
+  loadSmtTailCoverage,
+  smtTailRefreshNeeded,
+} from "@/lib/usage/smtTailCoverage";
 import { IntervalSeriesKind } from "@/modules/onePathSim/usageSimulator/kinds";
-import { resolveReportedCoverageWindow } from "@/modules/onePathSim/usageSimulator/metadataWindow";
+import {
+  resolveCanonicalUsage365CoverageWindow,
+  resolveReportedCoverageWindow,
+} from "@/modules/onePathSim/usageSimulator/metadataWindow";
 import { getMemoryRssMb, logSimPipelineEvent } from "@/modules/onePathSim/usageSimulator/simObservability";
 
 export type UpstreamUsageTruthOwner = {
@@ -296,6 +305,98 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
     skipLightweightInsightRecompute: args.skipLightweightInsightRecompute === true,
   });
   if (resolved?.dataset) {
+    const greenButtonOnlyMode = args.preferredActualSource === "GREEN_BUTTON" || isGreenButtonPrimaryDataset(resolved.dataset);
+    const esiidForTail = actualContextHouseWithEffectiveEsiid.esiid;
+    const shouldRefreshSmtTail =
+      args.seedIfMissing === true &&
+      !greenButtonOnlyMode &&
+      Boolean(esiidForTail) &&
+      !isGreenButtonPrimaryDataset(resolved.dataset);
+
+    if (shouldRefreshSmtTail && esiidForTail) {
+      const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
+      const initialTail = await loadSmtTailCoverage({
+        esiid: esiidForTail,
+        targetEndDate: canonicalCoverage.endDate,
+      });
+      if (smtTailRefreshNeeded(initialTail)) {
+        logBaselineUsageTruthEvent("baseline_upstream_usage_seed_start", {
+          userId: args.userId,
+          selectedHouseId: selectedHouse.id,
+          actualContextHouseId: actualContextHouse.id,
+          usageTruthAlreadyExists: true,
+          seedingAttempted: true,
+          usageTruthSource: "persisted_usage_output",
+        });
+
+        const tailEnsure = await ensureSmtTailCoverageForUserHouse({
+          userId: args.userId,
+          houseId: actualContextHouse.id,
+          esiid: esiidForTail,
+          targetEndDate: canonicalCoverage.endDate,
+        });
+        const seedResult: UpstreamUsageTruthSeedResult = tailEnsure.refreshResult?.ok
+          ? {
+              ok: true,
+              homeId: actualContextHouse.id,
+              message: tailEnsure.coverage.tailReady
+                ? "existing usage orchestration refreshed tail coverage"
+                : "existing usage orchestration requested; tail still pending after wait",
+            }
+          : {
+              ok: false,
+              homeId: actualContextHouse.id,
+              message:
+                (tailEnsure.refreshResult && "message" in tailEnsure.refreshResult
+                  ? tailEnsure.refreshResult.message
+                  : null) ??
+                (tailEnsure.refreshResult && "error" in tailEnsure.refreshResult
+                  ? String(tailEnsure.refreshResult.error)
+                  : "tail_refresh_failed"),
+            };
+
+        resolved = await readPersistedUsageTruth({
+          userId: args.userId,
+          houseId: actualContextHouse.id,
+          esiid: actualContextHouseWithEffectiveEsiid.esiid,
+          preferredActualSource: args.preferredActualSource ?? null,
+          skipLightweightInsightRecompute: args.skipLightweightInsightRecompute === true,
+        });
+
+        const usageTruthSource: UpstreamUsageTruthSource = "seeded_via_existing_usage_orchestration";
+        logBaselineUsageTruthEvent(
+          resolved?.dataset ? "baseline_upstream_usage_truth_lookup_success" : "baseline_upstream_usage_truth_lookup_failure",
+          {
+            userId: args.userId,
+            selectedHouseId: selectedHouse.id,
+            actualContextHouseId: actualContextHouse.id,
+            usageTruthAlreadyExists: true,
+            seedingAttempted: true,
+            usageTruthSource: resolved?.dataset ? usageTruthSource : "missing_usage_truth",
+            seedResult,
+          }
+        );
+
+        return {
+          selectedHouse: selectedHouseWithEffectiveEsiid,
+          actualContextHouse: actualContextHouseWithEffectiveEsiid,
+          dataset: resolved?.dataset ?? null,
+          alternatives: resolved?.alternatives ?? { smt: null, greenButton: null },
+          usageTruthSource: resolved?.dataset ? usageTruthSource : "missing_usage_truth",
+          seedResult,
+          summary: buildUpstreamUsageTruthSummary({
+            selectedHouseId: selectedHouse.id,
+            actualContextHouseId: actualContextHouse.id,
+            dataset: resolved?.dataset ?? null,
+            usageTruthSource: resolved?.dataset ? usageTruthSource : "missing_usage_truth",
+            seedResult,
+            preferredActualSource: args.preferredActualSource ?? null,
+            seedIfMissing: args.seedIfMissing,
+          }),
+        };
+      }
+    }
+
     if (args.seedIfMissing) {
       logBaselineUsageTruthEvent("baseline_upstream_usage_truth_lookup_success", {
         userId: args.userId,

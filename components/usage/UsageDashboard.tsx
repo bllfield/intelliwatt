@@ -6,6 +6,7 @@ import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 import { WeatherSensitivityCard } from "@/components/usage/WeatherSensitivityCard";
 import { formatDateLong, formatDateShort } from "@/components/usage/usageFormatting";
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
+import type { UserUsageIngestionStatus } from "@/lib/usage/userUsageHouseContract";
 import {
   type ManualAnnualStageOneSummary,
   type ManualMonthlyStageOneRow,
@@ -146,9 +147,17 @@ export type HouseUsage = {
     code?: string;
     explanation?: string;
   } | null;
+  usageIngestion?: UserUsageIngestionStatus | null;
   weatherSensitivityScore?: WeatherSensitivityScore | null;
   weatherEfficiencyDerivedInput?: WeatherEfficiencyDerivedInput | null;
 };
+
+function houseNeedsSmtIngestionPoll(house: HouseUsage | null | undefined): boolean {
+  if (!house?.esiid) return false;
+  if (!house.dataset) return true;
+  if (house.usageIngestion && house.usageIngestion.tailReady === false) return true;
+  return house.dataset.insights?.stitchedMonth?.mode === "PRIOR_YEAR_TAIL";
+}
 
 type UsageApiResponse =
   | { ok: true; houses: HouseUsage[] }
@@ -471,8 +480,7 @@ export const UsageDashboard: React.FC<Props> = ({
     const active = houses.find((h) => h.houseId === selectedHouseId) || null;
     if (!active) return;
 
-    // Only poll when there's an ESIID but no dataset yet.
-    const shouldPoll = Boolean(active.esiid && !active.dataset);
+    const shouldPoll = houseNeedsSmtIngestionPoll(active);
     if (!shouldPoll) return;
 
     let cancelled = false;
@@ -547,6 +555,11 @@ export const UsageDashboard: React.FC<Props> = ({
     if (!selectedHouseId) return null;
     return houses.find((h) => h.houseId === selectedHouseId) || null;
   }, [houses, selectedHouseId]);
+
+  const smtTailIngestionPending = useMemo(() => {
+    if (effectiveFetchMode !== "REAL") return false;
+    return houseNeedsSmtIngestionPoll(activeHouse);
+  }, [activeHouse, effectiveFetchMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -666,10 +679,14 @@ export const UsageDashboard: React.FC<Props> = ({
       baseloadMonthly: null,
     };
 
-  if (loading) {
+  if (loading || smtTailIngestionPending) {
     return (
       <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
-        <p className="text-sm text-neutral-600">Loading usage data…</p>
+        <p className="text-sm text-neutral-600">
+          {smtTailIngestionPending && !loading
+            ? "Finishing the latest meter usage for your dashboard…"
+            : "Loading usage data…"}
+        </p>
       </div>
     );
   }
