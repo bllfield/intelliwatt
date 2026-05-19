@@ -245,6 +245,7 @@ function buildCompactRunReadModelDataset(args: {
   artifactDataset: Record<string, unknown> | null;
   artifactDatasetMeta: Record<string, unknown> | null;
   runDisplayView: Record<string, unknown> | null;
+  forceBaselinePassthrough?: boolean;
 }) {
   const summary = asRecord(args.artifactDataset?.summary);
   const viewSummary = asRecord(args.runDisplayView?.summary);
@@ -293,8 +294,59 @@ function buildCompactRunReadModelDataset(args: {
     },
     meta: {
       ...(args.artifactDatasetMeta ?? {}),
-      baselinePassthrough: true,
+      ...(args.forceBaselinePassthrough ? { baselinePassthrough: true } : {}),
     },
+  };
+}
+
+function buildCompactArtifactSummary(artifact: Record<string, unknown> | null) {
+  return artifact
+    ? {
+        artifactId: artifact.artifactId ?? null,
+        artifactInputHash: artifact.artifactInputHash ?? null,
+        buildInputsHash: artifact.buildInputsHash ?? null,
+        engineVersion: artifact.engineVersion ?? null,
+        inputType: artifact.inputType ?? null,
+        simulatorMode: artifact.simulatorMode ?? null,
+        houseId: artifact.houseId ?? null,
+        scenarioId: artifact.scenarioId ?? null,
+        actualContextHouseId: artifact.actualContextHouseId ?? null,
+        createdAt: artifact.createdAt ?? null,
+        updatedAt: artifact.updatedAt ?? null,
+      }
+    : null;
+}
+
+function buildCompactSimulationReadModel(args: {
+  artifact: Record<string, unknown> | null;
+  artifactDataset: Record<string, unknown> | null;
+  artifactDatasetMeta: Record<string, unknown> | null;
+  runDisplayView: Record<string, unknown> | null;
+  compareProjection?: unknown;
+  forceBaselinePassthrough?: boolean;
+}) {
+  if (!args.artifactDataset && !args.runDisplayView) return null;
+  const artifact = args.artifact ?? {};
+  return {
+    compactResponseReadModel: true,
+    compactResponseReason: "admin_response_keeps_display_small_but_preserves_ai_copy_diagnostics",
+    runIdentity: null,
+    dataset: buildCompactRunReadModelDataset({
+      artifactDataset: args.artifactDataset,
+      artifactDatasetMeta: args.artifactDatasetMeta,
+      runDisplayView: args.runDisplayView,
+      forceBaselinePassthrough: args.forceBaselinePassthrough,
+    }),
+    compareProjection: args.compareProjection ?? null,
+    manualMonthlyReconciliation: artifact.manualMonthlyReconciliation ?? null,
+    manualParitySummary: artifact.manualParitySummary ?? null,
+    manualStageOneView: artifact.manualStageOneView ?? null,
+    sharedDiagnostics: artifact.sharedDiagnostics ?? null,
+    tuningSummary: artifact.tuningSummary ?? null,
+    dailyShapeTuning: artifact.dailyShapeTuning ?? null,
+    sourceOfTruthSummary: artifact.sourceOfTruthSummary ?? null,
+    effectiveSimulationVariablesUsed: artifact.effectiveSimulationVariablesUsed ?? null,
+    compactArtifactSummary: buildCompactArtifactSummary(args.artifact),
   };
 }
 
@@ -602,6 +654,13 @@ async function buildPastSimRunReadbackResponse(args: {
     source: "buildPastSimRunReadbackResponse",
     memoryRssMb: getMemoryRssMb(),
   });
+  const compactRunDisplayView =
+    runDisplayViewBase != null
+      ? {
+          ...runDisplayViewBase,
+          pastVariables,
+        }
+      : null;
   return {
     ok: true as const,
     debugDiagnosticsIncluded: false,
@@ -610,15 +669,15 @@ async function buildPastSimRunReadbackResponse(args: {
     runType: "PAST_SIM" as const,
     correlationId: args.correlationId ?? null,
     manualStageOneView: null,
-    runDisplayView:
-      runDisplayViewBase != null
-        ? {
-            ...runDisplayViewBase,
-            pastVariables,
-          }
-        : null,
+    runDisplayView: compactRunDisplayView,
     artifact: null,
-    readModel: null,
+    readModel: buildCompactSimulationReadModel({
+      artifact: null,
+      artifactDataset: asRecord(readback.dataset),
+      artifactDatasetMeta: asRecord(asRecord(readback.dataset)?.meta),
+      runDisplayView: compactRunDisplayView,
+      compareProjection,
+    }),
   };
 }
 
@@ -1607,6 +1666,7 @@ export async function POST(request: NextRequest) {
                   artifactDataset: baselineDataset,
                   artifactDatasetMeta: baselineDatasetMeta,
                   runDisplayView: compactRunDisplayView,
+                  forceBaselinePassthrough: true,
                 }),
               }
             : null;
@@ -1650,6 +1710,7 @@ export async function POST(request: NextRequest) {
                   artifactDataset,
                   artifactDatasetMeta,
                   runDisplayView: compactRunDisplayView,
+                  forceBaselinePassthrough: true,
                 }),
               }
             : null;
@@ -1696,6 +1757,13 @@ export async function POST(request: NextRequest) {
             engineInput: asRecord(engineInput),
             readModel: { compareProjection: artifact.compareProjection },
           }) ?? null;
+        const compactReadModel = buildCompactSimulationReadModel({
+          artifact: asRecord(artifact),
+          artifactDataset,
+          artifactDatasetMeta,
+          runDisplayView: compactRunDisplayView,
+          compareProjection: artifact.compareProjection,
+        });
         return NextResponse.json({
           ok: true,
           debugDiagnosticsIncluded: false,
@@ -1707,7 +1775,7 @@ export async function POST(request: NextRequest) {
           manualStageOneView: artifact.manualStageOneView ?? null,
           runDisplayView: compactRunDisplayView,
           artifact: null,
-          readModel: null,
+          readModel: compactReadModel,
         });
       }
       let readModel = buildSharedSimulationReadModel(artifact);
@@ -1759,6 +1827,14 @@ export async function POST(request: NextRequest) {
         }) ??
         null;
       if (!includeDebugDiagnostics) {
+        const compactReadModel = buildCompactSimulationReadModel({
+          artifact: asRecord(artifact),
+          artifactDataset: asRecord(readModel.dataset),
+          artifactDatasetMeta: asRecord(asRecord(readModel.dataset)?.meta),
+          runDisplayView,
+          compareProjection: readModel.compareProjection,
+          forceBaselinePassthrough: Boolean(artifactDatasetMeta?.baselinePassthrough),
+        });
         return NextResponse.json({
           ok: true,
           debugDiagnosticsIncluded: false,
@@ -1774,7 +1850,7 @@ export async function POST(request: NextRequest) {
           manualStageOneView: readModel.manualStageOneView ?? null,
           runDisplayView,
           artifact: null,
-          readModel: null,
+          readModel: compactReadModel,
         });
       }
       return NextResponse.json({

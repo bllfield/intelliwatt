@@ -146,6 +146,45 @@ function buildCurveShapingSummary(variableFamilies: SimulationVariableFamilyAdmi
     .slice(0, 24);
 }
 
+function buildAllModeVariableFamilies(args: {
+  response: SimulationVariablePolicyResponseShape;
+  runSnapshot?: EffectiveSimulationVariablesUsed | null;
+}): Record<string, SimulationVariableFamilyAdminView[]> {
+  const modes = Array.from(
+    new Set([
+      "INTERVAL",
+      "GREEN_BUTTON",
+      "MANUAL_MONTHLY",
+      "MANUAL_ANNUAL",
+      "NEW_BUILD",
+      ...Object.keys(args.response.effectiveByMode ?? {}),
+    ])
+  );
+  const familyKeys = Object.keys(args.response.familyMeta ?? {});
+  const out: Record<string, SimulationVariableFamilyAdminView[]> = {};
+  for (const mode of modes) {
+    out[mode] = familyKeys
+      .map((familyKey) =>
+        buildSimulationVariableFamilyAdminView({
+          familyKey,
+          mode,
+          response: args.response,
+          runSnapshot: args.runSnapshot?.inputType === modeToInputType(mode) ? args.runSnapshot : null,
+        })
+      )
+      .filter(Boolean) as SimulationVariableFamilyAdminView[];
+  }
+  return out;
+}
+
+function pickKeys(source: Record<string, unknown>, keys: string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of keys) {
+    if (source[key] !== undefined) out[key] = source[key];
+  }
+  return out;
+}
+
 function fieldDescription(familyTitle: string, key: string): string {
   const readableKey = humanizeKey(key).toLowerCase();
   if (key.includes("threshold")) return `This threshold decides when the shared ${familyTitle.toLowerCase()} logic changes behavior.`;
@@ -319,6 +358,10 @@ export function buildSimulationVariableCopyPayload(args: {
       })
     )
     .filter(Boolean) as SimulationVariableFamilyAdminView[];
+  const allModesVariableFamilies = buildAllModeVariableFamilies({
+    response: args.response,
+    runSnapshot: args.runSnapshot,
+  });
   const copiedLoadedSourceContext = Object.keys(loadedSourceContext).length
     ? {
         actualDatasetSummary: loadedSourceContext.actualDatasetSummary ?? null,
@@ -435,6 +478,116 @@ export function buildSimulationVariableCopyPayload(args: {
   const pastSim = !lookupOnly && !baselinePassthrough;
   const runType = lookupOnly ? "LOOKUP_ONLY" : baselinePassthrough ? "BASELINE_PASSTHROUGH" : "PAST_SIM";
   const readModelDataset = asNullableRecord(readModel.dataset);
+  const readModelDatasetMeta = asRecord(readModelDataset?.meta);
+  const compactArtifactSummary = asRecord(readModel.compactArtifactSummary);
+  const activeRunSnapshot =
+    args.runSnapshot ??
+    asNullableRecord(readModel.effectiveSimulationVariablesUsed) ??
+    asNullableRecord(readModelDatasetMeta.effectiveSimulationVariablesUsed);
+  const artifactIdentity = {
+    artifactId:
+      artifact.artifactId ??
+      compactArtifactSummary.artifactId ??
+      asRecord((activeRunSnapshot as Record<string, unknown> | null)?.runIdentityLinkage).artifactId ??
+      null,
+    artifactInputHash:
+      artifact.artifactInputHash ??
+      compactArtifactSummary.artifactInputHash ??
+      asRecord((activeRunSnapshot as Record<string, unknown> | null)?.runIdentityLinkage).artifactInputHash ??
+      null,
+    buildInputsHash:
+      artifact.buildInputsHash ??
+      compactArtifactSummary.buildInputsHash ??
+      asRecord((activeRunSnapshot as Record<string, unknown> | null)?.runIdentityLinkage).buildInputsHash ??
+      null,
+    engineVersion:
+      artifact.engineVersion ??
+      compactArtifactSummary.engineVersion ??
+      readModelDatasetMeta.simVersion ??
+      readModelDatasetMeta.derivationVersion ??
+      null,
+    inputType: artifact.inputType ?? compactArtifactSummary.inputType ?? inputType,
+    simulatorMode:
+      artifact.simulatorMode ?? compactArtifactSummary.simulatorMode ?? asRecord(args.engineInput).simulatorMode ?? null,
+  };
+  const engineInputRecord = asRecord(args.engineInput);
+  const simRunAudit = {
+    purpose:
+      "Run-complete audit block for AI. Includes compact/full run proof, source identity, simulation variables, fingerprints, correction metadata, and diagnostics for the active mode.",
+    selectedMode: inputType,
+    runType,
+    compactResponse: Boolean(hasCompactRunResponse || readModel.compactResponseReadModel === true),
+    hasFullReadModel: Object.keys(readModel).length > 0 && readModel.compactResponseReadModel !== true,
+    hasRunSnapshot: activeRunSnapshot != null,
+    artifactIdentity,
+    engineInputIdentity: {
+      inputType: engineInputRecord.inputType ?? inputType,
+      simulatorMode: engineInputRecord.simulatorMode ?? null,
+      actualSource: engineInputRecord.actualSource ?? null,
+      preferredActualSource: asRecord(engineInputRecord.runtime).runContext
+        ? asRecord(asRecord(engineInputRecord.runtime).runContext).preferredActualSource ?? null
+        : null,
+      actualContextHouseId: engineInputRecord.actualContextHouseId ?? null,
+      scenarioId: engineInputRecord.scenarioId ?? null,
+      coverageWindowStart: engineInputRecord.coverageWindowStart ?? null,
+      coverageWindowEnd: engineInputRecord.coverageWindowEnd ?? null,
+      canonicalMonths: engineInputRecord.canonicalMonths ?? null,
+      weatherPreference: engineInputRecord.weatherPreference ?? null,
+      weatherLogicMode: engineInputRecord.weatherLogicMode ?? null,
+      sourceDerivedMode: engineInputRecord.sourceDerivedMode ?? null,
+      actualIntervalFingerprint: engineInputRecord.actualIntervalFingerprint ?? null,
+      weatherIdentity: engineInputRecord.weatherIdentity ?? null,
+      usageShapeIdentity: engineInputRecord.usageShapeIdentity ?? null,
+    },
+    datasetMeta: readModelDatasetMeta,
+    sourceTruthContext: pickKeys(readModelDatasetMeta, [
+      "actualSource",
+      "sourceActualIntervalsCount",
+      "actualIntervalsCount",
+      "actualIntervalPayloadAttached",
+      "sourceDerivedMode",
+      "intervalUsageFingerprintIdentity",
+      "trustedIntervalFingerprintDayCount",
+      "excludedTravelVacantFingerprintDayCount",
+      "excludedIncompleteMeterFingerprintDayCount",
+      "excludedDailyUsageMissingFingerprintDayCount",
+      "excludedLeadingMissingFingerprintDayCount",
+      "excludedOtherUntrustedFingerprintDayCount",
+      "excludedDateKeysCount",
+      "excludedDateKeysFingerprint",
+      "fingerprintMonthBucketsUsed",
+      "fingerprintWeekdayWeekendBucketsUsed",
+      "fingerprintWeatherBucketsUsed",
+      "fingerprintShapeSummaryByMonthDayType",
+    ]),
+    greenButtonCorrectionProof: pickKeys(readModelDatasetMeta, [
+      "greenButtonIntervalTimestampMode",
+      "greenButtonCoverageIntervalCount",
+      "greenButtonSourceCoverageStart",
+      "greenButtonSourceCoverageEnd",
+      "greenButtonShiftedIntervalCount",
+      "greenButtonShiftedDateCount",
+      "greenButtonPaddedIntervalCount",
+      "greenButtonPaddedDateCount",
+      "greenButtonZeroRedistributedIntervalCount",
+      "greenButtonRepairedDuplicateIntervalCount",
+      "greenButtonRepairedDuplicateDateCount",
+      "greenButtonShiftedWeatherDateCount",
+      "greenButtonWeatherSourceCoverageStart",
+      "greenButtonWeatherSourceCoverageEnd",
+      "greenButtonSourceDateByTargetDate",
+      "displayWindowNote",
+      "dailyUsageDisclosureNote",
+    ]),
+    effectiveSimulationVariablesUsed: activeRunSnapshot,
+    diagnostics: {
+      sharedDiagnostics: readModel.sharedDiagnostics ?? null,
+      tuningSummary: readModel.tuningSummary ?? null,
+      dailyShapeTuning: readModel.dailyShapeTuning ?? null,
+      sourceOfTruthSummary: readModel.sourceOfTruthSummary ?? null,
+      compareProjection: readModel.compareProjection ?? null,
+    },
+  };
   const derivedRunDisplayView =
     !lookupOnly && readModelDataset
       ? buildOnePathRunReadOnlyView({
@@ -517,6 +670,8 @@ export function buildSimulationVariableCopyPayload(args: {
       includesParitySections: Boolean(baselineParityReport || baselineParityAudit),
       includesEnvReadinessTraceSections: Boolean(runtimeEnvParityTrace || intervalPastReadinessTrace),
       includesReadOnlyAudit: Boolean(readOnlyAudit),
+      includesAllModesVariableFamilies: true,
+      includesSimRunAudit: true,
     },
     currentControls: args.currentControls ?? {},
     knownScenario: args.knownScenario ?? null,
@@ -597,16 +752,7 @@ export function buildSimulationVariableCopyPayload(args: {
           sharedDiagnostics: readModel.sharedDiagnostics ?? null,
           sourceOfTruthSummary: readModel.sourceOfTruthSummary ?? null,
           readModelRunIdentity: readModel.runIdentity ?? null,
-          artifactSummary: args.artifact
-            ? {
-                artifactId: artifact.artifactId ?? null,
-                artifactInputHash: artifact.artifactInputHash ?? null,
-                buildInputsHash: artifact.buildInputsHash ?? null,
-                engineVersion: artifact.engineVersion ?? null,
-                inputType: artifact.inputType ?? null,
-                simulatorMode: artifact.simulatorMode ?? null,
-              }
-            : null,
+          artifactSummary: artifactIdentity,
         }
       : effectiveRunDisplayView
         ? {
@@ -632,7 +778,16 @@ export function buildSimulationVariableCopyPayload(args: {
     },
     ownershipAudit: buildOnePathOwnershipAudit(),
     variableFamilies,
-    rawEffectiveSimulationVariablesUsed: args.runSnapshot ?? null,
+    allModesVariableFamilies,
+    rawSimulationVariablePolicy: {
+      defaults: args.response.defaults ?? {},
+      effectiveByMode: args.response.effectiveByMode ?? {},
+      overrides: args.response.overrides ?? {},
+      familyMeta: args.response.familyMeta ?? {},
+    },
+    simRunAudit,
+    rawEffectiveSimulationVariablesUsed: activeRunSnapshot ?? null,
     rawReadModel: args.readModel ?? null,
+    rawArtifact: args.artifact ?? null,
   };
 }

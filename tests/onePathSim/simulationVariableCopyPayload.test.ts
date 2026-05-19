@@ -429,9 +429,22 @@ describe("one path simulation variable copy payload", () => {
     const payload = buildSimulationVariableCopyPayload({
       mode: "GREEN_BUTTON",
       response: {
-        familyMeta: {},
-        defaults: {},
-        effectiveByMode: { GREEN_BUTTON: {} },
+        familyMeta: {
+          weatherShaping: {
+            title: "Weather Shaping",
+            description: "Shared weather shaping controls",
+          },
+        },
+        defaults: {
+          weatherShaping: {
+            coolingWeight: 0.7,
+          },
+        },
+        effectiveByMode: {
+          INTERVAL: { weatherShaping: { coolingWeight: 0.72 } },
+          GREEN_BUTTON: { weatherShaping: { coolingWeight: 0.81 } },
+          MANUAL_MONTHLY: { weatherShaping: { coolingWeight: 0.66 } },
+        },
         overrides: {},
       },
       engineInput: {
@@ -497,9 +510,22 @@ describe("one path simulation variable copy payload", () => {
     const payload = buildSimulationVariableCopyPayload({
       mode: "GREEN_BUTTON",
       response: {
-        familyMeta: {},
-        defaults: {},
-        effectiveByMode: { GREEN_BUTTON: {} },
+        familyMeta: {
+          weatherShaping: {
+            title: "Weather Shaping",
+            description: "Shared weather shaping controls",
+          },
+        },
+        defaults: {
+          weatherShaping: {
+            coolingWeight: 0.7,
+          },
+        },
+        effectiveByMode: {
+          INTERVAL: { weatherShaping: { coolingWeight: 0.72 } },
+          GREEN_BUTTON: { weatherShaping: { coolingWeight: 0.81 } },
+          MANUAL_MONTHLY: { weatherShaping: { coolingWeight: 0.66 } },
+        },
         overrides: {},
       },
       engineInput: {
@@ -507,7 +533,42 @@ describe("one path simulation variable copy payload", () => {
         simulatorMode: "GREEN_BUTTON",
         scenarioId: "past-scenario-1",
       },
-      readModel: null,
+      readModel: {
+        compactResponseReadModel: true,
+        dataset: {
+          summary: {
+            source: "GREEN_BUTTON with simulated fill for Travel/Vacant",
+            totalKwh: 1234.5,
+          },
+          meta: {
+            actualSource: "GREEN_BUTTON",
+            intervalUsageFingerprintIdentity: "gb-fingerprint-1",
+            trustedIntervalFingerprintDayCount: 342,
+            greenButtonZeroRedistributedIntervalCount: 88,
+          },
+        },
+        compareProjection: {
+          rows: [{ localDate: "2025-06-02", actualDayKwh: 64.76, simulatedDayKwh: 65.37 }],
+          metrics: { wape: 12.11, mae: 8.27, rmse: 11.67 },
+        },
+        effectiveSimulationVariablesUsed: {
+          inputType: "GREEN_BUTTON",
+          familyByFamilyResolvedValues: {
+            weatherShaping: {
+              resolvedValues: { coolingWeight: 0.81 },
+            },
+          },
+          runIdentityLinkage: {
+            artifactId: "artifact-gb-1",
+            artifactInputHash: "hash-gb-1",
+          },
+        },
+        compactArtifactSummary: {
+          artifactId: "artifact-gb-1",
+          artifactInputHash: "hash-gb-1",
+          engineVersion: "production_past_stitched_v6",
+        },
+      },
       runDisplayView: {
         summary: {
           source: "GREEN_BUTTON with simulated fill for Travel/Vacant",
@@ -543,7 +604,7 @@ describe("one path simulation variable copy payload", () => {
         rowsCount: 1,
         metrics: { wape: 12.11, mae: 8.27, rmse: 11.67 },
         rows: [{ localDate: "2025-06-02", actualDayKwh: 64.76, simulatedDayKwh: 65.37 }],
-        sourceOwner: "runDisplayView.compare",
+        sourceOwner: "readModel.compareProjection",
       })
     );
     expect((payload.runDisplayContract as any)?.dailyUsage).toEqual(
@@ -562,7 +623,47 @@ describe("one path simulation variable copy payload", () => {
       expect.objectContaining({
         compareProjectionRowsCount: 1,
         compareProjectionMetrics: { wape: 12.11, mae: 8.27, rmse: 11.67 },
-        compactResponseReadModelSuppressed: true,
+        artifactSummary: expect.objectContaining({
+          artifactId: "artifact-gb-1",
+          artifactInputHash: "hash-gb-1",
+        }),
+      })
+    );
+    expect((payload.aiPayloadMeta as any)).toEqual(
+      expect.objectContaining({
+        includesAllModesVariableFamilies: true,
+        includesSimRunAudit: true,
+      })
+    );
+    expect((payload.allModesVariableFamilies as any).INTERVAL[0].fields[0]).toEqual(
+      expect.objectContaining({ key: "coolingWeight", resolvedValue: 0.72 })
+    );
+    expect((payload.allModesVariableFamilies as any).GREEN_BUTTON[0].fields[0]).toEqual(
+      expect.objectContaining({ key: "coolingWeight", resolvedValue: 0.81 })
+    );
+    expect((payload.rawSimulationVariablePolicy as any).effectiveByMode.MANUAL_MONTHLY.weatherShaping).toEqual({
+      coolingWeight: 0.66,
+    });
+    expect((payload.simRunAudit as any)).toEqual(
+      expect.objectContaining({
+        compactResponse: true,
+        hasRunSnapshot: true,
+        artifactIdentity: expect.objectContaining({
+          artifactId: "artifact-gb-1",
+          artifactInputHash: "hash-gb-1",
+        }),
+        sourceTruthContext: expect.objectContaining({
+          intervalUsageFingerprintIdentity: "gb-fingerprint-1",
+          trustedIntervalFingerprintDayCount: 342,
+        }),
+        greenButtonCorrectionProof: expect.objectContaining({
+          greenButtonZeroRedistributedIntervalCount: 88,
+        }),
+      })
+    );
+    expect(payload.rawEffectiveSimulationVariablesUsed).toEqual(
+      expect.objectContaining({
+        inputType: "GREEN_BUTTON",
       })
     );
     expect((payload.intervalPastReadinessTrace as any)).toEqual(

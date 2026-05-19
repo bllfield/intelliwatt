@@ -1224,7 +1224,15 @@ describe("admin one path sim route", () => {
     );
     expect(json.debugDiagnosticsIncluded).toBe(false);
     expect(json.debugDiagnosticsSuppressedReason).toBe("past_sim_compact_response");
-    expect(json.readModel).toBeNull();
+    expect(json.readModel).toEqual(
+      expect.objectContaining({
+        compactResponseReadModel: true,
+        compactArtifactSummary: expect.objectContaining({
+          artifactId: "artifact-2",
+          artifactInputHash: "artifact-hash-2",
+        }),
+      })
+    );
     expect(json.artifact).toBeNull();
     expect(json.runDisplayView).toBeTruthy();
   });
@@ -1282,7 +1290,14 @@ describe("admin one path sim route", () => {
       },
     ]);
     expect(json.artifact ?? null).toBeNull();
-    expect(json.readModel ?? null).toBeNull();
+    expect(json.readModel ?? null).toEqual(
+      expect.objectContaining({
+        compactResponseReadModel: true,
+        compareProjection: expect.objectContaining({
+          metrics: { wape: 2.8, mae: 1.12, rmse: 1.12 },
+        }),
+      })
+    );
     expect(readOnePathSimulatedUsageScenario).toHaveBeenCalledWith({
       userId: "user-1",
       houseId: "house-1",
@@ -1566,7 +1581,15 @@ describe("admin one path sim route", () => {
     expect(json.manualStageOneView?.billPeriodCompare).toBeTruthy();
     expect(json.runDisplayView).toBeTruthy();
     expect(json.artifact ?? null).toBeNull();
-    expect(json.readModel ?? null).toBeNull();
+    expect(json.readModel ?? null).toEqual(
+      expect.objectContaining({
+        compactResponseReadModel: true,
+        compactArtifactSummary: expect.objectContaining({
+          artifactId: "artifact-1",
+          artifactInputHash: "artifact-hash-1",
+        }),
+      })
+    );
     expect(adaptManualMonthlyRawInput).toHaveBeenCalledWith(
       expect.objectContaining({
         scenarioId: "scenario-1",
