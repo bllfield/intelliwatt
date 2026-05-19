@@ -1,0 +1,18 @@
+---
+description: Enforce generalized Green Button shifted-actual handling
+globs: "{modules/realUsageAdapter/**,modules/onePathSim/**,modules/usageSimulator/**,modules/simulatedUsage/**,tests/**,docs/**}"
+alwaysApply: false
+---
+
+# Green Button Shifted Actuals
+
+For Green Button interval and One Path/Past simulation work, enforce these rules:
+
+- Shifted Green Button actuals are a general behavior, not a date-specific patch.
+- A shifted source day with trusted interval coverage must remain actual-backed for the target date and must not be downgraded to `SIMULATED_INCOMPLETE_METER`.
+- Trusted coverage uses the shared 90-interval rule, bounded by `expectedIntervalsForDateISO()` for DST-aware expected slot counts.
+- Current-year partial/trailing intervals must not overwrite or downgrade a trusted shifted source day for the same target date.
+- Shifted Green Button metadata must preserve `sourceDateByTargetDate` and disclose that weather for the original source day is used.
+- Adapter normalization owns shifted-day padding/precedence before `CanonicalSimulationEngineInput`; route/page code must not rederive or patch this classification locally.
+- Artifact/cache identity must change or invalidate cleanly when Green Button correction logic changes, so stale exact-hash artifacts cannot mask corrected classifications.
+- Regression tests must cover the generalized behavior: trusted shifted source days, partial-current-year conflicts, DST-aware slot thresholds, source-day weather disclosure, and downstream non-`SIMULATED_INCOMPLETE_METER` classification.

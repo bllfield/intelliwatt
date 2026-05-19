@@ -18,6 +18,15 @@ This document explains how to:
     5. Handle missing data, meter changes, and rate changes
     6. Store in database for analysis
 
+CURRENT INTELLIWATT POLICY:
+    - Green Button interval normalization is supplier-agnostic and must not contain one-off date patches.
+    - Shifted Green Button actuals are actual-usage truth when the source day has trusted coverage.
+    - Trusted shifted daily coverage uses the shared 90-interval minimum, bounded by expectedIntervalsForDateISO() for DST-aware expected slot counts.
+    - If a trusted prior-year source day is shifted to a target date, that target date must remain actual-backed and must not be downgraded to SIMULATED_INCOMPLETE_METER by downstream Past or One Path simulation.
+    - Current-year partial/trailing intervals must not overwrite or downgrade a trusted shifted source day for the same target date.
+    - Metadata must preserve sourceDateByTargetDate and must disclose that shifted Green Button days use weather from the original source day.
+    - Artifact/cache identity must be invalidated or versioned when Green Button correction logic changes so stale exact-hash artifacts do not hide corrected classifications.
+
 ---
 
 ## SECTION 1: GREEN BUTTON FILE FORMATS

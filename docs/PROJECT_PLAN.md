@@ -22,6 +22,7 @@
 - **One Path lean manual rule:** debug OFF / lean manual runs must return the same Stage 1 contract plus the same Stage 2 display-ready Past view the future lightweight user-style path will use. Debug ON may add richer diagnostics, but not a different core manual operation.
 - **One Path dedicated test-home rule:** One Path Admin writes only to a reusable `ONE_PATH_LAB_TEST_HOME`. The selected source house stays read-only. Replacing the test home must reset isolated mutable state, sync missing home/appliance profiles, and clone Green Button actual-usage records so sandbox tuning does not mutate live/source data.
 - **One Path actual-source rule:** on a pinned One Path test home, actual usage still comes from shared usage owners. SMT interval truth may use the selected source house ESIID as the actual meter identity fallback for the pinned actual-context house, while Green Button truth must come from persisted Green Button usage cloned onto the test home.
+- **Green Button shifted-actual rule:** shifted Green Button actuals are generalized actual-usage behavior, not date-specific patches. Trusted shifted source days use the shared 90-interval minimum bounded by `expectedIntervalsForDateISO()`, must win over trailing/current-year partial days for the same target date, must preserve `sourceDateByTargetDate`, must disclose source-day weather usage, and must not reach downstream simulation as `SIMULATED_INCOMPLETE_METER` unless the shifted source day itself fails the trusted coverage rule.
 - **One Path shared-window rule:** for non-baseline runs, canonical 365-day coverage metadata must stay owned by `resolveCanonicalUsage365CoverageWindow()` / shared metadata-window helpers. `dataset.summary.start/end`, `dataset.meta.coverageStart/coverageEnd`, and bounded `excludedDateKeys*` metadata must stay aligned to that same shared window.
 - **One Path best-effort SMT recovery rule:** interval runs may request SMT refresh and wait for canonical tail coverage before the first run, but stale/incomplete tail no longer blocks results. If the first result still marks `SIMULATED_INCOMPLETE_METER` days, refresh those exact dates, rebuild engine input, rerun once, and still return results if some incomplete simulated days remain.
 - **One Path known-house tuning rule:** repeated One Path tuning runs should use the sandbox-only known-house scenario registry under `modules/onePathSim/**`. Presets may preload keeper-user selection, house/context resolution strategy, scenario selection, validation inputs, weather preference, travel ranges, and review expectations into the existing One Path Admin controls, and the same preset identity should flow into sandbox summaries / AI copy payloads. No live persistence or live-surface wiring is part of this step.
@@ -64,6 +65,7 @@
 
 2) Actual interval source selection/fetching:
    - `modules/realUsageAdapter/actual.ts`
+   - `modules/realUsageAdapter/greenButton.ts`
    - `lib/usage/actualDatasetForHouse.ts`
    - `lib/usage/resolveIntervalsLayer.ts`
 3) Past corrected baseline/simulated-day generation:
@@ -119,6 +121,7 @@ Audit baseline (2026-03-13): all GapFill/simulation tests and admin tools must u
 
 4) Canonical interval source + persisted artifact reads:
 - `modules/realUsageAdapter/actual.ts`
+- `modules/realUsageAdapter/greenButton.ts`
 - `lib/usage/actualDatasetForHouse.ts`
 - `lib/usage/resolveIntervalsLayer.ts`
 - `lib/usage/intervalSeriesRepo.ts`

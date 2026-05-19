@@ -21,6 +21,7 @@ This document defines the canonical interval-series layers and maps current endp
 - `POST /api/green-button/upload` (and admin variant)
   - Current meaning: ingests Green Button intervals.
   - Target layer: writes `ACTUAL_USAGE_INTERVALS`.
+  - Shifted Green Button actuals remain part of this actual layer. When prior-year data is shifted into a target coverage window, trusted shifted source days (90 intervals, DST-bounded by `expectedIntervalsForDateISO()`) stay actual-backed, preserve `sourceDateByTargetDate`, disclose source-day weather use, and must not be reclassified by simulation as `SIMULATED_INCOMPLETE_METER` unless the shifted source day is below the trusted threshold.
 
 - `POST /api/internal/smt/ingest-normalize` (and admin normalize/raw-upload/backfill/analysis normalize-smt routes)
   - Current meaning: ingests or normalizes SMT intervals.
@@ -29,6 +30,7 @@ This document defines the canonical interval-series layers and maps current endp
 - Repository/functions mapped to this layer:
   - `lib/usage/actualDatasetForHouse.ts`
   - `modules/realUsageAdapter/*`
+  - `modules/realUsageAdapter/greenButton.ts` owns shifted Green Button day precedence/padding before simulation.
   - `lib/usage/dualWriteUsageIntervals.ts` (replication from main DB to usage DB mirror)
 
 ### `BASELINE_INTERVALS`

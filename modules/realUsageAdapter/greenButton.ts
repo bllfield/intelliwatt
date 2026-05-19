@@ -4,6 +4,7 @@ import { dateTimePartsInTimezone, enumerateDateKeysInclusive } from "@/lib/time/
 import { expectedIntervalsForDateISO } from "@/lib/analysis/dst";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const MIN_TRUSTED_GREEN_BUTTON_INTERVALS_PER_DAY = 90;
 const USAGE_DB_ENABLED = Boolean((process.env.USAGE_DATABASE_URL ?? "").trim());
 
 function parseYearMonth(ym: string): { year: number; month1: number } | null {
@@ -67,6 +68,10 @@ function utcSlot96FromIsoTimestamp(timestamp: string): number | null {
 
 function utcGridTimestampForDateSlot(dateKey: string, slot: number): string {
   return new Date(new Date(`${dateKey}T00:00:00.000Z`).getTime() + slot * 15 * 60 * 1000).toISOString();
+}
+
+function minimumTrustedGreenButtonSlotCount(dateKey: string): number {
+  return Math.min(expectedIntervalsForDateISO(dateKey), MIN_TRUSTED_GREEN_BUTTON_INTERVALS_PER_DAY);
 }
 
 function normalizeDateKey(value: unknown): string | null {
@@ -364,6 +369,18 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
           shiftedIntervalCount += 1;
           shiftedDateKeys.add(targetDateKey);
         }
+        const existingSourceDateKey = sourceDateByTargetDate.get(targetDateKey);
+        if (
+          existingSourceDateKey &&
+          existingSourceDateKey !== sourceDateKey &&
+          existingSourceDateKey !== targetDateKey &&
+          sourceDateKey === targetDateKey
+        ) {
+          const existingSourceSlotCount = sourceSlotCountsByDate.get(existingSourceDateKey) ?? 0;
+          if (existingSourceSlotCount >= minimumTrustedGreenButtonSlotCount(existingSourceDateKey)) {
+            continue;
+          }
+        }
         const outputTimestamp = utcGridTimestampForDateSlot(targetDateKey, sourceSlot);
         byTimestamp.set(outputTimestamp, (byTimestamp.get(outputTimestamp) ?? 0) + (Number(row.kwh) || 0));
         sourceDateByTargetDate.set(targetDateKey, sourceDateKey);
@@ -431,11 +448,10 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
         const sourceDateKey = sourceDateByTargetDate.get(targetDateKey);
         if (!sourceDateKey) continue;
         const sourceSlotCount = sourceSlotCountsByDate.get(sourceDateKey) ?? 0;
-        const expectedSourceSlotCount = expectedIntervalsForDateISO(sourceDateKey);
         // Some Green Button exports land on the UTC Past Sim grid with a repeated
         // one-hour gap after local-time/year rebasing. Keep those high-coverage
         // actual days actual, but do not hide genuinely sparse partial days.
-        const minimumSourceCompleteSlotCount = Math.min(expectedSourceSlotCount, 92);
+        const minimumSourceCompleteSlotCount = minimumTrustedGreenButtonSlotCount(sourceDateKey);
         if (sourceSlotCount < minimumSourceCompleteSlotCount) continue;
 
         let paddedThisDate = 0;
