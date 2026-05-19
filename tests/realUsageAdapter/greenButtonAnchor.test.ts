@@ -235,7 +235,7 @@ describe("green button full-day anchor", () => {
     expect(String(out.displayWindowNote ?? "")).toContain("matching source-day weather");
   });
 
-  it("keeps the raw XML duplicate/missing-slot shape actual-backed after shifting", async () => {
+  it("regresses v8 live failure: trusted shifted 2026-05-14 stays actual-backed through engine", async () => {
     const shiftedSourceDayIntervals = [
       { ts: new Date("2025-05-14T00:00:00.000Z"), kwh: 1.706 },
       ...Array.from({ length: 94 }, (_, index) => ({
@@ -259,7 +259,15 @@ describe("green button full-day anchor", () => {
     });
     const engine = await import("@/modules/onePathSim/simulatedUsage/engine");
     const stitchedCurve = await import("@/modules/onePathSim/usageSimulator/pastStitchedCurve");
-    const debugOut: Record<string, unknown> = {};
+    const dayStartMs = new Date("2026-05-14T00:00:00.000Z").getTime();
+    const trustedActualDateKeys = new Set(adapterOut.trustedActualDateKeys ?? []);
+    const engineArgs = {
+      canonicalDayStartsMs: [dayStartMs],
+      excludedDateKeys: new Set<string>(),
+      dateKeyFromTimestamp: stitchedCurve.dateKeyFromTimestamp,
+      getDayGridTimestamps: stitchedCurve.getDayGridTimestamps,
+      collectSimulatedDayResults: true,
+    };
 
     const targetDayRows = adapterOut.intervals.filter((row) => row.timestamp.startsWith("2026-05-14T"));
     expect(targetDayRows).toHaveLength(96);
@@ -268,22 +276,54 @@ describe("green button full-day anchor", () => {
     expect(adapterOut.paddedIntervalCount).toBe(1);
     expect(adapterOut.paddedDateCount).toBe(1);
     expect(adapterOut.sourceDateByTargetDate?.["2026-05-14"]).toBe("2025-05-14");
+    expect(trustedActualDateKeys.has("2026-05-14")).toBe(true);
 
-    const out = engine.buildPastSimulatedBaselineV1({
+    const trustedDebugOut: Record<string, unknown> = {};
+    const trustedOut = engine.buildPastSimulatedBaselineV1({
+      ...engineArgs,
       actualIntervals: adapterOut.intervals,
-      trustedActualDateKeys: new Set(adapterOut.trustedActualDateKeys ?? []),
-      canonicalDayStartsMs: [new Date("2026-05-14T00:00:00.000Z").getTime()],
-      excludedDateKeys: new Set<string>(),
-      dateKeyFromTimestamp: stitchedCurve.dateKeyFromTimestamp,
-      getDayGridTimestamps: stitchedCurve.getDayGridTimestamps,
-      collectSimulatedDayResults: true,
-      debug: { out: debugOut as any },
+      trustedActualDateKeys,
+      debug: { out: trustedDebugOut as any },
     });
-
-    expect(out.dayResults.find((row) => row.localDate === "2026-05-14")?.simulatedReasonCode).not.toBe(
+    expect(trustedOut.dayResults.find((row) => row.localDate === "2026-05-14")?.simulatedReasonCode).not.toBe(
       "INCOMPLETE_METER_DAY"
     );
-    expect(debugOut.excludedIncompleteMeterFingerprintDayCount).toBe(0);
+    expect(trustedDebugOut.excludedIncompleteMeterFingerprintDayCount).toBe(0);
+
+    // Mirrors the live v8 artifact: padded target day exists, but engine only sees <90 slots.
+    const thinnedIntervals = adapterOut.intervals.filter((row) => {
+      if (!row.timestamp.startsWith("2026-05-14T")) return true;
+      const slotIndex = Math.round(
+        (new Date(row.timestamp).getTime() - dayStartMs) / (15 * 60 * 1000)
+      );
+      return slotIndex < 76;
+    });
+    expect(
+      thinnedIntervals.filter((row) => row.timestamp.startsWith("2026-05-14T")).length
+    ).toBe(76);
+
+    const untrustedDebugOut: Record<string, unknown> = {};
+    const untrustedOut = engine.buildPastSimulatedBaselineV1({
+      ...engineArgs,
+      actualIntervals: thinnedIntervals,
+      debug: { out: untrustedDebugOut as any },
+    });
+    expect(untrustedOut.dayResults.find((row) => row.localDate === "2026-05-14")?.simulatedReasonCode).toBe(
+      "INCOMPLETE_METER_DAY"
+    );
+    expect(untrustedDebugOut.excludedIncompleteMeterFingerprintDayCount).toBe(1);
+
+    const thinnedTrustedDebugOut: Record<string, unknown> = {};
+    const thinnedTrustedOut = engine.buildPastSimulatedBaselineV1({
+      ...engineArgs,
+      actualIntervals: thinnedIntervals,
+      trustedActualDateKeys,
+      debug: { out: thinnedTrustedDebugOut as any },
+    });
+    expect(
+      thinnedTrustedOut.dayResults.find((row) => row.localDate === "2026-05-14")?.simulatedReasonCode
+    ).not.toBe("INCOMPLETE_METER_DAY");
+    expect(thinnedTrustedDebugOut.excludedIncompleteMeterFingerprintDayCount).toBe(0);
   });
 
   it("prefers a trusted current-year UTC-grid day over a shifted prior-year day for the same target date", async () => {
@@ -316,7 +356,7 @@ describe("green button full-day anchor", () => {
     expect(out.paddedDateCount).toBe(0);
   });
 
-  it("passes padded trusted shifted Green Button days downstream as actual-backed", async () => {
+  it("marks padded trusted shifted Green Button days in trustedActualDateKeys", async () => {
     const shiftedSourceDayIntervals = Array.from({ length: 95 }, (_, slot) => ({
       ts: new Date(new Date("2025-05-14T00:00:00.000Z").getTime() + slot * 15 * 60 * 1000),
       kwh: 0.25,
@@ -327,34 +367,20 @@ describe("green button full-day anchor", () => {
       .mockResolvedValueOnce([{ bucket: new Date("2026-05-20T05:00:00.000Z"), intervalscount: 96 }])
       .mockResolvedValueOnce(shiftedSourceDayIntervals);
 
-    const greenButton = await import("@/modules/realUsageAdapter/greenButton");
-    const adapterOut = await greenButton.fetchGreenButtonIntervalsForCoverageWindow({
+    const mod = await import("@/modules/realUsageAdapter/greenButton");
+    const out = await mod.fetchGreenButtonIntervalsForCoverageWindow({
       houseId: "house-1",
       coverageStartDate: "2025-05-17",
       coverageEndDate: "2026-05-16",
       timestampMode: "utcDayGrid",
     });
-    const engine = await import("@/modules/onePathSim/simulatedUsage/engine");
-    const stitchedCurve = await import("@/modules/onePathSim/usageSimulator/pastStitchedCurve");
-    const debugOut: Record<string, unknown> = {};
 
-    const out = engine.buildPastSimulatedBaselineV1({
-      actualIntervals: adapterOut.intervals,
-      canonicalDayStartsMs: [new Date("2026-05-14T00:00:00.000Z").getTime()],
-      excludedDateKeys: new Set<string>(),
-      dateKeyFromTimestamp: stitchedCurve.dateKeyFromTimestamp,
-      getDayGridTimestamps: stitchedCurve.getDayGridTimestamps,
-      collectSimulatedDayResults: true,
-      debug: { out: debugOut as any },
-    });
-
-    expect(adapterOut.intervals.filter((row) => row.timestamp.startsWith("2026-05-14T"))).toHaveLength(96);
-    expect(adapterOut.trustedActualDateKeys).toContain("2026-05-14");
-    expect(out.dayResults.find((row) => row.localDate === "2026-05-14")?.simulatedReasonCode).not.toBe(
-      "INCOMPLETE_METER_DAY"
-    );
-    expect(debugOut.excludedIncompleteMeterFingerprintDayCount).toBe(0);
-    expect(debugOut.referenceDaysUsed).toBe(1);
+    const targetDayRows = out.intervals.filter((row) => row.timestamp.startsWith("2026-05-14T"));
+    expect(targetDayRows).toHaveLength(96);
+    expect(targetDayRows[95]).toEqual({ timestamp: "2026-05-14T23:45:00.000Z", kwh: 0 });
+    expect(out.trustedActualDateKeys).toContain("2026-05-14");
+    expect(out.paddedIntervalCount).toBe(1);
+    expect(out.sourceDateByTargetDate?.["2026-05-14"]).toBe("2025-05-14");
   });
 
   it("pads complete DST-short Green Button days onto the Past Sim 96-slot grid", async () => {
