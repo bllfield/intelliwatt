@@ -1,5 +1,8 @@
 import { prisma } from "@/lib/db";
-import { requestUsageRefreshForUserHouse } from "@/lib/usage/userUsageRefresh";
+import {
+  requestUsageRefreshForUserHouse,
+  type UsageRefreshResult,
+} from "@/lib/usage/userUsageRefresh";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 
 export const SMT_TAIL_LOOKBACK_DAYS = 14;
@@ -53,7 +56,7 @@ export type SmtTailEnsureResult = {
   reason: "coverage_tail_current" | "refresh_requested" | "refresh_disabled";
   coverage: SmtTailCoverageSnapshot;
   wait: SmtTailWaitResult | null;
-  refreshResult?: Awaited<ReturnType<typeof requestUsageRefreshForUserHouse>>;
+  refreshResult?: UsageRefreshResult;
 };
 
 export function smtCoverageDateKey(date: Date | null | undefined): string | null {
@@ -313,14 +316,19 @@ export async function ensureSmtTailCoverageForUserHouse(args: {
       wait: null,
     };
   }
-  const refreshResult = await requestUsageRefreshForUserHouse({
-    userId: args.userId,
-    houseId: args.houseId,
-  }).catch((error) => ({
-    ok: false as const,
-    error: "refresh_failed" as const,
-    message: error instanceof Error ? error.message : String(error),
-  }));
+  let refreshResult: UsageRefreshResult;
+  try {
+    refreshResult = await requestUsageRefreshForUserHouse({
+      userId: args.userId,
+      houseId: args.houseId,
+    });
+  } catch (error) {
+    refreshResult = {
+      ok: false,
+      error: "admin_token_missing",
+      message: `refresh_failed:${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
   const wait = await waitForSmtTailCoverage({
     esiid: args.esiid,
     targetEndDate,
