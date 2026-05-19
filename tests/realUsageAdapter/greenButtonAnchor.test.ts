@@ -235,6 +235,56 @@ describe("green button full-day anchor", () => {
     expect(String(out.displayWindowNote ?? "")).toContain("matching source-day weather");
   });
 
+  it("keeps the raw XML duplicate/missing-slot shape actual-backed after shifting", async () => {
+    const shiftedSourceDayIntervals = [
+      { ts: new Date("2025-05-14T00:00:00.000Z"), kwh: 1.706 },
+      ...Array.from({ length: 94 }, (_, index) => ({
+        ts: new Date(new Date("2025-05-14T00:00:00.000Z").getTime() + (index + 2) * 15 * 60 * 1000),
+        kwh: 0.25,
+      })),
+    ];
+    const trailingPartialCurrentYearDay = [{ ts: new Date("2026-05-14T00:00:00.000Z"), kwh: 10 }];
+    usageQueryRaw
+      .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-05-13T04:45:00.000Z") }])
+      .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-05-13T04:45:00.000Z") }])
+      .mockResolvedValueOnce([{ bucket: new Date("2026-05-12T05:00:00.000Z"), intervalscount: 96 }])
+      .mockResolvedValueOnce([...shiftedSourceDayIntervals, ...trailingPartialCurrentYearDay]);
+
+    const greenButton = await import("@/modules/realUsageAdapter/greenButton");
+    const adapterOut = await greenButton.fetchGreenButtonIntervalsForCoverageWindow({
+      houseId: "house-1",
+      coverageStartDate: "2025-05-15",
+      coverageEndDate: "2026-05-14",
+      timestampMode: "utcDayGrid",
+    });
+    const engine = await import("@/modules/onePathSim/simulatedUsage/engine");
+    const stitchedCurve = await import("@/modules/onePathSim/usageSimulator/pastStitchedCurve");
+    const debugOut: Record<string, unknown> = {};
+
+    const targetDayRows = adapterOut.intervals.filter((row) => row.timestamp.startsWith("2026-05-14T"));
+    expect(targetDayRows).toHaveLength(96);
+    expect(targetDayRows[0]).toEqual({ timestamp: "2026-05-14T00:00:00.000Z", kwh: 1.706 });
+    expect(targetDayRows[1]).toEqual({ timestamp: "2026-05-14T00:15:00.000Z", kwh: 0 });
+    expect(adapterOut.paddedIntervalCount).toBe(1);
+    expect(adapterOut.paddedDateCount).toBe(1);
+    expect(adapterOut.sourceDateByTargetDate?.["2026-05-14"]).toBe("2025-05-14");
+
+    const out = engine.buildPastSimulatedBaselineV1({
+      actualIntervals: adapterOut.intervals,
+      canonicalDayStartsMs: [new Date("2026-05-14T00:00:00.000Z").getTime()],
+      excludedDateKeys: new Set<string>(),
+      dateKeyFromTimestamp: stitchedCurve.dateKeyFromTimestamp,
+      getDayGridTimestamps: stitchedCurve.getDayGridTimestamps,
+      collectSimulatedDayResults: true,
+      debug: { out: debugOut as any },
+    });
+
+    expect(out.dayResults.find((row) => row.localDate === "2026-05-14")?.simulatedReasonCode).not.toBe(
+      "INCOMPLETE_METER_DAY"
+    );
+    expect(debugOut.excludedIncompleteMeterFingerprintDayCount).toBe(0);
+  });
+
   it("prefers a trusted current-year UTC-grid day over a shifted prior-year day for the same target date", async () => {
     const shiftedSourceDayIntervals = Array.from({ length: 95 }, (_, slot) => ({
       ts: new Date(new Date("2025-05-14T00:00:00.000Z").getTime() + slot * 15 * 60 * 1000),
