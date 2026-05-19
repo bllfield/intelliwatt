@@ -896,14 +896,15 @@ function computeFifteenMinuteAverages(intervals: Array<{ timestamp: string; cons
     .sort((a, b) => (a.hhmm < b.hhmm ? -1 : 1));
 }
 
+const chicagoHourFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/Chicago",
+  hour: "numeric",
+  hour12: false,
+});
+
 function chicagoHour(ts: Date): number | null {
   try {
-    const fmt = new Intl.DateTimeFormat("en-US", {
-      timeZone: "America/Chicago",
-      hour: "numeric",
-      hour12: false,
-    });
-    const parts = fmt.formatToParts(ts);
+    const parts = chicagoHourFormatter.formatToParts(ts);
     const hour = Number(parts.find((p) => p.type === "hour")?.value ?? "");
     if (!Number.isFinite(hour) || hour < 0 || hour > 23) return null;
     return hour;
