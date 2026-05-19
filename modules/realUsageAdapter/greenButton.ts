@@ -368,7 +368,7 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
         slots.add(sourceSlot);
         sourceSlotsByDate.set(sourceDateKey, slots);
       }
-      for (const [sourceDateKey, slots] of sourceSlotsByDate.entries()) {
+      for (const [sourceDateKey, slots] of Array.from(sourceSlotsByDate.entries())) {
         sourceSlotCountsByDate.set(sourceDateKey, slots.size);
         if (slots.size < minimumTrustedGreenButtonSlotCount(sourceDateKey)) continue;
         const resolved = resolveUtcGridTargetDate(sourceDateKey);
