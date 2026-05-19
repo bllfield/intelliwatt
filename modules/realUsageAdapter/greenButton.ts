@@ -52,6 +52,19 @@ function chicagoSlot96FromIsoTimestamp(timestamp: string): number | null {
   return Number.isFinite(slot) && slot >= 0 && slot < 96 ? slot : null;
 }
 
+function utcDateKeyFromIsoTimestamp(timestamp: string): string | null {
+  const parsed = new Date(timestamp);
+  if (!Number.isFinite(parsed.getTime())) return null;
+  return parsed.toISOString().slice(0, 10);
+}
+
+function utcSlot96FromIsoTimestamp(timestamp: string): number | null {
+  const parsed = new Date(timestamp);
+  if (!Number.isFinite(parsed.getTime())) return null;
+  const slot = parsed.getUTCHours() * 4 + Math.floor(parsed.getUTCMinutes() / 15);
+  return Number.isFinite(slot) && slot >= 0 && slot < 96 ? slot : null;
+}
+
 function utcGridTimestampForDateSlot(dateKey: string, slot: number): string {
   return new Date(new Date(`${dateKey}T00:00:00.000Z`).getTime() + slot * 15 * 60 * 1000).toISOString();
 }
@@ -324,9 +337,15 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
 
     for (const row of rows) {
       const rawTimestamp = (row.ts instanceof Date ? row.ts : new Date(row.ts)).toISOString();
-      const sourceDateKey = chicagoDateKeyFromIsoTimestamp(rawTimestamp);
+      const sourceDateKey =
+        args.timestampMode === "utcDayGrid"
+          ? utcDateKeyFromIsoTimestamp(rawTimestamp)
+          : chicagoDateKeyFromIsoTimestamp(rawTimestamp);
       if (!sourceDateKey) continue;
-      const sourceSlot = chicagoSlot96FromIsoTimestamp(rawTimestamp);
+      const sourceSlot =
+        args.timestampMode === "utcDayGrid"
+          ? utcSlot96FromIsoTimestamp(rawTimestamp)
+          : chicagoSlot96FromIsoTimestamp(rawTimestamp);
       sourceSlotCountsByDate.set(sourceDateKey, (sourceSlotCountsByDate.get(sourceDateKey) ?? 0) + 1);
       if (args.timestampMode === "utcDayGrid") {
         if (sourceSlot == null) continue;
