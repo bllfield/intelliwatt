@@ -5,6 +5,11 @@ import {
   getRollingBackfillRange,
   requestSmtBackfillForAuthorization,
 } from "@/lib/smt/agreements";
+import {
+  chicagoPullDateKey,
+  finalizeDeferredPendingRepairsAfterPull,
+  reconcileSmtLedgerAfterPersist,
+} from "@/lib/usage/smtDayCoverageLedger";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -295,6 +300,17 @@ export async function requestUsageRefreshForUserHouse(args: {
         ok: false,
         message: backfillError instanceof Error ? backfillError.message : String(backfillError),
       };
+    }
+
+    if (house.esiid) {
+      await reconcileSmtLedgerAfterPersist({ esiids: [house.esiid] }).catch(() => null);
+      if (result.pull.ok) {
+        await finalizeDeferredPendingRepairsAfterPull({
+          esiid: house.esiid,
+          pullDateKey: chicagoPullDateKey(),
+          waitTimeoutMs: 12_000,
+        }).catch(() => null);
+      }
     }
 
     return { result, backfillOutcome };

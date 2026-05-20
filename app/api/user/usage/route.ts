@@ -6,6 +6,10 @@ import { normalizeEmail } from '@/lib/utils/email';
 import { resolveIntervalsLayer } from '@/lib/usage/resolveIntervalsLayer';
 import { buildUserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
 import {
+  loadSmtDayLedgerSnapshot,
+  smtLedgerFieldsFromDatasetMeta,
+} from "@/lib/usage/smtDayCoverageLedger";
+import {
   buildUsageIngestionStatusFromTailEnsure,
   ensureSmtTailCoverageForUserHouse,
   isGreenButtonPrimaryDataset,
@@ -184,12 +188,25 @@ export async function GET(_request: NextRequest) {
       const esiid = house.esiid ? String(house.esiid).trim() : "";
       const resolvedDataset = contract.dataset;
       if (esiid && resolvedDataset && !isGreenButtonPrimaryDataset(resolvedDataset)) {
+        const ledgerFromDataset = smtLedgerFieldsFromDatasetMeta(resolvedDataset);
         if (isResolvedDatasetTailDisplayReady(resolvedDataset, canonicalCoverage.endDate)) {
-          usageIngestion = reconcileUsageIngestionWithDataset({
-            ingestion: null,
-            dataset: resolvedDataset,
-            targetEndDate: canonicalCoverage.endDate,
-          });
+          usageIngestion = {
+            ...(reconcileUsageIngestionWithDataset({
+              ingestion: null,
+              dataset: resolvedDataset,
+              targetEndDate: canonicalCoverage.endDate,
+            }) ?? {
+              tailReady: true,
+              targetEndDate: canonicalCoverage.endDate,
+              tailRefreshAttempted: false,
+              tailRefreshReason: "coverage_tail_current" as const,
+              tailTimedOut: false,
+              incompleteTailDateKeys: [],
+              coverageEndDate: null,
+            }),
+            smtPendingIntervalDateKeys: ledgerFromDataset.pendingDateKeys,
+            smtIncompleteMeterDateKeys: ledgerFromDataset.incompleteMeterDateKeys,
+          };
         } else {
           const tailEnsure = await ensureSmtTailCoverageForUserHouse({
             userId: user.id,
@@ -201,11 +218,31 @@ export async function GET(_request: NextRequest) {
             console.warn("[user/usage] SMT tail ensure failed; continuing with current persisted usage", house.id, error);
             return null;
           });
-          usageIngestion = reconcileUsageIngestionWithDataset({
-            ingestion: tailEnsure ? buildUsageIngestionStatusFromTailEnsure(tailEnsure) : null,
-            dataset: resolvedDataset,
-            targetEndDate: canonicalCoverage.endDate,
-          });
+          const ledger =
+            (await loadSmtDayLedgerSnapshot({ esiid }).catch(() => null)) ?? ledgerFromDataset;
+          usageIngestion = {
+            ...(reconcileUsageIngestionWithDataset({
+              ingestion: tailEnsure
+                ? buildUsageIngestionStatusFromTailEnsure(tailEnsure, ledger)
+                : null,
+              dataset: resolvedDataset,
+              targetEndDate: canonicalCoverage.endDate,
+            }) ?? {
+              tailReady: false,
+              targetEndDate: canonicalCoverage.endDate,
+              tailRefreshAttempted: Boolean(tailEnsure?.attempted),
+              tailRefreshReason: tailEnsure?.reason ?? "coverage_tail_current",
+              tailTimedOut: tailEnsure?.wait?.timedOut ?? false,
+              incompleteTailDateKeys: tailEnsure?.coverage.incompleteTailDateKeys ?? [],
+              coverageEndDate: tailEnsure?.coverage.coverageEndDate ?? null,
+            }),
+            smtPendingIntervalDateKeys:
+              ledger.pendingDateKeys?.length ? ledger.pendingDateKeys : ledgerFromDataset.pendingDateKeys,
+            smtIncompleteMeterDateKeys:
+              ledger.incompleteMeterDateKeys?.length
+                ? ledger.incompleteMeterDateKeys
+                : ledgerFromDataset.incompleteMeterDateKeys,
+          };
         }
       }
       results.push({

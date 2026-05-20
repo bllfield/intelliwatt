@@ -16,6 +16,7 @@ import {
   getLatestGreenButtonFullDayDateKey,
   getLatestUsableRawGreenButtonIdForHouse,
 } from "@/modules/realUsageAdapter/greenButton";
+import { applySmtLedgerToActualDataset } from "@/lib/usage/smtDayCoverageLedger";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 import { buildUtcRangeForChicagoLocalDateRange } from "@/lib/usage/greenButtonCoverage";
 import { dateTimePartsInTimezone, prevCalendarDayDateKey } from "@/lib/time/chicago";
@@ -1345,6 +1346,9 @@ export async function getActualUsageDatasetForHouse(
       },
     };
     await hydrateActualUsageDailyWeather({ houseId, dataset });
+    if (selected.summary.source === "SMT" && esiid) {
+      await applySmtLedgerToActualDataset({ dataset, esiid, reconcile: true }).catch(() => null);
+    }
     return {
       dataset,
       alternatives: {
@@ -1541,6 +1545,9 @@ export async function getActualUsageDatasetForHouse(
     : null;
 
   await hydrateActualUsageDailyWeather({ houseId, dataset });
+  if (dataset && selected?.summary?.source === "SMT" && esiid) {
+    await applySmtLedgerToActualDataset({ dataset, esiid, reconcile: true }).catch(() => null);
+  }
 
   return {
     dataset,

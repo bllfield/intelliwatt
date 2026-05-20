@@ -32,6 +32,8 @@ type DailyRow = {
     | "SIMULATED_LEADING_MISSING"
     | "SIMULATED_OTHER"
     | "ACTUAL_VALIDATION_TEST_DAY"
+    | "ACTUAL_INTERVALS_NOT_AVAILABLE_YET"
+    | "ACTUAL_INCOMPLETE_METER"
     | "ACTUAL";
 };
 type FifteenMinuteAverage = { hhmm: string; avgKw: number };
@@ -153,6 +155,12 @@ export function UsageChartsPanel(props: {
     }
     if (row.source === "ACTUAL" && row.sourceDetail === "ACTUAL_VALIDATION_TEST_DAY") {
       return "ACTUAL (VALIDATION/TEST)";
+    }
+    if (row.source === "ACTUAL" && row.sourceDetail === "ACTUAL_INTERVALS_NOT_AVAILABLE_YET") {
+      return "INTERVALS NOT AVAILABLE YET";
+    }
+    if (row.source === "ACTUAL" && row.sourceDetail === "ACTUAL_INCOMPLETE_METER") {
+      return "INCOMPLETE METER";
     }
     if (row.source === "MISSING_REFERENCE") {
       return "MISSING REFERENCE";

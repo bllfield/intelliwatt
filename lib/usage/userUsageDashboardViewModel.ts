@@ -35,6 +35,20 @@ function getWeatherBasisLabel(meta: Record<string, unknown>): string | null {
   return null;
 }
 
+function buildSmtPendingIntervalsDisclosure(meta: Record<string, unknown>): string | null {
+  const pending =
+    Array.isArray(meta.smtPendingIntervalDateKeys) ? meta.smtPendingIntervalDateKeys : [];
+  const keys = pending
+    .map((value) => asDateKey(value))
+    .filter((value): value is string => Boolean(value))
+    .sort();
+  if (keys.length === 0) return null;
+  const start = keys[0];
+  const end = keys[keys.length - 1];
+  const range = start === end ? start : `${start} – ${end}`;
+  return `SMT disclosure: interval data for ${range} is not available yet from the utility. We will attempt one automatic refresh on the next calendar day; until then, daily totals may be partial.`;
+}
+
 function buildGreenButtonShiftDisclosure(meta: Record<string, unknown>): string | null {
   const sourceMap =
     meta.greenButtonSourceDateByTargetDate &&
@@ -194,7 +208,8 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
     intervalsCount: dataset?.summary?.intervalsCount ?? null,
     hasSimulatedFill,
     weatherBasisLabel: getWeatherBasisLabel(meta),
-    dailyUsageDisclosureNote: buildGreenButtonShiftDisclosure(meta),
+    dailyUsageDisclosureNote:
+      buildSmtPendingIntervalsDisclosure(meta) ?? buildGreenButtonShiftDisclosure(meta),
     sourceOfDaySimulationCore: (meta.sourceOfDaySimulationCore as string) || null,
   };
 

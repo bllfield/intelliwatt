@@ -4,7 +4,9 @@ import type { PastSimulatedDaySourceDetail } from "@/modules/usageSimulator/data
 export type UsageDailyDisplaySourceDetail =
   | PastSimulatedDaySourceDetail
   | "ACTUAL"
-  | "ACTUAL_VALIDATION_TEST_DAY";
+  | "ACTUAL_VALIDATION_TEST_DAY"
+  | "ACTUAL_INTERVALS_NOT_AVAILABLE_YET"
+  | "ACTUAL_INCOMPLETE_METER";
 
 /**
  * Normalizes date/kwh/source/sourceDetail for Usage derived daily rows (chart + table).

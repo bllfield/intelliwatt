@@ -79,6 +79,7 @@ describe("one path upstream usage truth tail refresh", () => {
       houseId: "house-1",
       esiid: "esiid-1",
       targetEndDate: expect.any(String),
+      waitTimeoutMs: 20_000,
     });
     expect(resolveIntervalsLayer).toHaveBeenCalledTimes(2);
     expect(out.usageTruthSource).toBe("seeded_via_existing_usage_orchestration");

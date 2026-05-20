@@ -4,7 +4,9 @@ import { requestUsageRefreshForUserHouse } from "@/lib/usage/userUsageRefresh";
 import {
   ensureSmtTailCoverageForUserHouse,
   isGreenButtonPrimaryDataset,
+  isResolvedDatasetTailDisplayReady,
   loadSmtTailCoverage,
+  ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS,
   smtTailRefreshNeeded,
 } from "@/lib/usage/smtTailCoverage";
 import { IntervalSeriesKind } from "@/modules/onePathSim/usageSimulator/kinds";
@@ -315,11 +317,14 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
 
     if (shouldRefreshSmtTail && esiidForTail) {
       const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
-      const initialTail = await loadSmtTailCoverage({
-        esiid: esiidForTail,
-        targetEndDate: canonicalCoverage.endDate,
-      });
-      if (smtTailRefreshNeeded(initialTail)) {
+      const displayReady = isResolvedDatasetTailDisplayReady(resolved.dataset, canonicalCoverage.endDate);
+      const initialTail = displayReady
+        ? null
+        : await loadSmtTailCoverage({
+            esiid: esiidForTail,
+            targetEndDate: canonicalCoverage.endDate,
+          });
+      if (!displayReady && initialTail && smtTailRefreshNeeded(initialTail)) {
         logBaselineUsageTruthEvent("baseline_upstream_usage_seed_start", {
           userId: args.userId,
           selectedHouseId: selectedHouse.id,
@@ -334,6 +339,7 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
           houseId: actualContextHouse.id,
           esiid: esiidForTail,
           targetEndDate: canonicalCoverage.endDate,
+          waitTimeoutMs: ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS,
         });
         const seedResult: UpstreamUsageTruthSeedResult = tailEnsure.refreshResult?.ok
           ? {

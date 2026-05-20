@@ -1002,6 +1002,25 @@ model SmtInterval {
   @@index([esiid, meter, ts], map: "esiid_meter_ts_idx")
 }
 
+/// Per-day SMT interval completeness lifecycle (pending → one deferred repair → incomplete).
+model SmtIntervalDayLedger {
+  id                            String    @id @default(cuid())
+  esiid                         String
+  dateKey                       String
+  status                        String
+  firstSeenAt                   DateTime  @default(now())
+  firstSeenAsCanonicalWindowEnd Boolean   @default(false)
+  repairAttemptedAt             DateTime?
+  repairAttemptedOnPullDate     String?
+  intervalCountAtLastCheck      Int?
+  createdAt                     DateTime  @default(now())
+  updatedAt                     DateTime  @updatedAt
+
+  @@unique([esiid, dateKey])
+  @@index([esiid, status])
+  @@map("smt_interval_day_ledger")
+}
+
 model SmtBillingRead {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())

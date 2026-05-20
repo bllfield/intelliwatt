@@ -3,6 +3,11 @@ import {
   requestUsageRefreshForUserHouse,
   type UsageRefreshResult,
 } from "@/lib/usage/userUsageRefresh";
+import {
+  isSmtDayLedgerSettledForTail,
+  loadSmtDayLedgerStatusForDate,
+  runDeferredPendingSmtDayRepairs,
+} from "@/lib/usage/smtDayCoverageLedger";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 
 export const SMT_TAIL_LOOKBACK_DAYS = 14;
@@ -11,6 +16,10 @@ export const SMT_TAIL_WAIT_TIMEOUT_MS = 60_000;
 export const SMT_TAIL_WAIT_INTERVAL_MS = 2_000;
 /** User-facing usage route budget: leave headroom when multiple homes are loaded. */
 export const USER_USAGE_SMT_TAIL_WAIT_TIMEOUT_MS = 8_000;
+/** One Path admin run: short poll; exit early when SMT counts stop changing. */
+export const ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS = 20_000;
+/** Only block incomplete-meter backfill waits on days near the canonical window end. */
+export const SMT_INCOMPLETE_METER_BACKFILL_LOOKBACK_DAYS = 3;
 
 const smtCoverageDateFmt = new Intl.DateTimeFormat("en-CA", {
   timeZone: "America/Chicago",
@@ -29,6 +38,7 @@ export type SmtTailCoverageSnapshot = {
   tailStartDate: string;
   tailCountsByDate: Record<string, number>;
   incompleteTailDateKeys: string[];
+  targetEndDayLedgerStatus: string | null;
   tailReady: boolean;
 };
 
@@ -178,12 +188,66 @@ export function isGreenButtonPrimaryDataset(dataset: unknown): boolean {
   return summarySource === "GREEN_BUTTON" || metaSource === "GREEN_BUTTON";
 }
 
-export function smtTailRefreshNeeded(coverage: Pick<SmtTailCoverageSnapshot, "coverageEndDate" | "incompleteTailDateKeys" | "targetEndDate">): boolean {
-  return (
-    !coverage.coverageEndDate ||
-    coverage.coverageEndDate < coverage.targetEndDate ||
-    coverage.incompleteTailDateKeys.length > 0
-  );
+export function smtTargetEndDayIntervalCount(
+  coverage: Pick<SmtTailCoverageSnapshot, "targetEndDate" | "tailCountsByDate">
+): number {
+  return coverage.tailCountsByDate?.[coverage.targetEndDate] ?? 0;
+}
+
+/** True when the canonical window end day itself is below the trusted interval threshold. */
+export function smtCanonicalEndDayIncomplete(
+  coverage: Pick<SmtTailCoverageSnapshot, "targetEndDate" | "tailCountsByDate">
+): boolean {
+  return smtTargetEndDayIntervalCount(coverage) < SMT_TAIL_REQUIRED_INTERVALS_PER_DAY;
+}
+
+/**
+ * Refresh/wait only when persisted coverage has not reached the canonical end date,
+ * or the canonical end day is still incomplete. Mid-window partial days (e.g. 40/96)
+ * are handled by Past Sim INCOMPLETE_METER modeling and must not block the run.
+ */
+export function smtTailRefreshNeeded(
+  coverage: Pick<
+    SmtTailCoverageSnapshot,
+    "coverageEndDate" | "targetEndDate" | "tailCountsByDate" | "targetEndDayLedgerStatus"
+  >
+): boolean {
+  if (!coverage.coverageEndDate || coverage.coverageEndDate < coverage.targetEndDate) {
+    return true;
+  }
+  if (isSmtDayLedgerSettledForTail(coverage.targetEndDayLedgerStatus)) {
+    return false;
+  }
+  return smtCanonicalEndDayIncomplete(coverage);
+}
+
+export function filterDateKeysNearTargetEnd(
+  dateKeys: string[],
+  targetEndDate: string,
+  lookbackDays = SMT_INCOMPLETE_METER_BACKFILL_LOOKBACK_DAYS
+): string[] {
+  const minKey = addDateKeyDays(targetEndDate, -(lookbackDays - 1));
+  return normalizeDateKeys(dateKeys).filter((dateKey) => dateKey >= minKey && dateKey <= targetEndDate);
+}
+
+function coverageProgressFingerprint(
+  snapshot: Pick<SmtTailCoverageSnapshot, "tailReady" | "incompleteTailDateKeys" | "tailCountsByDate">
+): string {
+  return JSON.stringify({
+    tailReady: snapshot.tailReady,
+    incompleteTailDateKeys: snapshot.incompleteTailDateKeys,
+    tailCountsByDate: snapshot.tailCountsByDate,
+  });
+}
+
+function dateCoverageProgressFingerprint(
+  snapshot: Pick<SmtDateCoverageSnapshot, "ready" | "incompleteDateKeys" | "countsByDate">
+): string {
+  return JSON.stringify({
+    ready: snapshot.ready,
+    incompleteDateKeys: snapshot.incompleteDateKeys,
+    countsByDate: snapshot.countsByDate,
+  });
 }
 
 export async function loadSmtDateCoverage(args: { esiid: string; dateKeys: string[] }): Promise<SmtDateCoverageSnapshot> {
@@ -284,8 +348,15 @@ export async function loadSmtTailCoverage(args: {
   const incompleteTailDateKeys = tailDateKeys.filter(
     (dateKey) => (tailCountsByDate[dateKey] ?? 0) < SMT_TAIL_REQUIRED_INTERVALS_PER_DAY
   );
+  const targetEndDayLedgerStatus = await loadSmtDayLedgerStatusForDate({
+    esiid: args.esiid,
+    dateKey: targetEndDate,
+  });
+  const endDaySettled = isSmtDayLedgerSettledForTail(targetEndDayLedgerStatus);
   const tailReady = Boolean(
-    coverageEndDate && coverageEndDate >= targetEndDate && incompleteTailDateKeys.length === 0
+    coverageEndDate &&
+      coverageEndDate >= targetEndDate &&
+      (endDaySettled || !smtCanonicalEndDayIncomplete({ targetEndDate, tailCountsByDate }))
   );
   return {
     intervalCount,
@@ -297,6 +368,7 @@ export async function loadSmtTailCoverage(args: {
     tailStartDate,
     tailCountsByDate,
     incompleteTailDateKeys,
+    targetEndDayLedgerStatus,
     tailReady,
   };
 }
@@ -313,10 +385,18 @@ export async function waitForSmtTailCoverage(args: {
   const startedAt = Date.now();
   let attempts = 0;
   let latest = await loadSmtTailCoverage({ esiid: args.esiid, targetEndDate });
+  let lastProgressFingerprint = coverageProgressFingerprint(latest);
   while (!latest.tailReady && Date.now() - startedAt < timeoutMs) {
     attempts += 1;
     await wait(intervalMs);
-    latest = await loadSmtTailCoverage({ esiid: args.esiid, targetEndDate });
+    const next = await loadSmtTailCoverage({ esiid: args.esiid, targetEndDate });
+    const nextFingerprint = coverageProgressFingerprint(next);
+    if (attempts >= 2 && nextFingerprint === lastProgressFingerprint) {
+      latest = next;
+      break;
+    }
+    lastProgressFingerprint = nextFingerprint;
+    latest = next;
   }
   return {
     ...latest,
@@ -337,10 +417,18 @@ export async function waitForSmtDateCoverage(args: {
   const startedAt = Date.now();
   let attempts = 0;
   let latest = await loadSmtDateCoverage({ esiid: args.esiid, dateKeys: args.dateKeys });
+  let lastProgressFingerprint = dateCoverageProgressFingerprint(latest);
   while (!latest.ready && Date.now() - startedAt < timeoutMs) {
     attempts += 1;
     await wait(intervalMs);
-    latest = await loadSmtDateCoverage({ esiid: args.esiid, dateKeys: args.dateKeys });
+    const next = await loadSmtDateCoverage({ esiid: args.esiid, dateKeys: args.dateKeys });
+    const nextFingerprint = dateCoverageProgressFingerprint(next);
+    if (attempts >= 2 && nextFingerprint === lastProgressFingerprint) {
+      latest = next;
+      break;
+    }
+    lastProgressFingerprint = nextFingerprint;
+    latest = next;
   }
   return {
     ...latest,
@@ -359,6 +447,14 @@ export async function ensureSmtTailCoverageForUserHouse(args: {
   requestRefreshIfNeeded?: boolean;
 }): Promise<SmtTailEnsureResult> {
   const targetEndDate = args.targetEndDate ?? resolveCanonicalUsage365CoverageWindow().endDate;
+  if (args.requestRefreshIfNeeded !== false) {
+    await runDeferredPendingSmtDayRepairs({
+      esiid: args.esiid,
+      userId: args.userId,
+      houseId: args.houseId,
+      waitTimeoutMs: Math.min(args.waitTimeoutMs ?? USER_USAGE_SMT_TAIL_WAIT_TIMEOUT_MS, 12_000),
+    }).catch(() => null);
+  }
   let coverage = await loadSmtTailCoverage({ esiid: args.esiid, targetEndDate });
   if (!smtTailRefreshNeeded(coverage)) {
     return {
@@ -408,7 +504,10 @@ export async function ensureSmtTailCoverageForUserHouse(args: {
   };
 }
 
-export function buildUsageIngestionStatusFromTailEnsure(result: SmtTailEnsureResult) {
+export function buildUsageIngestionStatusFromTailEnsure(
+  result: SmtTailEnsureResult,
+  ledger?: { pendingDateKeys?: string[]; incompleteMeterDateKeys?: string[] } | null
+) {
   return {
     tailReady: result.coverage.tailReady,
     targetEndDate: result.coverage.targetEndDate,
@@ -417,5 +516,7 @@ export function buildUsageIngestionStatusFromTailEnsure(result: SmtTailEnsureRes
     tailTimedOut: result.wait?.timedOut ?? false,
     incompleteTailDateKeys: result.coverage.incompleteTailDateKeys,
     coverageEndDate: result.coverage.coverageEndDate,
+    smtPendingIntervalDateKeys: ledger?.pendingDateKeys ?? [],
+    smtIncompleteMeterDateKeys: ledger?.incompleteMeterDateKeys ?? [],
   } as const;
 }

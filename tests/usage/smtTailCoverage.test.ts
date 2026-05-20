@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { SMT_DAY_LEDGER_STATUS } from "@/lib/usage/smtDayCoverageLedger";
 import {
+  filterDateKeysNearTargetEnd,
   isGreenButtonPrimaryDataset,
   isResolvedDatasetTailDisplayReady,
   reconcileUsageIngestionWithDataset,
@@ -72,22 +74,65 @@ describe("smt tail coverage helpers", () => {
       smtTailRefreshNeeded({
         coverageEndDate: "2026-05-16",
         targetEndDate: "2026-05-17",
-        incompleteTailDateKeys: [],
+        tailCountsByDate: { "2026-05-17": 96 },
+        targetEndDayLedgerStatus: null,
       })
     ).toBe(true);
     expect(
       smtTailRefreshNeeded({
         coverageEndDate: "2026-05-17",
         targetEndDate: "2026-05-17",
-        incompleteTailDateKeys: ["2026-05-17"],
+        tailCountsByDate: { "2026-05-17": 40 },
+        targetEndDayLedgerStatus: null,
       })
     ).toBe(true);
     expect(
       smtTailRefreshNeeded({
         coverageEndDate: "2026-05-17",
         targetEndDate: "2026-05-17",
-        incompleteTailDateKeys: [],
+        tailCountsByDate: { "2026-05-16": 40, "2026-05-17": 96 },
+        targetEndDayLedgerStatus: null,
       })
     ).toBe(false);
+  });
+
+  it("does not require refresh when canonical end is pending or settled incomplete in ledger", () => {
+    expect(
+      smtTailRefreshNeeded({
+        coverageEndDate: "2026-05-17",
+        targetEndDate: "2026-05-17",
+        tailCountsByDate: { "2026-05-17": 40 },
+        targetEndDayLedgerStatus: SMT_DAY_LEDGER_STATUS.PENDING_SMT,
+      })
+    ).toBe(false);
+    expect(
+      smtTailRefreshNeeded({
+        coverageEndDate: "2026-05-17",
+        targetEndDate: "2026-05-17",
+        tailCountsByDate: { "2026-05-17": 40 },
+        targetEndDayLedgerStatus: SMT_DAY_LEDGER_STATUS.INCOMPLETE_METER,
+      })
+    ).toBe(false);
+  });
+
+  it("does not require refresh when only mid-window tail days are partial", () => {
+    expect(
+      smtTailRefreshNeeded({
+        coverageEndDate: "2026-05-17",
+        targetEndDate: "2026-05-17",
+        tailCountsByDate: { "2026-05-16": 40, "2026-05-17": 96 },
+        targetEndDayLedgerStatus: null,
+      })
+    ).toBe(false);
+  });
+
+  it("limits incomplete-meter backfill waits to days near canonical end", () => {
+    expect(
+      filterDateKeysNearTargetEnd(
+        ["2025-07-09", "2026-03-25", "2026-05-16", "2026-05-17"],
+        "2026-05-17",
+        3
+      )
+    ).toEqual(["2026-05-16", "2026-05-17"]);
   });
 });

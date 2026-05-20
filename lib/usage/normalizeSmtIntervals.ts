@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { normalizeSmtTo15Min, type NormalizeOpts, type SmtAdhocRow } from "@/lib/analysis/normalizeSmt";
 import { dualWriteUsageIntervals, type UsageIntervalCreateInput } from "@/lib/usage/dualWriteUsageIntervals";
+import { reconcileSmtLedgerAfterPersist } from "@/lib/usage/smtDayCoverageLedger";
 
 export const RAW_MODEL_CANDIDATES = [
   "rawSmtRow",
@@ -46,6 +47,10 @@ export async function persistParsedNormalizedSmtIntervals(args: {
     source: String(interval.source ?? "smt-inline"),
   }));
   await dualWriteUsageIntervals(rows);
+  const esiids = Array.from(new Set(rows.map((row) => String(row.esiid ?? "").trim()).filter(Boolean)));
+  if (esiids.length > 0) {
+    await reconcileSmtLedgerAfterPersist({ esiids }).catch(() => null);
+  }
   return { records: rows.length };
 }
 

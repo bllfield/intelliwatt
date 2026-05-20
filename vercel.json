@@ -40,6 +40,10 @@
     "app/api/admin/tools/prime-past-cache/route.ts": {
       "maxDuration": 300,
       "memory": 1024
+    },
+    "app/api/admin/tools/one-path-sim/route.ts": {
+      "maxDuration": 300,
+      "memory": 3008
     }
   },
   "crons": [

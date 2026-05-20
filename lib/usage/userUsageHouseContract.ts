@@ -28,6 +28,8 @@ export type UserUsageIngestionStatus = {
   tailTimedOut: boolean;
   incompleteTailDateKeys: string[];
   coverageEndDate: string | null;
+  smtPendingIntervalDateKeys?: string[];
+  smtIncompleteMeterDateKeys?: string[];
 };
 
 export type UserUsageHouseContract = {
