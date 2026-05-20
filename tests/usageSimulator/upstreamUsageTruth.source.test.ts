@@ -29,7 +29,7 @@ describe("upstream usage truth owner boundaries", () => {
     const onePathSource = readRepoFile("modules/onePathSim/upstreamUsageTruth.ts");
     const onePathSnapshotTestSource = readRepoFile("tests/usageSimulator/onePathSim.variableSnapshot.source.test.ts");
 
-    expect(onePathSource).toContain("requestUsageRefreshForUserHouse");
+    expect(onePathSource).toContain("ensureSmtCoverageForHouse");
     expect(onePathSource).toContain("baseline_upstream_usage_truth_lookup_start");
     expect(onePathSource).toContain("baseline_upstream_usage_seed_start");
     expect(onePathSource).toContain("existing shared usage refresh owner");

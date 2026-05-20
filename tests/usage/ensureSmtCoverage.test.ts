@@ -188,7 +188,14 @@ describe("ensureSmtCoverageForHouse", () => {
     expect(requestUsageRefreshForUserHouseMock).toHaveBeenCalledTimes(4);
   });
 
-  it("targeted backfills every incomplete day in the canonical window", async () => {
+  it("targeted backfills ledger incomplete/pending days near canonical end only", async () => {
+    loadSmtWindowDayStatusMock.mockResolvedValue(
+      windowStatus({
+        incompleteDateKeys: ["2026-04-10", "2026-04-12"],
+        incompleteMeterDateKeys: ["2026-04-12"],
+        pendingDateKeys: ["2026-04-14"],
+      })
+    );
     const result = await ensureSmtCoverageForHouse({
       userId: "user-1",
       houseId: "house-1",
@@ -199,7 +206,7 @@ describe("ensureSmtCoverageForHouse", () => {
     expect(result.healed).toBe(true);
     expect(requestTargetedSmtIntervalBackfillForHouseMock).toHaveBeenCalledWith({
       houseId: "house-1",
-      dateKeys: ["2026-04-12"],
+      dateKeys: ["2026-04-12", "2026-04-14"],
     });
     expect(runDeferredPendingSmtDayRepairsMock).toHaveBeenCalled();
     expect(waitForSmtDateCoverageMock).toHaveBeenCalled();

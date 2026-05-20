@@ -16,6 +16,8 @@ import {
   type SmtWindowStatusSnapshot,
 } from "@/lib/usage/smtWindowStatus";
 import {
+  filterDateKeysNearTargetEnd,
+  normalizeDateKeys,
   ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS,
   ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS,
   SMT_POST_BACKFILL_SETTLE_DELAY_MS,
@@ -91,6 +93,19 @@ async function resolveEsiidForHouse(houseId: string): Promise<string | null> {
   return esiid || null;
 }
 
+async function tryUsageRefreshForHouse(args: {
+  userId: string;
+  houseId: string;
+  skipGapFill?: boolean;
+  sessionKey?: string;
+}): Promise<UsageRefreshResult | undefined> {
+  try {
+    return await requestUsageRefreshForUserHouse(args);
+  } catch {
+    return undefined;
+  }
+}
+
 function emptyWindowStatus(window: SmtCanonicalWindow): SmtWindowStatusSnapshot {
   return {
     window,
@@ -111,6 +126,10 @@ export async function ensureSmtCoverageForHouse(args: {
   profile: EnsureSmtCoverageProfile;
   force?: boolean;
   sessionKey?: string;
+  /** Optional sim/UI incomplete-day hints merged before near-end filtering. */
+  extraBackfillDateKeys?: string[];
+  /** When true, skip pull/authorization refresh (caller already ran requestUsageRefreshForUserHouse). */
+  skipUsageRefresh?: boolean;
 }): Promise<EnsureSmtCoverageResult> {
   const window = resolveSmtCanonicalWindow();
   const esiid = await resolveEsiidForHouse(args.houseId);
@@ -148,7 +167,15 @@ export async function ensureSmtCoverageForHouse(args: {
   }
 
   const waits = waitBudgetForProfile(args.profile);
-  const backfillDateKeys = [...dayStatus.incompleteDateKeys];
+  const ledgerBackfillCandidates = normalizeDateKeys([
+    ...dayStatus.incompleteMeterDateKeys,
+    ...dayStatus.pendingDateKeys,
+    ...(args.extraBackfillDateKeys ?? []),
+  ]);
+  const backfillDateKeys = filterDateKeysNearTargetEnd(
+    ledgerBackfillCandidates.length > 0 ? ledgerBackfillCandidates : dayStatus.incompleteDateKeys,
+    dayStatus.window.endDate
+  );
 
   let refreshResult: UsageRefreshResult | undefined;
   let targetedBackfill: TargetedSmtIntervalBackfillResult | undefined;
@@ -158,14 +185,13 @@ export async function ensureSmtCoverageForHouse(args: {
   let tailWaitTimedOut = false;
   let incompleteMeterWaitTimedOut = false;
 
-  refreshResult = await requestUsageRefreshForUserHouse({
-    userId: args.userId,
-    houseId: args.houseId,
-  }).catch((error) => ({
-    ok: false as const,
-    error: "refresh_failed" as const,
-    message: error instanceof Error ? error.message : String(error),
-  }));
+  if (!args.skipUsageRefresh) {
+    refreshResult = await tryUsageRefreshForHouse({
+      userId: args.userId,
+      houseId: args.houseId,
+      sessionKey,
+    });
+  }
 
   if (backfillDateKeys.length > 0) {
     targetedBackfill = await requestTargetedSmtIntervalBackfillForHouse({
@@ -177,15 +203,13 @@ export async function ensureSmtCoverageForHouse(args: {
       message: error instanceof Error ? error.message : String(error),
     }));
 
-    postTargetedBackfillRefreshResult = await requestUsageRefreshForUserHouse({
+    postTargetedBackfillRefreshResult = await tryUsageRefreshForHouse({
       userId: args.userId,
       houseId: args.houseId,
-    }).catch((error) => ({
-      ok: false as const,
-      error: "refresh_failed" as const,
-      message: error instanceof Error ? error.message : String(error),
-    }));
-    if (postTargetedBackfillRefreshResult.ok !== false) {
+      skipGapFill: true,
+      sessionKey,
+    });
+    if (postTargetedBackfillRefreshResult && postTargetedBackfillRefreshResult.ok !== false) {
       refreshResult = postTargetedBackfillRefreshResult;
     }
 

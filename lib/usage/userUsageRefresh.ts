@@ -83,6 +83,9 @@ export type UsageRefreshResult =
 export async function requestUsageRefreshForUserHouse(args: {
   userId: string;
   houseId: string;
+  /** When true, only auth/pull/backfill — gap-fill runs via ensureSmtCoverage separately. */
+  skipGapFill?: boolean;
+  sessionKey?: string;
 }): Promise<UsageRefreshResult> {
   const targetHouse = await prisma.houseAddress.findFirst({
     where: { id: args.houseId, userId: args.userId, archivedAt: null },
@@ -322,9 +325,22 @@ export async function requestUsageRefreshForUserHouse(args: {
     .filter((x): x is { homeId: string; ok: boolean; message?: string } => Boolean(x));
   refreshed.push(...houseResults.map((hr) => hr.result));
 
-  return {
+  const result: UsageRefreshResult = {
     ok: true,
     homes: refreshed,
     backfill: backfillResults,
   };
+
+  if (!args.skipGapFill) {
+    const { ensureSmtCoverageForHouse } = await import("@/lib/usage/ensureSmtCoverage");
+    await ensureSmtCoverageForHouse({
+      userId: args.userId,
+      houseId: args.houseId,
+      profile: "user_session",
+      sessionKey: args.sessionKey ?? `refresh:${args.houseId}`,
+      skipUsageRefresh: true,
+    }).catch(() => null);
+  }
+
+  return result;
 }

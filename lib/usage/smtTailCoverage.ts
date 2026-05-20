@@ -405,6 +405,7 @@ export async function waitForSmtDateCoverage(args: {
   };
 }
 
+/** @deprecated Prefer ensureSmtCoverageForHouse; retained as legacy wrapper for internal callers. */
 export async function ensureSmtTailCoverageForUserHouse(args: {
   userId: string;
   houseId: string;
@@ -414,24 +415,8 @@ export async function ensureSmtTailCoverageForUserHouse(args: {
   requestRefreshIfNeeded?: boolean;
 }): Promise<SmtTailEnsureResult> {
   const targetEndDate = args.targetEndDate ?? resolveSmtCanonicalWindow().endDate;
-  if (args.requestRefreshIfNeeded !== false) {
-    await runDeferredPendingSmtDayRepairs({
-      esiid: args.esiid,
-      userId: args.userId,
-      houseId: args.houseId,
-      waitTimeoutMs: Math.min(args.waitTimeoutMs ?? USER_USAGE_SMT_TAIL_WAIT_TIMEOUT_MS, 12_000),
-    }).catch(() => null);
-  }
-  let coverage = await loadSmtTailCoverage({ esiid: args.esiid, targetEndDate });
-  if (!smtTailRefreshNeeded(coverage)) {
-    return {
-      attempted: false,
-      reason: "coverage_tail_current",
-      coverage,
-      wait: null,
-    };
-  }
   if (args.requestRefreshIfNeeded === false) {
+    const coverage = await loadSmtTailCoverage({ esiid: args.esiid, targetEndDate });
     return {
       attempted: false,
       reason: "refresh_disabled",
@@ -439,35 +424,35 @@ export async function ensureSmtTailCoverageForUserHouse(args: {
       wait: null,
     };
   }
-  let refreshResult: UsageRefreshResult;
-  try {
-    refreshResult = await requestUsageRefreshForUserHouse({
-      userId: args.userId,
-      houseId: args.houseId,
-    });
-  } catch (error) {
-    refreshResult = {
-      ok: false,
-      error: "admin_token_missing",
-      message: `refresh_failed:${error instanceof Error ? error.message : String(error)}`,
+
+  const { ensureSmtCoverageForHouse } = await import("@/lib/usage/ensureSmtCoverage");
+  const ensure = await ensureSmtCoverageForHouse({
+    userId: args.userId,
+    houseId: args.houseId,
+    profile: "user_session",
+    sessionKey: `legacy_tail:${args.houseId}:${targetEndDate}`,
+  });
+  const coverage = await loadSmtTailCoverage({ esiid: args.esiid, targetEndDate });
+  if (!ensure.healed) {
+    return {
+      attempted: false,
+      reason: "coverage_tail_current",
+      coverage,
+      wait: null,
+      refreshResult: ensure.refreshResult,
     };
   }
-  const waitTimeoutMs = args.waitTimeoutMs ?? SMT_TAIL_WAIT_TIMEOUT_MS;
-  const wait =
-    waitTimeoutMs > 0
-      ? await waitForSmtTailCoverage({
-          esiid: args.esiid,
-          targetEndDate,
-          timeoutMs: waitTimeoutMs,
-        })
-      : null;
-  coverage = await loadSmtTailCoverage({ esiid: args.esiid, targetEndDate });
   return {
     attempted: true,
     reason: "refresh_requested",
     coverage,
-    wait,
-    refreshResult,
+    wait: {
+      ...coverage,
+      timedOut: Boolean(ensure.tailWaitTimedOut || ensure.incompleteMeterWaitTimedOut),
+      attempts: 0,
+      durationMs: 0,
+    },
+    refreshResult: ensure.refreshResult,
   };
 }
 
@@ -486,4 +471,32 @@ export function buildUsageIngestionStatusFromTailEnsure(
     smtPendingIntervalDateKeys: ledger?.pendingDateKeys ?? [],
     smtIncompleteMeterDateKeys: ledger?.incompleteMeterDateKeys ?? [],
   } as const;
+}
+
+export function buildUsageIngestionStatusFromEnsure(
+  ensure: import("@/lib/usage/ensureSmtCoverage").EnsureSmtCoverageResult,
+  ledger?: { pendingDateKeys?: string[]; incompleteMeterDateKeys?: string[] } | null
+): UsageIngestionStatusLike & {
+  smtPendingIntervalDateKeys: string[];
+  smtIncompleteMeterDateKeys: string[];
+} {
+  const dayStatus = ensure.dayStatus;
+  const tailRefreshReason: UsageIngestionStatusLike["tailRefreshReason"] = ensure.healed
+    ? "refresh_requested"
+    : "coverage_tail_current";
+  return {
+    tailReady: dayStatus.ready && dayStatus.canonicalEndDayComplete,
+    targetEndDate: ensure.window.endDate,
+    tailRefreshAttempted: ensure.healed,
+    tailRefreshReason,
+    tailTimedOut: Boolean(ensure.tailWaitTimedOut || ensure.incompleteMeterWaitTimedOut),
+    incompleteTailDateKeys: dayStatus.incompleteDateKeys,
+    coverageEndDate: ensure.window.endDate,
+    smtPendingIntervalDateKeys: dayStatus.pendingDateKeys.length
+      ? dayStatus.pendingDateKeys
+      : (ledger?.pendingDateKeys ?? []),
+    smtIncompleteMeterDateKeys: dayStatus.incompleteMeterDateKeys.length
+      ? dayStatus.incompleteMeterDateKeys
+      : (ledger?.incompleteMeterDateKeys ?? []),
+  };
 }

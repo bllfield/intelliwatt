@@ -1,12 +1,10 @@
 import { prisma } from "@/lib/db";
 import { resolveIntervalsLayer } from "@/lib/usage/resolveIntervalsLayer";
-import { requestUsageRefreshForUserHouse } from "@/lib/usage/userUsageRefresh";
+import { ensureSmtCoverageForHouse } from "@/lib/usage/ensureSmtCoverage";
 import {
-  ensureSmtTailCoverageForUserHouse,
   isGreenButtonPrimaryDataset,
   isResolvedDatasetTailDisplayReady,
   loadSmtTailCoverage,
-  ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS,
   smtTailRefreshNeeded,
 } from "@/lib/usage/smtTailCoverage";
 import { IntervalSeriesKind } from "@/modules/onePathSim/usageSimulator/kinds";
@@ -161,7 +159,7 @@ export function buildUpstreamUsageTruthSummary(args: {
         existingUsageTruthFound: status.existingUsageTruthFound,
         seedingAllowed: args.seedIfMissing === true,
         refreshRequested: status.refreshRequested,
-        refreshOwner: greenButtonOnlyMode ? null : "lib/usage/userUsageRefresh.ts -> requestUsageRefreshForUserHouse",
+        refreshOwner: greenButtonOnlyMode ? null : "lib/usage/ensureSmtCoverage.ts -> ensureSmtCoverageForHouse",
         refreshCompleted: status.refreshCompleted,
         refreshFailureReason: status.refreshFailureReason,
       },
@@ -269,6 +267,7 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
   seedIfMissing: boolean;
   preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
   skipLightweightInsightRecompute?: boolean;
+  runId?: string | null;
 }): Promise<UpstreamUsageTruthResult> {
   const selectedHouse = await loadHouseForUser({
     userId: args.userId,
@@ -334,18 +333,18 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
           usageTruthSource: "persisted_usage_output",
         });
 
-        const tailEnsure = await ensureSmtTailCoverageForUserHouse({
+        const runSessionKey = `sim:${String(args.runId ?? actualContextHouse.id).trim()}`;
+        const ensure = await ensureSmtCoverageForHouse({
           userId: args.userId,
           houseId: actualContextHouse.id,
-          esiid: esiidForTail,
-          targetEndDate: canonicalCoverage.endDate,
-          waitTimeoutMs: ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS,
+          profile: "sim_run",
+          sessionKey: runSessionKey,
         });
-        const seedResult: UpstreamUsageTruthSeedResult = tailEnsure.refreshResult?.ok
+        const seedResult: UpstreamUsageTruthSeedResult = ensure.refreshResult?.ok !== false
           ? {
               ok: true,
               homeId: actualContextHouse.id,
-              message: tailEnsure.coverage.tailReady
+              message: ensure.dayStatus.ready
                 ? "existing usage orchestration refreshed tail coverage"
                 : "existing usage orchestration requested; tail still pending after wait",
             }
@@ -353,11 +352,11 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
               ok: false,
               homeId: actualContextHouse.id,
               message:
-                (tailEnsure.refreshResult && "message" in tailEnsure.refreshResult
-                  ? tailEnsure.refreshResult.message
+                (ensure.refreshResult && "message" in ensure.refreshResult
+                  ? ensure.refreshResult.message
                   : null) ??
-                (tailEnsure.refreshResult && "error" in tailEnsure.refreshResult
-                  ? String(tailEnsure.refreshResult.error)
+                (ensure.refreshResult && "error" in ensure.refreshResult
+                  ? String(ensure.refreshResult.error)
                   : "tail_refresh_failed"),
             };
 
@@ -469,22 +468,32 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
     usageTruthSource: "missing_usage_truth",
   });
 
-  const refreshResult = await requestUsageRefreshForUserHouse({
+  const runSessionKey = `sim:${String(args.runId ?? actualContextHouse.id).trim()}`;
+  const ensure = await ensureSmtCoverageForHouse({
     userId: args.userId,
     houseId: actualContextHouse.id,
+    profile: "sim_run",
+    sessionKey: runSessionKey,
   });
 
-  const seedResult: UpstreamUsageTruthSeedResult = refreshResult.ok
-    ? {
-        ok: true,
-        homeId: actualContextHouse.id,
-        message: "existing usage orchestration requested",
-      }
-    : {
-        ok: false,
-        homeId: actualContextHouse.id,
-        message: refreshResult.message ?? refreshResult.error,
-      };
+  const seedResult: UpstreamUsageTruthSeedResult =
+    ensure.refreshResult?.ok !== false
+      ? {
+          ok: true,
+          homeId: actualContextHouse.id,
+          message: "existing usage orchestration requested",
+        }
+      : {
+          ok: false,
+          homeId: actualContextHouse.id,
+          message:
+            (ensure.refreshResult && "message" in ensure.refreshResult
+              ? ensure.refreshResult.message
+              : null) ??
+            (ensure.refreshResult && "error" in ensure.refreshResult
+              ? String(ensure.refreshResult.error)
+              : "usage_ensure_failed"),
+        };
 
   logBaselineUsageTruthEvent(
     seedResult.ok ? "baseline_upstream_usage_seed_success" : "baseline_upstream_usage_seed_failure",

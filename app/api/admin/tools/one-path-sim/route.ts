@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { buildUserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
-import { ensureSmtCoverageForHouse } from "@/lib/usage/ensureSmtCoverage";
-import { requestUsageRefreshForUserHouse } from "@/lib/usage/userUsageRefresh";
+import {
+  ensureSmtCoverageForHouse,
+  type EnsureSmtCoverageResult,
+} from "@/lib/usage/ensureSmtCoverage";
+import type { UsageRefreshResult } from "@/lib/usage/userUsageRefresh";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { getHomeProfileReadOnlyByUserHouse, getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import {
@@ -614,16 +617,19 @@ async function buildPastSimRunReadbackResponse(args: {
   let smtIncompleteMeterRetry: OnePathIncompleteMeterBackfillRetry | null = null;
   const healingCtx = args.smtPostSimHealing;
   if (healingCtx?.mode === "INTERVAL" && String(healingCtx.sourceEsiid ?? "").trim()) {
-    smtIncompleteMeterRetry = await maybeRunOnePathSmtPostSimHealing({
-      mode: healingCtx.mode,
-      preferredActualSource: healingCtx.preferredActualSource,
-      sourceUserId: healingCtx.sourceUserId,
-      sourceHouseId: healingCtx.sourceHouseId,
-      sourceEsiid: healingCtx.sourceEsiid,
+    const postEnsure = await ensureSmtCoverageForHouse({
+      userId: healingCtx.sourceUserId,
+      houseId: healingCtx.sourceHouseId,
+      profile: "admin_sim",
+      sessionKey: `post:${args.correlationId ?? ""}`,
+      extraBackfillDateKeys: extractIncompleteMeterDateKeysFromDataset(readback.dataset),
+    });
+    smtIncompleteMeterRetry = buildOnePathPostSimHealFromEnsure(postEnsure, {
+      correlationId: args.correlationId ?? "",
       effectiveHouseId: healingCtx.effectiveHouseId,
       actualContextHouseId: healingCtx.actualContextHouseId,
-      correlationId: args.correlationId ?? "",
-      artifactDataset: readback.dataset,
+      sourceUserId: healingCtx.sourceUserId,
+      sourceEsiid: String(healingCtx.sourceEsiid).trim(),
     });
     if (smtIncompleteMeterRetry?.attempted) {
       const reread = await readScenarioDataset(true);
@@ -900,34 +906,22 @@ async function waitForOnePathSmtTailCoverage(args: {
   };
 }
 
-async function maybeRefreshOnePathSmtTailCoverage(args: {
-  mode: CanonicalSimulationInputType;
-  preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
-  sourceUserId: string;
-  sourceHouseId: string;
-  sourceEsiid: string | null;
-  effectiveHouseId: string;
-  actualContextHouseId: string;
-  correlationId: string;
-}) {
-  if (args.mode !== "INTERVAL") return null;
-  if (args.preferredActualSource === "GREEN_BUTTON") return null;
-  const esiid = String(args.sourceEsiid ?? "").trim();
-  if (!esiid) return null;
-
-  const ensure = await ensureSmtCoverageForHouse({
-    userId: args.sourceUserId,
-    houseId: args.sourceHouseId,
-    profile: "admin_sim",
-    sessionKey: `tail:${args.correlationId}`,
-  });
-
+function buildOnePathSmtRefreshCheckFromEnsure(
+  ensure: EnsureSmtCoverageResult,
+  args: {
+    correlationId: string;
+    effectiveHouseId: string;
+    actualContextHouseId: string;
+    sourceUserId: string;
+    sourceEsiid: string;
+  }
+) {
   logSimPipelineEvent("one_path_smt_tail_backfill_check", {
     correlationId: args.correlationId,
     houseId: args.effectiveHouseId,
     sourceHouseId: args.actualContextHouseId !== args.effectiveHouseId ? args.actualContextHouseId : undefined,
     sourceUserId: args.sourceUserId,
-    sourceEsiid: esiid,
+    sourceEsiid: args.sourceEsiid,
     targetEndDate: ensure.window.endDate,
     incompleteDateKeys: ensure.dayStatus.incompleteDateKeys.join(","),
     healed: ensure.healed,
@@ -952,7 +946,7 @@ async function maybeRefreshOnePathSmtTailCoverage(args: {
     correlationId: args.correlationId,
     houseId: args.effectiveHouseId,
     sourceUserId: args.sourceUserId,
-    sourceEsiid: esiid,
+    sourceEsiid: args.sourceEsiid,
     targetEndDate: ensure.window.endDate,
     backfillDateKeys: (ensure.backfillDateKeys ?? []).join(","),
     refreshOk: ensure.refreshResult?.ok,
@@ -999,45 +993,30 @@ type OnePathSmtPostSimHealingResult = {
   repairKind?: "ensure_smt_coverage";
   pullDateKey: string;
   requestedDateKeys: string[];
-  refreshResult?: Awaited<ReturnType<typeof requestUsageRefreshForUserHouse>>;
+  refreshResult?: UsageRefreshResult;
   waitTimedOut?: boolean;
-  targetedIntervalBackfill?: Awaited<
-    ReturnType<typeof ensureSmtCoverageForHouse>
-  >["targetedBackfill"];
-  postTargetedBackfillRefreshResult?: Awaited<ReturnType<typeof requestUsageRefreshForUserHouse>>;
-  reconcile?: Awaited<ReturnType<typeof ensureSmtCoverageForHouse>>["reconcile"];
-  ensure?: Awaited<ReturnType<typeof ensureSmtCoverageForHouse>>;
+  targetedIntervalBackfill?: EnsureSmtCoverageResult["targetedBackfill"];
+  postTargetedBackfillRefreshResult?: UsageRefreshResult;
+  reconcile?: EnsureSmtCoverageResult["reconcile"];
+  ensure?: EnsureSmtCoverageResult;
 };
 
-async function maybeRunOnePathSmtPostSimHealing(args: {
-  mode: CanonicalSimulationInputType;
-  preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
-  sourceUserId: string;
-  sourceHouseId: string;
-  sourceEsiid: string | null;
-  effectiveHouseId: string;
-  actualContextHouseId: string;
-  correlationId: string;
-  artifactDataset: unknown;
-}): Promise<OnePathSmtPostSimHealingResult | null> {
-  if (args.mode !== "INTERVAL") return null;
-  if (args.preferredActualSource === "GREEN_BUTTON") return null;
-  const esiid = String(args.sourceEsiid ?? "").trim();
-  if (!esiid) return null;
-
-  const ensure = await ensureSmtCoverageForHouse({
-    userId: args.sourceUserId,
-    houseId: args.sourceHouseId,
-    profile: "admin_sim",
-    sessionKey: `post:${args.correlationId}`,
-  });
-
+function buildOnePathPostSimHealFromEnsure(
+  ensure: EnsureSmtCoverageResult,
+  args: {
+    correlationId: string;
+    effectiveHouseId: string;
+    actualContextHouseId: string;
+    sourceUserId: string;
+    sourceEsiid: string;
+  }
+): OnePathSmtPostSimHealingResult | null {
   logSimPipelineEvent("one_path_smt_post_sim_heal", {
     correlationId: args.correlationId,
     houseId: args.effectiveHouseId,
     sourceHouseId: args.actualContextHouseId !== args.effectiveHouseId ? args.actualContextHouseId : undefined,
     sourceUserId: args.sourceUserId,
-    sourceEsiid: esiid,
+    sourceEsiid: args.sourceEsiid,
     healed: ensure.healed,
     skippedReason: ensure.skippedReason ?? null,
     backfillDateKeys: (ensure.backfillDateKeys ?? []).join(","),
@@ -1376,16 +1355,26 @@ export async function POST(request: NextRequest) {
         { status: 409 }
       );
     }
-    const smtRefreshCheck = await maybeRefreshOnePathSmtTailCoverage({
-      mode,
-      preferredActualSource: effectiveRawInputBase.preferredActualSource,
-      sourceUserId: resolved.userId,
-      sourceHouseId: resolved.selectedHouse.id,
-      sourceEsiid: smtSourceEsiid,
-      effectiveHouseId,
-      actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
-      correlationId,
-    });
+    const smtRefreshCheck =
+      mode === "INTERVAL" &&
+      effectiveRawInputBase.preferredActualSource !== "GREEN_BUTTON" &&
+      String(smtSourceEsiid ?? "").trim()
+        ? buildOnePathSmtRefreshCheckFromEnsure(
+            await ensureSmtCoverageForHouse({
+              userId: resolved.userId,
+              houseId: resolved.selectedHouse.id,
+              profile: "admin_sim",
+              sessionKey: `run:${correlationId}`,
+            }),
+            {
+              correlationId,
+              effectiveHouseId,
+              actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
+              sourceUserId: resolved.userId,
+              sourceEsiid: String(smtSourceEsiid).trim(),
+            }
+          )
+        : null;
     try {
       if (!includeDebugDiagnostics && effectiveRawInputBase.scenarioId && !isManualMode) {
         const readback = await buildPastSimRunReadbackResponse({
@@ -1554,18 +1543,27 @@ export async function POST(request: NextRequest) {
         });
       }
       const shouldReturnCompactPastResponse = Boolean(effectiveRawInputBase.scenarioId && !isManualMode);
-      let smtIncompleteMeterRetry: OnePathIncompleteMeterBackfillRetry | null =
-        await maybeRunOnePathSmtPostSimHealing({
-          mode,
-          preferredActualSource: effectiveRawInputBase.preferredActualSource,
-          sourceUserId: resolved.userId,
-          sourceHouseId: resolved.selectedHouse.id,
-          sourceEsiid: smtSourceEsiid,
+      let smtIncompleteMeterRetry: OnePathIncompleteMeterBackfillRetry | null = null;
+      if (
+        mode === "INTERVAL" &&
+        effectiveRawInputBase.preferredActualSource !== "GREEN_BUTTON" &&
+        String(smtSourceEsiid ?? "").trim()
+      ) {
+        const postEnsure = await ensureSmtCoverageForHouse({
+          userId: resolved.userId,
+          houseId: resolved.selectedHouse.id,
+          profile: "admin_sim",
+          sessionKey: `post:${correlationId}`,
+          extraBackfillDateKeys: extractIncompleteMeterDateKeysFromDataset(artifactDataset),
+        });
+        smtIncompleteMeterRetry = buildOnePathPostSimHealFromEnsure(postEnsure, {
+          correlationId,
           effectiveHouseId,
           actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
-          correlationId,
-          artifactDataset,
+          sourceUserId: resolved.userId,
+          sourceEsiid: String(smtSourceEsiid).trim(),
         });
+      }
       if (smtIncompleteMeterRetry?.attempted) {
         engineInput = await adaptIntervalRawInput(effectiveRawInputBase);
         slimEngineInput = buildSlimAdminEngineInput(engineInput);

@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { resolveIntervalsLayer } from "@/lib/usage/resolveIntervalsLayer";
-import { requestUsageRefreshForUserHouse } from "@/lib/usage/userUsageRefresh";
+import { ensureSmtCoverageForHouse } from "@/lib/usage/ensureSmtCoverage";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import { resolveReportedCoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 
@@ -145,7 +145,7 @@ export function buildUpstreamUsageTruthSummary(args: {
         lookedForExistingUsageTruth: status.lookedForExistingUsageTruth,
         existingUsageTruthFound: status.existingUsageTruthFound,
         refreshRequested: status.refreshRequested,
-        refreshOwner: "lib/usage/userUsageRefresh.ts -> requestUsageRefreshForUserHouse",
+        refreshOwner: "lib/usage/ensureSmtCoverage.ts -> ensureSmtCoverageForHouse",
         refreshCompleted: status.refreshCompleted,
         refreshFailureReason: status.refreshFailureReason,
       },
@@ -210,6 +210,7 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
   actualContextHouseId?: string | null;
   smtSourceEsiid?: string | null;
   seedIfMissing: boolean;
+  runId?: string | null;
 }): Promise<UpstreamUsageTruthResult> {
   const selectedHouse = await loadHouseForUser({
     userId: args.userId,
@@ -272,22 +273,32 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
     };
   }
 
-  const refreshResult = await requestUsageRefreshForUserHouse({
+  const runSessionKey = `sim:${String(args.runId ?? actualContextHouse.id).trim()}`;
+  const ensure = await ensureSmtCoverageForHouse({
     userId: args.userId,
     houseId: actualContextHouse.id,
+    profile: "sim_run",
+    sessionKey: runSessionKey,
   });
 
-  const seedResult: UpstreamUsageTruthSeedResult = refreshResult.ok
-    ? {
-        ok: true,
-        homeId: actualContextHouse.id,
-        message: "existing usage orchestration requested",
-      }
-    : {
-        ok: false,
-        homeId: actualContextHouse.id,
-        message: refreshResult.message ?? refreshResult.error,
-      };
+  const seedResult: UpstreamUsageTruthSeedResult =
+    ensure.refreshResult?.ok !== false
+      ? {
+          ok: true,
+          homeId: actualContextHouse.id,
+          message: "existing usage orchestration requested",
+        }
+      : {
+          ok: false,
+          homeId: actualContextHouse.id,
+          message:
+            (ensure.refreshResult && "message" in ensure.refreshResult
+              ? ensure.refreshResult.message
+              : null) ??
+            (ensure.refreshResult && "error" in ensure.refreshResult
+              ? String(ensure.refreshResult.error)
+              : "usage_ensure_failed"),
+        };
 
   resolved = await readPersistedUsageTruth({
     userId: args.userId,

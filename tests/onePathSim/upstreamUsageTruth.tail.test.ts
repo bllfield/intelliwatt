@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const findFirst = vi.fn();
 const resolveIntervalsLayer = vi.fn();
 const loadSmtTailCoverage = vi.fn();
-const ensureSmtTailCoverageForUserHouse = vi.fn();
+const ensureSmtCoverageForHouse = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -22,9 +22,12 @@ vi.mock("@/lib/usage/smtTailCoverage", async (importOriginal) => {
   return {
     ...actual,
     loadSmtTailCoverage: (...args: any[]) => loadSmtTailCoverage(...args),
-    ensureSmtTailCoverageForUserHouse: (...args: any[]) => ensureSmtTailCoverageForUserHouse(...args),
   };
 });
+
+vi.mock("@/lib/usage/ensureSmtCoverage", () => ({
+  ensureSmtCoverageForHouse: (...args: any[]) => ensureSmtCoverageForHouse(...args),
+}));
 
 describe("one path upstream usage truth tail refresh", () => {
   beforeEach(() => {
@@ -51,17 +54,20 @@ describe("one path upstream usage truth tail refresh", () => {
       incompleteTailDateKeys: ["2026-05-17"],
       tailReady: false,
     });
-    ensureSmtTailCoverageForUserHouse.mockResolvedValue({
-      attempted: true,
-      reason: "refresh_requested",
-      coverage: {
-        coverageEndDate: "2026-05-17",
-        targetEndDate: "2026-05-17",
-        incompleteTailDateKeys: [],
-        tailReady: true,
+    ensureSmtCoverageForHouse.mockResolvedValue({
+      healed: true,
+      window: { startDate: "2025-05-18", endDate: "2026-05-17" },
+      dayStatus: {
+        ready: true,
+        incompleteDateKeys: [],
+        pendingDateKeys: [],
+        incompleteMeterDateKeys: [],
+        canonicalEndDayComplete: true,
+        window: { startDate: "2025-05-18", endDate: "2026-05-17" },
       },
-      wait: { timedOut: false, attempts: 2, durationMs: 4000 },
       refreshResult: { ok: true, homes: [], backfill: [] },
+      tailWaitTimedOut: false,
+      incompleteMeterWaitTimedOut: false,
     });
   });
 
@@ -71,15 +77,15 @@ describe("one path upstream usage truth tail refresh", () => {
       userId: "user-1",
       houseId: "house-1",
       seedIfMissing: true,
+      runId: "run-abc",
     });
 
     expect(loadSmtTailCoverage).toHaveBeenCalled();
-    expect(ensureSmtTailCoverageForUserHouse).toHaveBeenCalledWith({
+    expect(ensureSmtCoverageForHouse).toHaveBeenCalledWith({
       userId: "user-1",
       houseId: "house-1",
-      esiid: "esiid-1",
-      targetEndDate: expect.any(String),
-      waitTimeoutMs: 20_000,
+      profile: "sim_run",
+      sessionKey: "sim:run-abc",
     });
     expect(resolveIntervalsLayer).toHaveBeenCalledTimes(2);
     expect(out.usageTruthSource).toBe("seeded_via_existing_usage_orchestration");

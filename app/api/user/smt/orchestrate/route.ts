@@ -4,13 +4,18 @@ import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { pickBestSmtAuthorization } from "@/lib/smt/authorizationSelection";
-import { getRollingBackfillRange, refreshSmtAuthorizationStatus, requestSmtBackfillForAuthorization } from "@/lib/smt/agreements";
+import { getRollingBackfillRange, refreshSmtAuthorizationStatus } from "@/lib/smt/agreements";
 import { chicagoDateKey } from "@/lib/time/chicago";
+import { ensureSmtCoverageForHouse } from "@/lib/usage/ensureSmtCoverage";
 import {
   loadSmtWindowDayStatus,
   SMT_REQUIRED_SLOTS_PER_DAY,
   smtWindowCompletenessRatio,
 } from "@/lib/usage/smtWindowStatus";
+import {
+  resolveUserUsageSessionKey,
+  USER_USAGE_SESSION_COOKIE,
+} from "@/lib/usage/userUsageSessionKey";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -387,6 +392,7 @@ export async function POST(req: NextRequest) {
 
   // Always compute current usage coverage for visibility (cheap DB-only).
   const usage = await computeUsageCoverageForEsiid(effectiveEsiid);
+  let windowStatus = await loadSmtWindowDayStatus({ esiid: effectiveEsiid });
 
   // Throttle only automatic polling: avoid running backfill + pull on every poll (e.g. every 5–30s).
   // Without this, the dashboard would trigger dozens of backfill/pull requests per minute and hammer SMT/droplet.
@@ -415,12 +421,18 @@ export async function POST(req: NextRequest) {
   const backfillEnvRaw = (process.env.SMT_INTERVAL_BACKFILL_ENABLED ?? "").toString().trim().toLowerCase();
   const backfillEnvEnabled = backfillEnvRaw === "true" || backfillEnvRaw === "1" || backfillEnvRaw === "yes";
 
+  const usageSessionKey = resolveUserUsageSessionKey({
+    userId: user.id,
+    request: req,
+    cookieValue: cookieStore.get(USER_USAGE_SESSION_COOKIE)?.value ?? null,
+  });
+
   const actions: Record<string, any> = {
     forced: force,
     statusRefreshed: false,
     statusThrottled: false,
-    backfillRequested: false,
-    pullTriggered: false,
+    ensureHealed: false,
+    ensureSkippedReason: null as string | null,
     orchestratorThrottled: recentlySynced,
     pullEligibleNow: usage.pullEligibleNow,
     pullEligibleAt: usage.pullEligibleAt,
@@ -470,81 +482,23 @@ export async function POST(req: NextRequest) {
     (!usage.ready || (force && usage.pullEligibleNow));
 
   if (shouldWork && (!recentlySynced || force)) {
-    const backfillRange = getRollingBackfillRange(12);
-    const requestedAt = effectiveBackfillRequestedAt
-      ? new Date(effectiveBackfillRequestedAt)
-      : null;
-
-    const retryAfterMs =
-      usage.rawCount === 0 && usage.coverageDays < 30 ? 60 * 60 * 1000 : 6 * 60 * 60 * 1000;
-    const isStale = requestedAt ? Date.now() - requestedAt.getTime() >= retryAfterMs : false;
-    const allowRetry = Boolean(requestedAt && !usage.ready && isStale);
-
-    // Accept "true", "1", "True", "TRUE", "yes" so Vercel/env casing doesn't break it.
-    const rawBackfill = (process.env.SMT_INTERVAL_BACKFILL_ENABLED ?? "").toString().trim().toLowerCase();
-    const enableBackfill =
-      rawBackfill === "true" || rawBackfill === "1" || rawBackfill === "yes";
-
-    // If the user forces a refresh but they are not eligible (data <30d old and no gaps),
-    // do NOT spam SMT backfill requests.
-    const allowForceBackfill = !force || usage.pullEligibleNow;
-
-    if (enableBackfill && allowForceBackfill && (force || !requestedAt || allowRetry)) {
-      const res = await requestSmtBackfillForAuthorization({
-        authorizationId: effectiveAuthorizationId,
-        esiid: effectiveEsiid,
-        meterNumber: effectiveMeterNumber,
-        startDate: backfillRange.startDate,
-        endDate: backfillRange.endDate,
-      });
-      actions.backfillRequested = Boolean(res.ok);
-
-      // Record attempt timestamp (even if SMT returns non-ok) to avoid spamming.
+    const ensure = await ensureSmtCoverageForHouse({
+      userId: user.id,
+      houseId: house.id,
+      profile: "user_session",
+      sessionKey: usageSessionKey,
+      force,
+    });
+    actions.ensureHealed = ensure.healed;
+    actions.ensureSkippedReason = ensure.skippedReason ?? null;
+    windowStatus = ensure.dayStatus;
+    if (ensure.healed || force) {
       await prisma.smtAuthorization
         .update({
           where: { id: effectiveAuthorizationId },
-          data: {
-            smtBackfillRequestedAt: new Date(),
-            smtLastSyncAt: new Date(),
-          },
+          data: { smtLastSyncAt: new Date() },
         })
         .catch(() => null);
-    }
-
-    // 3) Trigger droplet pull so we fetch anything delivered via SFTP.
-    if (force && !usage.pullEligibleNow) {
-      actions.pullTriggered = false;
-      actions.pullBlockedReason = "cooldown";
-    }
-    const adminToken = (process.env.ADMIN_TOKEN ?? "").trim();
-    if (adminToken && (!force || usage.pullEligibleNow)) {
-      try {
-        const baseUrl = resolveBaseUrl();
-        const pullUrl = new URL("/api/admin/smt/pull", baseUrl);
-        const pullRes = await fetch(pullUrl, {
-          method: "POST",
-          headers: {
-            "x-admin-token": adminToken,
-            "content-type": "application/json",
-          },
-          cache: "no-store",
-          body: JSON.stringify({
-            homeId: house.id,
-            esiid: effectiveEsiid,
-            reason: force ? "user_refresh" : "user_orchestrate",
-            forceRepost: force,
-          }),
-        });
-        actions.pullTriggered = pullRes.ok;
-        await prisma.smtAuthorization
-          .update({
-            where: { id: authorization.id },
-            data: { smtLastSyncAt: new Date() },
-          })
-          .catch(() => null);
-      } catch {
-        // swallow; user should still see coverage and can retry later
-      }
     }
   }
 
@@ -589,6 +543,13 @@ export async function POST(req: NextRequest) {
       status: usage.phase,
       intervals: usage.intervalCount,
       rawFiles: usage.rawCount,
+      windowStatus: {
+        ready: windowStatus.ready,
+        incompleteDateKeys: windowStatus.incompleteDateKeys,
+        pendingDateKeys: windowStatus.pendingDateKeys,
+        incompleteMeterDateKeys: windowStatus.incompleteMeterDateKeys,
+        canonicalEndDayComplete: windowStatus.canonicalEndDayComplete,
+      },
       coverage: {
         // Use America/Chicago calendar dates for user-facing display and gating.
         start: usage.coverageStartDate,

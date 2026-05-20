@@ -9,14 +9,14 @@ import {
   loadSmtDayLedgerSnapshot,
   smtLedgerFieldsFromDatasetMeta,
 } from "@/lib/usage/smtDayCoverageLedger";
+import { ensureSmtCoverageForHouse } from "@/lib/usage/ensureSmtCoverage";
 import {
-  buildUsageIngestionStatusFromTailEnsure,
-  ensureSmtTailCoverageForUserHouse,
+  buildUsageIngestionStatusFromEnsure,
   isGreenButtonPrimaryDataset,
   isResolvedDatasetTailDisplayReady,
   reconcileUsageIngestionWithDataset,
-  USER_USAGE_SMT_TAIL_WAIT_TIMEOUT_MS,
 } from "@/lib/usage/smtTailCoverage";
+import { resolveUserUsageSessionKey } from "@/lib/usage/userUsageSessionKey";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 import { IntervalSeriesKind } from '@/modules/usageSimulator/kinds';
 import { toPublicHouseLabel } from "@/modules/usageSimulator/houseLabel";
@@ -81,7 +81,7 @@ async function withTaskTimeout<T>(task: Promise<T>, timeoutMs: number, label: st
   }
 }
 
-export async function GET(_request: NextRequest) {
+export async function GET(request: NextRequest) {
   try {
     const cookieStore = cookies();
     const rawEmail = cookieStore.get('intelliwatt_user')?.value;
@@ -113,10 +113,11 @@ export async function GET(_request: NextRequest) {
 
     const results = [];
     const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
-    const perHouseTailWaitMs =
-      houses.length > 1
-        ? Math.max(3_000, Math.floor(USER_USAGE_SMT_TAIL_WAIT_TIMEOUT_MS / houses.length))
-        : USER_USAGE_SMT_TAIL_WAIT_TIMEOUT_MS;
+    const usageSessionKey = resolveUserUsageSessionKey({
+      userId: user.id,
+      request,
+      cookieValue: cookieStore.get("intelliwatt_usage_session")?.value ?? null,
+    });
     for (const house of houses) {
       let result: { dataset: any | null; alternatives: { smt: any; greenButton: any } };
       try {
@@ -208,33 +209,30 @@ export async function GET(_request: NextRequest) {
             smtIncompleteMeterDateKeys: ledgerFromDataset.incompleteMeterDateKeys,
           };
         } else {
-          const tailEnsure = await ensureSmtTailCoverageForUserHouse({
+          const ensure = await ensureSmtCoverageForHouse({
             userId: user.id,
             houseId: house.id,
-            esiid,
-            targetEndDate: canonicalCoverage.endDate,
-            waitTimeoutMs: perHouseTailWaitMs,
+            profile: "user_session",
+            sessionKey: usageSessionKey,
           }).catch((error) => {
-            console.warn("[user/usage] SMT tail ensure failed; continuing with current persisted usage", house.id, error);
+            console.warn("[user/usage] SMT ensure failed; continuing with current persisted usage", house.id, error);
             return null;
           });
           const ledger =
             (await loadSmtDayLedgerSnapshot({ esiid }).catch(() => null)) ?? ledgerFromDataset;
           usageIngestion = {
             ...(reconcileUsageIngestionWithDataset({
-              ingestion: tailEnsure
-                ? buildUsageIngestionStatusFromTailEnsure(tailEnsure, ledger)
-                : null,
+              ingestion: ensure ? buildUsageIngestionStatusFromEnsure(ensure, ledger) : null,
               dataset: resolvedDataset,
               targetEndDate: canonicalCoverage.endDate,
             }) ?? {
               tailReady: false,
               targetEndDate: canonicalCoverage.endDate,
-              tailRefreshAttempted: Boolean(tailEnsure?.attempted),
-              tailRefreshReason: tailEnsure?.reason ?? "coverage_tail_current",
-              tailTimedOut: tailEnsure?.wait?.timedOut ?? false,
-              incompleteTailDateKeys: tailEnsure?.coverage.incompleteTailDateKeys ?? [],
-              coverageEndDate: tailEnsure?.coverage.coverageEndDate ?? null,
+              tailRefreshAttempted: Boolean(ensure?.healed),
+              tailRefreshReason: ensure?.skippedReason ?? "coverage_tail_current",
+              tailTimedOut: Boolean(ensure?.tailWaitTimedOut),
+              incompleteTailDateKeys: ensure?.dayStatus.incompleteDateKeys ?? [],
+              coverageEndDate: ensure?.window.endDate ?? null,
             }),
             smtPendingIntervalDateKeys:
               ledger.pendingDateKeys?.length ? ledger.pendingDateKeys : ledgerFromDataset.pendingDateKeys,

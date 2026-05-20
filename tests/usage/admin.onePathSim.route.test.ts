@@ -238,7 +238,7 @@ function enablePostSimEnsureHeal() {
         incompleteMeterWaitTimedOut: false,
       };
     }
-    if (sessionKey.startsWith("tail:")) {
+    if (sessionKey.startsWith("tail:") || sessionKey.startsWith("run:")) {
       return {
         healed: true,
         window: baseDayStatus.window,
@@ -362,7 +362,7 @@ describe("admin one path sim route", () => {
           dayStatus: { ...baseDayStatus, ready: true, incompleteDateKeys: [] },
         };
       }
-      if (sessionKey.startsWith("tail:")) {
+      if (sessionKey.startsWith("tail:") || sessionKey.startsWith("run:")) {
         return {
           healed: true,
           window: baseDayStatus.window,
@@ -1274,7 +1274,7 @@ describe("admin one path sim route", () => {
       })
     );
     expect(ensureSmtCoverageForHouse).toHaveBeenCalledWith(
-      expect.objectContaining({ profile: "admin_sim", sessionKey: expect.stringMatching(/^tail:/) })
+      expect.objectContaining({ profile: "admin_sim", sessionKey: expect.stringMatching(/^run:/) })
     );
     expect(adaptIntervalRawInput).toHaveBeenCalledTimes(1);
     expect(runSharedSimulation).toHaveBeenCalledTimes(1);

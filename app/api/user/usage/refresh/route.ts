@@ -3,7 +3,11 @@ import { cookies } from "next/headers";
 
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
-import { requestUsageRefreshForUserHouse } from "@/lib/usage/userUsageRefresh";
+import { ensureSmtCoverageForHouse } from "@/lib/usage/ensureSmtCoverage";
+import {
+  resolveUserUsageSessionKey,
+  USER_USAGE_SESSION_COOKIE,
+} from "@/lib/usage/userUsageSessionKey";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs"; // ensure Node runtime for longer executions
@@ -46,18 +50,44 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const result = await requestUsageRefreshForUserHouse({
+  const sessionKey = resolveUserUsageSessionKey({
     userId: user.id,
-    houseId: requestedHomeId,
+    request: req,
+    cookieValue: cookieStore.get(USER_USAGE_SESSION_COOKIE)?.value ?? null,
   });
 
-  if (!result.ok) {
+  const ensure = await ensureSmtCoverageForHouse({
+    userId: user.id,
+    houseId: requestedHomeId,
+    profile: "user_session",
+    sessionKey,
+    force: true,
+  });
+
+  if (ensure.skippedReason === "no_esiid") {
     return NextResponse.json(
-      { ok: false, error: result.error, ...(result.message ? { message: result.message } : {}) },
-      { status: result.error === "home_not_found" ? 404 : 500 }
+      { ok: false, error: "home_not_found", message: "Home is missing an ESIID for SMT refresh." },
+      { status: 404 }
     );
   }
 
-  return NextResponse.json(result);
-}
+  const refreshResult = ensure.refreshResult;
+  if (refreshResult && refreshResult.ok === false) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: refreshResult.error,
+        ...(refreshResult.message ? { message: refreshResult.message } : {}),
+        ensure,
+      },
+      { status: refreshResult.error === "home_not_found" ? 404 : 500 }
+    );
+  }
 
+  return NextResponse.json({
+    ok: true,
+    homes: refreshResult?.ok ? refreshResult.homes : [],
+    backfill: refreshResult?.ok ? refreshResult.backfill : [],
+    ensure,
+  });
+}

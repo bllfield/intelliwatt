@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const findFirst = vi.fn();
 const resolveIntervalsLayer = vi.fn();
-const requestUsageRefreshForUserHouse = vi.fn();
+const ensureSmtCoverageForHouse = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -16,15 +16,15 @@ vi.mock("@/lib/usage/resolveIntervalsLayer", () => ({
   resolveIntervalsLayer: (...args: any[]) => resolveIntervalsLayer(...args),
 }));
 
-vi.mock("@/lib/usage/userUsageRefresh", () => ({
-  requestUsageRefreshForUserHouse: (...args: any[]) => requestUsageRefreshForUserHouse(...args),
+vi.mock("@/lib/usage/ensureSmtCoverage", () => ({
+  ensureSmtCoverageForHouse: (...args: any[]) => ensureSmtCoverageForHouse(...args),
 }));
 
 describe("live shared upstream usage truth owner", () => {
   beforeEach(() => {
     findFirst.mockReset();
     resolveIntervalsLayer.mockReset();
-    requestUsageRefreshForUserHouse.mockReset();
+    ensureSmtCoverageForHouse.mockReset();
 
     findFirst.mockImplementation(async ({ where }: any) => {
       if (where.id === "house-1") return { id: "house-1", esiid: "esiid-1" };
@@ -57,7 +57,7 @@ describe("live shared upstream usage truth owner", () => {
       esiid: "esiid-2",
       lightweightActualUsage: true,
     });
-    expect(requestUsageRefreshForUserHouse).not.toHaveBeenCalled();
+    expect(ensureSmtCoverageForHouse).not.toHaveBeenCalled();
     expect(out.usageTruthSource).toBe("persisted_usage_output");
     expect(out.dataset).toEqual({ summary: { totalKwh: 123 } });
     expect(out.summary.currentRun.statusSummary).toEqual({
@@ -75,10 +75,11 @@ describe("live shared upstream usage truth owner", () => {
         dataset: { summary: { totalKwh: 456 } },
         alternatives: { smt: { totalKwh: 456 }, greenButton: null },
       });
-    requestUsageRefreshForUserHouse.mockResolvedValue({
-      ok: true,
-      homeId: "house-2",
-      message: "existing usage orchestration requested",
+    ensureSmtCoverageForHouse.mockResolvedValue({
+      healed: true,
+      window: { startDate: "2025-01-01", endDate: "2026-01-01" },
+      dayStatus: { ready: true, incompleteDateKeys: [] },
+      refreshResult: { ok: true, homes: [], backfill: [] },
     });
     const { resolveUpstreamUsageTruthForSimulation } = await import(
       "@/modules/usageSimulator/upstreamUsageTruth"
@@ -91,9 +92,11 @@ describe("live shared upstream usage truth owner", () => {
       seedIfMissing: true,
     });
 
-    expect(requestUsageRefreshForUserHouse).toHaveBeenCalledWith({
+    expect(ensureSmtCoverageForHouse).toHaveBeenCalledWith({
       userId: "user-1",
       houseId: "house-2",
+      profile: "sim_run",
+      sessionKey: "sim:house-2",
     });
     expect(resolveIntervalsLayer).toHaveBeenCalledTimes(2);
     expect(out.usageTruthSource).toBe("seeded_via_existing_usage_orchestration");
