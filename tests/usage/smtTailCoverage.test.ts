@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SMT_DAY_LEDGER_STATUS } from "@/lib/usage/smtDayCoverageLedger";
+import { chicagoSlot96FromTs } from "@/lib/time/chicago";
 import {
-  chicagoSlot96FromTs,
   filterDateKeysNearTargetEnd,
   isGreenButtonPrimaryDataset,
   isResolvedDatasetTailDisplayReady,

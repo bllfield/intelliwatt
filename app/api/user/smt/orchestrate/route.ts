@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { pickBestSmtAuthorization } from "@/lib/smt/authorizationSelection";
 import { getRollingBackfillRange, refreshSmtAuthorizationStatus, requestSmtBackfillForAuthorization } from "@/lib/smt/agreements";
+import { chicagoDateKey } from "@/lib/time/chicago";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,24 +15,6 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const SMT_PULL_COOLDOWN_MS = 30 * DAY_MS;
 const SMT_READY_COMPLETENESS = 0.99; // stop chasing tiny tails; treat ~99% as sufficient for "ready"
 const SMT_GAP_SLOP_DAYS = 1; // tolerate up to 1 day tail/head mismatch for messaging/eligibility
-const SMT_TZ = "America/Chicago";
-
-const chicagoDateFmt = new Intl.DateTimeFormat("en-CA", {
-  timeZone: SMT_TZ,
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
-
-function chicagoDateKey(d: Date): string {
-  try {
-    return chicagoDateFmt.format(d); // YYYY-MM-DD
-  } catch {
-    // Fallback: UTC date (still stable)
-    return d.toISOString().slice(0, 10);
-  }
-}
-
 /**
  * Convert a YYYY-MM-DD date key into a monotonic day index.
  *

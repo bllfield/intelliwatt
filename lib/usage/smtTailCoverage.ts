@@ -8,7 +8,10 @@ import {
   loadSmtDayLedgerStatusForDate,
   runDeferredPendingSmtDayRepairs,
 } from "@/lib/usage/smtDayCoverageLedger";
+import { chicagoSlot96FromTs, smtCoverageDateKey } from "@/lib/time/chicago";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
+
+export { chicagoSlot96FromTs, smtCoverageDateKey } from "@/lib/time/chicago";
 
 export const SMT_TAIL_LOOKBACK_DAYS = 14;
 export const SMT_TAIL_REQUIRED_INTERVALS_PER_DAY = 96;
@@ -28,35 +31,6 @@ export const SMT_NEAR_COMPLETE_INTERVAL_THRESHOLD = 94;
 export const SMT_POST_BACKFILL_SETTLE_DELAY_MS = 3_000;
 /** Only block incomplete-meter backfill waits on days near the canonical window end. */
 export const SMT_INCOMPLETE_METER_BACKFILL_LOOKBACK_DAYS = 3;
-
-const SMT_COVERAGE_TIMEZONE = "America/Chicago";
-
-const smtCoverageDateFmt = new Intl.DateTimeFormat("en-CA", {
-  timeZone: SMT_COVERAGE_TIMEZONE,
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
-
-const smtCoverageSlotFmt = new Intl.DateTimeFormat("en-CA", {
-  timeZone: SMT_COVERAGE_TIMEZONE,
-  hour: "numeric",
-  minute: "numeric",
-  hour12: false,
-});
-
-/** Local 15-minute slot index (0–95) for completeness checks. */
-export function chicagoSlot96FromTs(ts: Date): number | null {
-  try {
-    const parts = smtCoverageSlotFmt.formatToParts(ts);
-    const hour = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10);
-    const minute = parseInt(parts.find((p) => p.type === "minute")?.value ?? "0", 10);
-    const slot = hour * 4 + Math.floor(minute / 15);
-    return slot >= 0 && slot <= 95 ? slot : null;
-  } catch {
-    return null;
-  }
-}
 
 export function missingChicagoSlotsFromFilledSlots(filledSlots: ReadonlySet<number>): number[] {
   const missing: number[] = [];
@@ -124,15 +98,6 @@ export type SmtTailEnsureResult = {
   wait: SmtTailWaitResult | null;
   refreshResult?: UsageRefreshResult;
 };
-
-export function smtCoverageDateKey(date: Date | null | undefined): string | null {
-  if (!date) return null;
-  try {
-    return smtCoverageDateFmt.format(date);
-  } catch {
-    return date.toISOString().slice(0, 10);
-  }
-}
 
 export function smtUtcDateKey(date: Date | null | undefined): string | null {
   if (!date) return null;

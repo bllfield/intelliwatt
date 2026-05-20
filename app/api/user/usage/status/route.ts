@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { getRollingBackfillRange } from "@/lib/smt/agreements";
+import { chicagoDateKey } from "@/lib/time/chicago";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -11,23 +12,6 @@ export const runtime = "nodejs";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SMT_PULL_COOLDOWN_MS = 30 * DAY_MS;
 const SMT_READY_COMPLETENESS = 0.99;
-const SMT_TZ = "America/Chicago";
-
-const chicagoDateFmt = new Intl.DateTimeFormat("en-CA", {
-  timeZone: SMT_TZ,
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
-
-function chicagoDateKey(d: Date): string {
-  try {
-    return chicagoDateFmt.format(d); // YYYY-MM-DD
-  } catch {
-    return d.toISOString().slice(0, 10);
-  }
-}
-
 function dayIndexFromDateKey(key: string): number {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(key ?? "").trim());
   if (!m) return Number.NaN;

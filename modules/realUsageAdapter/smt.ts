@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { dateTimePartsInTimezone, enumerateDateKeysInclusive } from "@/lib/time/chicago";
+import { chicagoDateKey, dateTimePartsInTimezone, enumerateDateKeysInclusive } from "@/lib/time/chicago";
 
 export const SMT_SHAPE_DERIVATION_VERSION = "v1";
 
@@ -31,10 +31,6 @@ function utcRangeWithChicagoBuffer(months: string[]): { start: Date; endExclusiv
 
 function chicagoYearMonthFromBucket(bucket: Date): string {
   return dateTimePartsInTimezone(bucket, "America/Chicago")?.yearMonth ?? bucket.toISOString().slice(0, 7);
-}
-
-function chicagoDateKeyFromBucket(bucket: Date): string {
-  return dateTimePartsInTimezone(bucket, "America/Chicago")?.dateKey ?? bucket.toISOString().slice(0, 10);
 }
 
 export async function hasSmtIntervals(args: { esiid: string; canonicalMonths: string[] }): Promise<boolean> {
@@ -142,7 +138,7 @@ export async function fetchSmtCanonicalDailyTotals(args: {
   const dailyKwhByDateKey: Record<string, number> = {};
   let intervalsCount = 0;
   for (const row of rows) {
-    const dateKey = chicagoDateKeyFromBucket(row.bucket);
+    const dateKey = chicagoDateKey(row.bucket);
     dailyKwhByDateKey[dateKey] = Number(row.kwh) || 0;
     intervalsCount += Number(row.intervalscount) || 0;
   }

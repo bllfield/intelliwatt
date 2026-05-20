@@ -66,14 +66,51 @@ export function lastFullMonthChicago(now = new Date()): string {
   return month === 1 ? `${year - 1}-12` : `${year}-${pad2(month - 1)}`;
 }
 
-export function chicagoDateKey(now = new Date()): string {
-  const fmt = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Chicago",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  return fmt.format(now);
+const CHICAGO_TZ = "America/Chicago";
+
+const chicagoDateFmt = new Intl.DateTimeFormat("en-CA", {
+  timeZone: CHICAGO_TZ,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+const chicagoSlotFmt = new Intl.DateTimeFormat("en-CA", {
+  timeZone: CHICAGO_TZ,
+  hour: "numeric",
+  minute: "numeric",
+  hour12: false,
+});
+
+export function chicagoDateKey(now: Date = new Date()): string {
+  try {
+    return chicagoDateFmt.format(now);
+  } catch {
+    return now.toISOString().slice(0, 10);
+  }
+}
+
+/** Null-safe Chicago calendar date key for SMT coverage labeling. */
+export function smtCoverageDateKey(date: Date | null | undefined): string | null {
+  if (!date) return null;
+  try {
+    return chicagoDateFmt.format(date);
+  } catch {
+    return date.toISOString().slice(0, 10);
+  }
+}
+
+/** Local 15-minute slot index (0–95) in America/Chicago for SMT completeness checks. */
+export function chicagoSlot96FromTs(ts: Date): number | null {
+  try {
+    const parts = chicagoSlotFmt.formatToParts(ts);
+    const hour = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10);
+    const minute = parseInt(parts.find((p) => p.type === "minute")?.value ?? "0", 10);
+    const slot = hour * 4 + Math.floor(minute / 15);
+    return slot >= 0 && slot <= 95 ? slot : null;
+  } catch {
+    return null;
+  }
 }
 
 export function rollingAutoAnchorEndDateChicago(

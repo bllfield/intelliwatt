@@ -19,26 +19,11 @@ import {
 import { applySmtLedgerToActualDataset } from "@/lib/usage/smtDayCoverageLedger";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 import { buildUtcRangeForChicagoLocalDateRange } from "@/lib/usage/greenButtonCoverage";
-import { dateTimePartsInTimezone, prevCalendarDayDateKey } from "@/lib/time/chicago";
+import { chicagoDateKey, dateTimePartsInTimezone, prevCalendarDayDateKey } from "@/lib/time/chicago";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const USAGE_DB_ENABLED = Boolean((process.env.USAGE_DATABASE_URL ?? "").trim());
 const SMT_TZ = "America/Chicago";
-
-const chicagoDateFmt = new Intl.DateTimeFormat("en-CA", {
-  timeZone: SMT_TZ,
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
-
-function chicagoDateKey(d: Date): string {
-  try {
-    return chicagoDateFmt.format(d);
-  } catch {
-    return d.toISOString().slice(0, 10);
-  }
-}
 
 function normalizeDateKey(value: unknown): string | null {
   if (typeof value !== "string") return null;
