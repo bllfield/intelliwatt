@@ -154,11 +154,10 @@ vi.mock("@/lib/usage/userUsageHouseContract", () => ({
   buildUserUsageHouseContract: (...args: any[]) => buildUserUsageHouseContract(...args),
 }));
 
-const requestTargetedSmtIntervalBackfillForHouse = vi.fn();
+const ensureSmtCoverageForHouse = vi.fn();
 
-vi.mock("@/lib/usage/smtIncompleteMeterBackfill", () => ({
-  requestTargetedSmtIntervalBackfillForHouse: (...args: any[]) =>
-    requestTargetedSmtIntervalBackfillForHouse(...args),
+vi.mock("@/lib/usage/ensureSmtCoverage", () => ({
+  ensureSmtCoverageForHouse: (...args: any[]) => ensureSmtCoverageForHouse(...args),
 }));
 
 vi.mock("@/lib/usage/userUsageRefresh", () => ({
@@ -208,6 +207,57 @@ function buildDailyRows(startDate: string, endDate: string, kwh = 10) {
   return out;
 }
 
+function enablePostSimEnsureHeal() {
+  ensureSmtCoverageForHouse.mockImplementation(async (args: any) => {
+    const sessionKey = String(args?.sessionKey ?? "");
+    const baseDayStatus = {
+      window: { startDate: "2025-04-16", endDate: "2026-04-14" },
+      dateKeys: ["2026-04-12", "2026-04-14"],
+      byDate: {},
+      completeDateKeys: ["2026-04-14"],
+      incompleteDateKeys: ["2026-04-12"],
+      pendingDateKeys: [],
+      incompleteMeterDateKeys: ["2026-04-12"],
+      canonicalEndDayComplete: false,
+      ready: false,
+    };
+    if (sessionKey.startsWith("post:")) {
+      return {
+        healed: true,
+        window: baseDayStatus.window,
+        dayStatus: baseDayStatus,
+        backfillDateKeys: ["2026-04-12"],
+        targetedBackfill: {
+          ok: true,
+          dateKeys: ["2026-04-12"],
+          startDateKey: "2026-04-12",
+          endDateKey: "2026-04-12",
+        },
+        refreshResult: { ok: true, homes: [], backfill: [] },
+        tailWaitTimedOut: false,
+        incompleteMeterWaitTimedOut: false,
+      };
+    }
+    if (sessionKey.startsWith("tail:")) {
+      return {
+        healed: true,
+        window: baseDayStatus.window,
+        dayStatus: baseDayStatus,
+        backfillDateKeys: ["2026-04-12", "2026-04-14"],
+        refreshResult: { ok: true, homes: [], backfill: [] },
+        tailWaitTimedOut: true,
+        incompleteMeterWaitTimedOut: false,
+      };
+    }
+    return {
+      healed: false,
+      skippedReason: "window_ready",
+      window: baseDayStatus.window,
+      dayStatus: { ...baseDayStatus, ready: true, incompleteDateKeys: [] },
+    };
+  });
+}
+
 function buildSmtIntervalRows(startDate: string, endDate: string) {
   const out: Array<{ ts: Date }> = [];
   const start = new Date(`${startDate}T00:00:00.000Z`).getTime();
@@ -237,7 +287,7 @@ describe("admin one path sim route", () => {
     prismaSmtIntervalDayLedgerCreate.mockReset();
     prismaSmtIntervalDayLedgerUpdateMany.mockReset();
     requestUsageRefreshForUserHouse.mockReset();
-    requestTargetedSmtIntervalBackfillForHouse.mockReset();
+    ensureSmtCoverageForHouse.mockReset();
     usageGreenButtonIntervalAggregate.mockReset();
     getManualUsageInputForUserHouse.mockReset();
     saveManualUsageInputForUserHouse.mockReset();
@@ -291,11 +341,44 @@ describe("admin one path sim route", () => {
     prismaSmtIntervalDayLedgerCreate.mockResolvedValue({});
     prismaSmtIntervalDayLedgerUpdateMany.mockResolvedValue({ count: 0 });
     requestUsageRefreshForUserHouse.mockResolvedValue({ ok: true, homes: [], backfill: [] });
-    requestTargetedSmtIntervalBackfillForHouse.mockResolvedValue({
-      ok: true,
-      startDateKey: "2026-04-12",
-      endDateKey: "2026-04-12",
-      dateKeys: ["2026-04-12"],
+    ensureSmtCoverageForHouse.mockImplementation(async (args: any) => {
+      const sessionKey = String(args?.sessionKey ?? "");
+      const baseDayStatus = {
+        window: { startDate: "2025-04-16", endDate: "2026-04-14" },
+        dateKeys: ["2026-04-12", "2026-04-14"],
+        byDate: {},
+        completeDateKeys: ["2026-04-14"],
+        incompleteDateKeys: ["2026-04-12"],
+        pendingDateKeys: [],
+        incompleteMeterDateKeys: ["2026-04-12"],
+        canonicalEndDayComplete: false,
+        ready: false,
+      };
+      if (sessionKey.startsWith("post:")) {
+        return {
+          healed: false,
+          skippedReason: "session_throttle",
+          window: baseDayStatus.window,
+          dayStatus: { ...baseDayStatus, ready: true, incompleteDateKeys: [] },
+        };
+      }
+      if (sessionKey.startsWith("tail:")) {
+        return {
+          healed: true,
+          window: baseDayStatus.window,
+          dayStatus: baseDayStatus,
+          backfillDateKeys: ["2026-04-12", "2026-04-14"],
+          refreshResult: { ok: true, homes: [], backfill: [] },
+          tailWaitTimedOut: true,
+          incompleteMeterWaitTimedOut: false,
+        };
+      }
+      return {
+        healed: false,
+        skippedReason: "window_ready",
+        window: baseDayStatus.window,
+        dayStatus: { ...baseDayStatus, ready: true, incompleteDateKeys: [] },
+      };
     });
     usageGreenButtonIntervalAggregate.mockResolvedValue(null);
     lookupAdminHousesByEmail.mockResolvedValue({
@@ -1186,17 +1269,19 @@ describe("admin one path sim route", () => {
           attempted: true,
           wait: expect.objectContaining({
             timedOut: true,
-            incompleteTailDateKeys: expect.arrayContaining(["2026-04-14"]),
           }),
         }),
       })
     );
-    expect(requestUsageRefreshForUserHouse).toHaveBeenCalledWith({ userId: "user-1", houseId: "house-1" });
+    expect(ensureSmtCoverageForHouse).toHaveBeenCalledWith(
+      expect.objectContaining({ profile: "admin_sim", sessionKey: expect.stringMatching(/^tail:/) })
+    );
     expect(adaptIntervalRawInput).toHaveBeenCalledTimes(1);
     expect(runSharedSimulation).toHaveBeenCalledTimes(1);
   });
 
   it("requests a targeted SMT refresh and reruns once when the first result has incomplete meter days", async () => {
+    enablePostSimEnsureHeal();
     runSharedSimulation
       .mockResolvedValueOnce({
         artifactId: "artifact-1",
@@ -1254,18 +1339,21 @@ describe("admin one path sim route", () => {
     const json = await res.json();
 
     expect(res.status).toBe(200);
-    expect(requestUsageRefreshForUserHouse).toHaveBeenCalledWith({ userId: "user-1", houseId: "house-1" });
-    expect(requestUsageRefreshForUserHouse.mock.calls.length).toBeGreaterThanOrEqual(2);
-    expect(requestTargetedSmtIntervalBackfillForHouse).toHaveBeenCalledWith({
-      houseId: "house-1",
-      dateKeys: ["2026-04-12"],
-    });
+    expect(ensureSmtCoverageForHouse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        houseId: "house-1",
+        profile: "admin_sim",
+        sessionKey: expect.stringMatching(/^post:/),
+      })
+    );
     expect(adaptIntervalRawInput).toHaveBeenCalledTimes(2);
     expect(runSharedSimulation).toHaveBeenCalledTimes(2);
     expect(buildSharedSimulationReadModel).not.toHaveBeenCalled();
     expect(json.smtIncompleteMeterRetry).toEqual(
       expect.objectContaining({
         attempted: true,
+        repairKind: "ensure_smt_coverage",
         requestedDateKeys: ["2026-04-12"],
         postRetryIncompleteDateKeys: [],
         targetedIntervalBackfill: expect.objectContaining({ ok: true }),
@@ -1287,6 +1375,7 @@ describe("admin one path sim route", () => {
   });
 
   it("runs incomplete-meter backfill even when deferred pending repair also runs", async () => {
+    enablePostSimEnsureHeal();
     prismaSmtIntervalDayLedgerFindMany.mockImplementation(async (args: any) => {
       const status = args?.where?.status;
       if (status === "PENDING_SMT") {
@@ -1355,13 +1444,12 @@ describe("admin one path sim route", () => {
     expect(json.smtIncompleteMeterRetry).toEqual(
       expect.objectContaining({
         attempted: true,
-        repairKind: "deferred_pending_and_incomplete_meter_backfill",
-        deferredPendingDateKeys: ["2026-04-11"],
-        incompleteMeterBackfillDateKeys: ["2026-04-12"],
-        requestedDateKeys: ["2026-04-11", "2026-04-12"],
+        repairKind: "ensure_smt_coverage",
+        requestedDateKeys: ["2026-04-12"],
+        targetedIntervalBackfill: expect.objectContaining({ ok: true }),
       })
     );
-    expect(requestUsageRefreshForUserHouse.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(ensureSmtCoverageForHouse).toHaveBeenCalled();
     expect(adaptIntervalRawInput).toHaveBeenCalledTimes(2);
     expect(runSharedSimulation).toHaveBeenCalledTimes(2);
   });
@@ -1452,6 +1540,7 @@ describe("admin one path sim route", () => {
   });
 
   it("runs incomplete-meter backfill on lean debug-off INTERVAL past readback", async () => {
+    enablePostSimEnsureHeal();
     readOnePathSimulatedUsageScenario
       .mockResolvedValueOnce({
         ok: true,
@@ -1508,7 +1597,14 @@ describe("admin one path sim route", () => {
     expect(res.status).toBe(200);
     expect(json.ok).toBe(true);
     expect(json.executionMode).toBe("artifact_readback");
-    expect(requestUsageRefreshForUserHouse).toHaveBeenCalledWith({ userId: "user-1", houseId: "house-1" });
+    expect(ensureSmtCoverageForHouse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        houseId: "house-1",
+        profile: "admin_sim",
+        sessionKey: expect.stringMatching(/^post:/),
+      })
+    );
     expect(readOnePathSimulatedUsageScenario).toHaveBeenCalledTimes(2);
     expect(readOnePathSimulatedUsageScenario.mock.calls[1]?.[0]).toEqual(
       expect.objectContaining({
@@ -1518,14 +1614,17 @@ describe("admin one path sim route", () => {
     expect(json.smtIncompleteMeterRetry).toEqual(
       expect.objectContaining({
         attempted: true,
-        incompleteMeterBackfillDateKeys: ["2026-04-12"],
+        repairKind: "ensure_smt_coverage",
+        requestedDateKeys: ["2026-04-12"],
         postRetryIncompleteDateKeys: [],
+        targetedIntervalBackfill: expect.objectContaining({ ok: true }),
       })
     );
     expect(runSharedSimulation).not.toHaveBeenCalled();
   });
 
   it("runs incomplete-meter backfill from ledger when artifact meta omits simulatedSourceDetailByDate", async () => {
+    enablePostSimEnsureHeal();
     prismaSmtIntervalDayLedgerFindMany.mockImplementation(async () => [
       { dateKey: "2026-04-12", status: "INCOMPLETE_METER", intervalCount: 76, repairAttemptedAt: null },
     ]);
@@ -1577,12 +1676,19 @@ describe("admin one path sim route", () => {
     expect(json.smtIncompleteMeterRetry).toEqual(
       expect.objectContaining({
         attempted: true,
-        incompleteMeterBackfillDateKeys: ["2026-04-12"],
-        incompleteMeterBackfillFromLedgerDateKeys: ["2026-04-12"],
-        incompleteMeterBackfillFromArtifactDateKeys: ["2026-04-12"],
+        repairKind: "ensure_smt_coverage",
+        requestedDateKeys: ["2026-04-12"],
+        targetedIntervalBackfill: expect.objectContaining({ ok: true }),
       })
     );
-    expect(requestUsageRefreshForUserHouse).toHaveBeenCalledWith({ userId: "user-1", houseId: "house-1" });
+    expect(ensureSmtCoverageForHouse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        houseId: "house-1",
+        profile: "admin_sim",
+        sessionKey: expect.stringMatching(/^post:/),
+      })
+    );
   });
 
   it("returns a lean manual Stage 1 preview on manual lookup without falling back to the user manual page path", async () => {

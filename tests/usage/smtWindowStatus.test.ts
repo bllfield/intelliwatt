@@ -88,6 +88,29 @@ describe("smtWindowStatus", () => {
     expect(status.ready).toBe(false);
   });
 
+  it("drops stale ledger pending keys when slots are already 96/96", async () => {
+    const dateKey = "2026-05-17";
+    findManyMock.mockResolvedValue(
+      rowsForChicagoDateSlots(dateKey, Array.from({ length: 96 }, (_, i) => i)) as never
+    );
+    loadSmtDayLedgerSnapshotMock.mockResolvedValue({
+      canonicalEndDate: dateKey,
+      byDate: { [dateKey]: SMT_DAY_LEDGER_STATUS.PENDING_SMT },
+      pendingDateKeys: [dateKey],
+      incompleteMeterDateKeys: [],
+    });
+
+    const status = await loadSmtWindowDayStatus({
+      esiid: "10400511114390001",
+      dateKeys: [dateKey],
+      now: new Date("2026-05-20T12:00:00.000Z"),
+    });
+
+    expect(status.ready).toBe(true);
+    expect(status.pendingDateKeys).toEqual([]);
+    expect(status.incompleteDateKeys).toEqual([]);
+  });
+
   it("reports ready when every requested day has 96 slots", async () => {
     const dateKey = "2026-05-17";
     findManyMock.mockResolvedValue(

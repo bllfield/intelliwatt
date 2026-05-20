@@ -4,7 +4,11 @@ import {
   CANONICAL_COVERAGE_TOTAL_DAYS,
 } from "@/lib/usage/canonicalCoverageConfig";
 import { canonicalUsageWindowChicago, chicagoSlot96FromTs, enumerateDateKeysInclusive, smtCoverageDateKey } from "@/lib/time/chicago";
-import { loadSmtDayLedgerSnapshot, type SmtDayLedgerStatus } from "@/lib/usage/smtDayCoverageLedger";
+import {
+  loadSmtDayLedgerSnapshot,
+  SMT_DAY_LEDGER_STATUS,
+  type SmtDayLedgerStatus,
+} from "@/lib/usage/smtDayCoverageLedger";
 
 export const SMT_REQUIRED_SLOTS_PER_DAY = 96;
 
@@ -179,14 +183,29 @@ export async function loadSmtWindowDayStatus(args: {
 
   const canonicalEndDayComplete = byDate[window.endDate]?.isComplete === true;
 
+  const pendingDateKeys: string[] = [];
+  const incompleteMeterDateKeys: string[] = [];
+  for (const dateKey of incompleteDateKeys) {
+    const ledgerStatus = byDate[dateKey]?.ledgerStatus;
+    if (ledgerStatus === SMT_DAY_LEDGER_STATUS.PENDING_SMT) {
+      pendingDateKeys.push(dateKey);
+    } else if (ledgerStatus === SMT_DAY_LEDGER_STATUS.INCOMPLETE_METER) {
+      incompleteMeterDateKeys.push(dateKey);
+    } else if (dateKey === window.endDate) {
+      pendingDateKeys.push(dateKey);
+    } else {
+      incompleteMeterDateKeys.push(dateKey);
+    }
+  }
+
   return {
     window,
     dateKeys,
     byDate,
     completeDateKeys,
     incompleteDateKeys,
-    pendingDateKeys: ledger.pendingDateKeys,
-    incompleteMeterDateKeys: ledger.incompleteMeterDateKeys,
+    pendingDateKeys,
+    incompleteMeterDateKeys,
     canonicalEndDayComplete,
     ready: incompleteDateKeys.length === 0,
   };

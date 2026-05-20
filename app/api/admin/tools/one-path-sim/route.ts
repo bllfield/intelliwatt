@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { buildUserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
-import { requestTargetedSmtIntervalBackfillForHouse } from "@/lib/usage/smtIncompleteMeterBackfill";
+import { ensureSmtCoverageForHouse } from "@/lib/usage/ensureSmtCoverage";
 import { requestUsageRefreshForUserHouse } from "@/lib/usage/userUsageRefresh";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { getHomeProfileReadOnlyByUserHouse, getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
@@ -58,25 +58,12 @@ import type { ManualUsagePayload } from "@/modules/onePathSim/simulatedUsage/typ
 import { buildValidationCompareProjectionSidecar } from "@/modules/onePathSim/usageSimulator/compareProjection";
 import { createSimCorrelationId, getMemoryRssMb, logSimPipelineEvent } from "@/modules/onePathSim/usageSimulator/simObservability";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/onePathSim/usageSimulator/metadataWindow";
+import { chicagoPullDateKey } from "@/lib/usage/smtDayCoverageLedger";
 import {
-  chicagoPullDateKey,
-  reconcileSmtIntervalDayLedger,
-  runDeferredPendingSmtDayRepairs,
-} from "@/lib/usage/smtDayCoverageLedger";
-import {
-  addDateKeyDays,
-  filterDateKeysNearTargetEnd,
-  loadSmtDateCoverage,
   loadSmtTailCoverage,
   normalizeDateKeys,
-  ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_SECOND_PASS_WAIT_TIMEOUT_MS,
-  ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS,
   ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS,
-  SMT_INCOMPLETE_METER_BACKFILL_LOOKBACK_DAYS,
-  SMT_NEAR_COMPLETE_INTERVAL_THRESHOLD,
-  SMT_POST_BACKFILL_SETTLE_DELAY_MS,
   SMT_TAIL_WAIT_INTERVAL_MS,
-  waitForSmtDateCoverage,
   waitForSmtTailCoverage,
 } from "@/lib/usage/smtTailCoverage";
 import { buildRuntimeEnvParityTrace } from "@/modules/onePathSim/runtimeEnvParityTrace";
@@ -913,64 +900,6 @@ async function waitForOnePathSmtTailCoverage(args: {
   };
 }
 
-async function waitForOnePathSmtDateCoverage(args: {
-  esiid: string;
-  dateKeys: string[];
-  correlationId: string;
-  effectiveHouseId: string;
-  actualContextHouseId: string;
-  sourceUserId: string;
-  sourceHouseId: string;
-  afterTargetedBackfill?: boolean;
-  waitTimeoutMs?: number;
-}) {
-  const waitResult = await waitForSmtDateCoverage({
-    esiid: args.esiid,
-    dateKeys: args.dateKeys,
-    timeoutMs:
-      args.waitTimeoutMs ??
-      (args.afterTargetedBackfill
-        ? ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS
-        : ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS),
-    intervalMs: SMT_TAIL_WAIT_INTERVAL_MS,
-    initialDelayMs: args.afterTargetedBackfill ? SMT_POST_BACKFILL_SETTLE_DELAY_MS : undefined,
-    exitEarlyWhenStalled: !args.afterTargetedBackfill,
-    midWaitRefresh: args.afterTargetedBackfill
-      ? async () => {
-          await requestUsageRefreshForUserHouse({
-            userId: args.sourceUserId,
-            houseId: args.sourceHouseId,
-          });
-        }
-      : undefined,
-  });
-  const latest = waitResult;
-  const durationMs = waitResult.durationMs;
-  const attempts = waitResult.attempts;
-  logSimPipelineEvent("one_path_smt_incomplete_meter_backfill_wait_complete", {
-    correlationId: args.correlationId,
-    houseId: args.effectiveHouseId,
-    sourceHouseId: args.actualContextHouseId !== args.effectiveHouseId ? args.actualContextHouseId : undefined,
-    sourceUserId: args.sourceUserId,
-    sourceEsiid: args.esiid,
-    durationMs,
-    attempts,
-    requestedDateKeys: latest.dateKeys.join(","),
-    incompleteDateKeys: latest.incompleteDateKeys.join(","),
-    countsByDate: jsonForLog(latest.countsByDate),
-    ready: latest.ready,
-    timedOut: !latest.ready,
-    source: "one-path-admin",
-    memoryRssMb: getMemoryRssMb(),
-  });
-  return {
-    ...latest,
-    durationMs,
-    attempts,
-    timedOut: !latest.ready,
-  };
-}
-
 async function maybeRefreshOnePathSmtTailCoverage(args: {
   mode: CanonicalSimulationInputType;
   preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
@@ -986,13 +915,12 @@ async function maybeRefreshOnePathSmtTailCoverage(args: {
   const esiid = String(args.sourceEsiid ?? "").trim();
   if (!esiid) return null;
 
-  const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
-  const targetEndDate = canonicalCoverage.endDate;
-  const initialCoverage = await loadSmtTailCoverage({ esiid, targetEndDate });
-  const shouldRefresh =
-    !initialCoverage.coverageEndDate ||
-    initialCoverage.coverageEndDate < targetEndDate ||
-    !initialCoverage.tailReady;
+  const ensure = await ensureSmtCoverageForHouse({
+    userId: args.sourceUserId,
+    houseId: args.sourceHouseId,
+    profile: "admin_sim",
+    sessionKey: `tail:${args.correlationId}`,
+  });
 
   logSimPipelineEvent("one_path_smt_tail_backfill_check", {
     correlationId: args.correlationId,
@@ -1000,77 +928,49 @@ async function maybeRefreshOnePathSmtTailCoverage(args: {
     sourceHouseId: args.actualContextHouseId !== args.effectiveHouseId ? args.actualContextHouseId : undefined,
     sourceUserId: args.sourceUserId,
     sourceEsiid: esiid,
-    intervalCount: initialCoverage.intervalCount,
-    coverageStartDate: initialCoverage.coverageStartDate,
-    coverageEndDate: initialCoverage.coverageEndDate,
-    coverageStartUtcDate: initialCoverage.coverageStartUtcDate,
-    coverageEndUtcDate: initialCoverage.coverageEndUtcDate,
-    targetEndDate,
-    tailStartDate: initialCoverage.tailStartDate,
-    incompleteTailDateKeys: initialCoverage.incompleteTailDateKeys.join(","),
-    tailCountsByDate: jsonForLog(initialCoverage.tailCountsByDate),
-    refreshNeeded: shouldRefresh,
+    targetEndDate: ensure.window.endDate,
+    incompleteDateKeys: ensure.dayStatus.incompleteDateKeys.join(","),
+    healed: ensure.healed,
+    skippedReason: ensure.skippedReason ?? null,
     source: "one-path-admin",
     memoryRssMb: getMemoryRssMb(),
   });
 
-  if (!shouldRefresh) {
+  if (!ensure.healed) {
     return {
       attempted: false,
-      reason: "coverage_tail_current",
-      coverageStartDate: initialCoverage.coverageStartDate,
-      coverageEndDate: initialCoverage.coverageEndDate,
-      targetEndDate,
+      reason: ensure.skippedReason === "session_throttle" ? "coverage_tail_current" : "coverage_tail_current",
+      coverageStartDate: null,
+      coverageEndDate: ensure.dayStatus.window.endDate,
+      targetEndDate: ensure.window.endDate,
       wait: null,
+      ensure,
     };
   }
 
-  const refreshResult = await requestUsageRefreshForUserHouse({
-    userId: args.sourceUserId,
-    houseId: args.sourceHouseId,
-  }).catch((error) => ({
-    ok: false as const,
-    error: "refresh_failed" as const,
-    message: error instanceof Error ? error.message : String(error),
-  }));
   logSimPipelineEvent("one_path_smt_tail_backfill_requested", {
     correlationId: args.correlationId,
     houseId: args.effectiveHouseId,
-    sourceHouseId: args.actualContextHouseId !== args.effectiveHouseId ? args.actualContextHouseId : undefined,
     sourceUserId: args.sourceUserId,
     sourceEsiid: esiid,
-    intervalCount: initialCoverage.intervalCount,
-    coverageStartDate: initialCoverage.coverageStartDate,
-    coverageEndDate: initialCoverage.coverageEndDate,
-    coverageStartUtcDate: initialCoverage.coverageStartUtcDate,
-    coverageEndUtcDate: initialCoverage.coverageEndUtcDate,
-    targetEndDate,
-    tailStartDate: initialCoverage.tailStartDate,
-    incompleteTailDateKeys: initialCoverage.incompleteTailDateKeys.join(","),
-    refreshOk: refreshResult.ok,
-    refreshMessage: (refreshResult as any)?.message ?? (refreshResult as any)?.error ?? null,
-    pullAttempted: Array.isArray((refreshResult as any)?.homes)
-      ? Boolean((refreshResult as any).homes.some((home: any) => home?.pull?.attempted))
-      : undefined,
-    backfillCount: Array.isArray((refreshResult as any)?.backfill) ? (refreshResult as any).backfill.length : undefined,
+    targetEndDate: ensure.window.endDate,
+    backfillDateKeys: (ensure.backfillDateKeys ?? []).join(","),
+    refreshOk: ensure.refreshResult?.ok,
     source: "one-path-admin",
     memoryRssMb: getMemoryRssMb(),
   });
-  const waitResult = await waitForOnePathSmtTailCoverage({
-    esiid,
-    targetEndDate,
-    correlationId: args.correlationId,
-    effectiveHouseId: args.effectiveHouseId,
-    actualContextHouseId: args.actualContextHouseId,
-    sourceUserId: args.sourceUserId,
-  });
+
   return {
     attempted: true,
-    coverageStartDate: initialCoverage.coverageStartDate,
-    coverageEndDate: initialCoverage.coverageEndDate,
-    targetEndDate,
-    result: refreshResult,
-    wait: waitResult,
+    coverageStartDate: ensure.window.startDate,
+    coverageEndDate: ensure.window.endDate,
+    targetEndDate: ensure.window.endDate,
+    result: ensure.refreshResult,
+    wait: {
+      tailReady: ensure.dayStatus.canonicalEndDayComplete,
+      timedOut: Boolean(ensure.tailWaitTimedOut || ensure.incompleteMeterWaitTimedOut),
+    },
+    ensure,
   };
 }
 
@@ -1096,81 +996,18 @@ function extractIncompleteMeterDateKeysFromDataset(dataset: unknown): string[] {
 
 type OnePathSmtPostSimHealingResult = {
   attempted: boolean;
-  repairKind?:
-    | "deferred_pending"
-    | "incomplete_meter_backfill"
-    | "deferred_pending_and_incomplete_meter_backfill";
+  repairKind?: "ensure_smt_coverage";
   pullDateKey: string;
   requestedDateKeys: string[];
-  eligibleDateKeys?: string[];
-  deferredPendingDateKeys?: string[];
-  incompleteMeterBackfillDateKeys?: string[];
-  incompleteMeterBackfillFromLedgerDateKeys?: string[];
-  incompleteMeterBackfillFromArtifactDateKeys?: string[];
   refreshResult?: Awaited<ReturnType<typeof requestUsageRefreshForUserHouse>>;
   waitTimedOut?: boolean;
-  incompleteMeterCoverageWait?: {
-    countsByDate: Record<string, number>;
-    missingSlotsByDate?: Record<string, number[]>;
-    incompleteDateKeys: string[];
-    timedOut: boolean;
-    durationMs?: number;
-    attempts?: number;
-    waitTimeoutMs?: number;
-  };
-  nearCompleteSecondPass?: {
-    attempted: boolean;
-    nearCompleteDateKeys: string[];
-    expandedBackfillDateKeys: string[];
-    incompleteMeterCoverageWait?: {
-      countsByDate: Record<string, number>;
-      missingSlotsByDate?: Record<string, number[]>;
-      incompleteDateKeys: string[];
-      timedOut: boolean;
-      durationMs?: number;
-      attempts?: number;
-      waitTimeoutMs?: number;
-    };
-    targetedIntervalBackfill?: Awaited<ReturnType<typeof requestTargetedSmtIntervalBackfillForHouse>>;
-  };
-  targetedIntervalBackfill?: Awaited<ReturnType<typeof requestTargetedSmtIntervalBackfillForHouse>>;
+  targetedIntervalBackfill?: Awaited<
+    ReturnType<typeof ensureSmtCoverageForHouse>
+  >["targetedBackfill"];
   postTargetedBackfillRefreshResult?: Awaited<ReturnType<typeof requestUsageRefreshForUserHouse>>;
-  reconcile?: Awaited<ReturnType<typeof reconcileSmtIntervalDayLedger>>;
-  postRetryIncompleteDateKeys?: string[];
+  reconcile?: Awaited<ReturnType<typeof ensureSmtCoverageForHouse>>["reconcile"];
+  ensure?: Awaited<ReturnType<typeof ensureSmtCoverageForHouse>>;
 };
-
-async function resolveIncompleteMeterBackfillDateKeys(args: {
-  esiid: string;
-  artifactDataset: unknown;
-  targetEndDate: string;
-  ledgerSnapshot?: Pick<
-    Awaited<ReturnType<typeof reconcileSmtIntervalDayLedger>>,
-    "incompleteMeterDateKeys"
-  > | null;
-}): Promise<{
-  dateKeys: string[];
-  fromLedgerDateKeys: string[];
-  fromArtifactDateKeys: string[];
-}> {
-  const fromArtifact = filterDateKeysNearTargetEnd(
-    extractIncompleteMeterDateKeysFromDataset(args.artifactDataset),
-    args.targetEndDate,
-    SMT_INCOMPLETE_METER_BACKFILL_LOOKBACK_DAYS
-  );
-  const ledgerSnapshot =
-    args.ledgerSnapshot ??
-    (await reconcileSmtIntervalDayLedger({ esiid: args.esiid }).catch(() => null));
-  const fromLedger = filterDateKeysNearTargetEnd(
-    ledgerSnapshot?.incompleteMeterDateKeys ?? [],
-    args.targetEndDate,
-    SMT_INCOMPLETE_METER_BACKFILL_LOOKBACK_DAYS
-  );
-  return {
-    dateKeys: normalizeDateKeys([...fromLedger, ...fromArtifact]),
-    fromLedgerDateKeys: fromLedger,
-    fromArtifactDateKeys: fromArtifact,
-  };
-}
 
 async function maybeRunOnePathSmtPostSimHealing(args: {
   mode: CanonicalSimulationInputType;
@@ -1188,235 +1025,46 @@ async function maybeRunOnePathSmtPostSimHealing(args: {
   const esiid = String(args.sourceEsiid ?? "").trim();
   if (!esiid) return null;
 
-  const pullDateKey = chicagoPullDateKey();
-
-  const deferredRepair = await runDeferredPendingSmtDayRepairs({
-    esiid,
+  const ensure = await ensureSmtCoverageForHouse({
     userId: args.sourceUserId,
     houseId: args.sourceHouseId,
-    waitTimeoutMs: ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS,
+    profile: "admin_sim",
+    sessionKey: `post:${args.correlationId}`,
   });
-  const targetEndDate = resolveCanonicalUsage365CoverageWindow().endDate;
-  const incompleteMeterBackfill = await resolveIncompleteMeterBackfillDateKeys({
-    esiid,
-    artifactDataset: args.artifactDataset,
-    targetEndDate,
-    ledgerSnapshot: deferredRepair.reconcile ?? null,
-  });
-  const incompleteMeterBackfillDateKeys = incompleteMeterBackfill.dateKeys;
 
-  logSimPipelineEvent("one_path_smt_deferred_day_repair", {
+  logSimPipelineEvent("one_path_smt_post_sim_heal", {
     correlationId: args.correlationId,
     houseId: args.effectiveHouseId,
     sourceHouseId: args.actualContextHouseId !== args.effectiveHouseId ? args.actualContextHouseId : undefined,
     sourceUserId: args.sourceUserId,
     sourceEsiid: esiid,
-    attempted: deferredRepair.attempted,
-    eligibleDateKeys: deferredRepair.eligibleDateKeys.join(","),
-    incompleteMeterBackfillDateKeys: incompleteMeterBackfillDateKeys.join(","),
-    pullDateKey: deferredRepair.pullDateKey,
-    refreshOk: deferredRepair.refreshResult?.ok,
-    waitTimedOut: deferredRepair.waitTimedOut,
+    healed: ensure.healed,
+    skippedReason: ensure.skippedReason ?? null,
+    backfillDateKeys: (ensure.backfillDateKeys ?? []).join(","),
+    incompleteDateKeys: ensure.dayStatus.incompleteDateKeys.join(","),
     source: "one-path-admin",
     memoryRssMb: getMemoryRssMb(),
   });
 
-  if (!deferredRepair.attempted && incompleteMeterBackfillDateKeys.length === 0) {
+  if (!ensure.healed) {
     return null;
   }
 
-  let refreshResult = deferredRepair.refreshResult;
-  let waitTimedOut = deferredRepair.waitTimedOut;
-  let reconcile = deferredRepair.reconcile;
-  let incompleteMeterCoverageWait: OnePathSmtPostSimHealingResult["incompleteMeterCoverageWait"];
-  let nearCompleteSecondPass: OnePathSmtPostSimHealingResult["nearCompleteSecondPass"];
-  let targetedIntervalBackfill: OnePathSmtPostSimHealingResult["targetedIntervalBackfill"];
-  let postTargetedBackfillRefreshResult: OnePathSmtPostSimHealingResult["postTargetedBackfillRefreshResult"];
-
-  if (incompleteMeterBackfillDateKeys.length > 0) {
-    logSimPipelineEvent("one_path_smt_incomplete_meter_backfill_requested", {
-      correlationId: args.correlationId,
-      houseId: args.effectiveHouseId,
-      sourceHouseId: args.actualContextHouseId !== args.effectiveHouseId ? args.actualContextHouseId : undefined,
-      sourceUserId: args.sourceUserId,
-      sourceEsiid: esiid,
-      requestedDateKeys: incompleteMeterBackfillDateKeys.join(","),
-      targetEndDate,
-      pullDateKey,
-      deferredRepairAlreadyAttempted: deferredRepair.attempted,
-      source: "one-path-admin",
-      memoryRssMb: getMemoryRssMb(),
-    });
-
-    const backfillRefreshResult = await requestUsageRefreshForUserHouse({
-      userId: args.sourceUserId,
-      houseId: args.sourceHouseId,
-    }).catch((error) => ({
-      ok: false as const,
-      error: "refresh_failed" as const,
-      message: error instanceof Error ? error.message : String(error),
-    }));
-    if (backfillRefreshResult.ok !== false) {
-      refreshResult = backfillRefreshResult;
-    }
-
-    targetedIntervalBackfill = await requestTargetedSmtIntervalBackfillForHouse({
-      houseId: args.sourceHouseId,
-      dateKeys: incompleteMeterBackfillDateKeys,
-    }).catch((error) => ({
-      ok: false as const,
-      skipped: "targeted_backfill_failed",
-      message: error instanceof Error ? error.message : String(error),
-    }));
-
-    // Backfill only queues FTP delivery; pull again so new files are ingested before we poll counts.
-    const postBackfillRefresh = await requestUsageRefreshForUserHouse({
-      userId: args.sourceUserId,
-      houseId: args.sourceHouseId,
-    }).catch((error) => ({
-      ok: false as const,
-      error: "refresh_failed" as const,
-      message: error instanceof Error ? error.message : String(error),
-    }));
-    if (postBackfillRefresh.ok !== false) {
-      refreshResult = postBackfillRefresh;
-      postTargetedBackfillRefreshResult = postBackfillRefresh;
-    }
-
-    const waitResult = await waitForOnePathSmtDateCoverage({
-      esiid,
-      dateKeys: incompleteMeterBackfillDateKeys,
-      correlationId: args.correlationId,
-      effectiveHouseId: args.effectiveHouseId,
-      actualContextHouseId: args.actualContextHouseId,
-      sourceUserId: args.sourceUserId,
-      sourceHouseId: args.sourceHouseId,
-      afterTargetedBackfill: true,
-    });
-    waitTimedOut = waitTimedOut || waitResult.timedOut;
-    incompleteMeterCoverageWait = {
-      countsByDate: waitResult.countsByDate,
-      missingSlotsByDate: waitResult.missingSlotsByDate,
-      incompleteDateKeys: waitResult.incompleteDateKeys,
-      timedOut: waitResult.timedOut,
-      durationMs: waitResult.durationMs,
-      attempts: waitResult.attempts,
-      waitTimeoutMs: ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS,
-    };
-
-    const nearCompleteDateKeys = waitResult.incompleteDateKeys.filter(
-      (dateKey) => (waitResult.countsByDate[dateKey] ?? 0) >= SMT_NEAR_COMPLETE_INTERVAL_THRESHOLD
-    );
-    if (!waitResult.ready && nearCompleteDateKeys.length > 0) {
-      const expandedBackfillDateKeys = filterDateKeysNearTargetEnd(
-        normalizeDateKeys([
-          ...nearCompleteDateKeys,
-          ...nearCompleteDateKeys.flatMap((dateKey) => [addDateKeyDays(dateKey, -1), addDateKeyDays(dateKey, 1)]),
-        ]),
-        targetEndDate,
-        SMT_INCOMPLETE_METER_BACKFILL_LOOKBACK_DAYS + 1
-      );
-      logSimPipelineEvent("one_path_smt_near_complete_second_pass_requested", {
-        correlationId: args.correlationId,
-        houseId: args.effectiveHouseId,
-        sourceEsiid: esiid,
-        nearCompleteDateKeys: nearCompleteDateKeys.join(","),
-        expandedBackfillDateKeys: expandedBackfillDateKeys.join(","),
-        countsByDate: jsonForLog(waitResult.countsByDate),
-        missingSlotsByDate: jsonForLog(
-          Object.fromEntries(
-            nearCompleteDateKeys.map((dateKey) => [dateKey, waitResult.missingSlotsByDate[dateKey] ?? []])
-          )
-        ),
-        source: "one-path-admin",
-        memoryRssMb: getMemoryRssMb(),
-      });
-
-      const secondBackfill = await requestTargetedSmtIntervalBackfillForHouse({
-        houseId: args.sourceHouseId,
-        dateKeys: expandedBackfillDateKeys,
-      }).catch((error) => ({
-        ok: false as const,
-        skipped: "targeted_backfill_failed",
-        message: error instanceof Error ? error.message : String(error),
-      }));
-
-      await requestUsageRefreshForUserHouse({
-        userId: args.sourceUserId,
-        houseId: args.sourceHouseId,
-      }).catch(() => null);
-
-      const secondWait = await waitForOnePathSmtDateCoverage({
-        esiid,
-        dateKeys: nearCompleteDateKeys,
-        correlationId: args.correlationId,
-        effectiveHouseId: args.effectiveHouseId,
-        actualContextHouseId: args.actualContextHouseId,
-        sourceUserId: args.sourceUserId,
-        sourceHouseId: args.sourceHouseId,
-        afterTargetedBackfill: true,
-        waitTimeoutMs: ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_SECOND_PASS_WAIT_TIMEOUT_MS,
-      });
-      waitTimedOut = waitTimedOut || secondWait.timedOut;
-      nearCompleteSecondPass = {
-        attempted: true,
-        nearCompleteDateKeys,
-        expandedBackfillDateKeys,
-        targetedIntervalBackfill: secondBackfill,
-        incompleteMeterCoverageWait: {
-          countsByDate: secondWait.countsByDate,
-          missingSlotsByDate: secondWait.missingSlotsByDate,
-          incompleteDateKeys: secondWait.incompleteDateKeys,
-          timedOut: secondWait.timedOut,
-          durationMs: secondWait.durationMs,
-          attempts: secondWait.attempts,
-          waitTimeoutMs: ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_SECOND_PASS_WAIT_TIMEOUT_MS,
-        },
-      };
-      incompleteMeterCoverageWait = {
-        countsByDate: secondWait.countsByDate,
-        missingSlotsByDate: secondWait.missingSlotsByDate,
-        incompleteDateKeys: secondWait.incompleteDateKeys,
-        timedOut: secondWait.timedOut,
-        durationMs: (incompleteMeterCoverageWait.durationMs ?? 0) + (secondWait.durationMs ?? 0),
-        attempts: (incompleteMeterCoverageWait.attempts ?? 0) + (secondWait.attempts ?? 0),
-        waitTimeoutMs:
-          ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS +
-          ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_SECOND_PASS_WAIT_TIMEOUT_MS,
-      };
-    }
-
-    reconcile = (await reconcileSmtIntervalDayLedger({ esiid }).catch(() => null)) ?? reconcile;
-  }
-
-  const requestedDateKeys = normalizeDateKeys([
-    ...deferredRepair.eligibleDateKeys,
-    ...incompleteMeterBackfillDateKeys,
-  ]);
-  const repairKind =
-    deferredRepair.attempted && incompleteMeterBackfillDateKeys.length > 0
-      ? "deferred_pending_and_incomplete_meter_backfill"
-      : deferredRepair.attempted
-        ? "deferred_pending"
-        : "incomplete_meter_backfill";
-
+  const requestedDateKeys = ensure.backfillDateKeys ?? [];
   return {
     attempted: true,
-    repairKind,
-    pullDateKey: deferredRepair.pullDateKey,
+    repairKind: "ensure_smt_coverage",
+    pullDateKey: chicagoPullDateKey(),
     requestedDateKeys,
-    eligibleDateKeys: deferredRepair.eligibleDateKeys,
-    deferredPendingDateKeys: deferredRepair.eligibleDateKeys,
-    incompleteMeterBackfillDateKeys,
-    incompleteMeterBackfillFromLedgerDateKeys: incompleteMeterBackfill.fromLedgerDateKeys,
-    incompleteMeterBackfillFromArtifactDateKeys: incompleteMeterBackfill.fromArtifactDateKeys,
-    refreshResult: refreshResult?.ok === false ? undefined : refreshResult,
-    waitTimedOut,
-    incompleteMeterCoverageWait,
-    nearCompleteSecondPass,
-    targetedIntervalBackfill,
-    postTargetedBackfillRefreshResult,
-    reconcile: reconcile ?? undefined,
+    refreshResult: ensure.refreshResult?.ok === false ? undefined : ensure.refreshResult,
+    waitTimedOut: Boolean(ensure.tailWaitTimedOut || ensure.incompleteMeterWaitTimedOut),
+    targetedIntervalBackfill: ensure.targetedBackfill,
+    postTargetedBackfillRefreshResult:
+      ensure.postTargetedBackfillRefreshResult?.ok === false
+        ? undefined
+        : ensure.postTargetedBackfillRefreshResult,
+    reconcile: ensure.reconcile,
+    ensure,
   };
 }
 
