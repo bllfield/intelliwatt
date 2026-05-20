@@ -92,8 +92,8 @@ type UsageCoverage = {
 };
 
 async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverage> {
-  // This "target" window is used for messaging/backoff (e.g. "tail gap" to the most recent day),
-  // not for readiness. Readiness is computed from contiguous completeness across the observed span.
+  // Target 12-month window drives pull eligibility and gap messaging only.
+  // Readiness matches usage/status: every canonical window day 96/96 and no pending raw files.
   const target = getRollingBackfillRange(12);
 
   const intervalAggAll = await prisma.smtInterval.aggregate({
@@ -141,8 +141,7 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
   const hasFullWindow =
     coverageDays >= 365 || (coverageDays > 0 && coverageDays < 365 && tailGapOk);
 
-  // Inside 30 days: 100% if we have full span from last pull (ignore tail). After 30 days: 100% when tail reaches target (yesterday).
-  const gapsOkForReady = dataOlderThan30d ? gapsOk : headGapOk;
+  // Inside 30 days: ignore tail gap for pull eligibility. After 30 days: require head and tail within slop.
   const missingGapsForPull = dataOlderThan30d
     ? !(completenessOk && hasFullWindow && gapsOk)
     : !(completenessOk && hasFullWindow && headGapOk);
@@ -158,7 +157,7 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
   // Don't declare 100% while SMT might still be delivering: require no unprocessed raw files and no gaps.
   // Keep pulling while rawCount > 0 or missingGaps so we pick up any older dates SMT delivers later.
   const deliveryComplete = rawCount === 0;
-  const historyReady = Boolean(completenessOk && hasFullWindow && gapsOkForReady && deliveryComplete);
+  const historyReady = Boolean(completenessOk && deliveryComplete);
   const missingGapsOrPendingDelivery = missingGaps || !deliveryComplete;
 
   const missingGapsForEligibility = missingGapsOrPendingDelivery;
