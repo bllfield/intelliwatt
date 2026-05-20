@@ -17,9 +17,7 @@ export const currentPlanDb =
   globalThis.currentPlanPrisma ??
   createClient();
 
-if (process.env.NODE_ENV !== 'production') {
-  globalThis.currentPlanPrisma = currentPlanDb;
-}
+globalThis.currentPlanPrisma = currentPlanDb;
 
 export { Prisma as CurrentPlanPrisma };
 

@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 
 import { Prisma } from '@prisma/client';
 
+import { shouldDeferHeavyDbWorkForPool } from '@/lib/db/connectionPoolBudget';
 import { prisma } from '@/lib/db';
 import { usagePrisma } from '@/lib/db/usageClient';
 import { runPlanPipelineForHome } from '@/lib/plan-engine/runPlanPipelineForHome';
@@ -17,27 +18,10 @@ type DeferredPostIngestTask = {
   rangeEndIso: string;
 };
 
-function parseConnectionLimitFromUrl(rawUrl: string | undefined): number | null {
-  const value = String(rawUrl ?? '').trim();
-  if (!value) return null;
-  try {
-    const u = new URL(value);
-    const parsed = Number(u.searchParams.get('connection_limit') ?? '');
-    return Number.isFinite(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
 export function shouldThrottleInlinePostIngest(): boolean {
-  // In constrained serverless envs (connection_limit=1), running heavy post-ingest
-  // work inline reliably causes pool starvation timeouts. Keep ingest fast and defer.
-  const primaryLimit = parseConnectionLimitFromUrl(process.env.DATABASE_URL);
-  const usageLimit = parseConnectionLimitFromUrl(process.env.USAGE_DATABASE_URL);
-  const minConfiguredLimit = [primaryLimit, usageLimit]
-    .filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
-    .reduce<number | null>((min, v) => (min == null ? v : Math.min(min, v)), null);
-  return minConfiguredLimit != null && minConfiguredLimit <= 1;
+  // In constrained serverless envs (connection_limit=1 per URL, or limit < datasource count),
+  // running heavy post-ingest inline causes pool starvation (P2024). Keep ingest fast and defer.
+  return shouldDeferHeavyDbWorkForPool();
 }
 
 function encodeDeferredTaskPath(task: DeferredPostIngestTask): string {

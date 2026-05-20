@@ -19,6 +19,46 @@ export const maxDuration = 300; // allow large SMT raw uploads
 
 export const dynamic = 'force-dynamic';
 
+async function findOrCreateRawSmtFileRow(args: {
+  sha256: string;
+  filename: string;
+  sizeBytes: number;
+  source: string;
+  contentType: string;
+  storagePath: string;
+  receivedAt?: string;
+}): Promise<{ row: { id: bigint; filename: string; size_bytes: number; sha256: string; created_at: Date }; duplicate: boolean }> {
+  const select = { id: true, filename: true, size_bytes: true, sha256: true, created_at: true } as const;
+  const existing = await prisma.rawSmtFile.findUnique({
+    where: { sha256: args.sha256 },
+    select,
+  });
+  if (existing) {
+    return { row: existing, duplicate: true };
+  }
+  try {
+    const created = await prisma.rawSmtFile.create({
+      data: {
+        filename: args.filename,
+        size_bytes: args.sizeBytes,
+        sha256: args.sha256,
+        source: args.source,
+        content_type: args.contentType,
+        storage_path: args.storagePath,
+        received_at: args.receivedAt ? new Date(args.receivedAt) : new Date(),
+      },
+      select,
+    });
+    return { row: created, duplicate: false };
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+      const raced = await prisma.rawSmtFile.findUnique({ where: { sha256: args.sha256 }, select });
+      if (raced) return { row: raced, duplicate: true };
+    }
+    throw e;
+  }
+}
+
 async function withTaskTimeout<T>(task: Promise<T>, timeoutMs: number, label: string): Promise<T | null> {
   let timer: NodeJS.Timeout | null = null;
   try {
@@ -104,28 +144,16 @@ export async function POST(req: NextRequest) {
   try {
     const contentBuffer = contentBase64 ? Buffer.from(contentBase64, 'base64') : undefined;
 
-    // Idempotency: if a row with this sha256 already exists, we still allow inline normalization
-    // when content is provided (e.g., operator "force refresh" / reprocess after a prior failure).
-    const existing = await prisma.rawSmtFile.findUnique({
-      where: { sha256 }, // requires a UNIQUE on sha256 (which you added)
-      select: { id: true, filename: true, size_bytes: true, sha256: true, created_at: true },
+    // Idempotency: sha256 unique; concurrent uploads may race — treat duplicate as success.
+    const { row, duplicate } = await findOrCreateRawSmtFileRow({
+      sha256: sha256!,
+      filename: filename!,
+      sizeBytes: sizeBytes!,
+      source,
+      contentType,
+      storagePath,
+      receivedAt,
     });
-
-    const duplicate = Boolean(existing);
-    const row = existing
-      ? existing
-      : await prisma.rawSmtFile.create({
-          data: {
-            filename: filename!,
-            size_bytes: sizeBytes!,
-            sha256: sha256!,
-            source,
-            content_type: contentType,
-            storage_path: storagePath,
-            received_at: receivedAt ? new Date(receivedAt) : new Date(),
-          },
-          select: { id: true, filename: true, size_bytes: true, sha256: true, created_at: true },
-        });
 
     // Early purge of prior data for this ESIID so normalization has a clean slate.
     // NOTE: This is intentionally off by default; only do it for explicit "full refresh" requests.

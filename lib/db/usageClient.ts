@@ -11,9 +11,7 @@ const usageClient =
     log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
   });
 
-if (process.env.NODE_ENV !== 'production') {
-  globalThis.usagePrisma = usageClient;
-}
+globalThis.usagePrisma = usageClient;
 
 export function getUsagePrisma() {
   return usageClient;

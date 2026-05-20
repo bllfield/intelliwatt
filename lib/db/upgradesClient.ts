@@ -11,9 +11,7 @@ const upgradesClient =
     log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
   });
 
-if (process.env.NODE_ENV !== 'production') {
-  globalThis.upgradesPrisma = upgradesClient;
-}
+globalThis.upgradesPrisma = upgradesClient;
 
 export function getUpgradesPrisma() {
   return upgradesClient;

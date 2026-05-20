@@ -11,9 +11,7 @@ const referralsClient =
     log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
   });
 
-if (process.env.NODE_ENV !== 'production') {
-  globalThis.referralsPrisma = referralsClient;
-}
+globalThis.referralsPrisma = referralsClient;
 
 export function getReferralsPrisma() {
   return referralsClient;

@@ -11,9 +11,7 @@ const appliancesClient =
     log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
   });
 
-if (process.env.NODE_ENV !== 'production') {
-  globalThis.appliancesPrisma = appliancesClient;
-}
+globalThis.appliancesPrisma = appliancesClient;
 
 export function getAppliancesPrisma() {
   return appliancesClient;
