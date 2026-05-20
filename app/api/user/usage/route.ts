@@ -229,7 +229,7 @@ export async function GET(request: NextRequest) {
               tailReady: false,
               targetEndDate: canonicalCoverage.endDate,
               tailRefreshAttempted: Boolean(ensure?.healed),
-              tailRefreshReason: ensure?.skippedReason ?? "coverage_tail_current",
+              tailRefreshReason: ensure?.healed ? "refresh_requested" : "coverage_tail_current",
               tailTimedOut: Boolean(ensure?.tailWaitTimedOut),
               incompleteTailDateKeys: ensure?.dayStatus.incompleteDateKeys ?? [],
               coverageEndDate: ensure?.window.endDate ?? null,

@@ -10,6 +10,7 @@ import {
   finalizeDeferredPendingRepairsAfterPull,
   reconcileSmtLedgerAfterPersist,
 } from "@/lib/usage/smtDayCoverageLedger";
+import { loadSmtWindowDayStatus } from "@/lib/usage/smtWindowStatus";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -208,43 +209,33 @@ export async function requestUsageRefreshForUserHouse(args: {
       const statusNorm = String((auth as any)?.smtStatus ?? "").trim().toLowerCase();
       const isActive = statusNorm === "active" || statusNorm === "already_active";
 
-      let coverageStart: Date | null = null;
-      let coverageEnd: Date | null = null;
       let coverageDays = 0;
       let historyReady = false;
+      let rawCount = 0;
       if (auth?.esiid) {
-        const agg = await prisma.smtInterval.aggregate({
-          where: { esiid: auth.esiid },
-          _min: { ts: true },
-          _max: { ts: true },
-        });
-        coverageStart = agg._min.ts ?? null;
-        coverageEnd = agg._max.ts ?? null;
-        coverageDays = coverageStart && coverageEnd ? daysBetweenInclusive(coverageStart, coverageEnd) : 0;
-
-        const slopDays = 2;
-        const targetStartMs = backfillRange.startDate.getTime() + slopDays * DAY_MS;
-        const targetEndMs = backfillRange.endDate.getTime() - slopDays * DAY_MS;
-        historyReady = Boolean(
-          coverageStart &&
-            coverageEnd &&
-            coverageStart.getTime() <= targetStartMs &&
-            coverageEnd.getTime() >= targetEndMs
-        );
-      }
-
-      const rawCount = auth?.esiid
-        ? await prisma.rawSmtFile
+        const esiid = auth.esiid;
+        const [agg, windowStatus, rawFileCount] = await Promise.all([
+          prisma.smtInterval.aggregate({
+            where: { esiid },
+            _min: { ts: true },
+            _max: { ts: true },
+          }),
+          loadSmtWindowDayStatus({ esiid }),
+          prisma.rawSmtFile
             .count({
               where: {
-                OR: [
-                  { filename: { contains: auth.esiid } },
-                  { storage_path: { contains: auth.esiid } },
-                ],
+                OR: [{ filename: { contains: esiid } }, { storage_path: { contains: esiid } }],
               },
             })
-            .catch(() => 0)
-        : 0;
+            .catch(() => 0),
+        ]);
+        const coverageStart = agg._min.ts ?? null;
+        const coverageEnd = agg._max.ts ?? null;
+        coverageDays =
+          coverageStart && coverageEnd ? daysBetweenInclusive(coverageStart, coverageEnd) : 0;
+        rawCount = rawFileCount;
+        historyReady = Boolean(windowStatus.ready && rawCount === 0);
+      }
 
       const retryAfterMs = rawCount === 0 && coverageDays < 30 ? 60 * 60 * 1000 : 6 * 60 * 60 * 1000;
       const requestedAt = (auth as any)?.smtBackfillRequestedAt
