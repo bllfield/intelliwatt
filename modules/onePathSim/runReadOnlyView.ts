@@ -1,4 +1,5 @@
 import { dateKeyInTimezone } from "@/lib/admin/gapfillLab";
+import { smtPendingIntervalDateKeysFromMeta } from "@/lib/usage/smtDayCoverageLedger";
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
 import { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
 import type { ValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
@@ -198,8 +199,27 @@ function asArray<T = unknown>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
 }
 
-function buildDisplayDailyRows(value: unknown): Array<ReturnType<typeof dailyRowFieldsFromSourceRow>> {
-  return asArray<Record<string, unknown>>(value)
+function applySmtPendingLabelsToDailyRows(
+  rows: Array<ReturnType<typeof dailyRowFieldsFromSourceRow>>,
+  pendingSmtDateKeys: Set<string>
+): Array<ReturnType<typeof dailyRowFieldsFromSourceRow>> {
+  if (pendingSmtDateKeys.size === 0) return rows;
+  return rows.map((row) => {
+    if (!pendingSmtDateKeys.has(row.date)) return row;
+    return dailyRowFieldsFromSourceRow({
+      date: row.date,
+      kwh: row.kwh,
+      source: "SIMULATED",
+      sourceDetail: "SIMULATED_INTERVALS_NOT_AVAILABLE_YET",
+    });
+  });
+}
+
+function buildDisplayDailyRows(
+  value: unknown,
+  pendingSmtDateKeys?: Set<string>
+): Array<ReturnType<typeof dailyRowFieldsFromSourceRow>> {
+  const rows = asArray<Record<string, unknown>>(value)
     .map((row) => {
       const item = asRecord(row);
       const date = asDateKey(item?.date);
@@ -212,6 +232,7 @@ function buildDisplayDailyRows(value: unknown): Array<ReturnType<typeof dailyRow
       });
     })
     .filter((row): row is ReturnType<typeof dailyRowFieldsFromSourceRow> => row != null);
+  return pendingSmtDateKeys ? applySmtPendingLabelsToDailyRows(rows, pendingSmtDateKeys) : rows;
 }
 
 function buildLocalDailyRowsFromIntervals15(args: {
@@ -360,7 +381,8 @@ export function buildOnePathRunReadOnlyView(args: {
         }))
         .filter((value) => value.payloadJson.startDate && value.payloadJson.endDate)
     : [];
-  const datasetDailyRows = buildDisplayDailyRows(dataset.daily);
+  const smtPendingDateKeys = smtPendingIntervalDateKeysFromMeta(meta);
+  const datasetDailyRows = buildDisplayDailyRows(dataset.daily, smtPendingDateKeys);
   const timezone = typeof meta?.timezone === "string" && meta.timezone.trim() ? meta.timezone : "America/Chicago";
   const intervalTimestampMode = resolveIntervalTimestampMode(meta);
   const intervalBackedLocalDailyRows = buildLocalDailyRowsFromIntervals15({
@@ -376,9 +398,7 @@ export function buildOnePathRunReadOnlyView(args: {
       !Array.isArray(meta.simulatedSourceDetailByDate)
         ? (meta.simulatedSourceDetailByDate as Record<string, string>)
         : null,
-    smtPendingIntervalDateKeys: Array.isArray(meta?.smtPendingIntervalDateKeys)
-      ? (meta.smtPendingIntervalDateKeys as string[])
-      : null,
+    smtPendingIntervalDateKeys: Array.from(smtPendingDateKeys),
   });
   const datasetDailyEnd = datasetDailyRows.length > 0 ? datasetDailyRows[datasetDailyRows.length - 1]?.date ?? null : null;
   const localDailyEnd =
@@ -390,11 +410,14 @@ export function buildOnePathRunReadOnlyView(args: {
     (datasetDailyRows.length === 0 ||
       intervalBackedLocalDailyRows.length > datasetDailyRows.length ||
       (viewModel.coverage.end != null && localDailyEnd === viewModel.coverage.end && datasetDailyEnd !== viewModel.coverage.end));
-  const dailyRows = shouldPreferIntervalBackedLocalDailyRows
-    ? intervalBackedLocalDailyRows
-    : datasetDailyRows.length > 0
-      ? datasetDailyRows
-      : viewModel.derived.daily;
+  const dailyRows = applySmtPendingLabelsToDailyRows(
+    shouldPreferIntervalBackedLocalDailyRows
+      ? intervalBackedLocalDailyRows
+      : datasetDailyRows.length > 0
+        ? datasetDailyRows
+        : viewModel.derived.daily,
+    smtPendingDateKeys
+  );
   const compareProjection = asRecord(readModel.compareProjection) ?? {};
   const tuningSummary = asRecord(readModel.tuningSummary) ?? {};
   const compareRowsPrimary = asCompareRows(compareProjection.rows);

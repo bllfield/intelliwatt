@@ -251,16 +251,20 @@ export async function reconcileSmtIntervalDayLedger(args: {
 
     if (intervalCount >= SMT_TAIL_REQUIRED_INTERVALS_PER_DAY) {
       nextStatus = SMT_DAY_LEDGER_STATUS.COMPLETE;
-    } else if (existingStatus === SMT_DAY_LEDGER_STATUS.INCOMPLETE_METER) {
-      nextStatus = SMT_DAY_LEDGER_STATUS.INCOMPLETE_METER;
+    } else if (dateKey === canonicalEndDate) {
+      // Canonical tail: pending until one deferred repair is recorded, even if previously incomplete.
+      nextStatus =
+        existing?.repairAttemptedAt != null
+          ? SMT_DAY_LEDGER_STATUS.INCOMPLETE_METER
+          : SMT_DAY_LEDGER_STATUS.PENDING_SMT;
+      firstSeenAsCanonicalWindowEnd = true;
     } else if (existingStatus === SMT_DAY_LEDGER_STATUS.PENDING_SMT) {
       nextStatus =
         existing?.repairAttemptedAt != null
           ? SMT_DAY_LEDGER_STATUS.INCOMPLETE_METER
           : SMT_DAY_LEDGER_STATUS.PENDING_SMT;
-    } else if (dateKey === canonicalEndDate) {
-      nextStatus = SMT_DAY_LEDGER_STATUS.PENDING_SMT;
-      firstSeenAsCanonicalWindowEnd = true;
+    } else if (existingStatus === SMT_DAY_LEDGER_STATUS.INCOMPLETE_METER) {
+      nextStatus = SMT_DAY_LEDGER_STATUS.INCOMPLETE_METER;
     } else {
       nextStatus = SMT_DAY_LEDGER_STATUS.INCOMPLETE_METER;
     }
@@ -290,6 +294,57 @@ export async function reconcileSmtIntervalDayLedger(args: {
     ...snapshotFromRows({ canonicalEndDate, rows }),
     updatedDateKeys,
   };
+}
+
+export async function resolveSmtLedgerDateKeysForPastSim(args: {
+  esiid: string;
+  coverageStartDate: string;
+  coverageEndDate: string;
+  reconcile?: boolean;
+}): Promise<{
+  ledger: SmtDayLedgerSnapshot;
+  pendingDateKeys: Set<string>;
+  incompleteMeterDateKeys: Set<string>;
+}> {
+  const ledger = args.reconcile
+    ? await reconcileSmtIntervalDayLedger({
+        esiid: args.esiid,
+        canonicalStartDate: args.coverageStartDate,
+        canonicalEndDate: args.coverageEndDate,
+      })
+    : await loadSmtDayLedgerSnapshot({
+        esiid: args.esiid,
+        canonicalStartDate: args.coverageStartDate,
+        canonicalEndDate: args.coverageEndDate,
+      });
+  const pendingDateKeys = new Set(ledger.pendingDateKeys);
+  const incompleteMeterDateKeys = new Set(
+    ledger.incompleteMeterDateKeys.filter((dateKey) => !pendingDateKeys.has(dateKey))
+  );
+  return { ledger, pendingDateKeys, incompleteMeterDateKeys };
+}
+
+export function smtPendingIntervalDateKeysFromMeta(meta: Record<string, unknown> | null | undefined): Set<string> {
+  const pending = new Set<string>();
+  const keys = Array.isArray(meta?.smtPendingIntervalDateKeys) ? meta.smtPendingIntervalDateKeys : [];
+  for (const value of keys) {
+    const dateKey = String(value ?? "").slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) pending.add(dateKey);
+  }
+  const byDate =
+    meta?.smtDayLedgerStatusByDate &&
+    typeof meta.smtDayLedgerStatusByDate === "object" &&
+    !Array.isArray(meta.smtDayLedgerStatusByDate)
+      ? (meta.smtDayLedgerStatusByDate as Record<string, unknown>)
+      : null;
+  if (byDate) {
+    for (const [dateKey, status] of Object.entries(byDate)) {
+      if (String(status ?? "").trim().toUpperCase() === SMT_DAY_LEDGER_STATUS.PENDING_SMT) {
+        pending.add(dateKey.slice(0, 10));
+      }
+    }
+  }
+  return pending;
 }
 
 export async function loadSmtDayLedgerSnapshot(args: {

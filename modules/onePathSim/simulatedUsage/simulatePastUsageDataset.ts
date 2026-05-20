@@ -7,7 +7,7 @@
 import { prisma } from "@/lib/db";
 import { dateKeyInTimezone } from "@/lib/admin/gapfillLab";
 import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
-import { buildSmtDayLedgerMeta, loadSmtDayLedgerSnapshot } from "@/lib/usage/smtDayCoverageLedger";
+import { buildSmtDayLedgerMeta, resolveSmtLedgerDateKeysForPastSim } from "@/lib/usage/smtDayCoverageLedger";
 import { buildUniformMonthlyTotalsFromAnnualWindow, travelRangesToExcludeDateKeys } from "@/modules/onePathSim/usageSimulator/build";
 import { boundDateKeysToCoverageWindow } from "@/modules/onePathSim/usageSimulator/metadataWindow";
 import {
@@ -1786,18 +1786,20 @@ export async function simulatePastUsageDataset(
       { startDate, endDate }
     );
     const excludedDateKeysFingerprint = Array.from(excludedDateKeys).sort().join(",");
-    const smtDayLedgerSnapshot = esiid
-      ? await loadSmtDayLedgerSnapshot({
+    const smtLedgerForSim = esiid
+      ? await resolveSmtLedgerDateKeysForPastSim({
           esiid,
-          canonicalStartDate: startDate,
-          canonicalEndDate: endDate,
+          coverageStartDate: startDate,
+          coverageEndDate: endDate,
+          reconcile: true,
         }).catch(() => null)
       : null;
+    const smtDayLedgerSnapshot = smtLedgerForSim?.ledger ?? null;
     const pendingSmtIntervalDateKeys = new Set<string>(
-      (smtDayLedgerSnapshot?.pendingDateKeys ?? []).filter((dk) => canonicalDateKeys.includes(dk))
+      Array.from(smtLedgerForSim?.pendingDateKeys ?? []).filter((dk) => canonicalDateKeys.includes(dk))
     );
     const ledgerIncompleteMeterDateKeys = new Set<string>(
-      (smtDayLedgerSnapshot?.incompleteMeterDateKeys ?? []).filter((dk) => canonicalDateKeys.includes(dk))
+      Array.from(smtLedgerForSim?.incompleteMeterDateKeys ?? []).filter((dk) => canonicalDateKeys.includes(dk))
     );
 
     const mergedKeepRefLocalDateKeys = new Set<string>(forceModeledOutputKeepReferencePoolDateKeysLocalSet);
@@ -2208,6 +2210,13 @@ export async function simulatePastUsageDataset(
       });
       patchedIntervals = baselineBuild.intervals;
       dayResults = baselineBuild.dayResults;
+      if (pendingSmtIntervalDateKeys.size > 0) {
+        for (const dayResult of dayResults) {
+          const dateKey = String(dayResult.localDate ?? "").slice(0, 10);
+          if (!pendingSmtIntervalDateKeys.has(dateKey)) continue;
+          dayResult.simulatedReasonCode = "INTERVALS_NOT_AVAILABLE_YET_DAY";
+        }
+      }
       const manualUsageInputMode =
         buildInputs.mode === "MANUAL_TOTALS"
           ? typeof (buildInputs as any)?.snapshots?.manualUsagePayload?.mode === "string" &&

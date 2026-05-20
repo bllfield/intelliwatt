@@ -5,6 +5,7 @@ import {
   displayLabelForSmtSourceDetail,
   isSmtDayLedgerSettledForTail,
   SIMULATED_SMT_SOURCE_DETAIL,
+  smtPendingIntervalDateKeysFromMeta,
   SMT_DAY_LEDGER_STATUS,
   sourceDetailForSmtLedgerStatus,
 } from "@/lib/usage/smtDayCoverageLedger";
@@ -34,6 +35,17 @@ describe("smt day coverage ledger helpers", () => {
     expect(isSmtDayLedgerSettledForTail(SMT_DAY_LEDGER_STATUS.INCOMPLETE_METER)).toBe(true);
     expect(isSmtDayLedgerSettledForTail(SMT_DAY_LEDGER_STATUS.COMPLETE)).toBe(false);
     expect(isSmtDayLedgerSettledForTail(null)).toBe(false);
+  });
+
+  it("reads pending interval date keys from dataset meta", () => {
+    const keys = smtPendingIntervalDateKeysFromMeta({
+      smtPendingIntervalDateKeys: ["2026-05-17"],
+      smtDayLedgerStatusByDate: {
+        "2026-05-17": "PENDING_SMT",
+        "2026-05-16": "INCOMPLETE_METER",
+      },
+    });
+    expect(Array.from(keys).sort()).toEqual(["2026-05-17"]);
   });
 
   it("annotates daily rows from ledger snapshot", () => {
