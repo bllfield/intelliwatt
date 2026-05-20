@@ -22,6 +22,7 @@ import {
   ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS,
   SMT_POST_BACKFILL_SETTLE_DELAY_MS,
   SMT_TAIL_WAIT_INTERVAL_MS,
+  USER_USAGE_DEFERRED_REPAIR_WAIT_MS,
   USER_USAGE_SMT_TAIL_WAIT_TIMEOUT_MS,
   waitForSmtDateCoverage,
   waitForSmtTailCoverage,
@@ -190,6 +191,7 @@ export async function ensureSmtCoverageForHouse(args: {
       userId: args.userId,
       houseId: args.houseId,
       sessionKey,
+      skipGapFill: true,
     });
   }
 

@@ -19,7 +19,8 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
+/** Poll + ensureSmtCoverage; bounded pull via userUsageRefresh (vercel.json also sets 60). */
+export const maxDuration = 60;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SMT_PULL_COOLDOWN_MS = 30 * DAY_MS;

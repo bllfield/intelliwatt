@@ -11,6 +11,10 @@ import {
   reconcileSmtLedgerAfterPersist,
 } from "@/lib/usage/smtDayCoverageLedger";
 import { loadSmtWindowDayStatus } from "@/lib/usage/smtWindowStatus";
+import {
+  USER_USAGE_DEFERRED_REPAIR_WAIT_MS,
+  USER_USAGE_PULL_FETCH_TIMEOUT_MS,
+} from "@/lib/usage/smtTailCoverage";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -156,6 +160,7 @@ export async function requestUsageRefreshForUserHouse(args: {
             "content-type": "application/json",
           },
           cache: "no-store",
+          signal: AbortSignal.timeout(USER_USAGE_PULL_FETCH_TIMEOUT_MS),
           body: JSON.stringify({ esiid: house.esiid, houseId: house.id }),
         });
 
@@ -302,7 +307,7 @@ export async function requestUsageRefreshForUserHouse(args: {
         await finalizeDeferredPendingRepairsAfterPull({
           esiid: house.esiid,
           pullDateKey: chicagoPullDateKey(),
-          waitTimeoutMs: 12_000,
+          waitTimeoutMs: USER_USAGE_DEFERRED_REPAIR_WAIT_MS,
         }).catch(() => null);
       }
     }

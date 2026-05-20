@@ -11,7 +11,8 @@ import {
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs"; // ensure Node runtime for longer executions
-export const maxDuration = 30;
+/** User refresh runs ensure + bounded pull; keep under Vercel cap (vercel.json also sets 60). */
+export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   const cookieStore = cookies();

@@ -25,6 +25,10 @@ export const SMT_TAIL_WAIT_TIMEOUT_MS = 60_000;
 export const SMT_TAIL_WAIT_INTERVAL_MS = 2_000;
 /** User-facing usage route budget: leave headroom when multiple homes are loaded. */
 export const USER_USAGE_SMT_TAIL_WAIT_TIMEOUT_MS = 8_000;
+/** Cap internal /api/admin/smt/pull wait from user refresh (Vercel user routes are ~30–60s). */
+export const USER_USAGE_PULL_FETCH_TIMEOUT_MS = 18_000;
+/** After a pull from user refresh, bounded deferred PENDING_SMT repair wait. */
+export const USER_USAGE_DEFERRED_REPAIR_WAIT_MS = 6_000;
 /** One Path admin run: short poll; exit early when SMT counts stop changing. */
 export const ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS = 20_000;
 /** After targeted incomplete-meter backfill: allow FTP delivery + ingest before giving up. */
