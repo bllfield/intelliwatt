@@ -208,6 +208,36 @@ function snapshotFromRows(args: {
 }
 
 /**
+ * Resolve the next ledger status for one calendar day from interval coverage and prior ledger state.
+ * The canonical window-end day stays PENDING_SMT while incomplete, even after a deferred repair attempt.
+ */
+export function resolveSmtDayLedgerStatusForDate(args: {
+  intervalCount: number;
+  dateKey: string;
+  canonicalEndDate: string;
+  existingStatus?: SmtDayLedgerStatus | null;
+  repairAttemptedAt?: Date | null;
+}): SmtDayLedgerStatus {
+  const existingStatus = String(args.existingStatus ?? "").trim().toUpperCase() as SmtDayLedgerStatus;
+
+  if (args.intervalCount >= SMT_TAIL_REQUIRED_INTERVALS_PER_DAY) {
+    return SMT_DAY_LEDGER_STATUS.COMPLETE;
+  }
+  if (args.dateKey === args.canonicalEndDate) {
+    return SMT_DAY_LEDGER_STATUS.PENDING_SMT;
+  }
+  if (existingStatus === SMT_DAY_LEDGER_STATUS.PENDING_SMT) {
+    return args.repairAttemptedAt != null
+      ? SMT_DAY_LEDGER_STATUS.INCOMPLETE_METER
+      : SMT_DAY_LEDGER_STATUS.PENDING_SMT;
+  }
+  if (existingStatus === SMT_DAY_LEDGER_STATUS.INCOMPLETE_METER) {
+    return SMT_DAY_LEDGER_STATUS.INCOMPLETE_METER;
+  }
+  return SMT_DAY_LEDGER_STATUS.INCOMPLETE_METER;
+}
+
+/**
  * Reconcile persisted interval counts with the SMT day ledger for the canonical 365 window.
  * Partial days at the canonical end become PENDING_SMT; other partial days become INCOMPLETE_METER immediately.
  */
@@ -246,27 +276,16 @@ export async function reconcileSmtIntervalDayLedger(args: {
     const existing = existingByDate.get(dateKey);
     const existingStatus = String(existing?.status ?? "").trim().toUpperCase() as SmtDayLedgerStatus;
 
-    let nextStatus: SmtDayLedgerStatus;
+    const nextStatus = resolveSmtDayLedgerStatusForDate({
+      intervalCount,
+      dateKey,
+      canonicalEndDate,
+      existingStatus,
+      repairAttemptedAt: existing?.repairAttemptedAt ?? null,
+    });
     let firstSeenAsCanonicalWindowEnd = existing?.firstSeenAsCanonicalWindowEnd ?? false;
-
-    if (intervalCount >= SMT_TAIL_REQUIRED_INTERVALS_PER_DAY) {
-      nextStatus = SMT_DAY_LEDGER_STATUS.COMPLETE;
-    } else if (dateKey === canonicalEndDate) {
-      // Canonical tail: pending until one deferred repair is recorded, even if previously incomplete.
-      nextStatus =
-        existing?.repairAttemptedAt != null
-          ? SMT_DAY_LEDGER_STATUS.INCOMPLETE_METER
-          : SMT_DAY_LEDGER_STATUS.PENDING_SMT;
+    if (dateKey === canonicalEndDate && nextStatus === SMT_DAY_LEDGER_STATUS.PENDING_SMT) {
       firstSeenAsCanonicalWindowEnd = true;
-    } else if (existingStatus === SMT_DAY_LEDGER_STATUS.PENDING_SMT) {
-      nextStatus =
-        existing?.repairAttemptedAt != null
-          ? SMT_DAY_LEDGER_STATUS.INCOMPLETE_METER
-          : SMT_DAY_LEDGER_STATUS.PENDING_SMT;
-    } else if (existingStatus === SMT_DAY_LEDGER_STATUS.INCOMPLETE_METER) {
-      nextStatus = SMT_DAY_LEDGER_STATUS.INCOMPLETE_METER;
-    } else {
-      nextStatus = SMT_DAY_LEDGER_STATUS.INCOMPLETE_METER;
     }
 
     const statusChanged = existingStatus !== nextStatus;

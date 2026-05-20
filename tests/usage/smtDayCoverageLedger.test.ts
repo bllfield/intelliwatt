@@ -4,6 +4,7 @@ import {
   annotateActualDailyWithSmtLedger,
   displayLabelForSmtSourceDetail,
   isSmtDayLedgerSettledForTail,
+  resolveSmtDayLedgerStatusForDate,
   SIMULATED_SMT_SOURCE_DETAIL,
   smtPendingIntervalDateKeysFromMeta,
   SMT_DAY_LEDGER_STATUS,
@@ -46,6 +47,27 @@ describe("smt day coverage ledger helpers", () => {
       },
     });
     expect(Array.from(keys).sort()).toEqual(["2026-05-17"]);
+  });
+
+  it("keeps the current canonical end day pending while intervals are still missing", () => {
+    expect(
+      resolveSmtDayLedgerStatusForDate({
+        intervalCount: 40,
+        dateKey: "2026-05-17",
+        canonicalEndDate: "2026-05-17",
+        existingStatus: SMT_DAY_LEDGER_STATUS.INCOMPLETE_METER,
+        repairAttemptedAt: new Date("2026-05-19T12:00:00.000Z"),
+      })
+    ).toBe(SMT_DAY_LEDGER_STATUS.PENDING_SMT);
+    expect(
+      resolveSmtDayLedgerStatusForDate({
+        intervalCount: 40,
+        dateKey: "2026-05-16",
+        canonicalEndDate: "2026-05-17",
+        existingStatus: SMT_DAY_LEDGER_STATUS.PENDING_SMT,
+        repairAttemptedAt: new Date("2026-05-19T12:00:00.000Z"),
+      })
+    ).toBe(SMT_DAY_LEDGER_STATUS.INCOMPLETE_METER);
   });
 
   it("annotates daily rows from ledger snapshot", () => {
