@@ -1262,6 +1262,85 @@ describe("admin one path sim route", () => {
     expect(json.runDisplayView).toBeTruthy();
   });
 
+  it("runs incomplete-meter backfill even when deferred pending repair also runs", async () => {
+    prismaSmtIntervalDayLedgerFindMany.mockImplementation(async (args: any) => {
+      const status = args?.where?.status;
+      if (status === "PENDING_SMT") {
+        return [{ dateKey: "2026-04-11" }];
+      }
+      return [];
+    });
+
+    runSharedSimulation
+      .mockResolvedValueOnce({
+        artifactId: "artifact-1",
+        artifactInputHash: "artifact-hash-1",
+        engineInput: {},
+        manualStageOneView: null,
+        compareProjection: { rows: [], metrics: null },
+        dataset: {
+          summary: { source: "SIMULATED", start: "2025-04-16", end: "2026-04-15" },
+          meta: {
+            simulatedSourceDetailByDate: {
+              "2026-04-12": "SIMULATED_INCOMPLETE_METER",
+            },
+          },
+          daily: [
+            {
+              date: "2026-04-12",
+              kwh: 22,
+              source: "SIMULATED",
+              sourceDetail: "SIMULATED_INCOMPLETE_METER",
+            },
+          ],
+          monthly: [{ month: "2026-04", kwh: 22 }],
+          series: { intervals15: [] },
+        },
+      })
+      .mockResolvedValueOnce({
+        artifactId: "artifact-2",
+        artifactInputHash: "artifact-hash-2",
+        engineInput: {},
+        manualStageOneView: null,
+        compareProjection: { rows: [], metrics: null },
+        dataset: {
+          summary: { source: "SIMULATED", start: "2025-04-16", end: "2026-04-15" },
+          daily: [{ date: "2026-04-12", kwh: 22, source: "ACTUAL", sourceDetail: "ACTUAL" }],
+          monthly: [{ month: "2026-04", kwh: 22 }],
+          series: { intervals15: [] },
+        },
+      });
+
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const pending = POST(
+      buildRequest({
+        action: "run",
+        email: "customer@example.com",
+        houseId: "house-1",
+        mode: "INTERVAL",
+        scenarioId: "scenario-1",
+        includeDebugDiagnostics: true,
+      })
+    );
+
+    await vi.advanceTimersByTimeAsync(65_000);
+    const res = await pending;
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.smtIncompleteMeterRetry).toEqual(
+      expect.objectContaining({
+        attempted: true,
+        repairKind: "deferred_pending_and_incomplete_meter_backfill",
+        deferredPendingDateKeys: ["2026-04-11"],
+        incompleteMeterBackfillDateKeys: ["2026-04-12"],
+        requestedDateKeys: ["2026-04-11", "2026-04-12"],
+      })
+    );
+    expect(adaptIntervalRawInput).toHaveBeenCalledTimes(2);
+    expect(runSharedSimulation).toHaveBeenCalledTimes(2);
+  });
+
   it("defaults lookup requests to lean debug-off source context when debug is not requested", async () => {
     const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
     const res = await POST(buildRequest({ action: "lookup", email: "customer@example.com" }));

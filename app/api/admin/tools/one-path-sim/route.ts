@@ -1031,10 +1031,15 @@ function extractIncompleteMeterDateKeysFromDataset(dataset: unknown): string[] {
 
 type OnePathSmtPostSimHealingResult = {
   attempted: boolean;
-  repairKind?: "deferred_pending" | "incomplete_meter_backfill";
+  repairKind?:
+    | "deferred_pending"
+    | "incomplete_meter_backfill"
+    | "deferred_pending_and_incomplete_meter_backfill";
   pullDateKey: string;
   requestedDateKeys: string[];
   eligibleDateKeys?: string[];
+  deferredPendingDateKeys?: string[];
+  incompleteMeterBackfillDateKeys?: string[];
   refreshResult?: Awaited<ReturnType<typeof requestUsageRefreshForUserHouse>>;
   waitTimedOut?: boolean;
   reconcile?: Awaited<ReturnType<typeof reconcileSmtIntervalDayLedger>>;
@@ -1065,6 +1070,13 @@ async function maybeRunOnePathSmtPostSimHealing(args: {
     houseId: args.sourceHouseId,
     waitTimeoutMs: ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS,
   });
+  const targetEndDate = resolveCanonicalUsage365CoverageWindow().endDate;
+  const incompleteMeterBackfillDateKeys = filterDateKeysNearTargetEnd(
+    extractIncompleteMeterDateKeysFromDataset(args.artifactDataset),
+    targetEndDate,
+    SMT_INCOMPLETE_METER_BACKFILL_LOOKBACK_DAYS
+  );
+
   logSimPipelineEvent("one_path_smt_deferred_day_repair", {
     correlationId: args.correlationId,
     houseId: args.effectiveHouseId,
@@ -1073,73 +1085,82 @@ async function maybeRunOnePathSmtPostSimHealing(args: {
     sourceEsiid: esiid,
     attempted: deferredRepair.attempted,
     eligibleDateKeys: deferredRepair.eligibleDateKeys.join(","),
+    incompleteMeterBackfillDateKeys: incompleteMeterBackfillDateKeys.join(","),
     pullDateKey: deferredRepair.pullDateKey,
     refreshOk: deferredRepair.refreshResult?.ok,
     waitTimedOut: deferredRepair.waitTimedOut,
     source: "one-path-admin",
     memoryRssMb: getMemoryRssMb(),
   });
-  if (deferredRepair.attempted) {
-    return {
-      attempted: true,
-      repairKind: "deferred_pending",
-      pullDateKey: deferredRepair.pullDateKey,
-      requestedDateKeys: deferredRepair.eligibleDateKeys,
-      eligibleDateKeys: deferredRepair.eligibleDateKeys,
-      refreshResult: deferredRepair.refreshResult,
-      waitTimedOut: deferredRepair.waitTimedOut,
-      reconcile: deferredRepair.reconcile,
-    };
+
+  if (!deferredRepair.attempted && incompleteMeterBackfillDateKeys.length === 0) {
+    return null;
   }
 
-  const targetEndDate = resolveCanonicalUsage365CoverageWindow().endDate;
-  const requestedDateKeys = filterDateKeysNearTargetEnd(
-    extractIncompleteMeterDateKeysFromDataset(args.artifactDataset),
-    targetEndDate,
-    SMT_INCOMPLETE_METER_BACKFILL_LOOKBACK_DAYS
-  );
-  if (requestedDateKeys.length === 0) return null;
+  let refreshResult = deferredRepair.refreshResult;
+  let waitTimedOut = deferredRepair.waitTimedOut;
+  let reconcile = deferredRepair.reconcile;
 
-  logSimPipelineEvent("one_path_smt_incomplete_meter_backfill_requested", {
-    correlationId: args.correlationId,
-    houseId: args.effectiveHouseId,
-    sourceHouseId: args.actualContextHouseId !== args.effectiveHouseId ? args.actualContextHouseId : undefined,
-    sourceUserId: args.sourceUserId,
-    sourceEsiid: esiid,
-    requestedDateKeys: requestedDateKeys.join(","),
-    targetEndDate,
-    pullDateKey,
-    source: "one-path-admin",
-    memoryRssMb: getMemoryRssMb(),
-  });
+  if (incompleteMeterBackfillDateKeys.length > 0) {
+    logSimPipelineEvent("one_path_smt_incomplete_meter_backfill_requested", {
+      correlationId: args.correlationId,
+      houseId: args.effectiveHouseId,
+      sourceHouseId: args.actualContextHouseId !== args.effectiveHouseId ? args.actualContextHouseId : undefined,
+      sourceUserId: args.sourceUserId,
+      sourceEsiid: esiid,
+      requestedDateKeys: incompleteMeterBackfillDateKeys.join(","),
+      targetEndDate,
+      pullDateKey,
+      deferredRepairAlreadyAttempted: deferredRepair.attempted,
+      source: "one-path-admin",
+      memoryRssMb: getMemoryRssMb(),
+    });
 
-  const refreshResult = await requestUsageRefreshForUserHouse({
-    userId: args.sourceUserId,
-    houseId: args.sourceHouseId,
-  }).catch((error) => ({
-    ok: false as const,
-    error: "refresh_failed" as const,
-    message: error instanceof Error ? error.message : String(error),
-  }));
+    if (!deferredRepair.attempted) {
+      const backfillRefreshResult = await requestUsageRefreshForUserHouse({
+        userId: args.sourceUserId,
+        houseId: args.sourceHouseId,
+      }).catch((error) => ({
+        ok: false as const,
+        error: "refresh_failed" as const,
+        message: error instanceof Error ? error.message : String(error),
+      }));
+      refreshResult = backfillRefreshResult.ok === false ? undefined : backfillRefreshResult;
+    }
 
-  const waitResult = await waitForOnePathSmtDateCoverage({
-    esiid,
-    dateKeys: requestedDateKeys,
-    correlationId: args.correlationId,
-    effectiveHouseId: args.effectiveHouseId,
-    actualContextHouseId: args.actualContextHouseId,
-    sourceUserId: args.sourceUserId,
-  });
+    const waitResult = await waitForOnePathSmtDateCoverage({
+      esiid,
+      dateKeys: incompleteMeterBackfillDateKeys,
+      correlationId: args.correlationId,
+      effectiveHouseId: args.effectiveHouseId,
+      actualContextHouseId: args.actualContextHouseId,
+      sourceUserId: args.sourceUserId,
+    });
+    waitTimedOut = waitTimedOut || waitResult.timedOut;
+    reconcile = (await reconcileSmtIntervalDayLedger({ esiid }).catch(() => null)) ?? reconcile;
+  }
 
-  const reconcile = await reconcileSmtIntervalDayLedger({ esiid }).catch(() => null);
+  const requestedDateKeys = normalizeDateKeys([
+    ...deferredRepair.eligibleDateKeys,
+    ...incompleteMeterBackfillDateKeys,
+  ]);
+  const repairKind =
+    deferredRepair.attempted && incompleteMeterBackfillDateKeys.length > 0
+      ? "deferred_pending_and_incomplete_meter_backfill"
+      : deferredRepair.attempted
+        ? "deferred_pending"
+        : "incomplete_meter_backfill";
 
   return {
     attempted: true,
-    repairKind: "incomplete_meter_backfill",
-    pullDateKey,
+    repairKind,
+    pullDateKey: deferredRepair.pullDateKey,
     requestedDateKeys,
-    refreshResult: refreshResult.ok === false ? undefined : refreshResult,
-    waitTimedOut: waitResult.timedOut,
+    eligibleDateKeys: deferredRepair.eligibleDateKeys,
+    deferredPendingDateKeys: deferredRepair.eligibleDateKeys,
+    incompleteMeterBackfillDateKeys,
+    refreshResult: refreshResult?.ok === false ? undefined : refreshResult,
+    waitTimedOut,
     reconcile: reconcile ?? undefined,
   };
 }
