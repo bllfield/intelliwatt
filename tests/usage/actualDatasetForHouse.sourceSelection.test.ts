@@ -45,7 +45,7 @@ vi.mock("@/modules/realUsageAdapter/greenButton", () => ({
   getLatestGreenButtonFullDayDateKey: (...args: any[]) => getLatestGreenButtonFullDayDateKey(...args),
 }));
 
-vi.mock("@/modules/usageSimulator/metadataWindow", () => ({
+vi.mock("@/lib/usage/canonicalMetadataWindow", () => ({
   resolveCanonicalUsage365CoverageWindow: () => ({
     startDate: "2024-12-02",
     endDate: "2025-12-01",

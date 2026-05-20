@@ -18,7 +18,7 @@ import { getUsageShapeProfileIdentityForPast } from "@/modules/simulatedUsage/si
 import { getHouseWeatherDays } from "@/modules/weather/repo";
 import { WEATHER_STUB_SOURCE } from "@/modules/weather/types";
 import { deriveCodecTotalDriftToleranceKwh } from "@/modules/usageSimulator/intervalCodec";
-import { resolveReportedCoverageWindow } from "@/modules/usageSimulator/metadataWindow";
+import { resolveReportedCoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
 
 const YYYY_MM_DD = /^\d{4}-\d{2}-\d{2}$/;
 const BOUNDARY_STUB_SAMPLE = 5;
