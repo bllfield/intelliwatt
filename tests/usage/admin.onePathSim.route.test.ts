@@ -1505,6 +1505,66 @@ describe("admin one path sim route", () => {
     expect(runSharedSimulation).not.toHaveBeenCalled();
   });
 
+  it("runs incomplete-meter backfill from ledger when artifact meta omits simulatedSourceDetailByDate", async () => {
+    prismaSmtIntervalDayLedgerFindMany.mockImplementation(async () => [
+      { dateKey: "2026-04-12", status: "INCOMPLETE_METER", intervalCount: 76, repairAttemptedAt: null },
+    ]);
+
+    readOnePathSimulatedUsageScenario
+      .mockResolvedValueOnce({
+        ok: true,
+        houseId: "house-1",
+        scenarioKey: "scenario-1",
+        scenarioId: "scenario-1",
+        dataset: {
+          summary: { source: "SIMULATED", start: "2025-04-16", end: "2026-04-15" },
+          meta: {},
+          daily: [{ date: "2026-04-12", kwh: 22, source: "SIMULATED", sourceDetail: "SIMULATED_INCOMPLETE_METER" }],
+          monthly: [{ month: "2026-04", kwh: 22 }],
+          series: { intervals15: [] },
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        houseId: "house-1",
+        scenarioKey: "scenario-1",
+        scenarioId: "scenario-1",
+        dataset: {
+          summary: { source: "SIMULATED", start: "2025-04-16", end: "2026-04-15" },
+          meta: {},
+          daily: [{ date: "2026-04-12", kwh: 22, source: "ACTUAL", sourceDetail: "ACTUAL" }],
+          monthly: [{ month: "2026-04", kwh: 22 }],
+          series: { intervals15: [] },
+        },
+      });
+
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const pending = POST(
+      buildRequest({
+        action: "run",
+        email: "customer@example.com",
+        houseId: "house-1",
+        mode: "INTERVAL",
+        scenarioId: "scenario-1",
+      })
+    );
+
+    await vi.advanceTimersByTimeAsync(45_000);
+    const res = await pending;
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.smtIncompleteMeterRetry).toEqual(
+      expect.objectContaining({
+        attempted: true,
+        incompleteMeterBackfillDateKeys: ["2026-04-12"],
+        incompleteMeterBackfillFromLedgerDateKeys: ["2026-04-12"],
+        incompleteMeterBackfillFromArtifactDateKeys: ["2026-04-12"],
+      })
+    );
+    expect(requestUsageRefreshForUserHouse).toHaveBeenCalledWith({ userId: "user-1", houseId: "house-1" });
+  });
+
   it("returns a lean manual Stage 1 preview on manual lookup without falling back to the user manual page path", async () => {
     getManualUsageInputForUserHouse.mockResolvedValueOnce({
       payload: {

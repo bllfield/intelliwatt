@@ -326,6 +326,8 @@ export function buildSimulationVariableCopyPayload(args: {
   intervalPastReadinessTrace?: Record<string, unknown> | null;
   readOnlyAudit?: Record<string, unknown> | null;
   includeSimRunAudit?: boolean;
+  smtIncompleteMeterRetry?: Record<string, unknown> | null;
+  smtRefreshCheck?: Record<string, unknown> | null;
 }): Record<string, unknown> {
   const inputType = modeToInputType(args.mode);
   const loadedSourceContext = asRecord(args.loadedSourceContext);
@@ -589,6 +591,24 @@ export function buildSimulationVariableCopyPayload(args: {
       sourceOfTruthSummary: readModel.sourceOfTruthSummary ?? null,
       compareProjection: readModel.compareProjection ?? null,
     },
+    smtRefreshCheck: args.smtRefreshCheck ?? null,
+    smtIncompleteMeterRetry: args.smtIncompleteMeterRetry ?? null,
+    smtDayLedgerTail:
+      loadedSourceContext.actualDatasetMeta &&
+      typeof loadedSourceContext.actualDatasetMeta === "object"
+        ? (() => {
+            const byDate = asRecord(
+              asRecord(loadedSourceContext.actualDatasetMeta).smtDayLedgerStatusByDate
+            );
+            const tail = Object.fromEntries(
+              Object.entries(byDate).filter(([dateKey]) => dateKey >= "2020-01-01")
+            );
+            const keys = Object.keys(tail).sort();
+            if (keys.length <= 14) return tail;
+            const lastKeys = keys.slice(-14);
+            return Object.fromEntries(lastKeys.map((key) => [key, tail[key]]));
+          })()
+        : null,
   };
   const derivedRunDisplayView =
     !lookupOnly && readModelDataset
@@ -788,6 +808,8 @@ export function buildSimulationVariableCopyPayload(args: {
       familyMeta: args.response.familyMeta ?? {},
     },
     ...(includeSimRunAudit ? { simRunAudit } : {}),
+    smtRefreshCheck: args.smtRefreshCheck ?? null,
+    smtIncompleteMeterRetry: args.smtIncompleteMeterRetry ?? null,
     rawEffectiveSimulationVariablesUsed: activeRunSnapshot ?? null,
     rawReadModel: args.readModel ?? null,
     rawArtifact: args.artifact ?? null,

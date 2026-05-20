@@ -1082,11 +1082,51 @@ type OnePathSmtPostSimHealingResult = {
   eligibleDateKeys?: string[];
   deferredPendingDateKeys?: string[];
   incompleteMeterBackfillDateKeys?: string[];
+  incompleteMeterBackfillFromLedgerDateKeys?: string[];
+  incompleteMeterBackfillFromArtifactDateKeys?: string[];
   refreshResult?: Awaited<ReturnType<typeof requestUsageRefreshForUserHouse>>;
   waitTimedOut?: boolean;
+  incompleteMeterCoverageWait?: {
+    countsByDate: Record<string, number>;
+    incompleteDateKeys: string[];
+    timedOut: boolean;
+  };
   reconcile?: Awaited<ReturnType<typeof reconcileSmtIntervalDayLedger>>;
   postRetryIncompleteDateKeys?: string[];
 };
+
+async function resolveIncompleteMeterBackfillDateKeys(args: {
+  esiid: string;
+  artifactDataset: unknown;
+  targetEndDate: string;
+  ledgerSnapshot?: Pick<
+    Awaited<ReturnType<typeof reconcileSmtIntervalDayLedger>>,
+    "incompleteMeterDateKeys"
+  > | null;
+}): Promise<{
+  dateKeys: string[];
+  fromLedgerDateKeys: string[];
+  fromArtifactDateKeys: string[];
+}> {
+  const fromArtifact = filterDateKeysNearTargetEnd(
+    extractIncompleteMeterDateKeysFromDataset(args.artifactDataset),
+    args.targetEndDate,
+    SMT_INCOMPLETE_METER_BACKFILL_LOOKBACK_DAYS
+  );
+  const ledgerSnapshot =
+    args.ledgerSnapshot ??
+    (await reconcileSmtIntervalDayLedger({ esiid: args.esiid }).catch(() => null));
+  const fromLedger = filterDateKeysNearTargetEnd(
+    ledgerSnapshot?.incompleteMeterDateKeys ?? [],
+    args.targetEndDate,
+    SMT_INCOMPLETE_METER_BACKFILL_LOOKBACK_DAYS
+  );
+  return {
+    dateKeys: normalizeDateKeys([...fromLedger, ...fromArtifact]),
+    fromLedgerDateKeys: fromLedger,
+    fromArtifactDateKeys: fromArtifact,
+  };
+}
 
 async function maybeRunOnePathSmtPostSimHealing(args: {
   mode: CanonicalSimulationInputType;
@@ -1113,11 +1153,13 @@ async function maybeRunOnePathSmtPostSimHealing(args: {
     waitTimeoutMs: ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS,
   });
   const targetEndDate = resolveCanonicalUsage365CoverageWindow().endDate;
-  const incompleteMeterBackfillDateKeys = filterDateKeysNearTargetEnd(
-    extractIncompleteMeterDateKeysFromDataset(args.artifactDataset),
+  const incompleteMeterBackfill = await resolveIncompleteMeterBackfillDateKeys({
+    esiid,
+    artifactDataset: args.artifactDataset,
     targetEndDate,
-    SMT_INCOMPLETE_METER_BACKFILL_LOOKBACK_DAYS
-  );
+    ledgerSnapshot: deferredRepair.reconcile ?? null,
+  });
+  const incompleteMeterBackfillDateKeys = incompleteMeterBackfill.dateKeys;
 
   logSimPipelineEvent("one_path_smt_deferred_day_repair", {
     correlationId: args.correlationId,
@@ -1142,6 +1184,7 @@ async function maybeRunOnePathSmtPostSimHealing(args: {
   let refreshResult = deferredRepair.refreshResult;
   let waitTimedOut = deferredRepair.waitTimedOut;
   let reconcile = deferredRepair.reconcile;
+  let incompleteMeterCoverageWait: OnePathSmtPostSimHealingResult["incompleteMeterCoverageWait"];
 
   if (incompleteMeterBackfillDateKeys.length > 0) {
     logSimPipelineEvent("one_path_smt_incomplete_meter_backfill_requested", {
@@ -1179,6 +1222,11 @@ async function maybeRunOnePathSmtPostSimHealing(args: {
       sourceUserId: args.sourceUserId,
     });
     waitTimedOut = waitTimedOut || waitResult.timedOut;
+    incompleteMeterCoverageWait = {
+      countsByDate: waitResult.countsByDate,
+      incompleteDateKeys: waitResult.incompleteDateKeys,
+      timedOut: waitResult.timedOut,
+    };
     reconcile = (await reconcileSmtIntervalDayLedger({ esiid }).catch(() => null)) ?? reconcile;
   }
 
@@ -1201,8 +1249,11 @@ async function maybeRunOnePathSmtPostSimHealing(args: {
     eligibleDateKeys: deferredRepair.eligibleDateKeys,
     deferredPendingDateKeys: deferredRepair.eligibleDateKeys,
     incompleteMeterBackfillDateKeys,
+    incompleteMeterBackfillFromLedgerDateKeys: incompleteMeterBackfill.fromLedgerDateKeys,
+    incompleteMeterBackfillFromArtifactDateKeys: incompleteMeterBackfill.fromArtifactDateKeys,
     refreshResult: refreshResult?.ok === false ? undefined : refreshResult,
     waitTimedOut,
+    incompleteMeterCoverageWait,
     reconcile: reconcile ?? undefined,
   };
 }
