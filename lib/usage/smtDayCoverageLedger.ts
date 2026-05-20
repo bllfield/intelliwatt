@@ -466,7 +466,7 @@ export function buildSmtDayLedgerMeta(ledger: SmtDayLedgerSnapshot): Record<stri
 }
 
 export async function applySmtLedgerToActualDataset(args: {
-  dataset: { daily?: Array<{ date: string; kwh: number }>; meta?: Record<string, unknown> } | null;
+  dataset: { daily?: Array<{ date: string; kwh: number }>; meta?: Record<string, unknown> | null } | null;
   esiid: string | null;
   reconcile?: boolean;
 }): Promise<void> {
