@@ -5,13 +5,14 @@ import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { getRollingBackfillRange } from "@/lib/smt/agreements";
 import { chicagoDateKey } from "@/lib/time/chicago";
+import { loadSmtWindowDayStatus } from "@/lib/usage/smtWindowStatus";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SMT_PULL_COOLDOWN_MS = 30 * DAY_MS;
-const SMT_READY_COMPLETENESS = 0.99;
+
 function dayIndexFromDateKey(key: string): number {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(key ?? "").trim());
   if (!m) return Number.NaN;
@@ -117,12 +118,6 @@ export async function POST(req: NextRequest) {
       ? daysBetweenDateKeysInclusive(coverageStartDate, coverageEndDate)
       : 0;
 
-  // "Ready" means: full-year span and near-complete series (stop chasing a 1-day tail).
-  const expectedIntervals = Math.max(1, coverageDays * 96);
-  const completenessByDaySpan = expectedIntervals > 0 ? intervalCount / expectedIntervals : 0;
-  const historyReady = Boolean(coverageDays >= 365 && completenessByDaySpan >= SMT_READY_COMPLETENESS);
-
-  // Also report whether any raw SMT files have landed for visibility.
   const rawCount = await prisma.rawSmtFile.count({
     where: {
       OR: [
@@ -132,6 +127,8 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  const windowStatus = await loadSmtWindowDayStatus({ esiid: house.esiid });
+  const historyReady = Boolean(windowStatus.ready && rawCount === 0);
   const ready = historyReady;
   const phase = ready ? "ready" : intervalCount > 0 || rawCount > 0 ? "processing" : "pending";
 

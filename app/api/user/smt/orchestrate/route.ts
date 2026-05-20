@@ -6,6 +6,11 @@ import { normalizeEmail } from "@/lib/utils/email";
 import { pickBestSmtAuthorization } from "@/lib/smt/authorizationSelection";
 import { getRollingBackfillRange, refreshSmtAuthorizationStatus, requestSmtBackfillForAuthorization } from "@/lib/smt/agreements";
 import { chicagoDateKey } from "@/lib/time/chicago";
+import {
+  loadSmtWindowDayStatus,
+  SMT_REQUIRED_SLOTS_PER_DAY,
+  smtWindowCompletenessRatio,
+} from "@/lib/usage/smtWindowStatus";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,7 +18,6 @@ export const maxDuration = 30;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SMT_PULL_COOLDOWN_MS = 30 * DAY_MS;
-const SMT_READY_COMPLETENESS = 0.99; // stop chasing tiny tails; treat ~99% as sufficient for "ready"
 const SMT_GAP_SLOP_DAYS = 1; // tolerate up to 1 day tail/head mismatch for messaging/eligibility
 /**
  * Convert a YYYY-MM-DD date key into a monotonic day index.
@@ -108,58 +112,9 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
   const coverageDays =
     coverageStartDate && coverageEndDate ? daysBetweenDateKeysInclusive(coverageStartDate, coverageEndDate) : 0;
 
-  // Completeness check (contiguous-series, per meter):
-  // SMT delivers 15-minute reads as a contiguous series (zeros still appear as rows).
-  //
-  // A single ESIID can have multiple meters over time (e.g., meter replacement). Those meters can
-  // have different coverage windows, so we compute expected intervals per meter span and sum them.
-  const FIFTEEN_MIN_MS = 15 * 60 * 1000;
-
-  let intervalExpectedBySpan = 0;
-  let minMeterCompleteness = 1;
-  let meterGroupsSeen = 0;
-
-  try {
-    const meterAgg = await prisma.smtInterval.groupBy({
-      by: ["meter"],
-      where: { esiid },
-      _count: { _all: true },
-      _min: { ts: true },
-      _max: { ts: true },
-    });
-
-    for (const m of meterAgg) {
-      const minTs = (m as any)?._min?.ts as Date | null | undefined;
-      const maxTs = (m as any)?._max?.ts as Date | null | undefined;
-      const count = Number((m as any)?._count?._all ?? 0);
-      if (!minTs || !maxTs || count <= 0) continue;
-
-      const diff = maxTs.getTime() - minTs.getTime();
-      if (!Number.isFinite(diff) || diff < 0) continue;
-
-      // Use rounding to tolerate any occasional ms drift; timestamps should be 15-min aligned.
-      const expected = Math.max(1, Math.round(diff / FIFTEEN_MIN_MS) + 1);
-      intervalExpectedBySpan += expected;
-
-      const completeness = expected > 0 ? count / expected : 0;
-      minMeterCompleteness = Math.min(minMeterCompleteness, completeness);
-      meterGroupsSeen += 1;
-    }
-  } catch {
-    // Fall back to naive expectation from global span if groupBy fails.
-    if (coverageStart && coverageEnd) {
-      const diff = coverageEnd.getTime() - coverageStart.getTime();
-      if (Number.isFinite(diff) && diff >= 0) {
-        intervalExpectedBySpan = Math.max(1, Math.round(diff / FIFTEEN_MIN_MS) + 1);
-        minMeterCompleteness =
-          intervalExpectedBySpan > 0 ? intervalCount / intervalExpectedBySpan : 0;
-        meterGroupsSeen = 1;
-      }
-    }
-  }
-
-  const intervalCompletenessBySpan =
-    intervalExpectedBySpan > 0 ? intervalCount / intervalExpectedBySpan : 0;
+  const windowStatus = await loadSmtWindowDayStatus({ esiid });
+  const intervalExpectedBySpan = windowStatus.dateKeys.length * SMT_REQUIRED_SLOTS_PER_DAY;
+  const intervalCompletenessBySpan = smtWindowCompletenessRatio(windowStatus);
 
   // Compute head/tail gaps against the target 12-month calendar window (for messaging + eligibility).
   // getRollingBackfillRange() returns UTC day-marker Dates (YYYY-MM-DD keys). Treat as date keys directly.
@@ -175,8 +130,7 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
       ? Math.max(0, daysBetweenDateKeysInclusive(coverageEndDate, targetEndKey) - 1)
       : 0;
 
-  const completenessOk =
-    intervalExpectedBySpan > 0 && meterGroupsSeen > 0 && minMeterCompleteness >= SMT_READY_COMPLETENESS;
+  const completenessOk = windowStatus.ready;
   const headGapOk = headGapDays <= SMT_GAP_SLOP_DAYS;
   const tailGapOk = tailGapDays <= SMT_GAP_SLOP_DAYS;
   const gapsOk = headGapOk && tailGapOk;

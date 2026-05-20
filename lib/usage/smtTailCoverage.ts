@@ -8,13 +8,19 @@ import {
   loadSmtDayLedgerStatusForDate,
   runDeferredPendingSmtDayRepairs,
 } from "@/lib/usage/smtDayCoverageLedger";
-import { chicagoSlot96FromTs, smtCoverageDateKey } from "@/lib/time/chicago";
-import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
+import { smtCoverageDateKey } from "@/lib/time/chicago";
+import {
+  loadSmtWindowDayStatus,
+  missingChicagoSlotsFromFilledSlots,
+  resolveSmtCanonicalWindow,
+  SMT_REQUIRED_SLOTS_PER_DAY,
+} from "@/lib/usage/smtWindowStatus";
 
 export { chicagoSlot96FromTs, smtCoverageDateKey } from "@/lib/time/chicago";
+export { missingChicagoSlotsFromFilledSlots } from "@/lib/usage/smtWindowStatus";
 
 export const SMT_TAIL_LOOKBACK_DAYS = 14;
-export const SMT_TAIL_REQUIRED_INTERVALS_PER_DAY = 96;
+export const SMT_TAIL_REQUIRED_INTERVALS_PER_DAY = SMT_REQUIRED_SLOTS_PER_DAY;
 export const SMT_TAIL_WAIT_TIMEOUT_MS = 60_000;
 export const SMT_TAIL_WAIT_INTERVAL_MS = 2_000;
 /** User-facing usage route budget: leave headroom when multiple homes are loaded. */
@@ -31,31 +37,6 @@ export const SMT_NEAR_COMPLETE_INTERVAL_THRESHOLD = 94;
 export const SMT_POST_BACKFILL_SETTLE_DELAY_MS = 3_000;
 /** Only block incomplete-meter backfill waits on days near the canonical window end. */
 export const SMT_INCOMPLETE_METER_BACKFILL_LOOKBACK_DAYS = 3;
-
-export function missingChicagoSlotsFromFilledSlots(filledSlots: ReadonlySet<number>): number[] {
-  const missing: number[] = [];
-  for (let slot = 0; slot < SMT_TAIL_REQUIRED_INTERVALS_PER_DAY; slot += 1) {
-    if (!filledSlots.has(slot)) missing.push(slot);
-  }
-  return missing;
-}
-
-function accumulateChicagoSlotsByDate(args: {
-  rows: Array<{ ts: Date | string | null | undefined }>;
-  requestedDateSet: Set<string>;
-}): Map<string, Set<number>> {
-  const slotsByDate = new Map<string, Set<number>>();
-  for (const row of args.rows) {
-    const ts = row?.ts instanceof Date ? row.ts : row?.ts ? new Date(row.ts) : null;
-    const dateKey = smtCoverageDateKey(ts);
-    const slot = ts ? chicagoSlot96FromTs(ts) : null;
-    if (!dateKey || slot == null || !args.requestedDateSet.has(dateKey)) continue;
-    const bucket = slotsByDate.get(dateKey) ?? new Set<number>();
-    bucket.add(slot);
-    slotsByDate.set(dateKey, bucket);
-  }
-  return slotsByDate;
-}
 
 export type SmtTailCoverageSnapshot = {
   intervalCount: number;
@@ -272,51 +253,19 @@ function dateCoverageProgressFingerprint(
 }
 
 export async function loadSmtDateCoverage(args: { esiid: string; dateKeys: string[] }): Promise<SmtDateCoverageSnapshot> {
-  const dateKeys = normalizeDateKeys(args.dateKeys);
-  if (dateKeys.length === 0) {
-    return {
-      dateKeys,
-      countsByDate: {},
-      missingSlotsByDate: {},
-      incompleteDateKeys: [],
-      ready: true,
-    };
-  }
-  const startDate = addDateKeyDays(dateKeys[0]!, -1);
-  const endDate = addDateKeyDays(dateKeys[dateKeys.length - 1]!, 1);
-  const rows = await prisma.smtInterval
-    .findMany({
-      where: {
-        esiid: args.esiid,
-        ts: {
-          gte: new Date(`${startDate}T00:00:00.000Z`),
-          lte: new Date(`${endDate}T23:59:59.999Z`),
-        },
-      },
-      select: { ts: true },
-      orderBy: { ts: "asc" },
-    })
-    .catch(() => []);
-  const requestedDateSet = new Set(dateKeys);
-  const slotsByDate = accumulateChicagoSlotsByDate({ rows, requestedDateSet });
+  const windowStatus = await loadSmtWindowDayStatus({ esiid: args.esiid, dateKeys: args.dateKeys });
   const countsByDate = Object.fromEntries(
-    dateKeys.map((dateKey) => [dateKey, slotsByDate.get(dateKey)?.size ?? 0])
+    windowStatus.dateKeys.map((dateKey) => [dateKey, windowStatus.byDate[dateKey]?.slotCount ?? 0])
   );
   const missingSlotsByDate = Object.fromEntries(
-    dateKeys.map((dateKey) => [
-      dateKey,
-      missingChicagoSlotsFromFilledSlots(slotsByDate.get(dateKey) ?? new Set<number>()),
-    ])
-  );
-  const incompleteDateKeys = dateKeys.filter(
-    (dateKey) => (countsByDate[dateKey] ?? 0) < SMT_TAIL_REQUIRED_INTERVALS_PER_DAY
+    windowStatus.dateKeys.map((dateKey) => [dateKey, windowStatus.byDate[dateKey]?.missingSlots ?? []])
   );
   return {
-    dateKeys,
+    dateKeys: windowStatus.dateKeys,
     countsByDate,
     missingSlotsByDate,
-    incompleteDateKeys,
-    ready: incompleteDateKeys.length === 0,
+    incompleteDateKeys: windowStatus.incompleteDateKeys,
+    ready: windowStatus.ready,
   };
 }
 
@@ -324,7 +273,7 @@ export async function loadSmtTailCoverage(args: {
   esiid: string;
   targetEndDate?: string;
 }): Promise<SmtTailCoverageSnapshot> {
-  const targetEndDate = args.targetEndDate ?? resolveCanonicalUsage365CoverageWindow().endDate;
+  const targetEndDate = args.targetEndDate ?? resolveSmtCanonicalWindow().endDate;
   const coverage = await prisma.smtInterval
     .aggregate({
       where: { esiid: args.esiid },
@@ -340,29 +289,11 @@ export async function loadSmtTailCoverage(args: {
   const intervalCount = Number(coverage?._count?._all ?? 0) || 0;
   const tailStartDate = addDateKeyDays(targetEndDate, -(SMT_TAIL_LOOKBACK_DAYS - 1));
   const tailDateKeys = enumerateDateKeysInclusive(tailStartDate, targetEndDate);
-  const tailDateSet = new Set(tailDateKeys);
-  const tailStart = new Date(`${tailStartDate}T00:00:00.000Z`);
-  const tailEnd = new Date(`${targetEndDate}T23:59:59.999Z`);
-  const tailRows = await prisma.smtInterval
-    .findMany({
-      where: {
-        esiid: args.esiid,
-        ts: {
-          gte: tailStart,
-          lte: tailEnd,
-        },
-      },
-      select: { ts: true },
-      orderBy: { ts: "asc" },
-    })
-    .catch(() => []);
-  const tailSlotsByDate = accumulateChicagoSlotsByDate({ rows: tailRows, requestedDateSet: tailDateSet });
+  const tailWindowStatus = await loadSmtWindowDayStatus({ esiid: args.esiid, dateKeys: tailDateKeys });
   const tailCountsByDate = Object.fromEntries(
-    tailDateKeys.map((dateKey) => [dateKey, tailSlotsByDate.get(dateKey)?.size ?? 0])
+    tailDateKeys.map((dateKey) => [dateKey, tailWindowStatus.byDate[dateKey]?.slotCount ?? 0])
   );
-  const incompleteTailDateKeys = tailDateKeys.filter(
-    (dateKey) => (tailCountsByDate[dateKey] ?? 0) < SMT_TAIL_REQUIRED_INTERVALS_PER_DAY
-  );
+  const incompleteTailDateKeys = tailWindowStatus.incompleteDateKeys;
   const targetEndDayLedgerStatus = await loadSmtDayLedgerStatusForDate({
     esiid: args.esiid,
     dateKey: targetEndDate,
@@ -396,7 +327,7 @@ export async function waitForSmtTailCoverage(args: {
   /** When false, keep polling until timeout even if counts stop changing. */
   exitEarlyWhenStalled?: boolean;
 }): Promise<SmtTailWaitResult> {
-  const targetEndDate = args.targetEndDate ?? resolveCanonicalUsage365CoverageWindow().endDate;
+  const targetEndDate = args.targetEndDate ?? resolveSmtCanonicalWindow().endDate;
   const timeoutMs = args.timeoutMs ?? SMT_TAIL_WAIT_TIMEOUT_MS;
   const intervalMs = args.intervalMs ?? SMT_TAIL_WAIT_INTERVAL_MS;
   const exitEarlyWhenStalled = args.exitEarlyWhenStalled !== false;
@@ -482,7 +413,7 @@ export async function ensureSmtTailCoverageForUserHouse(args: {
   waitTimeoutMs?: number;
   requestRefreshIfNeeded?: boolean;
 }): Promise<SmtTailEnsureResult> {
-  const targetEndDate = args.targetEndDate ?? resolveCanonicalUsage365CoverageWindow().endDate;
+  const targetEndDate = args.targetEndDate ?? resolveSmtCanonicalWindow().endDate;
   if (args.requestRefreshIfNeeded !== false) {
     await runDeferredPendingSmtDayRepairs({
       esiid: args.esiid,

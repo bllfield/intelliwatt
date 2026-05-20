@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { SMT_DAY_LEDGER_STATUS } from "@/lib/usage/smtDayCoverageLedger";
 import { chicagoSlot96FromTs } from "@/lib/time/chicago";
+import { missingChicagoSlotsFromFilledSlots } from "@/lib/usage/smtWindowStatus";
 import {
   filterDateKeysNearTargetEnd,
   isGreenButtonPrimaryDataset,
   isResolvedDatasetTailDisplayReady,
-  missingChicagoSlotsFromFilledSlots,
   ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS,
   ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS,
   reconcileUsageIngestionWithDataset,
