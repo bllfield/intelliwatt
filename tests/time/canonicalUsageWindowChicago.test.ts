@@ -1,5 +1,7 @@
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { canonicalUsageWindowChicago, canonicalUsageWindowForTimezone } from "@/lib/time/chicago";
+
+vi.unmock("@/lib/usage/canonicalCoverageConfig");
 
 function dayDiffInclusive(startDate: string, endDate: string): number {
   const s = new Date(`${startDate}T12:00:00.000Z`).getTime();
@@ -8,6 +10,10 @@ function dayDiffInclusive(startDate: string, endDate: string): number {
 }
 
 describe("canonicalUsageWindowChicago", () => {
+  afterEach(() => {
+    vi.resetModules();
+  });
+
   test("defaults to inclusive 365-day window with two-day reliability lag", () => {
     const out = canonicalUsageWindowChicago({ now: new Date("2026-03-12T12:00:00.000Z") });
     expect(out.endDate).toBe("2026-03-10");
@@ -28,6 +34,20 @@ describe("canonicalUsageWindowChicago", () => {
       totalDays: 30,
     });
     expect(dayDiffInclusive(out.startDate, out.endDate)).toBe(30);
+  });
+
+  test("config lag 3 shifts endDate one calendar day earlier than lag 2", async () => {
+    vi.resetModules();
+    vi.doMock("@/lib/usage/canonicalCoverageConfig", () => ({
+      CANONICAL_COVERAGE_LAG_DAYS: 3,
+      CANONICAL_COVERAGE_TOTAL_DAYS: 365,
+    }));
+    const { canonicalUsageWindowChicago: windowChicago } = await import("@/lib/time/chicago");
+    const now = new Date("2026-03-12T12:00:00.000Z");
+    const lag2 = windowChicago({ now, reliableLagDays: 2 });
+    const lag3Default = windowChicago({ now });
+    expect(lag2.endDate).toBe("2026-03-10");
+    expect(lag3Default.endDate).toBe("2026-03-09");
   });
 });
 

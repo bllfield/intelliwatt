@@ -1,4 +1,8 @@
 import { getFlag, setFlag } from "@/lib/flags";
+import {
+  CANONICAL_COVERAGE_LAG_DAYS,
+  CANONICAL_COVERAGE_TOTAL_DAYS,
+} from "@/lib/usage/canonicalCoverageConfig";
 
 export const SIMULATION_VARIABLE_POLICY_FLAG_KEY = "sim.shared_variable_policy.v1";
 export const SIMULATION_VARIABLE_OVERRIDE_CONFIRMATION = "OVERRIDE";
@@ -538,8 +542,8 @@ export const DEFAULT_SIMULATION_VARIABLE_POLICY: SimulationVariablePolicy = {
     lowDataScaledDayThreshold: 0.035,
   },
   adapterCanonicalInput: {
-    canonicalCoverageLagDays: 2,
-    canonicalCoverageTotalDays: 365,
+    canonicalCoverageLagDays: CANONICAL_COVERAGE_LAG_DAYS,
+    canonicalCoverageTotalDays: CANONICAL_COVERAGE_TOTAL_DAYS,
     manualMonthlyDefaultBillEndDay: 15,
     manualAnnualWindowDays: 365,
     longTermWeatherBaselineStartYear: 1991,

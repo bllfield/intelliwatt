@@ -28,6 +28,10 @@ import { enumerateDayStartsMsForWindow, getDayGridTimestamps, dateKeyFromTimesta
 import { getHouseWeatherDays } from "@/modules/weather/repo";
 import { WEATHER_STUB_SOURCE } from "@/modules/weather/types";
 import { canonicalUsageWindowForTimezone, prevCalendarDayDateKey, monthsEndingAt } from "@/lib/time/chicago";
+import {
+  CANONICAL_COVERAGE_LAG_DAYS,
+  CANONICAL_COVERAGE_TOTAL_DAYS,
+} from "@/lib/usage/canonicalCoverageConfig";
 
 const WORKSPACE_PAST_NAME = "Past (Corrected)";
 
@@ -263,7 +267,12 @@ export async function buildAndSavePastForGapfillLab(args: {
   }
 
   const normalizedWindow = normalizeWindowToInclusiveDays(
-    canonicalUsageWindowForTimezone({ now: new Date(), reliableLagDays: 2, totalDays: 365, timezone }),
+    canonicalUsageWindowForTimezone({
+      now: new Date(),
+      reliableLagDays: CANONICAL_COVERAGE_LAG_DAYS,
+      totalDays: CANONICAL_COVERAGE_TOTAL_DAYS,
+      timezone,
+    }),
     365
   );
   const startDate = normalizedWindow.startDate;

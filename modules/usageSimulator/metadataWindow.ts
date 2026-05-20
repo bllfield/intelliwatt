@@ -1,4 +1,8 @@
 import { canonicalUsageWindowChicago } from "@/lib/time/chicago";
+import {
+  CANONICAL_COVERAGE_LAG_DAYS,
+  CANONICAL_COVERAGE_TOTAL_DAYS,
+} from "@/lib/usage/canonicalCoverageConfig";
 import { DEFAULT_SIMULATION_VARIABLE_POLICY, type SimulationVariablePolicy } from "@/modules/usageSimulator/simulationVariablePolicy";
 
 export type CoverageWindow = { startDate: string; endDate: string };
@@ -60,8 +64,8 @@ export function resolveCanonicalUsage365CoverageWindow(
 ): CoverageWindow {
   const win = canonicalUsageWindowChicago({
     now,
-    reliableLagDays: policy.canonicalCoverageLagDays,
-    totalDays: policy.canonicalCoverageTotalDays,
+    reliableLagDays: policy.canonicalCoverageLagDays ?? CANONICAL_COVERAGE_LAG_DAYS,
+    totalDays: policy.canonicalCoverageTotalDays ?? CANONICAL_COVERAGE_TOTAL_DAYS,
   });
   return {
     startDate: String(win.startDate).slice(0, 10),

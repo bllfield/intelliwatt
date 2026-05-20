@@ -1,3 +1,8 @@
+import {
+  CANONICAL_COVERAGE_LAG_DAYS,
+  CANONICAL_COVERAGE_TOTAL_DAYS,
+} from "@/lib/usage/canonicalCoverageConfig";
+
 export function isYearMonth(s: string): boolean {
   return /^\d{4}-\d{2}$/.test(String(s ?? "").trim());
 }
@@ -71,10 +76,12 @@ export function chicagoDateKey(now = new Date()): string {
   return fmt.format(now);
 }
 
-export function rollingAutoAnchorEndDateChicago(now = new Date(), lagDays = 2): string {
+export function rollingAutoAnchorEndDateChicago(
+  now = new Date(),
+  lagDays = CANONICAL_COVERAGE_LAG_DAYS
+): string {
   const safeLagDays = Math.max(0, Math.trunc(lagDays));
-  const shifted = new Date(now.getTime() - safeLagDays * 24 * 60 * 60 * 1000);
-  return chicagoDateKey(shifted);
+  return prevCalendarDayDateKey(chicagoDateKey(now), safeLagDays);
 }
 
 const dtfCache = new Map<string, Intl.DateTimeFormat>();
@@ -185,8 +192,8 @@ export function canonicalUsageWindowForTimezone(args?: {
   timezone?: string;
 }): { startDate: string; endDate: string } {
   const now = args?.now ?? new Date();
-  const reliableLagDays = Math.max(0, Math.trunc(args?.reliableLagDays ?? 2));
-  const totalDays = Math.max(1, Math.trunc(args?.totalDays ?? 365));
+  const reliableLagDays = Math.max(0, Math.trunc(args?.reliableLagDays ?? CANONICAL_COVERAGE_LAG_DAYS));
+  const totalDays = Math.max(1, Math.trunc(args?.totalDays ?? CANONICAL_COVERAGE_TOTAL_DAYS));
   const timezone = String(args?.timezone ?? "America/Chicago").trim() || "America/Chicago";
   const todayInTimezone = dateTimePartsInTimezone(now, timezone)?.dateKey ?? chicagoDateKey(now);
   const endDate = prevCalendarDayDateKey(todayInTimezone, reliableLagDays);
