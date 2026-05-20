@@ -1,3 +1,4 @@
+import { CANONICAL_COVERAGE_LAG_DAYS } from "@/lib/usage/canonicalCoverageConfig";
 import { rollingAutoAnchorEndDateChicago } from "@/modules/onePathSim/manualAnchor";
 import { addDaysToIsoDate, buildContiguousStatementRanges, MAX_MANUAL_MONTHLY_BILLS } from "@/modules/onePathSim/manualStatementRanges";
 import type {
@@ -116,7 +117,7 @@ export function resolveSeedAnchorEndDate(args: {
 }
 
 export function resolveGapfillSyntheticAnchorEndDate(_actualEndDate?: string | null, now = new Date()): string {
-  return rollingAutoAnchorEndDateChicago(now, 2);
+  return rollingAutoAnchorEndDateChicago(now, CANONICAL_COVERAGE_LAG_DAYS);
 }
 
 export function deriveMonthlySeedFromActual(args: {

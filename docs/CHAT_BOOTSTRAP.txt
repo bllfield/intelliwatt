@@ -64,6 +64,22 @@ ONE PATH SIM RESCUE ARCHITECTURE
 - **Known-house sandbox tuning rule:** repeated One Path tuning runs should use the sandbox-only known-house scenario registry/preset loader under `modules/onePathSim/**`. Presets may preload keeper-user identity, house/context selection, scenario selection, validation inputs, travel ranges, expected truth source, and review expectations into the existing One Path Admin controls and AI copy payload, but they must not add live persistence or touch live app surfaces.
 
 ========================================
+SMT INTERVAL UNIFICATION (IN PROGRESS — 8 PHASES)
+========================================
+
+- **Authoritative:** `docs/PROJECT_PLAN.md` (PC-2026-05 master entry), detail `docs/SMT_UNIFICATION_PLAN.md`, phased prompts `docs/SMT_UNIFICATION_PHASE_PROMPTS.md`, new-chat bootstrap `docs/SMT_UNIFICATION_AGENT_BOOTSTRAP.md`, Cursor rule `.cursor/rules/smt-unification-lock.mdc`.
+- **Run one phase per chat;** pre-check → implement → post-check for that phase only. User may verify each phase in a separate review chat before continuing.
+- **Lag knob:** `lib/usage/canonicalCoverageConfig.ts` (`CANONICAL_COVERAGE_LAG_DAYS = 2` today; 3 in one place later). Window via `resolveCanonicalUsage365CoverageWindow()` (moves to `lib/usage/canonicalMetadataWindow.ts` in Phase 7).
+- **SMT completeness:** strict **96/96** Chicago 15-minute slots per day for SMT readiness, ledger, orchestrate/status, Past Sim INTERVAL trusted pool. **Not** 90, **not** 99% span completeness.
+- **Green Button:** do **not** edit `modules/realUsageAdapter/greenButton.ts` for this effort; GB keeps looser/trusted-shifted rules (90 + `expectedIntervalsForDateISO()`).
+- **Single heal owner (target):** `lib/usage/ensureSmtCoverage.ts` — pull, targeted backfill (`smtIncompleteMeterBackfill`), ledger reconcile, per-session throttle. One Path only **triggers** ensure; no `requestTargetedSmtIntervalBackfillForHouse` in `one-path-sim/route.ts` after Phase 4/5.
+- **Single status read (target):** `lib/usage/smtWindowStatus.ts` for all days in canonical window.
+- **Chicago timestamps (SMT):** `lib/time/chicago.ts` for date keys + slot-96; no duplicate Intl formatters in routes/adapters (except GB file).
+- **Display vs sim:** usage + INTERVAL baseline show partial SMT intervals; Past Sim excludes &lt;96-slot days from trusted pool and simulates with not-fully-available labeling.
+- **One Path isolation:** shared SMT code in `lib/**` only; `modules/onePathSim/**` must not import `modules/usageSimulator/**`.
+- **Completion marker:** add `docs/SMT_UNIFICATION_COMPLETE.md` after Phase 8 greps/tests green.
+
+========================================
 USER MANUAL MONTHLY (AUTHORITATIVE)
 ========================================
 

@@ -1314,8 +1314,9 @@ function buildCanonicalEngineInput(args: {
     typeof args.loaded.actualDataset?.summary?.start === "string" ? String(args.loaded.actualDataset.summary.start).slice(0, 10) : null;
   const actualSummaryEnd =
     typeof args.loaded.actualDataset?.summary?.end === "string" ? String(args.loaded.actualDataset.summary.end).slice(0, 10) : null;
+  // Green Button upload span is baseline/usage display only. Past Sim (scenarioId set) always uses canonical lag window.
   const usesGreenButtonAnchorWindow =
-    (args.inputType !== "GREEN_BUTTON" || args.scenarioId == null) &&
+    args.scenarioId == null &&
     isIntervalLikeInputType(args.inputType) &&
     actualMeta.actualSource === "GREEN_BUTTON" &&
     !!actualSummaryStart &&

@@ -24,13 +24,86 @@
 - **One Path actual-source rule:** on a pinned One Path test home, actual usage still comes from shared usage owners. SMT interval truth may use the selected source house ESIID as the actual meter identity fallback for the pinned actual-context house, while Green Button truth must come from persisted Green Button usage cloned onto the test home.
 - **Green Button shifted-actual rule:** shifted Green Button actuals are generalized actual-usage behavior, not date-specific patches. Trusted shifted source days use the shared 90-interval minimum bounded by `expectedIntervalsForDateISO()`, must win over trailing/current-year partial days for the same target date, must preserve `sourceDateByTargetDate`, must disclose source-day weather usage, and must not reach downstream simulation as `SIMULATED_INCOMPLETE_METER` unless the shifted source day itself fails the trusted coverage rule.
 - **One Path shared-window rule:** for non-baseline runs, canonical 365-day coverage metadata must stay owned by `resolveCanonicalUsage365CoverageWindow()` / shared metadata-window helpers. `dataset.summary.start/end`, `dataset.meta.coverageStart/coverageEnd`, and bounded `excludedDateKeys*` metadata must stay aligned to that same shared window.
-- **One Path best-effort SMT recovery rule:** interval runs may request SMT refresh and wait for canonical tail coverage before the first run, but stale/incomplete tail no longer blocks results. If the first result still marks `SIMULATED_INCOMPLETE_METER` days, refresh those exact dates, rebuild engine input, rerun once, and still return results if some incomplete simulated days remain.
+- **One Path SMT recovery rule (superseded by PC-2026-05 when shipped):** until SMT unification is complete, interval runs may request SMT refresh and wait for canonical tail coverage before the first run, but stale/incomplete tail no longer blocks results. If the first result still marks `SIMULATED_INCOMPLETE_METER` days, the route may refresh those exact dates, rebuild engine input, rerun once, and still return results if some incomplete simulated days remain. **Target (PC-2026-05):** One Path only triggers `lib/usage/ensureSmtCoverage.ts`; no private targeted backfill or long SMT waits in `one-path-sim/route.ts`.
 - **One Path known-house tuning rule:** repeated One Path tuning runs should use the sandbox-only known-house scenario registry under `modules/onePathSim/**`. Presets may preload keeper-user selection, house/context resolution strategy, scenario selection, validation inputs, weather preference, travel ranges, and review expectations into the existing One Path Admin controls, and the same preset identity should flow into sandbox summaries / AI copy payloads. No live persistence or live-surface wiring is part of this step.
 - **Cutover honesty rule:** internal seal does not mean live cutover is complete. GapFill and user sim pages are still not routed through One Path; Manual Lab now shares the One Path Stage 2 calc/read path while keeping its separate admin Stage 1 surface.
+
+## PC-2026-05 — SMT interval coverage unification (8 phases, IN PROGRESS)
+
+**Status:** Planned / in flight. **Completion marker:** `docs/SMT_UNIFICATION_COMPLETE.md` (all checkboxes green).
+
+**Authoritative detail (do not duplicate here — link and keep in sync):**
+
+| Doc | Role |
+|-----|------|
+| `docs/SMT_UNIFICATION_PLAN.md` | Architecture, product rules, per-phase file map, session heal contract |
+| `docs/SMT_UNIFICATION_PHASE_PROMPTS.md` | Copy-paste prompts: pre-check → implement → post-check per phase |
+| `docs/SMT_UNIFICATION_AGENT_BOOTSTRAP.md` | New Cursor chat bootstrap + per-phase verification prompt |
+| `.cursor/rules/smt-unification-lock.mdc` | Agent constraints until complete |
+| `docs/USAGE_LAYER_MAP.md` | SMT layer owner table (target) |
+| `docs/ONE_PATH_SIM_ARCHITECTURE.md` | One Path current vs target SMT heal |
+
+**Problem:** SMT pull/backfill/wait and “day complete” logic are split across `userUsageRefresh`, `ensureSmtTailCoverage`, `/api/user/smt/orchestrate`, One Path admin post-sim healing, duplicate Chicago timestamp helpers, and conflicting readiness rules (99% span, 90 trusted slots, 96 ledger slots).
+
+**Product rules (locked):**
+
+- **Canonical window lag:** `CANONICAL_COVERAGE_LAG_DAYS = 2` (Chicago calendar days behind today). Changeable in **one file only:** `lib/usage/canonicalCoverageConfig.ts` (lag 3 = one constant change, window shifts everywhere).
+- **SMT completeness:** **96/96** distinct Chicago 15-minute slots per calendar day for readiness, ledger, orchestrate/status, and Past Sim INTERVAL trusted pool.
+- **Green Button:** **Out of scope.** Do **not** edit `modules/realUsageAdapter/greenButton.ts` for this effort. GB keeps looser trusted-shifted rules (90 + `expectedIntervalsForDateISO()`).
+- **Usage + INTERVAL baseline:** display whatever SMT intervals exist (partial days OK on chart/table).
+- **Past Sim (INTERVAL/SMT):** days with fewer than 96 slots are **not** in the trusted actual pool; simulate with not-fully-available labeling (`INCOMPLETE_METER` / `PENDING_SMT` from shared status).
+- **Heal:** all surfaces **trigger** one usage-owned orchestrator; **no** One Path–only SMT pull/backfill/wait after Phase 4/5.
+- **Heal throttle:** at most **once per session** per `userId + houseId + sessionKey` unless `force: true` (usage refresh, manual refresh, Past Sim run may use run-scoped key or force).
+- **One Path isolation:** `modules/onePathSim/**` must **not** import `modules/usageSimulator/**`; shared SMT code lives in `lib/**` only.
+- **Shared sim window lock:** non-baseline coverage metadata stays owned by `resolveCanonicalUsage365CoverageWindow()` (moves to `lib/usage/canonicalMetadataWindow.ts` in Phase 7).
+- **Lag knob scope:** changing `CANONICAL_COVERAGE_LAG_DAYS` in `lib/usage/canonicalCoverageConfig.ts` moves **Past Sim** `coverageStart`/`coverageEnd` and admin manual synthetic anchor (`resolveGapfillSyntheticAnchorEndDate`) for **all** input types including **GREEN_BUTTON** and **INTERVAL**. **Usage page / GB upload anchor / baseline passthrough** keep upload-backed or data-backed windows (`getLatestGreenButtonFullDayDateKey`, `usesGreenButtonAnchorWindow` only when `scenarioId == null`).
+
+**Target single owners (after all phases):**
+
+| Concern | Module |
+|---------|--------|
+| Lag + total days | `lib/usage/canonicalCoverageConfig.ts` |
+| 365-day window | `lib/usage/canonicalMetadataWindow.ts` |
+| Chicago date key + slot 0–95 | `lib/time/chicago.ts` |
+| Per-day status in window | `lib/usage/smtWindowStatus.ts` |
+| Pull, backfill, wait, session throttle | `lib/usage/ensureSmtCoverage.ts` |
+| Targeted incomplete-day backfill impl | `lib/usage/smtIncompleteMeterBackfill.ts` (callable only from ensure) |
+| Ledger | `lib/usage/smtDayCoverageLedger.ts` |
+| Persisted intervals read | `lib/usage/actualDatasetForHouse.ts`, `resolveIntervalsLayer` |
+
+**Detect vs act (same status, different surfaces):**
+
+- **Detect:** one status map per day in canonical window (`isComplete` ⇔ 96 slots).
+- **Act (display):** usage dashboard + INTERVAL baseline show partial intervals.
+- **Act (sim):** Past Sim excludes incomplete days from trusted pool.
+
+**Phased implementation (one phase per chat; no global Phase 0):**
+
+| Phase | Focus |
+|-------|--------|
+| 1 | Single lag knob in `lib/usage/canonicalCoverageConfig.ts`; calendar lag in `rollingAutoAnchorEndDateChicago` |
+| 2 | SMT timestamps only in `lib/time/chicago.ts` (no GB file edits) |
+| 3 | `lib/usage/smtWindowStatus.ts`; strict 96; remove 99% SMT ready from orchestrate/status |
+| 4 | `lib/usage/ensureSmtCoverage.ts` + per-session throttle; remove targeted backfill from one-path route |
+| 5 | Wire usage route, refresh, orchestrate, both upstream truths, one-path admin |
+| 6 | Past Sim engines: `MIN_TRUSTED_ACTUAL_INTERVALS_PER_DAY = 96` for INTERVAL/SMT only |
+| 7 | Dedupe `resolveCanonicalUsage365CoverageWindow` into `lib/` |
+| 8 | Closure greps + tests + `docs/SMT_UNIFICATION_COMPLETE.md` |
+
+**Verification:** per-phase pre/post checks in `docs/SMT_UNIFICATION_PHASE_PROMPTS.md`. Optional script when counting changes: `npx tsx scripts/audit-smt-day-coverage.ts <esiid> <dateKey>`.
+
+**Forbidden after completion:**
+
+- `requestTargetedSmtIntervalBackfillForHouse` outside `lib/usage/`
+- `maybeRunOnePathSmtPostSimHealing` / duplicate long SMT waits in `app/api/admin/tools/one-path-sim/route.ts`
+- `SMT_READY_COMPLETENESS` (0.99) for SMT readiness
+- `MIN_TRUSTED_ACTUAL_INTERVALS_PER_DAY = 90` for SMT INTERVAL Past Sim paths
+- Production literals `canonicalCoverageLagDays: 2` / `reliableLagDays: 2` outside lib config + tests
 
 ### Architecture lockstep rule
 
 - Any structural change to simulation ownership, module boundaries, orchestration, cutover state, upstream/downstream truth ownership, or lockbox isolation must update the relevant docs and plan files in the same pass.
+- **SMT unification in flight:** same-pass updates must include `docs/PROJECT_PLAN.md` (this PC-2026-05 section), `docs/SMT_UNIFICATION_PLAN.md`, and when behavior ships, `docs/SMT_UNIFICATION_COMPLETE.md`, `docs/CHAT_BOOTSTRAP.txt`, `docs/PROJECT_CONTEXT.md`, `docs/USAGE_LAYER_MAP.md`, `docs/ONE_PATH_SIM_ARCHITECTURE.md`.
 - Required same-pass workflow:
   - code change
   - docs/plan sync
@@ -60,8 +133,10 @@
 #### Canonical shared modules that must be used
 
 1) Canonical date/window logic:
-   - `lib/time/chicago.ts`
-   - `modules/usageSimulator/canonicalWindow.ts`
+   - `lib/time/chicago.ts` (Chicago date keys + slot-96 for SMT after PC-2026-05 Phase 2)
+   - `lib/usage/canonicalCoverageConfig.ts` (lag knob — PC-2026-05 Phase 1)
+   - `lib/usage/canonicalMetadataWindow.ts` (`resolveCanonicalUsage365CoverageWindow` — PC-2026-05 Phase 7)
+   - `modules/usageSimulator/canonicalWindow.ts` (12-month bill-cycle window; distinct from SMT 365-day coverage window)
 
 2) Actual interval source selection/fetching:
    - `modules/realUsageAdapter/actual.ts`
@@ -83,8 +158,15 @@
    - `lib/usage/intervalSeriesRepo.ts`
    - `lib/usage/resolveIntervalsLayer.ts`
    - `modules/usageSimulator/pastCache.ts`
-6) SMT normalized interval persistence:
-   - `lib/usage/normalizeSmtIntervals.ts`
+6) SMT interval coverage + persistence (PC-2026-05 target owners):
+   - `lib/usage/normalizeSmtIntervals.ts` (ingest persist)
+   - `lib/usage/smtWindowStatus.ts` (per-day 96/96 status in canonical window — Phase 3)
+   - `lib/usage/ensureSmtCoverage.ts` (single heal: pull, targeted backfill, wait, session throttle — Phase 4+)
+   - `lib/usage/smtIncompleteMeterBackfill.ts` (targeted day requests; only via ensure)
+   - `lib/usage/smtDayCoverageLedger.ts` (ledger reconcile)
+   - `lib/usage/smtTailCoverage.ts` (legacy tail helpers; consume smtWindowStatus, do not duplicate counting)
+   - `lib/usage/userUsageRefresh.ts` (auth refresh + pull; delegates gap-fill to ensure)
+   - **Do not** add SMT pull/backfill/wait logic to `app/api/admin/tools/one-path-sim/route.ts` after Phase 4/5
 7) Monthly stitching/display totals:
    - `lib/usage/buildUsageBucketsForEstimate.ts`
    - `modules/usageSimulator/dataset.ts`

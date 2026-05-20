@@ -1,0 +1,31 @@
+---
+description: SMT unification implementation lock — single window, 96/96, usage-owned heal, no Green Button edits
+globs: lib/usage/**/*.ts,lib/time/chicago.ts,app/api/user/usage/**/*.ts,app/api/user/smt/**/*.ts,app/api/admin/tools/one-path-sim/**/*.ts,modules/onePathSim/upstreamUsageTruth.ts,modules/usageSimulator/upstreamUsageTruth.ts,modules/*/simulatedUsage/engine.ts
+alwaysApply: false
+---
+
+# SMT unification lock (active until docs/SMT_UNIFICATION_COMPLETE.md exists)
+
+**Authoritative plan:** `docs/SMT_UNIFICATION_PLAN.md`  
+**Phase prompts:** `docs/SMT_UNIFICATION_PHASE_PROMPTS.md`
+
+## Non-negotiable
+
+- **Lag:** Only `lib/usage/canonicalCoverageConfig.ts` defines `CANONICAL_COVERAGE_LAG_DAYS` (default 2). No new `reliableLagDays: 2` or `canonicalCoverageLagDays: 2` literals in production code.
+- **Window:** Coverage framing uses `resolveCanonicalUsage365CoverageWindow()` from `lib/usage/canonicalMetadataWindow.ts` (after Phase 7) or metadataWindow wired to lib config. Routes must not invent their own end date.
+- **SMT completeness:** **96/96** distinct Chicago 15-minute slots per calendar day. Do not reintroduce `SMT_READY_COMPLETENESS` (0.99) or `MIN_TRUSTED_ACTUAL_INTERVALS_PER_DAY = 90` for SMT paths.
+- **Green Button:** Do **not** edit `modules/realUsageAdapter/greenButton.ts` as part of SMT unification work.
+- **Heal owner:** All SMT pull/backfill/wait/targeted-day requests go through `lib/usage/ensureSmtCoverage.ts` and `requestUsageRefreshForUserHouse`. **Forbidden** in `app/api/admin/tools/one-path-sim/route.ts`: direct `requestTargetedSmtIntervalBackfillForHouse`, `maybeRunOnePathSmtPostSimHealing`, duplicate long SMT wait loops.
+- **Status read:** Use `lib/usage/smtWindowStatus.ts` for per-day missing/complete in the canonical window — do not add parallel slot-count logic in routes.
+- **Timestamps (SMT):** Use `lib/time/chicago.ts` for `chicagoDateKey` and `chicagoSlot96FromTs`. No new local `Intl.DateTimeFormat` copies for SMT coverage.
+- **One Path isolation:** `modules/onePathSim/**` must not import `modules/usageSimulator/**`. Put shared logic in `lib/**`.
+- **Detect vs act:** Same status for all surfaces; usage/baseline may **display** partial days; Past Sim must **not** trust days with fewer than 96 slots for INTERVAL/SMT.
+- **Session throttle:** `ensureSmtCoverage` at most once per `userId+houseId+sessionKey` unless `force: true`.
+
+## If a change conflicts with this rule
+
+Stop and ask the user, or complete the current unification phase per `docs/SMT_UNIFICATION_PHASE_PROMPTS.md`.
+
+## When complete
+
+Downgrade or remove this rule after `docs/SMT_UNIFICATION_COMPLETE.md` exists and Phase 8 greps are green.

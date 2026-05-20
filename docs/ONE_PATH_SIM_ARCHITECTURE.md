@@ -33,6 +33,18 @@ When this document conflicts with older planning or audit language, this documen
 - One Path interval admin runs now treat SMT backfill as best-effort recovery, not a hard display gate. The route may request a refresh and wait for canonical tail coverage before the first run, but stale/incomplete tail coverage no longer returns `409`.
 - After the first interval simulation, if the dataset still marks any day as `SIMULATED_INCOMPLETE_METER`, the route requests SMT refresh once for those exact dates, rebuilds engine input, and reruns once. If some incomplete simulated days remain after that retry, the route still returns results with diagnostics instead of blocking.
 
+### SMT unification target (see `docs/SMT_UNIFICATION_PLAN.md`)
+
+**Current (pre-unification):** One Path admin route owns extra SMT healing (`maybeRunOnePathSmtPostSimHealing`, targeted backfill, long waits) beyond shared usage refresh.
+
+**Target (Phases 4–5):**
+
+- One Path **only** calls `ensureSmtCoverageForHouse` from `lib/usage/ensureSmtCoverage.ts` (profiles `sim_run` / `admin_sim`).
+- No direct `requestTargetedSmtIntervalBackfillForHouse` in `app/api/admin/tools/one-path-sim/route.ts`.
+- Same per-day status as usage dashboard: `lib/usage/smtWindowStatus.ts` (96/96 strict for SMT).
+- Past Sim engine: 96 slots required for trusted actual (Phase 6); usage/baseline may still **display** partial intervals.
+- Green Button baseline/adapter behavior unchanged by this effort.
+
 ## Non-negotiable upstream / downstream boundary
 
 ### Usage stays upstream
