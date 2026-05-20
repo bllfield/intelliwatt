@@ -1093,6 +1093,7 @@ type OnePathSmtPostSimHealingResult = {
     timedOut: boolean;
   };
   targetedIntervalBackfill?: Awaited<ReturnType<typeof requestTargetedSmtIntervalBackfillForHouse>>;
+  postTargetedBackfillRefreshResult?: Awaited<ReturnType<typeof requestUsageRefreshForUserHouse>>;
   reconcile?: Awaited<ReturnType<typeof reconcileSmtIntervalDayLedger>>;
   postRetryIncompleteDateKeys?: string[];
 };
@@ -1188,6 +1189,7 @@ async function maybeRunOnePathSmtPostSimHealing(args: {
   let reconcile = deferredRepair.reconcile;
   let incompleteMeterCoverageWait: OnePathSmtPostSimHealingResult["incompleteMeterCoverageWait"];
   let targetedIntervalBackfill: OnePathSmtPostSimHealingResult["targetedIntervalBackfill"];
+  let postTargetedBackfillRefreshResult: OnePathSmtPostSimHealingResult["postTargetedBackfillRefreshResult"];
 
   if (incompleteMeterBackfillDateKeys.length > 0) {
     logSimPipelineEvent("one_path_smt_incomplete_meter_backfill_requested", {
@@ -1224,6 +1226,22 @@ async function maybeRunOnePathSmtPostSimHealing(args: {
       skipped: "targeted_backfill_failed",
       message: error instanceof Error ? error.message : String(error),
     }));
+
+    // Backfill only queues FTP delivery; pull again so new files are ingested before we poll counts.
+    const postBackfillRefresh = await requestUsageRefreshForUserHouse({
+      userId: args.sourceUserId,
+      houseId: args.sourceHouseId,
+    }).catch((error) => ({
+      ok: false as const,
+      error: "refresh_failed" as const,
+      message: error instanceof Error ? error.message : String(error),
+    }));
+    if (postBackfillRefresh.ok !== false) {
+      refreshResult = postBackfillRefresh;
+      postTargetedBackfillRefreshResult = postBackfillRefresh;
+    } else {
+      postTargetedBackfillRefreshResult = postBackfillRefresh;
+    }
 
     const waitResult = await waitForOnePathSmtDateCoverage({
       esiid,
@@ -1267,6 +1285,7 @@ async function maybeRunOnePathSmtPostSimHealing(args: {
     waitTimedOut,
     incompleteMeterCoverageWait,
     targetedIntervalBackfill,
+    postTargetedBackfillRefreshResult,
     reconcile: reconcile ?? undefined,
   };
 }

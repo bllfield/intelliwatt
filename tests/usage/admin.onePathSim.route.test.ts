@@ -1255,6 +1255,7 @@ describe("admin one path sim route", () => {
 
     expect(res.status).toBe(200);
     expect(requestUsageRefreshForUserHouse).toHaveBeenCalledWith({ userId: "user-1", houseId: "house-1" });
+    expect(requestUsageRefreshForUserHouse.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(requestTargetedSmtIntervalBackfillForHouse).toHaveBeenCalledWith({
       houseId: "house-1",
       dateKeys: ["2026-04-12"],
