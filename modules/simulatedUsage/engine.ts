@@ -28,6 +28,7 @@ import {
   DEFAULT_SIMULATION_VARIABLE_POLICY,
   type SimulationVariablePolicy,
 } from "@/modules/usageSimulator/simulationVariablePolicy";
+import { chicagoSlot96FromTs } from "@/lib/time/chicago";
 
 /** Map shared simulator fallback level to engine diagnostic enum. */
 function pastDayFallbackToEngineLevel(level: PastDayFallbackLevel): PastFallbackLevel {
@@ -48,7 +49,8 @@ function pastDayFallbackToEngineLevel(level: PastDayFallbackLevel): PastFallback
 const DAY_MS = 24 * 60 * 60 * 1000;
 const INTERVAL_MINUTES = 15;
 const INTERVALS_PER_DAY = (24 * 60) / INTERVAL_MINUTES; // 96
-const MIN_TRUSTED_ACTUAL_INTERVALS_PER_DAY = 90;
+/** Strict SMT INTERVAL past-sim trusted pool (96/96 Chicago slots; aligns with smtWindowStatus). */
+const MIN_TRUSTED_ACTUAL_INTERVALS_PER_DAY = 96;
 
 function isYearMonth(s: string): boolean {
   return /^\d{4}-\d{2}$/.test(String(s ?? "").trim());
@@ -803,16 +805,13 @@ export function generateSimulatedCurve(args: {
 
 const SLOT_MS = INTERVAL_MINUTES * 60 * 1000;
 
-function countPresentSlotsForDay(
-  intervals: Array<{ timestamp: string; kwh: number }>,
-  dayStartMs: number
-): number {
+function countPresentSlotsForDay(intervals: Array<{ timestamp: string; kwh: number }>): number {
   const slots = new Set<number>();
   for (const p of intervals) {
-    const t = new Date(p.timestamp).getTime();
-    if (!Number.isFinite(t)) continue;
-    const slot = Math.floor((t - dayStartMs) / SLOT_MS);
-    if (slot >= 0 && slot < INTERVALS_PER_DAY) slots.add(slot);
+    const ts = new Date(p.timestamp);
+    if (!Number.isFinite(ts.getTime())) continue;
+    const slot = chicagoSlot96FromTs(ts);
+    if (slot != null) slots.add(slot);
   }
   return slots.size;
 }
@@ -853,10 +852,9 @@ export function completeActualIntervalsV1(args: {
 
   const usableDays = new Set<string>();
   for (const [dk, list] of Array.from(dayIntervals.entries())) {
-    const dayStartMs = new Date(dk + "T00:00:00.000Z").getTime();
     if (
       !excludedDateKeys.has(dk) &&
-      countPresentSlotsForDay(list, dayStartMs) >= MIN_TRUSTED_ACTUAL_INTERVALS_PER_DAY
+      countPresentSlotsForDay(list) >= MIN_TRUSTED_ACTUAL_INTERVALS_PER_DAY
     ) {
       usableDays.add(dk);
     }
@@ -979,7 +977,7 @@ export function completeActualIntervalsV1(args: {
     const ym = dk.slice(0, 7);
     const dow = day.getUTCDay();
     const list = dayIntervals.get(dk) ?? [];
-    const presentSlotCount = countPresentSlotsForDay(list, day.getTime());
+    const presentSlotCount = countPresentSlotsForDay(list);
     const needSimulate =
       excludedDateKeys.has(dk) ||
       (simulateIncompleteDays && presentSlotCount > 0 && presentSlotCount < MIN_TRUSTED_ACTUAL_INTERVALS_PER_DAY) ||
@@ -1726,7 +1724,11 @@ export function buildPastSimulatedBaselineV1(args: {
   const analyzeDay = (dayStartMs: number) => {
     const gridTs = args.getDayGridTimestamps(dayStartMs);
     const dateKey = gridTs.length > 0 ? args.dateKeyFromTimestamp(gridTs[0]) : "";
-    const presentSlotCount = gridTs.reduce((acc, ts) => acc + (actualByTs.has(ts) ? 1 : 0), 0);
+    const dayIntervalList = actualIntervals.filter((p) => {
+      const dk = args.dateKeyFromTimestamp(String(p?.timestamp ?? ""));
+      return Boolean(dateKey) && dk === dateKey;
+    });
+    const presentSlotCount = countPresentSlotsForDay(dayIntervalList);
     const dayIsExcluded = Boolean(dateKey) && args.excludedDateKeys.has(dateKey);
     const dayIsForcedSimulate = Boolean(dateKey) && forcedDateKeys.has(dateKey);
     const dayIsForceModeledKeepRef = Boolean(dateKey) && keepRefModeledKeys.has(dateKey);

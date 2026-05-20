@@ -290,7 +290,7 @@ describe("green button full-day anchor", () => {
     );
     expect(trustedDebugOut.excludedIncompleteMeterFingerprintDayCount).toBe(0);
 
-    // Mirrors the live v8 artifact: padded target day exists, but engine only sees <90 slots.
+    // Mirrors the live v8 artifact: padded target day exists, but engine only sees fewer than 96 SMT slots.
     const thinnedIntervals = adapterOut.intervals.filter((row) => {
       if (!row.timestamp.startsWith("2026-05-14T")) return true;
       const slotIndex = Math.round(
