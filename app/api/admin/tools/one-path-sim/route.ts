@@ -68,8 +68,10 @@ import {
   loadSmtDateCoverage,
   loadSmtTailCoverage,
   normalizeDateKeys,
+  ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS,
   ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS,
   SMT_INCOMPLETE_METER_BACKFILL_LOOKBACK_DAYS,
+  SMT_POST_BACKFILL_SETTLE_DELAY_MS,
   SMT_TAIL_WAIT_INTERVAL_MS,
   waitForSmtDateCoverage,
   waitForSmtTailCoverage,
@@ -915,12 +917,26 @@ async function waitForOnePathSmtDateCoverage(args: {
   effectiveHouseId: string;
   actualContextHouseId: string;
   sourceUserId: string;
+  sourceHouseId: string;
+  afterTargetedBackfill?: boolean;
 }) {
   const waitResult = await waitForSmtDateCoverage({
     esiid: args.esiid,
     dateKeys: args.dateKeys,
-    timeoutMs: ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS,
+    timeoutMs: args.afterTargetedBackfill
+      ? ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS
+      : ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS,
     intervalMs: SMT_TAIL_WAIT_INTERVAL_MS,
+    initialDelayMs: args.afterTargetedBackfill ? SMT_POST_BACKFILL_SETTLE_DELAY_MS : undefined,
+    exitEarlyWhenStalled: !args.afterTargetedBackfill,
+    midWaitRefresh: args.afterTargetedBackfill
+      ? async () => {
+          await requestUsageRefreshForUserHouse({
+            userId: args.sourceUserId,
+            houseId: args.sourceHouseId,
+          });
+        }
+      : undefined,
   });
   const latest = waitResult;
   const durationMs = waitResult.durationMs;
@@ -1091,6 +1107,9 @@ type OnePathSmtPostSimHealingResult = {
     countsByDate: Record<string, number>;
     incompleteDateKeys: string[];
     timedOut: boolean;
+    durationMs?: number;
+    attempts?: number;
+    waitTimeoutMs?: number;
   };
   targetedIntervalBackfill?: Awaited<ReturnType<typeof requestTargetedSmtIntervalBackfillForHouse>>;
   postTargetedBackfillRefreshResult?: Awaited<ReturnType<typeof requestUsageRefreshForUserHouse>>;
@@ -1248,12 +1267,17 @@ async function maybeRunOnePathSmtPostSimHealing(args: {
       effectiveHouseId: args.effectiveHouseId,
       actualContextHouseId: args.actualContextHouseId,
       sourceUserId: args.sourceUserId,
+      sourceHouseId: args.sourceHouseId,
+      afterTargetedBackfill: true,
     });
     waitTimedOut = waitTimedOut || waitResult.timedOut;
     incompleteMeterCoverageWait = {
       countsByDate: waitResult.countsByDate,
       incompleteDateKeys: waitResult.incompleteDateKeys,
       timedOut: waitResult.timedOut,
+      durationMs: waitResult.durationMs,
+      attempts: waitResult.attempts,
+      waitTimeoutMs: ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS,
     };
     reconcile = (await reconcileSmtIntervalDayLedger({ esiid }).catch(() => null)) ?? reconcile;
   }

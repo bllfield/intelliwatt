@@ -4,6 +4,8 @@ import {
   filterDateKeysNearTargetEnd,
   isGreenButtonPrimaryDataset,
   isResolvedDatasetTailDisplayReady,
+  ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS,
+  ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS,
   reconcileUsageIngestionWithDataset,
   smtTailRefreshNeeded,
 } from "@/lib/usage/smtTailCoverage";
@@ -134,5 +136,11 @@ describe("smt tail coverage helpers", () => {
         3
       )
     ).toEqual(["2026-05-16", "2026-05-17"]);
+  });
+
+  it("allows a longer admin wait after targeted incomplete-meter backfill", () => {
+    expect(ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS).toBeGreaterThan(
+      ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS
+    );
   });
 });

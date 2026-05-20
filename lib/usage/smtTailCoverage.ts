@@ -18,6 +18,10 @@ export const SMT_TAIL_WAIT_INTERVAL_MS = 2_000;
 export const USER_USAGE_SMT_TAIL_WAIT_TIMEOUT_MS = 8_000;
 /** One Path admin run: short poll; exit early when SMT counts stop changing. */
 export const ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS = 20_000;
+/** After targeted incomplete-meter backfill: allow FTP delivery + ingest before giving up. */
+export const ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS = 90_000;
+/** Pause after a post-backfill pull so ingestion can finish before polling counts. */
+export const SMT_POST_BACKFILL_SETTLE_DELAY_MS = 3_000;
 /** Only block incomplete-meter backfill waits on days near the canonical window end. */
 export const SMT_INCOMPLETE_METER_BACKFILL_LOOKBACK_DAYS = 3;
 
@@ -378,10 +382,13 @@ export async function waitForSmtTailCoverage(args: {
   targetEndDate?: string;
   timeoutMs?: number;
   intervalMs?: number;
+  /** When false, keep polling until timeout even if counts stop changing. */
+  exitEarlyWhenStalled?: boolean;
 }): Promise<SmtTailWaitResult> {
   const targetEndDate = args.targetEndDate ?? resolveCanonicalUsage365CoverageWindow().endDate;
   const timeoutMs = args.timeoutMs ?? SMT_TAIL_WAIT_TIMEOUT_MS;
   const intervalMs = args.intervalMs ?? SMT_TAIL_WAIT_INTERVAL_MS;
+  const exitEarlyWhenStalled = args.exitEarlyWhenStalled !== false;
   const startedAt = Date.now();
   let attempts = 0;
   let latest = await loadSmtTailCoverage({ esiid: args.esiid, targetEndDate });
@@ -391,7 +398,7 @@ export async function waitForSmtTailCoverage(args: {
     await wait(intervalMs);
     const next = await loadSmtTailCoverage({ esiid: args.esiid, targetEndDate });
     const nextFingerprint = coverageProgressFingerprint(next);
-    if (attempts >= 2 && nextFingerprint === lastProgressFingerprint) {
+    if (exitEarlyWhenStalled && attempts >= 2 && nextFingerprint === lastProgressFingerprint) {
       latest = next;
       break;
     }
@@ -411,19 +418,37 @@ export async function waitForSmtDateCoverage(args: {
   dateKeys: string[];
   timeoutMs?: number;
   intervalMs?: number;
+  initialDelayMs?: number;
+  /** When false, keep polling until timeout even if counts stop changing. */
+  exitEarlyWhenStalled?: boolean;
+  /** Optional pull halfway through the wait (e.g. after targeted backfill). */
+  midWaitRefresh?: () => Promise<void>;
 }): Promise<SmtDateCoverageWaitResult> {
   const timeoutMs = args.timeoutMs ?? SMT_TAIL_WAIT_TIMEOUT_MS;
   const intervalMs = args.intervalMs ?? SMT_TAIL_WAIT_INTERVAL_MS;
+  const exitEarlyWhenStalled = args.exitEarlyWhenStalled !== false;
+  if (args.initialDelayMs && args.initialDelayMs > 0) {
+    await wait(args.initialDelayMs);
+  }
   const startedAt = Date.now();
   let attempts = 0;
+  let midWaitRefreshDone = false;
   let latest = await loadSmtDateCoverage({ esiid: args.esiid, dateKeys: args.dateKeys });
   let lastProgressFingerprint = dateCoverageProgressFingerprint(latest);
   while (!latest.ready && Date.now() - startedAt < timeoutMs) {
+    const elapsedMs = Date.now() - startedAt;
+    if (!midWaitRefreshDone && args.midWaitRefresh && elapsedMs >= timeoutMs / 2 && !latest.ready) {
+      midWaitRefreshDone = true;
+      await args.midWaitRefresh().catch(() => null);
+      latest = await loadSmtDateCoverage({ esiid: args.esiid, dateKeys: args.dateKeys });
+      lastProgressFingerprint = dateCoverageProgressFingerprint(latest);
+      if (latest.ready) break;
+    }
     attempts += 1;
     await wait(intervalMs);
     const next = await loadSmtDateCoverage({ esiid: args.esiid, dateKeys: args.dateKeys });
     const nextFingerprint = dateCoverageProgressFingerprint(next);
-    if (attempts >= 2 && nextFingerprint === lastProgressFingerprint) {
+    if (exitEarlyWhenStalled && attempts >= 2 && nextFingerprint === lastProgressFingerprint) {
       latest = next;
       break;
     }

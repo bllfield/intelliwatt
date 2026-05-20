@@ -1347,7 +1347,7 @@ describe("admin one path sim route", () => {
       })
     );
 
-    await vi.advanceTimersByTimeAsync(65_000);
+    await vi.advanceTimersByTimeAsync(100_000);
     const res = await pending;
     const json = await res.json();
 
