@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { buildUserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
+import { requestTargetedSmtIntervalBackfillForHouse } from "@/lib/usage/smtIncompleteMeterBackfill";
 import { requestUsageRefreshForUserHouse } from "@/lib/usage/userUsageRefresh";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { getHomeProfileReadOnlyByUserHouse, getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
@@ -1091,6 +1092,7 @@ type OnePathSmtPostSimHealingResult = {
     incompleteDateKeys: string[];
     timedOut: boolean;
   };
+  targetedIntervalBackfill?: Awaited<ReturnType<typeof requestTargetedSmtIntervalBackfillForHouse>>;
   reconcile?: Awaited<ReturnType<typeof reconcileSmtIntervalDayLedger>>;
   postRetryIncompleteDateKeys?: string[];
 };
@@ -1185,6 +1187,7 @@ async function maybeRunOnePathSmtPostSimHealing(args: {
   let waitTimedOut = deferredRepair.waitTimedOut;
   let reconcile = deferredRepair.reconcile;
   let incompleteMeterCoverageWait: OnePathSmtPostSimHealingResult["incompleteMeterCoverageWait"];
+  let targetedIntervalBackfill: OnePathSmtPostSimHealingResult["targetedIntervalBackfill"];
 
   if (incompleteMeterBackfillDateKeys.length > 0) {
     logSimPipelineEvent("one_path_smt_incomplete_meter_backfill_requested", {
@@ -1212,6 +1215,15 @@ async function maybeRunOnePathSmtPostSimHealing(args: {
     if (backfillRefreshResult.ok !== false) {
       refreshResult = backfillRefreshResult;
     }
+
+    targetedIntervalBackfill = await requestTargetedSmtIntervalBackfillForHouse({
+      houseId: args.sourceHouseId,
+      dateKeys: incompleteMeterBackfillDateKeys,
+    }).catch((error) => ({
+      ok: false as const,
+      skipped: "targeted_backfill_failed",
+      message: error instanceof Error ? error.message : String(error),
+    }));
 
     const waitResult = await waitForOnePathSmtDateCoverage({
       esiid,
@@ -1254,6 +1266,7 @@ async function maybeRunOnePathSmtPostSimHealing(args: {
     refreshResult: refreshResult?.ok === false ? undefined : refreshResult,
     waitTimedOut,
     incompleteMeterCoverageWait,
+    targetedIntervalBackfill,
     reconcile: reconcile ?? undefined,
   };
 }

@@ -154,6 +154,13 @@ vi.mock("@/lib/usage/userUsageHouseContract", () => ({
   buildUserUsageHouseContract: (...args: any[]) => buildUserUsageHouseContract(...args),
 }));
 
+const requestTargetedSmtIntervalBackfillForHouse = vi.fn();
+
+vi.mock("@/lib/usage/smtIncompleteMeterBackfill", () => ({
+  requestTargetedSmtIntervalBackfillForHouse: (...args: any[]) =>
+    requestTargetedSmtIntervalBackfillForHouse(...args),
+}));
+
 vi.mock("@/lib/usage/userUsageRefresh", () => ({
   requestUsageRefreshForUserHouse: (...args: any[]) => requestUsageRefreshForUserHouse(...args),
 }));
@@ -230,6 +237,7 @@ describe("admin one path sim route", () => {
     prismaSmtIntervalDayLedgerCreate.mockReset();
     prismaSmtIntervalDayLedgerUpdateMany.mockReset();
     requestUsageRefreshForUserHouse.mockReset();
+    requestTargetedSmtIntervalBackfillForHouse.mockReset();
     usageGreenButtonIntervalAggregate.mockReset();
     getManualUsageInputForUserHouse.mockReset();
     saveManualUsageInputForUserHouse.mockReset();
@@ -283,6 +291,12 @@ describe("admin one path sim route", () => {
     prismaSmtIntervalDayLedgerCreate.mockResolvedValue({});
     prismaSmtIntervalDayLedgerUpdateMany.mockResolvedValue({ count: 0 });
     requestUsageRefreshForUserHouse.mockResolvedValue({ ok: true, homes: [], backfill: [] });
+    requestTargetedSmtIntervalBackfillForHouse.mockResolvedValue({
+      ok: true,
+      startDateKey: "2026-04-12",
+      endDateKey: "2026-04-12",
+      dateKeys: ["2026-04-12"],
+    });
     usageGreenButtonIntervalAggregate.mockResolvedValue(null);
     lookupAdminHousesByEmail.mockResolvedValue({
       ok: true,
@@ -1241,6 +1255,10 @@ describe("admin one path sim route", () => {
 
     expect(res.status).toBe(200);
     expect(requestUsageRefreshForUserHouse).toHaveBeenCalledWith({ userId: "user-1", houseId: "house-1" });
+    expect(requestTargetedSmtIntervalBackfillForHouse).toHaveBeenCalledWith({
+      houseId: "house-1",
+      dateKeys: ["2026-04-12"],
+    });
     expect(adaptIntervalRawInput).toHaveBeenCalledTimes(2);
     expect(runSharedSimulation).toHaveBeenCalledTimes(2);
     expect(buildSharedSimulationReadModel).not.toHaveBeenCalled();
@@ -1249,6 +1267,7 @@ describe("admin one path sim route", () => {
         attempted: true,
         requestedDateKeys: ["2026-04-12"],
         postRetryIncompleteDateKeys: [],
+        targetedIntervalBackfill: expect.objectContaining({ ok: true }),
       })
     );
     expect(json.debugDiagnosticsIncluded).toBe(false);
