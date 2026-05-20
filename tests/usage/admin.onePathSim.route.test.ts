@@ -978,7 +978,7 @@ describe("admin one path sim route", () => {
 
   it("routes interval runs through the shared adapter, producer, and read model", async () => {
     const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
-    const res = await POST(
+    const pending = POST(
       buildRequest({
         action: "run",
         email: "customer@example.com",
@@ -987,6 +987,8 @@ describe("admin one path sim route", () => {
         includeDebugDiagnostics: true,
       })
     );
+    await vi.advanceTimersByTimeAsync(25_000);
+    const res = await pending;
     const json = await res.json();
 
     expect(res.status).toBe(200);
@@ -1111,7 +1113,7 @@ describe("admin one path sim route", () => {
 
   it("keeps interval run requests off the lookup-only preview and baseline contract path", async () => {
     const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
-    const res = await POST(
+    const pending = POST(
       buildRequest({
         action: "run",
         email: "customer@example.com",
@@ -1121,6 +1123,8 @@ describe("admin one path sim route", () => {
         includeDebugDiagnostics: true,
       })
     );
+    await vi.advanceTimersByTimeAsync(25_000);
+    const res = await pending;
     const json = await res.json();
 
     expect(res.status).toBe(200);
@@ -1371,7 +1375,7 @@ describe("admin one path sim route", () => {
 
   it("defaults interval runs to the lean debug-off response when debug is not requested", async () => {
     const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
-    const res = await POST(
+    const pending = POST(
       buildRequest({
         action: "run",
         email: "customer@example.com",
@@ -1380,6 +1384,8 @@ describe("admin one path sim route", () => {
         scenarioId: "scenario-1",
       })
     );
+    await vi.advanceTimersByTimeAsync(25_000);
+    const res = await pending;
     const json = await res.json();
 
     expect(res.status).toBe(200);
@@ -1408,6 +1414,7 @@ describe("admin one path sim route", () => {
       houseId: "house-1",
       scenarioId: "scenario-1",
       readMode: "allow_rebuild",
+      forceRebuildArtifact: false,
       projectionMode: "baseline",
       readContext: {
         artifactReadMode: "allow_rebuild",
@@ -1422,6 +1429,80 @@ describe("admin one path sim route", () => {
     });
     expect(runSharedSimulation).not.toHaveBeenCalled();
     expect(buildSharedSimulationReadModel).not.toHaveBeenCalled();
+  });
+
+  it("runs incomplete-meter backfill on lean debug-off INTERVAL past readback", async () => {
+    readOnePathSimulatedUsageScenario
+      .mockResolvedValueOnce({
+        ok: true,
+        houseId: "house-1",
+        scenarioKey: "scenario-1",
+        scenarioId: "scenario-1",
+        dataset: {
+          summary: { source: "SIMULATED", start: "2025-04-16", end: "2026-04-15" },
+          meta: {
+            simulatedSourceDetailByDate: {
+              "2026-04-12": "SIMULATED_INCOMPLETE_METER",
+            },
+          },
+          daily: [
+            {
+              date: "2026-04-12",
+              kwh: 22,
+              source: "SIMULATED",
+              sourceDetail: "SIMULATED_INCOMPLETE_METER",
+            },
+          ],
+          monthly: [{ month: "2026-04", kwh: 22 }],
+          series: { intervals15: [] },
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        houseId: "house-1",
+        scenarioKey: "scenario-1",
+        scenarioId: "scenario-1",
+        dataset: {
+          summary: { source: "SIMULATED", start: "2025-04-16", end: "2026-04-15" },
+          daily: [{ date: "2026-04-12", kwh: 22, source: "ACTUAL", sourceDetail: "ACTUAL" }],
+          monthly: [{ month: "2026-04", kwh: 22 }],
+          series: { intervals15: [] },
+        },
+      });
+
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const pending = POST(
+      buildRequest({
+        action: "run",
+        email: "customer@example.com",
+        houseId: "house-1",
+        mode: "INTERVAL",
+        scenarioId: "scenario-1",
+      })
+    );
+
+    await vi.advanceTimersByTimeAsync(45_000);
+    const res = await pending;
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.ok).toBe(true);
+    expect(json.executionMode).toBe("artifact_readback");
+    expect(requestUsageRefreshForUserHouse).toHaveBeenCalledWith({ userId: "user-1", houseId: "house-1" });
+    expect(readOnePathSimulatedUsageScenario).toHaveBeenCalledTimes(2);
+    expect(readOnePathSimulatedUsageScenario.mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({
+        forceRebuildArtifact: true,
+      })
+    );
+    expect(json.smtIncompleteMeterRetry).toEqual(
+      expect.objectContaining({
+        attempted: true,
+        incompleteMeterBackfillDateKeys: ["2026-04-12"],
+        postRetryIncompleteDateKeys: [],
+      })
+    );
+    expect(runSharedSimulation).not.toHaveBeenCalled();
   });
 
   it("returns a lean manual Stage 1 preview on manual lookup without falling back to the user manual page path", async () => {
@@ -1734,7 +1815,7 @@ describe("admin one path sim route", () => {
 
   it("passes actual context house and manual validation date keys through the shared adapter", async () => {
     const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
-    await POST(
+    const pending = POST(
       buildRequest({
         action: "run",
         email: "customer@example.com",
@@ -1745,6 +1826,8 @@ describe("admin one path sim route", () => {
         validationOnlyDateKeysLocal: ["2026-03-10", "2026-03-11"],
       })
     );
+    await vi.advanceTimersByTimeAsync(25_000);
+    await pending;
 
     expect(adaptIntervalRawInput).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2089,7 +2172,7 @@ describe("admin one path sim route", () => {
       lastReplacedAt: new Date("2026-04-16T00:00:00.000Z"),
     });
 
-    const runRes = await POST(
+    const runPending = POST(
       buildRequest({
         action: "run",
         email: "customer@example.com",
@@ -2098,6 +2181,8 @@ describe("admin one path sim route", () => {
         mode: "INTERVAL",
       })
     );
+    await vi.advanceTimersByTimeAsync(25_000);
+    const runRes = await runPending;
     expect(runRes.status).toBe(200);
     expect(adaptIntervalRawInput).toHaveBeenLastCalledWith(
       expect.objectContaining({

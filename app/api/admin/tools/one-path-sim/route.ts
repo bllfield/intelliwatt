@@ -556,12 +556,23 @@ function asScenarioVariable(value: unknown): {
   };
 }
 
+type PastSimReadbackSmtHealingArgs = {
+  mode: CanonicalSimulationInputType;
+  preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
+  sourceUserId: string;
+  sourceHouseId: string;
+  sourceEsiid: string | null;
+  effectiveHouseId: string;
+  actualContextHouseId: string;
+};
+
 async function buildPastSimRunReadbackResponse(args: {
   userId: string;
   houseId: string;
   scenarioId: string;
   correlationId?: string | null;
   readMode?: "artifact_only" | "allow_rebuild";
+  smtPostSimHealing?: PastSimReadbackSmtHealingArgs | null;
 }) {
   const readMode = args.readMode ?? "artifact_only";
   const startedAt = Date.now();
@@ -573,18 +584,22 @@ async function buildPastSimRunReadbackResponse(args: {
     source: "buildPastSimRunReadbackResponse",
     memoryRssMb: getMemoryRssMb(),
   });
-  const readback = await readOnePathSimulatedUsageScenario({
-    userId: args.userId,
-    houseId: args.houseId,
-    scenarioId: args.scenarioId,
-    readMode,
-    projectionMode: "baseline",
-    readContext: {
-      artifactReadMode: readMode,
+  const readScenarioDataset = (forceRebuildArtifact = false) =>
+    readOnePathSimulatedUsageScenario({
+      userId: args.userId,
+      houseId: args.houseId,
+      scenarioId: args.scenarioId,
+      readMode,
+      forceRebuildArtifact,
       projectionMode: "baseline",
-      compareSidecarRequest: true,
-    },
-  });
+      readContext: {
+        artifactReadMode: readMode,
+        projectionMode: "baseline",
+        compareSidecarRequest: true,
+      },
+    });
+
+  let readback = await readScenarioDataset();
   if (!readback.ok) {
     logSimPipelineEvent("one_path_admin_past_readback_failure", {
       correlationId: args.correlationId ?? null,
@@ -601,6 +616,32 @@ async function buildPastSimRunReadbackResponse(args: {
       code: readback.code,
       message: readback.message,
     };
+  }
+
+  let smtIncompleteMeterRetry: OnePathIncompleteMeterBackfillRetry | null = null;
+  const healingCtx = args.smtPostSimHealing;
+  if (healingCtx?.mode === "INTERVAL" && String(healingCtx.sourceEsiid ?? "").trim()) {
+    smtIncompleteMeterRetry = await maybeRunOnePathSmtPostSimHealing({
+      mode: healingCtx.mode,
+      preferredActualSource: healingCtx.preferredActualSource,
+      sourceUserId: healingCtx.sourceUserId,
+      sourceHouseId: healingCtx.sourceHouseId,
+      sourceEsiid: healingCtx.sourceEsiid,
+      effectiveHouseId: healingCtx.effectiveHouseId,
+      actualContextHouseId: healingCtx.actualContextHouseId,
+      correlationId: args.correlationId ?? "",
+      artifactDataset: readback.dataset,
+    });
+    if (smtIncompleteMeterRetry?.attempted) {
+      const reread = await readScenarioDataset(true);
+      if (reread.ok) {
+        readback = reread;
+        smtIncompleteMeterRetry = {
+          ...smtIncompleteMeterRetry,
+          postRetryIncompleteDateKeys: extractIncompleteMeterDateKeysFromDataset(reread.dataset),
+        };
+      }
+    }
   }
 
   logSimPipelineEvent("one_path_admin_past_readback_success", {
@@ -684,6 +725,7 @@ async function buildPastSimRunReadbackResponse(args: {
     readbackPending: false,
     runType: "PAST_SIM" as const,
     correlationId: args.correlationId ?? null,
+    smtIncompleteMeterRetry,
     manualStageOneView: null,
     runDisplayView: compactRunDisplayView,
     artifact: null,
@@ -1491,6 +1533,18 @@ export async function POST(request: NextRequest) {
           scenarioId: effectiveRawInputBase.scenarioId,
           correlationId,
           readMode: "allow_rebuild",
+          smtPostSimHealing:
+            mode === "INTERVAL"
+              ? {
+                  mode,
+                  preferredActualSource: effectiveRawInputBase.preferredActualSource,
+                  sourceUserId: resolved.userId,
+                  sourceHouseId: resolved.selectedHouse.id,
+                  sourceEsiid: smtSourceEsiid,
+                  effectiveHouseId,
+                  actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
+                }
+              : null,
         });
         if (!readback.ok) {
           const status =
@@ -1508,7 +1562,10 @@ export async function POST(request: NextRequest) {
             { status }
           );
         }
-        return NextResponse.json(readback);
+        return NextResponse.json({
+          ...readback,
+          smtRefreshCheck,
+        });
       }
       let engineInput =
         mode === "INTERVAL"
