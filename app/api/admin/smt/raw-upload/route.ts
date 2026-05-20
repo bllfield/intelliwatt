@@ -8,8 +8,8 @@ import { normalizeSmtIntervals } from '@/app/lib/smt/normalize';
 import { requireAdmin } from '@/lib/auth/admin';
 import { runPlanPipelineForHome } from '@/lib/plan-engine/runPlanPipelineForHome';
 import {
+  DEFERRED_POST_INGEST_SOURCE,
   enqueueDeferredPostIngestTasks,
-  processDeferredPostIngestQueue,
   shouldThrottleInlinePostIngest,
 } from '@/lib/usage/smtDeferredPostIngest';
 import { resolveCanonicalUsage365CoverageWindow } from '@/modules/usageSimulator/metadataWindow';
@@ -107,8 +107,13 @@ export async function POST(req: NextRequest) {
   // chunk has been ingested.
   // Default to false so upload/normalize returns fast unless caller explicitly opts in.
   const postIngest: boolean = body.postIngest === true;
+  // Droplet SMT uploads set postIngest on the final chunk; bucket rebuild + plan pipeline
+  // must not run inline (20s caps routinely fail under pool load). Queue for post-ingest cron.
+  const inlinePostIngestRequested =
+    body.inlinePostIngest === true || body.runInlinePostIngest === true;
   const throttleInlinePostIngest = shouldThrottleInlinePostIngest();
-  const runInlinePostIngest = postIngest && !throttleInlinePostIngest;
+  const runInlinePostIngest =
+    postIngest && inlinePostIngestRequested && !throttleInlinePostIngest;
 
   const missing: string[] = [];
 
@@ -354,17 +359,27 @@ export async function POST(req: NextRequest) {
               rangeEnd,
               logPrefix: '[raw-upload:inline]',
             });
-            console.warn('[raw-upload:inline] postIngest requested but deferred due to constrained DB pool', {
+            const deferReason = throttleInlinePostIngest
+              ? 'constrained_db_pool'
+              : 'default_fast_ingest';
+            console.info('[raw-upload:inline] postIngest queued for deferred processing', {
               esiids: distinctEsiids.length,
               tasksEnqueued: deferredTasksEnqueued,
+              deferReason,
             });
           }
-          const deferredQueueMaxTasks = throttleInlinePostIngest ? 0 : 3;
-          const deferredQueueRun = await processDeferredPostIngestQueue({
-            maxTasks: deferredQueueMaxTasks,
-            taskTimeoutMs: 20_000,
-            logPrefix: '[raw-upload:inline]',
-          });
+          // Do not drain the deferred queue inline on upload; cron/post-ingest route has a longer budget.
+          const deferredQueueRun = { processed: 0, remaining: 0 };
+          if (postIngest && !runInlinePostIngest) {
+            try {
+              const remaining = await prisma.rawSmtFile.count({
+                where: { source: DEFERRED_POST_INGEST_SOURCE },
+              });
+              deferredQueueRun.remaining = remaining;
+            } catch {
+              // ignore
+            }
+          }
 
           // IMPORTANT for debugging/audit: keep the RawSmtFile row (sha256 + storage_path metadata).
           // Raw bytes live in object storage / droplet path referenced by storage_path, not in Postgres.
@@ -381,7 +396,7 @@ export async function POST(req: NextRequest) {
             diagnostics: stats,
             postIngestDeferred: postIngest && !runInlinePostIngest,
             usageDualWriteDeferred: throttleInlinePostIngest,
-            deferredQueueProcessingSkipped: deferredQueueMaxTasks === 0,
+            deferredQueueProcessingSkipped: true,
             deferredTasksEnqueued,
             deferredTasksProcessed: deferredQueueRun.processed,
             deferredTasksRemaining: deferredQueueRun.remaining,
