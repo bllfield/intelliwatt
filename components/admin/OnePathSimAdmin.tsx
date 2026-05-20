@@ -186,6 +186,8 @@ export function OnePathSimAdmin() {
   const [email, setEmail] = useState("");
   const [lookup, setLookup] = useState<LookupResponse | null>(null);
   const [debugDiagnosticsEnabled, setDebugDiagnosticsEnabled] = useState(true);
+  const [includeSimRunAuditEnabled, setIncludeSimRunAuditEnabled] = useState(false);
+  const effectiveIncludeDebugDiagnostics = debugDiagnosticsEnabled || includeSimRunAuditEnabled;
   const [selectedHouseId, setSelectedHouseId] = useState("");
   const [actualContextHouseId, setActualContextHouseId] = useState("");
   const [selectedScenarioId, setSelectedScenarioId] = useState("");
@@ -499,6 +501,7 @@ export function OnePathSimAdmin() {
       runtimeEnvParityTrace: runtimeEnvParityTrace,
       intervalPastReadinessTrace: intervalPastReadinessTrace,
       readOnlyAudit: asRecord(lookup?.sourceContext?.readOnlyAudit),
+      includeSimRunAudit: includeSimRunAuditEnabled || debugDiagnosticsEnabled,
       currentControls: {
         mode,
         actualContextHouseId: effectiveActualContextHouseId || null,
@@ -508,6 +511,7 @@ export function OnePathSimAdmin() {
         validationOnlyDateKeysLocal,
         persistRequested,
         runReason,
+        includeSimRunAudit: includeSimRunAuditEnabled,
       },
       knownScenario: lastRunKnownScenario ?? selectedKnownScenario,
       sandboxSummary: sandboxHarnessSummary,
@@ -536,6 +540,7 @@ export function OnePathSimAdmin() {
     variablePolicy,
     weatherPreference,
     intervalPastReadinessTrace,
+    includeSimRunAuditEnabled,
   ]);
 
   const copyCurrentFamilyForAi = useCallback(async () => {
@@ -554,11 +559,13 @@ export function OnePathSimAdmin() {
       runtimeEnvParityTrace: runtimeEnvParityTrace,
       intervalPastReadinessTrace: intervalPastReadinessTrace,
       readOnlyAudit: asRecord(lookup?.sourceContext?.readOnlyAudit),
+      includeSimRunAudit: includeSimRunAuditEnabled || debugDiagnosticsEnabled,
       currentControls: {
         mode,
         actualContextHouseId: effectiveActualContextHouseId || null,
         validationOnlyDateKeysLocal,
         selectedFamily: variableFamilyOpen,
+        includeSimRunAudit: includeSimRunAuditEnabled,
       },
       knownScenario: lastRunKnownScenario ?? selectedKnownScenario,
       sandboxSummary: sandboxHarnessSummary,
@@ -589,6 +596,8 @@ export function OnePathSimAdmin() {
     variableFamilyOpen,
     variablePolicy,
     intervalPastReadinessTrace,
+    includeSimRunAuditEnabled,
+    debugDiagnosticsEnabled,
   ]);
 
   const saveVariableFamily = useCallback(async () => {
@@ -709,7 +718,7 @@ export function OnePathSimAdmin() {
               (typeof onePathTestHome?.houseId === "string" && onePathTestHome.houseId.trim() ? onePathTestHome.houseId.trim() : null),
             mode: args?.mode ?? mode,
             actualContextHouseId: args?.actualContextHouseId ?? (freshSelection ? null : effectiveActualContextHouseId ?? null),
-            includeDebugDiagnostics: args?.includeDebugDiagnostics ?? debugDiagnosticsEnabled,
+            includeDebugDiagnostics: args?.includeDebugDiagnostics ?? effectiveIncludeDebugDiagnostics,
             lightweightLookup: args?.lightweightLookup === true,
           }),
         });
@@ -729,7 +738,14 @@ export function OnePathSimAdmin() {
       setBusy(false);
       return json as LookupResponse;
     },
-    [debugDiagnosticsEnabled, effectiveActualContextHouseId, effectiveHouseId, email, mode, onePathTestHome?.houseId]
+    [
+      effectiveIncludeDebugDiagnostics,
+      effectiveActualContextHouseId,
+      effectiveHouseId,
+      email,
+      mode,
+      onePathTestHome?.houseId,
+    ]
   );
 
   const replaceOnePathTestHome = useCallback(
@@ -947,8 +963,10 @@ export function OnePathSimAdmin() {
 
     let json = await requestLookup({
       ...lookupArgs,
-      includeDebugDiagnostics: useLightweightGreenButtonPresetLookup ? false : debugDiagnosticsEnabled,
-      lightweightLookup: useLightweightGreenButtonPresetLookup,
+      includeDebugDiagnostics: useLightweightGreenButtonPresetLookup
+        ? includeSimRunAuditEnabled
+        : effectiveIncludeDebugDiagnostics,
+      lightweightLookup: useLightweightGreenButtonPresetLookup && !includeSimRunAuditEnabled,
     });
     if (!json) return;
     const ensuredLookup = await ensureOnePathTestHomeReady(
@@ -956,8 +974,10 @@ export function OnePathSimAdmin() {
       lookupArgs.houseId || json.selectedHouse?.id || "",
       resolvedEmail,
       {
-        includeDebugDiagnostics: useLightweightGreenButtonPresetLookup ? false : debugDiagnosticsEnabled,
-        lightweightLookup: useLightweightGreenButtonPresetLookup,
+        includeDebugDiagnostics: useLightweightGreenButtonPresetLookup
+          ? includeSimRunAuditEnabled
+          : effectiveIncludeDebugDiagnostics,
+        lightweightLookup: useLightweightGreenButtonPresetLookup && !includeSimRunAuditEnabled,
       }
     );
     if (!ensuredLookup) return;
@@ -984,8 +1004,8 @@ export function OnePathSimAdmin() {
           houseId: resolvedSelection.selectedHouseId || lookupArgs.houseId,
           actualContextHouseId: targetActualContextHouseId,
           freshSelection: false,
-          includeDebugDiagnostics: false,
-          lightweightLookup: true,
+          includeDebugDiagnostics: includeSimRunAuditEnabled,
+          lightweightLookup: !includeSimRunAuditEnabled,
         });
         if (!json) return;
         const reEnsuredLookup = await ensureOnePathTestHomeReady(
@@ -993,8 +1013,8 @@ export function OnePathSimAdmin() {
           resolvedSelection.selectedHouseId || lookupArgs.houseId || json.selectedHouse?.id || "",
           resolvedEmail,
           {
-            includeDebugDiagnostics: false,
-            lightweightLookup: true,
+            includeDebugDiagnostics: includeSimRunAuditEnabled,
+            lightweightLookup: !includeSimRunAuditEnabled,
           }
         );
         if (!reEnsuredLookup) return;
@@ -1034,6 +1054,8 @@ export function OnePathSimAdmin() {
     selectedKnownScenario,
     uploadGreenButtonThroughUsage,
     ensureOnePathTestHomeReady,
+    includeSimRunAuditEnabled,
+    effectiveIncludeDebugDiagnostics,
   ]);
 
   const runSimulation = useCallback(async () => {
@@ -1116,7 +1138,7 @@ export function OnePathSimAdmin() {
           travelRanges,
           persistRequested,
           runReason,
-          includeDebugDiagnostics: debugDiagnosticsEnabled,
+          includeDebugDiagnostics: effectiveIncludeDebugDiagnostics,
         }),
       });
       json = await res.json().catch(() => null);
@@ -1160,6 +1182,7 @@ export function OnePathSimAdmin() {
   }, [
     activePathLabel,
     debugDiagnosticsEnabled,
+    effectiveIncludeDebugDiagnostics,
     effectiveActualContextHouseId,
     effectiveHouseId,
     effectiveMutableHouseId,
@@ -1176,6 +1199,7 @@ export function OnePathSimAdmin() {
     validationSelectionMode,
     validationOnlyDateKeysLocal,
     weatherPreference,
+    includeSimRunAuditEnabled,
   ]);
 
   const manualTransport = useMemo(
@@ -1510,6 +1534,23 @@ export function OnePathSimAdmin() {
             </label>
           </div>
 
+          <label className="mt-4 flex items-start gap-3 rounded-lg border border-slate-200 px-4 py-3 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={includeSimRunAuditEnabled}
+              onChange={(event) => setIncludeSimRunAuditEnabled(event.target.checked)}
+            />
+            <span>
+              <span className="font-semibold text-brand-navy">Include sim run audit</span>
+              <span className="mt-1 block text-xs text-slate-600">
+                Returns the full read model on run (SMT ledger, Green Button shift proof, fingerprints) and sets{" "}
+                <code className="text-[11px]">includesSimRunAudit: true</code> in the AI copy payload. Use for GREEN_BUTTON
+                baseline audit runs even when debug panels stay off.
+              </span>
+            </span>
+          </label>
+
           <label className="mt-4 block text-sm text-slate-700">
             <div className="font-semibold text-brand-navy">Manual validation date keys</div>
             <textarea
@@ -1575,7 +1616,7 @@ export function OnePathSimAdmin() {
               <button
                 type="button"
                 onClick={() => void copyAllVariablesForAi()}
-                disabled={!variablePolicy || !debugDiagnosticsEnabled}
+                disabled={!variablePolicy || !(debugDiagnosticsEnabled || includeSimRunAuditEnabled)}
                 className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-brand-navy disabled:opacity-60"
               >
                 Copy all variables for AI
@@ -2076,8 +2117,8 @@ export function OnePathSimAdmin() {
                 <button
                   type="button"
                   onClick={() => void copyCurrentFamilyForAi()}
-                  disabled={!debugDiagnosticsEnabled}
-                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-brand-navy"
+                  disabled={!(debugDiagnosticsEnabled || includeSimRunAuditEnabled)}
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-brand-navy disabled:opacity-60"
                 >
                   Copy this family for AI
                 </button>

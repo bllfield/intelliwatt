@@ -325,6 +325,7 @@ export function buildSimulationVariableCopyPayload(args: {
   runtimeEnvParityTrace?: Record<string, unknown> | null;
   intervalPastReadinessTrace?: Record<string, unknown> | null;
   readOnlyAudit?: Record<string, unknown> | null;
+  includeSimRunAudit?: boolean;
 }): Record<string, unknown> {
   const inputType = modeToInputType(args.mode);
   const loadedSourceContext = asRecord(args.loadedSourceContext);
@@ -463,6 +464,7 @@ export function buildSimulationVariableCopyPayload(args: {
         }
       : args.intervalPastReadinessTrace ?? null;
   const readOnlyAudit = args.readOnlyAudit ?? loadedSourceContext.readOnlyAudit ?? null;
+  const includeSimRunAudit = args.includeSimRunAudit !== false;
   const hasCompactRunResponse =
     Object.keys(asRecord(args.engineInput)).length > 0 &&
     (hasSuppliedRunDisplayView || sandboxRunStatus.runType === "BASELINE_PASSTHROUGH");
@@ -671,7 +673,7 @@ export function buildSimulationVariableCopyPayload(args: {
       includesEnvReadinessTraceSections: Boolean(runtimeEnvParityTrace || intervalPastReadinessTrace),
       includesReadOnlyAudit: Boolean(readOnlyAudit),
       includesAllModesVariableFamilies: true,
-      includesSimRunAudit: true,
+      includesSimRunAudit: includeSimRunAudit,
     },
     currentControls: args.currentControls ?? {},
     knownScenario: args.knownScenario ?? null,
@@ -785,7 +787,7 @@ export function buildSimulationVariableCopyPayload(args: {
       overrides: args.response.overrides ?? {},
       familyMeta: args.response.familyMeta ?? {},
     },
-    simRunAudit,
+    ...(includeSimRunAudit ? { simRunAudit } : {}),
     rawEffectiveSimulationVariablesUsed: activeRunSnapshot ?? null,
     rawReadModel: args.readModel ?? null,
     rawArtifact: args.artifact ?? null,

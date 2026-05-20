@@ -90,7 +90,11 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("<select");
     expect(source).toContain("sourceContext?.travelRangesFromDb");
     expect(source).toContain("lookup?.sourceContext?.upstreamUsageTruth");
-    expect(source).toContain("includeDebugDiagnostics: debugDiagnosticsEnabled");
+    expect(source).toContain("includeSimRunAuditEnabled");
+    expect(source).toContain("effectiveIncludeDebugDiagnostics");
+    expect(source).toContain("Include sim run audit");
+    expect(source).toContain("includeSimRunAudit:");
+    expect(source).toContain("debugDiagnosticsEnabled || includeSimRunAuditEnabled");
     expect(source).toContain("One Path calculation variable popups");
     expect(source).toContain("buildOnePathSandboxHarnessSummary");
     expect(source).toContain("getKnownHouseScenarioByKey");
@@ -262,8 +266,8 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("email: resolvedEmail,");
     expect(source).toContain("includeDebugDiagnostics?: boolean");
     expect(source).toContain("lightweightLookup?: boolean");
-    expect(source).toContain("includeDebugDiagnostics: args?.includeDebugDiagnostics ?? debugDiagnosticsEnabled");
-    expect(source).toContain("includeDebugDiagnostics: debugDiagnosticsEnabled");
+    expect(source).toContain("includeDebugDiagnostics: args?.includeDebugDiagnostics ?? effectiveIncludeDebugDiagnostics");
+    expect(source).toContain("includeDebugDiagnostics: effectiveIncludeDebugDiagnostics");
     expect(source).not.toContain("setEmail(selectedKnownScenario.sourceUserEmail);");
     expect(source).not.toContain("email: selectedKnownScenario.sourceUserEmail,");
   });
@@ -273,9 +277,10 @@ describe("One Path Sim Admin harness wiring", () => {
     const routeSource = readRepoFile("app/api/admin/tools/one-path-sim/route.ts");
 
     expect(source).toContain('const useLightweightGreenButtonPresetLookup = selectedKnownScenario.scenarioType === "GREEN_BUTTON_TRUTH";');
-    expect(source).toContain("includeDebugDiagnostics: useLightweightGreenButtonPresetLookup ? false : debugDiagnosticsEnabled");
+    expect(source).toContain("includeDebugDiagnostics: useLightweightGreenButtonPresetLookup");
+    expect(source).toContain("lightweightLookup: useLightweightGreenButtonPresetLookup && !includeSimRunAuditEnabled");
     expect(source).toContain("lightweightLookup: useLightweightGreenButtonPresetLookup");
-    expect(source).toContain("lightweightLookup: true");
+    expect(source).toContain("lightweightLookup: !includeSimRunAuditEnabled");
     expect(source).toContain("options?: {");
     expect(source).toContain("includeDebugDiagnostics: options?.includeDebugDiagnostics");
     expect(source).toContain("lightweightLookup: options?.lightweightLookup");
