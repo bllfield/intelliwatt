@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { SMT_DAY_LEDGER_STATUS } from "@/lib/usage/smtDayCoverageLedger";
 import {
+  chicagoSlot96FromTs,
   filterDateKeysNearTargetEnd,
   isGreenButtonPrimaryDataset,
   isResolvedDatasetTailDisplayReady,
+  missingChicagoSlotsFromFilledSlots,
   ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS,
   ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS,
   reconcileUsageIngestionWithDataset,
@@ -141,6 +143,14 @@ describe("smt tail coverage helpers", () => {
   it("allows a longer admin wait after targeted incomplete-meter backfill", () => {
     expect(ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS).toBeGreaterThan(
       ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS
+    );
+  });
+
+  it("maps Chicago 15-minute slots for completeness checks", () => {
+    expect(chicagoSlot96FromTs(new Date("2026-05-17T05:00:00.000Z"))).toBe(0);
+    expect(chicagoSlot96FromTs(new Date("2026-05-17T05:14:59.999Z"))).toBe(0);
+    expect(missingChicagoSlotsFromFilledSlots(new Set([0, 2]))).toEqual(
+      Array.from({ length: 96 }, (_, slot) => slot).filter((slot) => slot !== 0 && slot !== 2)
     );
   });
 });

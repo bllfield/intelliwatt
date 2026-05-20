@@ -20,17 +20,68 @@ export const USER_USAGE_SMT_TAIL_WAIT_TIMEOUT_MS = 8_000;
 export const ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS = 20_000;
 /** After targeted incomplete-meter backfill: allow FTP delivery + ingest before giving up. */
 export const ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS = 90_000;
+/** Second pass when a day is one or two intervals short after the first wait times out. */
+export const ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_SECOND_PASS_WAIT_TIMEOUT_MS = 60_000;
+/** Days at or above this count get a padded second targeted backfill + wait. */
+export const SMT_NEAR_COMPLETE_INTERVAL_THRESHOLD = 94;
 /** Pause after a post-backfill pull so ingestion can finish before polling counts. */
 export const SMT_POST_BACKFILL_SETTLE_DELAY_MS = 3_000;
 /** Only block incomplete-meter backfill waits on days near the canonical window end. */
 export const SMT_INCOMPLETE_METER_BACKFILL_LOOKBACK_DAYS = 3;
 
+const SMT_COVERAGE_TIMEZONE = "America/Chicago";
+
 const smtCoverageDateFmt = new Intl.DateTimeFormat("en-CA", {
-  timeZone: "America/Chicago",
+  timeZone: SMT_COVERAGE_TIMEZONE,
   year: "numeric",
   month: "2-digit",
   day: "2-digit",
 });
+
+const smtCoverageSlotFmt = new Intl.DateTimeFormat("en-CA", {
+  timeZone: SMT_COVERAGE_TIMEZONE,
+  hour: "numeric",
+  minute: "numeric",
+  hour12: false,
+});
+
+/** Local 15-minute slot index (0–95) for completeness checks. */
+export function chicagoSlot96FromTs(ts: Date): number | null {
+  try {
+    const parts = smtCoverageSlotFmt.formatToParts(ts);
+    const hour = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10);
+    const minute = parseInt(parts.find((p) => p.type === "minute")?.value ?? "0", 10);
+    const slot = hour * 4 + Math.floor(minute / 15);
+    return slot >= 0 && slot <= 95 ? slot : null;
+  } catch {
+    return null;
+  }
+}
+
+export function missingChicagoSlotsFromFilledSlots(filledSlots: ReadonlySet<number>): number[] {
+  const missing: number[] = [];
+  for (let slot = 0; slot < SMT_TAIL_REQUIRED_INTERVALS_PER_DAY; slot += 1) {
+    if (!filledSlots.has(slot)) missing.push(slot);
+  }
+  return missing;
+}
+
+function accumulateChicagoSlotsByDate(args: {
+  rows: Array<{ ts: Date | string | null | undefined }>;
+  requestedDateSet: Set<string>;
+}): Map<string, Set<number>> {
+  const slotsByDate = new Map<string, Set<number>>();
+  for (const row of args.rows) {
+    const ts = row?.ts instanceof Date ? row.ts : row?.ts ? new Date(row.ts) : null;
+    const dateKey = smtCoverageDateKey(ts);
+    const slot = ts ? chicagoSlot96FromTs(ts) : null;
+    if (!dateKey || slot == null || !args.requestedDateSet.has(dateKey)) continue;
+    const bucket = slotsByDate.get(dateKey) ?? new Set<number>();
+    bucket.add(slot);
+    slotsByDate.set(dateKey, bucket);
+  }
+  return slotsByDate;
+}
 
 export type SmtTailCoverageSnapshot = {
   intervalCount: number;
@@ -49,6 +100,7 @@ export type SmtTailCoverageSnapshot = {
 export type SmtDateCoverageSnapshot = {
   dateKeys: string[];
   countsByDate: Record<string, number>;
+  missingSlotsByDate: Record<string, number[]>;
   incompleteDateKeys: string[];
   ready: boolean;
 };
@@ -260,6 +312,7 @@ export async function loadSmtDateCoverage(args: { esiid: string; dateKeys: strin
     return {
       dateKeys,
       countsByDate: {},
+      missingSlotsByDate: {},
       incompleteDateKeys: [],
       ready: true,
     };
@@ -280,22 +333,23 @@ export async function loadSmtDateCoverage(args: { esiid: string; dateKeys: strin
     })
     .catch(() => []);
   const requestedDateSet = new Set(dateKeys);
-  const uniqueTsByDate = new Map<string, Set<string>>();
-  for (const row of rows) {
-    const ts = row?.ts instanceof Date ? row.ts : row?.ts ? new Date(row.ts) : null;
-    const dateKey = smtCoverageDateKey(ts);
-    if (!dateKey || !requestedDateSet.has(dateKey) || !ts) continue;
-    const bucket = uniqueTsByDate.get(dateKey) ?? new Set<string>();
-    bucket.add(ts.toISOString());
-    uniqueTsByDate.set(dateKey, bucket);
-  }
-  const countsByDate = Object.fromEntries(dateKeys.map((dateKey) => [dateKey, uniqueTsByDate.get(dateKey)?.size ?? 0]));
+  const slotsByDate = accumulateChicagoSlotsByDate({ rows, requestedDateSet });
+  const countsByDate = Object.fromEntries(
+    dateKeys.map((dateKey) => [dateKey, slotsByDate.get(dateKey)?.size ?? 0])
+  );
+  const missingSlotsByDate = Object.fromEntries(
+    dateKeys.map((dateKey) => [
+      dateKey,
+      missingChicagoSlotsFromFilledSlots(slotsByDate.get(dateKey) ?? new Set<number>()),
+    ])
+  );
   const incompleteDateKeys = dateKeys.filter(
     (dateKey) => (countsByDate[dateKey] ?? 0) < SMT_TAIL_REQUIRED_INTERVALS_PER_DAY
   );
   return {
     dateKeys,
     countsByDate,
+    missingSlotsByDate,
     incompleteDateKeys,
     ready: incompleteDateKeys.length === 0,
   };
@@ -337,17 +391,9 @@ export async function loadSmtTailCoverage(args: {
       orderBy: { ts: "asc" },
     })
     .catch(() => []);
-  const uniqueTsByDate = new Map<string, Set<string>>();
-  for (const row of tailRows) {
-    const ts = row?.ts instanceof Date ? row.ts : row?.ts ? new Date(row.ts) : null;
-    const dateKey = smtCoverageDateKey(ts);
-    if (!dateKey || !tailDateSet.has(dateKey) || !ts) continue;
-    const bucket = uniqueTsByDate.get(dateKey) ?? new Set<string>();
-    bucket.add(ts.toISOString());
-    uniqueTsByDate.set(dateKey, bucket);
-  }
+  const tailSlotsByDate = accumulateChicagoSlotsByDate({ rows: tailRows, requestedDateSet: tailDateSet });
   const tailCountsByDate = Object.fromEntries(
-    tailDateKeys.map((dateKey) => [dateKey, uniqueTsByDate.get(dateKey)?.size ?? 0])
+    tailDateKeys.map((dateKey) => [dateKey, tailSlotsByDate.get(dateKey)?.size ?? 0])
   );
   const incompleteTailDateKeys = tailDateKeys.filter(
     (dateKey) => (tailCountsByDate[dateKey] ?? 0) < SMT_TAIL_REQUIRED_INTERVALS_PER_DAY

@@ -64,13 +64,16 @@ import {
   runDeferredPendingSmtDayRepairs,
 } from "@/lib/usage/smtDayCoverageLedger";
 import {
+  addDateKeyDays,
   filterDateKeysNearTargetEnd,
   loadSmtDateCoverage,
   loadSmtTailCoverage,
   normalizeDateKeys,
+  ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_SECOND_PASS_WAIT_TIMEOUT_MS,
   ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS,
   ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS,
   SMT_INCOMPLETE_METER_BACKFILL_LOOKBACK_DAYS,
+  SMT_NEAR_COMPLETE_INTERVAL_THRESHOLD,
   SMT_POST_BACKFILL_SETTLE_DELAY_MS,
   SMT_TAIL_WAIT_INTERVAL_MS,
   waitForSmtDateCoverage,
@@ -919,13 +922,16 @@ async function waitForOnePathSmtDateCoverage(args: {
   sourceUserId: string;
   sourceHouseId: string;
   afterTargetedBackfill?: boolean;
+  waitTimeoutMs?: number;
 }) {
   const waitResult = await waitForSmtDateCoverage({
     esiid: args.esiid,
     dateKeys: args.dateKeys,
-    timeoutMs: args.afterTargetedBackfill
-      ? ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS
-      : ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS,
+    timeoutMs:
+      args.waitTimeoutMs ??
+      (args.afterTargetedBackfill
+        ? ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS
+        : ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS),
     intervalMs: SMT_TAIL_WAIT_INTERVAL_MS,
     initialDelayMs: args.afterTargetedBackfill ? SMT_POST_BACKFILL_SETTLE_DELAY_MS : undefined,
     exitEarlyWhenStalled: !args.afterTargetedBackfill,
@@ -1105,11 +1111,27 @@ type OnePathSmtPostSimHealingResult = {
   waitTimedOut?: boolean;
   incompleteMeterCoverageWait?: {
     countsByDate: Record<string, number>;
+    missingSlotsByDate?: Record<string, number[]>;
     incompleteDateKeys: string[];
     timedOut: boolean;
     durationMs?: number;
     attempts?: number;
     waitTimeoutMs?: number;
+  };
+  nearCompleteSecondPass?: {
+    attempted: boolean;
+    nearCompleteDateKeys: string[];
+    expandedBackfillDateKeys: string[];
+    incompleteMeterCoverageWait?: {
+      countsByDate: Record<string, number>;
+      missingSlotsByDate?: Record<string, number[]>;
+      incompleteDateKeys: string[];
+      timedOut: boolean;
+      durationMs?: number;
+      attempts?: number;
+      waitTimeoutMs?: number;
+    };
+    targetedIntervalBackfill?: Awaited<ReturnType<typeof requestTargetedSmtIntervalBackfillForHouse>>;
   };
   targetedIntervalBackfill?: Awaited<ReturnType<typeof requestTargetedSmtIntervalBackfillForHouse>>;
   postTargetedBackfillRefreshResult?: Awaited<ReturnType<typeof requestUsageRefreshForUserHouse>>;
@@ -1207,6 +1229,7 @@ async function maybeRunOnePathSmtPostSimHealing(args: {
   let waitTimedOut = deferredRepair.waitTimedOut;
   let reconcile = deferredRepair.reconcile;
   let incompleteMeterCoverageWait: OnePathSmtPostSimHealingResult["incompleteMeterCoverageWait"];
+  let nearCompleteSecondPass: OnePathSmtPostSimHealingResult["nearCompleteSecondPass"];
   let targetedIntervalBackfill: OnePathSmtPostSimHealingResult["targetedIntervalBackfill"];
   let postTargetedBackfillRefreshResult: OnePathSmtPostSimHealingResult["postTargetedBackfillRefreshResult"];
 
@@ -1273,12 +1296,96 @@ async function maybeRunOnePathSmtPostSimHealing(args: {
     waitTimedOut = waitTimedOut || waitResult.timedOut;
     incompleteMeterCoverageWait = {
       countsByDate: waitResult.countsByDate,
+      missingSlotsByDate: waitResult.missingSlotsByDate,
       incompleteDateKeys: waitResult.incompleteDateKeys,
       timedOut: waitResult.timedOut,
       durationMs: waitResult.durationMs,
       attempts: waitResult.attempts,
       waitTimeoutMs: ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS,
     };
+
+    const nearCompleteDateKeys = waitResult.incompleteDateKeys.filter(
+      (dateKey) => (waitResult.countsByDate[dateKey] ?? 0) >= SMT_NEAR_COMPLETE_INTERVAL_THRESHOLD
+    );
+    if (!waitResult.ready && nearCompleteDateKeys.length > 0) {
+      const expandedBackfillDateKeys = filterDateKeysNearTargetEnd(
+        normalizeDateKeys([
+          ...nearCompleteDateKeys,
+          ...nearCompleteDateKeys.flatMap((dateKey) => [addDateKeyDays(dateKey, -1), addDateKeyDays(dateKey, 1)]),
+        ]),
+        targetEndDate,
+        SMT_INCOMPLETE_METER_BACKFILL_LOOKBACK_DAYS + 1
+      );
+      logSimPipelineEvent("one_path_smt_near_complete_second_pass_requested", {
+        correlationId: args.correlationId,
+        houseId: args.effectiveHouseId,
+        sourceEsiid: esiid,
+        nearCompleteDateKeys: nearCompleteDateKeys.join(","),
+        expandedBackfillDateKeys: expandedBackfillDateKeys.join(","),
+        countsByDate: jsonForLog(waitResult.countsByDate),
+        missingSlotsByDate: jsonForLog(
+          Object.fromEntries(
+            nearCompleteDateKeys.map((dateKey) => [dateKey, waitResult.missingSlotsByDate[dateKey] ?? []])
+          )
+        ),
+        source: "one-path-admin",
+        memoryRssMb: getMemoryRssMb(),
+      });
+
+      const secondBackfill = await requestTargetedSmtIntervalBackfillForHouse({
+        houseId: args.sourceHouseId,
+        dateKeys: expandedBackfillDateKeys,
+      }).catch((error) => ({
+        ok: false as const,
+        skipped: "targeted_backfill_failed",
+        message: error instanceof Error ? error.message : String(error),
+      }));
+
+      await requestUsageRefreshForUserHouse({
+        userId: args.sourceUserId,
+        houseId: args.sourceHouseId,
+      }).catch(() => null);
+
+      const secondWait = await waitForOnePathSmtDateCoverage({
+        esiid,
+        dateKeys: nearCompleteDateKeys,
+        correlationId: args.correlationId,
+        effectiveHouseId: args.effectiveHouseId,
+        actualContextHouseId: args.actualContextHouseId,
+        sourceUserId: args.sourceUserId,
+        sourceHouseId: args.sourceHouseId,
+        afterTargetedBackfill: true,
+        waitTimeoutMs: ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_SECOND_PASS_WAIT_TIMEOUT_MS,
+      });
+      waitTimedOut = waitTimedOut || secondWait.timedOut;
+      nearCompleteSecondPass = {
+        attempted: true,
+        nearCompleteDateKeys,
+        expandedBackfillDateKeys,
+        targetedIntervalBackfill: secondBackfill,
+        incompleteMeterCoverageWait: {
+          countsByDate: secondWait.countsByDate,
+          missingSlotsByDate: secondWait.missingSlotsByDate,
+          incompleteDateKeys: secondWait.incompleteDateKeys,
+          timedOut: secondWait.timedOut,
+          durationMs: secondWait.durationMs,
+          attempts: secondWait.attempts,
+          waitTimeoutMs: ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_SECOND_PASS_WAIT_TIMEOUT_MS,
+        },
+      };
+      incompleteMeterCoverageWait = {
+        countsByDate: secondWait.countsByDate,
+        missingSlotsByDate: secondWait.missingSlotsByDate,
+        incompleteDateKeys: secondWait.incompleteDateKeys,
+        timedOut: secondWait.timedOut,
+        durationMs: (incompleteMeterCoverageWait.durationMs ?? 0) + (secondWait.durationMs ?? 0),
+        attempts: (incompleteMeterCoverageWait.attempts ?? 0) + (secondWait.attempts ?? 0),
+        waitTimeoutMs:
+          ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS +
+          ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_SECOND_PASS_WAIT_TIMEOUT_MS,
+      };
+    }
+
     reconcile = (await reconcileSmtIntervalDayLedger({ esiid }).catch(() => null)) ?? reconcile;
   }
 
@@ -1306,6 +1413,7 @@ async function maybeRunOnePathSmtPostSimHealing(args: {
     refreshResult: refreshResult?.ok === false ? undefined : refreshResult,
     waitTimedOut,
     incompleteMeterCoverageWait,
+    nearCompleteSecondPass,
     targetedIntervalBackfill,
     postTargetedBackfillRefreshResult,
     reconcile: reconcile ?? undefined,
