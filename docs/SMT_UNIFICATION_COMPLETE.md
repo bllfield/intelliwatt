@@ -55,4 +55,12 @@ Raw row counts, distinct Chicago slot counts, coverage loader, and ledger reconc
 - Implementation detail: `docs/SMT_UNIFICATION_PLAN.md`
 - Phase prompts: `docs/SMT_UNIFICATION_PHASE_PROMPTS.md`
 - New chat bootstrap: `docs/SMT_UNIFICATION_AGENT_BOOTSTRAP.md`
-- Cursor rule: `.cursor/rules/smt-unification-lock.mdc` (may be relaxed after sign-off)
+- Cursor rules (permanent): `.cursor/rules/smt-unification-lock.mdc` (always apply), `.cursor/rules/shared-sim-window-lock.mdc`
+
+## Ongoing enforcement (all future SMT-related changes)
+
+1. **Single owners** — extend behavior only in the modules in the table above; routes orchestrate, they do not rederive completeness or coverage end dates.
+2. **96/96** — SMT readiness, ledger, orchestrate/status, and INTERVAL Past Sim trusted pool; never reintroduce 99% span or 90-slot SMT trusted thresholds.
+3. **Heal** — `ensureSmtCoverage.ts` only; targeted backfill via `smtIncompleteMeterBackfill.ts` only from ensure.
+4. **Green Button** — do not edit `greenButton.ts` for SMT coverage fixes unless scope is explicitly expanded.
+5. **Docs** — update this file and `docs/PROJECT_PLAN.md` PC-2026-05 in the same pass when owners or semantics change.

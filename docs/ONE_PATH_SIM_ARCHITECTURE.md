@@ -29,21 +29,17 @@ When this document conflicts with older planning or audit language, this documen
 - One Path Admin writes only to a dedicated reusable `ONE_PATH_LAB_TEST_HOME`. The selected source house stays read-only. Replacing the test home resets isolated mutable state, copies scenarios/manual payload context, repairs missing home/appliance profiles, and clones Green Button actual-usage records onto the test home so admin tuning stays sandboxed.
 - When the test home is pinned, actual usage still stays under shared usage ownership. `INTERVAL` / SMT runs may use the selected source house ESIID as the SMT identity fallback for the pinned actual-context house, while `GREEN_BUTTON` runs read persisted Green Button truth cloned onto the test home. Route code must not invent a private actual-usage source.
 - For `GREEN_BUTTON` runs, shifted prior-year actuals are a generalized adapter behavior. A shifted source day that satisfies the trusted slot threshold (90 intervals, bounded by `expectedIntervalsForDateISO()` for DST) remains actual-backed for the target date, takes precedence over a trailing/current-year partial day for that target date, and must not enter the shared simulation core as `SIMULATED_INCOMPLETE_METER`. The adapter must carry `sourceDateByTargetDate` and disclose source-day weather use; route/page code must not patch or rederive that classification.
-- For non-baseline scenarios, canonical 365-day coverage ownership stays with `resolveCanonicalUsage365CoverageWindow()` and shared metadata-window helpers. `dataset.summary.start/end`, `dataset.meta.coverageStart/coverageEnd`, and bounded `excludedDateKeys*` metadata must stay aligned to that same shared coverage window.
-- One Path interval admin runs now treat SMT backfill as best-effort recovery, not a hard display gate. The route may request a refresh and wait for canonical tail coverage before the first run, but stale/incomplete tail coverage no longer returns `409`.
-- After the first interval simulation, if the dataset still marks any day as `SIMULATED_INCOMPLETE_METER`, the route requests SMT refresh once for those exact dates, rebuilds engine input, and reruns once. If some incomplete simulated days remain after that retry, the route still returns results with diagnostics instead of blocking.
+- For non-baseline scenarios, canonical 365-day coverage ownership stays with `resolveCanonicalUsage365CoverageWindow()` in `lib/usage/canonicalMetadataWindow.ts`. `dataset.summary.start/end`, `dataset.meta.coverageStart/coverageEnd`, and bounded `excludedDateKeys*` metadata must stay aligned to that same shared coverage window (`.cursor/rules/shared-sim-window-lock.mdc`).
 
-### SMT unification target (see `docs/SMT_UNIFICATION_PLAN.md`)
+### SMT interval coverage (shipped — PC-2026-05)
 
-**Current (pre-unification):** One Path admin route owns extra SMT healing (`maybeRunOnePathSmtPostSimHealing`, targeted backfill, long waits) beyond shared usage refresh.
+**Record:** `docs/SMT_UNIFICATION_COMPLETE.md` · **Rules:** `.cursor/rules/smt-unification-lock.mdc`
 
-**Target (Phases 4–5):**
-
-- One Path **only** calls `ensureSmtCoverageForHouse` from `lib/usage/ensureSmtCoverage.ts` (profiles `sim_run` / `admin_sim`).
-- No direct `requestTargetedSmtIntervalBackfillForHouse` in `app/api/admin/tools/one-path-sim/route.ts`.
-- Same per-day status as usage dashboard: `lib/usage/smtWindowStatus.ts` (96/96 strict for SMT).
-- Past Sim engine: 96 slots required for trusted actual (Phase 6); usage/baseline may still **display** partial intervals.
-- Green Button baseline/adapter behavior unchanged by this effort.
+- One Path **only** calls `ensureSmtCoverageForHouse` from `lib/usage/ensureSmtCoverage.ts` (`profile: admin_sim`, session keys `run:` / `post:`).
+- No direct `requestTargetedSmtIntervalBackfillForHouse`, `maybeRunOnePathSmtPostSimHealing`, or duplicate long SMT wait loops in `app/api/admin/tools/one-path-sim/route.ts`.
+- Same per-day status as usage: `lib/usage/smtWindowStatus.ts` (96/96 strict for SMT).
+- Past Sim engines: `MIN_TRUSTED_ACTUAL_INTERVALS_PER_DAY = 96` for INTERVAL/SMT trusted pool; usage/baseline may still **display** partial intervals.
+- Green Button baseline/adapter behavior unchanged by SMT coverage work.
 
 ## Non-negotiable upstream / downstream boundary
 

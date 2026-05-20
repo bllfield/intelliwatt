@@ -7,7 +7,7 @@ alwaysApply: true
 
 For simulation metadata and parity work, enforce these non-negotiable rules:
 
-- Use one shared source for non-baseline coverage window metadata: `resolveCanonicalUsage365CoverageWindow()` in `modules/usageSimulator/metadataWindow.ts`.
+- Use one shared source for non-baseline coverage window metadata: `resolveCanonicalUsage365CoverageWindow()` in `lib/usage/canonicalMetadataWindow.ts` (simulator `metadataWindow.ts` files re-export only; do not reimplement).
 - Do not derive coverage windows in route files when shared service metadata is available.
 - For non-baseline scenarios, `dataset.summary.start/end` and `dataset.meta.coverageStart/coverageEnd` must come from the same shared canonical window source.
 - `excludedDateKeysCount` and `excludedDateKeysFingerprint` must be computed from shared travel/vacant ranges bounded to that same shared coverage window.

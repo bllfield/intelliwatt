@@ -94,12 +94,12 @@ Persistence status today:
 
 - `/api/user/usage/simulated` (all-houses baseline aggregate), because it becomes ambiguous with five persisted layers
 
-## SMT interval coverage (unification in progress)
+## SMT interval coverage (shipped — PC-2026-05)
 
-**Plan:** `docs/SMT_UNIFICATION_PLAN.md` · **Prompts:** `docs/SMT_UNIFICATION_PHASE_PROMPTS.md`
+**Record:** `docs/SMT_UNIFICATION_COMPLETE.md` · **Permanent rules:** `.cursor/rules/smt-unification-lock.mdc`
 
-| Concern | Target owner (after unification) |
-|---------|----------------------------------|
+| Concern | Owner |
+|---------|--------|
 | Canonical 365-day window (lag 2 Chicago) | `lib/usage/canonicalCoverageConfig.ts` + `lib/usage/canonicalMetadataWindow.ts` |
 | Chicago date key + 15-min slot index | `lib/time/chicago.ts` |
 | Per-day complete / missing in window | `lib/usage/smtWindowStatus.ts` (96/96 strict) |
@@ -108,12 +108,12 @@ Persistence status today:
 | Ledger labels | `lib/usage/smtDayCoverageLedger.ts` |
 | Persisted intervals read | `lib/usage/actualDatasetForHouse.ts`, `resolveIntervalsLayer` |
 
-**Rules:**
+**Rules (ongoing):**
 
-- **Green Button** (`modules/realUsageAdapter/greenButton.ts`) is **not** part of SMT unification; GB keeps its own looser/trusted-day rules.
-- **One Path** may **trigger** `ensureSmtCoverage`; it must **not** own parallel SMT pull/backfill/wait in `one-path-sim/route.ts`.
+- **Green Button** (`modules/realUsageAdapter/greenButton.ts`) is **not** part of SMT coverage fixes; GB keeps its own looser/trusted-day rules.
+- **One Path** may **trigger** `ensureSmtCoverage` only; no parallel SMT pull/backfill/wait in `one-path-sim/route.ts`.
 - **Usage dashboard** displays partial SMT days; **Past Sim** (INTERVAL) does not trust days with fewer than 96 Chicago slots.
-- Do not use `/api/user/smt/orchestrate` as a second source of truth for completeness; it should delegate to `smtWindowStatus` + `ensureSmtCoverage`.
+- `/api/user/smt/orchestrate` and `/api/user/usage/status` delegate to `smtWindowStatus` + `ensureSmtCoverage` — do not add a second completeness derivation.
 
 ## Actionable Standardization Step
 

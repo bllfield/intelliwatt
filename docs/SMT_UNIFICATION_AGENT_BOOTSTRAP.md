@@ -1,69 +1,67 @@
-# SMT unification — new chat bootstrap
+# SMT unification — chat bootstrap
 
-Copy everything in **“Paste into new Cursor chat”** below into a fresh agent session. Run **one phase per chat**, then verify post-checks before the next phase.
+**PC-2026-05 is complete.** Use this file for **maintenance** (bugfixes, new SMT features) — not for re-running implementation phases unless explicitly restoring history.
+
+**Before any SMT-related code change:** read `docs/SMT_UNIFICATION_COMPLETE.md`, `docs/PROJECT_PLAN.md` → PC-2026-05, and `.cursor/rules/smt-unification-lock.mdc` (permanent, always apply). Keep docs in sync in the same pass.
+
+For historical phase-by-phase work, see `docs/SMT_UNIFICATION_PHASE_PROMPTS.md`.
 
 ---
 
-## Paste into new Cursor chat
+## Paste into new Cursor chat (maintenance / fixes)
+
+Copy everything below into a fresh agent session when changing SMT coverage, heal, readiness, or INTERVAL Past Sim trusted pools.
 
 ```
-You are implementing the IntelliWatt SMT interval coverage unification (PC-2026-05). Work surgically — ONE phase only unless I say otherwise.
+You are changing IntelliWatt SMT interval coverage behavior under the **shipped** PC-2026-05 model. Work surgically; do not weaken single-owner rules without explicit user approval.
 
-## REQUIRED FIRST STEP — read the master project plan
+## REQUIRED FIRST STEP — read shipped rules
 
 Before any grep, code, or opinion:
 
-1. Open and read **docs/PROJECT_PLAN.md** — search for **`PC-2026-05`** and read that entire section end-to-end. This is the **master** plan file; it overrides informal summaries in chat.
-2. Confirm you understand: product rules, 8 phases, target lib/ owners, forbidden items, Green Button out of scope, One Path isolation.
-3. In your first reply, briefly state: (a) that you read PC-2026-05 in PROJECT_PLAN.md, (b) which phase I assigned, (c) one sentence on what that phase changes.
+1. Read **docs/SMT_UNIFICATION_COMPLETE.md** (shipped owners + forbidden patterns).
+2. Read **docs/PROJECT_PLAN.md** → **PC-2026-05** (master plan; overrides informal chat summaries).
+3. Read **.cursor/rules/smt-unification-lock.mdc** and **.cursor/rules/shared-sim-window-lock.mdc** — these are permanent constraints.
+4. In your first reply, state: (a) you read COMPLETE + PC-2026-05, (b) the specific change requested, (c) which single owner module(s) you will touch.
 
-Do NOT start implementation until you have read PC-2026-05 in PROJECT_PLAN.md.
+Do NOT start implementation until you have read the above.
 
 ## Then read (in order)
 
-4. docs/SMT_UNIFICATION_PLAN.md — implementation detail, file map (must align with PROJECT_PLAN; if conflict, PROJECT_PLAN wins)
-5. docs/SMT_UNIFICATION_PHASE_PROMPTS.md — PRE-CHECK / IMPLEMENT / POST-CHECK for your phase number
-6. .cursor/rules/smt-unification-lock.mdc
-7. .cursor/rules/shared-sim-window-lock.mdc
-8. docs/USAGE_LAYER_MAP.md — SMT layer owners (especially Phase 5+)
-9. docs/ONE_PATH_SIM_ARCHITECTURE.md — One Path must only trigger ensureSmtCoverage, not own SMT
+5. docs/SMT_UNIFICATION_PLAN.md — architecture detail (must align with PROJECT_PLAN)
+6. docs/USAGE_LAYER_MAP.md — SMT layer owners
+7. docs/ONE_PATH_SIM_ARCHITECTURE.md — One Path triggers ensureSmtCoverage only
 
-Optional: scripts/audit-smt-day-coverage.ts — only when the phase touches slot counting or day status.
+Optional: `npx tsx scripts/audit-smt-day-coverage.ts <esiid> <dateKey>` when changing slot counting or day status.
 
 ## Same-pass doc rule (from PROJECT_PLAN)
 
-Any code change for this effort must stay consistent with **docs/PROJECT_PLAN.md PC-2026-05**. If you add a new lib owner or change behavior, update PROJECT_PLAN / SMT_UNIFICATION_PLAN in the same pass when the phase requires it.
+Any code change must stay consistent with **docs/PROJECT_PLAN.md PC-2026-05** and **docs/SMT_UNIFICATION_COMPLETE.md**. If you add a new lib owner or change behavior, update COMPLETE, PROJECT_PLAN, and the lock rule in the same pass.
 
-## What you are building (summary — detail is in PROJECT_PLAN)
+## Shipped model (summary)
 
-- ONE lag knob: lib/usage/canonicalCoverageConfig.ts (2 today; 3 in one place later)
+- ONE lag knob: lib/usage/canonicalCoverageConfig.ts
 - ONE Chicago time path for SMT: lib/time/chicago.ts
 - ONE day status read: lib/usage/smtWindowStatus.ts (96/96 strict)
 - ONE heal: lib/usage/ensureSmtCoverage.ts (per-session throttle)
+- ONE 365-day window: lib/usage/canonicalMetadataWindow.ts
 
-Usage + INTERVAL baseline: show partial SMT intervals.
-Past Sim INTERVAL: < 96 slots → not in trusted pool; simulate.
+Usage + INTERVAL baseline: show partial SMT intervals. Past Sim INTERVAL: fewer than 96 slots → not in trusted pool.
 
-## Hard rules
+## Hard rules (see smt-unification-lock.mdc)
 
-- Do NOT edit modules/realUsageAdapter/greenButton.ts
-- modules/onePathSim/** must NOT import modules/usageSimulator/** — shared code in lib/** only
-- SMT = 96/96 Chicago slots (not 90, not 99% span) where this phase touches completeness
-- No global “Phase 0” — only this phase’s pre-check and post-check in SMT_UNIFICATION_PHASE_PROMPTS.md
-- Do not advance to the next phase until I confirm post-checks are green
+- Do NOT edit modules/realUsageAdapter/greenButton.ts for SMT coverage fixes unless scope is explicitly expanded
+- modules/onePathSim/** must NOT import modules/usageSimulator/**
+- SMT = 96/96 Chicago slots (not 90, not 99% span)
+- No duplicate heal/backfill/wait in one-path-sim/route.ts
 
 ## Your task this session
 
-Wait for: **Run Phase N only.**
-
-Then:
-1. Re-read PC-2026-05 in PROJECT_PLAN.md for anything specific to Phase N
-2. Run Phase N PRE-CHECK from docs/SMT_UNIFICATION_PHASE_PROMPTS.md
-3. IMPLEMENT — minimal diff
-4. POST-CHECK — fix until green
-5. Summarize: files changed, tests run, PROJECT_PLAN alignment, ready for Phase N+1 or blockers
-
-Ask me for the phase number if I have not given it yet.
+Wait for my specific change request. Then:
+1. Re-read PC-2026-05 + COMPLETE for anything your change touches
+2. IMPLEMENT — minimal diff in the correct single owner module(s)
+3. Run closure greps from COMPLETE if you touched completeness, heal, or window metadata
+4. Summarize: files changed, tests run, doc updates, alignment with lock rules
 ```
 
 ---
@@ -71,30 +69,14 @@ Ask me for the phase number if I have not given it yet.
 ## For you (workflow)
 
 1. New Cursor chat → paste the block above.
-2. Send: `**Run Phase 1 only.**` (then 2, 3, …).
-3. First reply from agent should confirm it read **PROJECT_PLAN.md → PC-2026-05**.
-4. Review chat: use verification prompt below.
+2. Describe the specific fix or feature (not a phase number unless auditing history).
+3. First reply should confirm it read **COMPLETE** + **PROJECT_PLAN.md → PC-2026-05** + lock rules.
 
 ---
 
-## Verification chat bootstrap (review agent)
+## Historical: phase verification (archived)
 
-```
-Verify Phase N SMT unification work.
-
-REQUIRED: Read docs/PROJECT_PLAN.md — section PC-2026-05 — and confirm the code change matches that section for Phase N.
-
-Then run Phase N POST-CHECK from docs/SMT_UNIFICATION_PHASE_PROMPTS.md (greps + tests).
-
-Report:
-- Did implementation match PROJECT_PLAN PC-2026-05? (yes/no + gaps)
-- Post-check pass/fail per item
-- Stragglers to fix before Phase N+1
-
-Do not implement Phase N+1 unless I ask.
-```
-
-Replace `N` with 1–8.
+For auditing original Phases 1–8, use `docs/SMT_UNIFICATION_PHASE_PROMPTS.md` POST-CHECK sections and closure greps in `docs/SMT_UNIFICATION_COMPLETE.md`.
 
 ---
 
@@ -102,4 +84,3 @@ Replace `N` with 1–8.
 
 - ESIID: `10400511114390001`
 - Dates: `2026-05-16` (96/96), `2026-05-17` (often 95/96), `2026-05-18` (canonical end, often pending)
-
