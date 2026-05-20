@@ -1239,8 +1239,6 @@ async function maybeRunOnePathSmtPostSimHealing(args: {
     if (postBackfillRefresh.ok !== false) {
       refreshResult = postBackfillRefresh;
       postTargetedBackfillRefreshResult = postBackfillRefresh;
-    } else {
-      postTargetedBackfillRefreshResult = postBackfillRefresh;
     }
 
     const waitResult = await waitForOnePathSmtDateCoverage({
