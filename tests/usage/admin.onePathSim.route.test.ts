@@ -12,6 +12,11 @@ const prismaHouseAddressFindFirst = vi.fn();
 const prismaGreenButtonUploadFindFirst = vi.fn();
 const prismaSmtIntervalAggregate = vi.fn();
 const prismaSmtIntervalFindMany = vi.fn();
+const prismaSmtIntervalDayLedgerFindMany = vi.fn();
+const prismaSmtIntervalDayLedgerFindUnique = vi.fn();
+const prismaSmtIntervalDayLedgerUpdate = vi.fn();
+const prismaSmtIntervalDayLedgerCreate = vi.fn();
+const prismaSmtIntervalDayLedgerUpdateMany = vi.fn();
 const usageGreenButtonIntervalAggregate = vi.fn();
 const requestUsageRefreshForUserHouse = vi.fn();
 const getManualUsageInputForUserHouse = vi.fn();
@@ -83,6 +88,13 @@ vi.mock("@/lib/db", () => ({
     smtInterval: {
       aggregate: (...args: any[]) => prismaSmtIntervalAggregate(...args),
       findMany: (...args: any[]) => prismaSmtIntervalFindMany(...args),
+    },
+    smtIntervalDayLedger: {
+      findMany: (...args: any[]) => prismaSmtIntervalDayLedgerFindMany(...args),
+      findUnique: (...args: any[]) => prismaSmtIntervalDayLedgerFindUnique(...args),
+      update: (...args: any[]) => prismaSmtIntervalDayLedgerUpdate(...args),
+      create: (...args: any[]) => prismaSmtIntervalDayLedgerCreate(...args),
+      updateMany: (...args: any[]) => prismaSmtIntervalDayLedgerUpdateMany(...args),
     },
   },
 }));
@@ -212,6 +224,11 @@ describe("admin one path sim route", () => {
     prismaGreenButtonUploadFindFirst.mockReset();
     prismaSmtIntervalAggregate.mockReset();
     prismaSmtIntervalFindMany.mockReset();
+    prismaSmtIntervalDayLedgerFindMany.mockReset();
+    prismaSmtIntervalDayLedgerFindUnique.mockReset();
+    prismaSmtIntervalDayLedgerUpdate.mockReset();
+    prismaSmtIntervalDayLedgerCreate.mockReset();
+    prismaSmtIntervalDayLedgerUpdateMany.mockReset();
     requestUsageRefreshForUserHouse.mockReset();
     usageGreenButtonIntervalAggregate.mockReset();
     getManualUsageInputForUserHouse.mockReset();
@@ -260,6 +277,11 @@ describe("admin one path sim route", () => {
       _max: { ts: new Date("2026-04-14T23:45:00.000Z") },
     });
     prismaSmtIntervalFindMany.mockResolvedValue(buildSmtIntervalRows("2026-04-01", "2026-04-14"));
+    prismaSmtIntervalDayLedgerFindMany.mockResolvedValue([]);
+    prismaSmtIntervalDayLedgerFindUnique.mockResolvedValue(null);
+    prismaSmtIntervalDayLedgerUpdate.mockResolvedValue({});
+    prismaSmtIntervalDayLedgerCreate.mockResolvedValue({});
+    prismaSmtIntervalDayLedgerUpdateMany.mockResolvedValue({ count: 0 });
     requestUsageRefreshForUserHouse.mockResolvedValue({ ok: true, homes: [], backfill: [] });
     usageGreenButtonIntervalAggregate.mockResolvedValue(null);
     lookupAdminHousesByEmail.mockResolvedValue({
@@ -1168,12 +1190,12 @@ describe("admin one path sim route", () => {
           summary: { source: "SIMULATED", start: "2025-04-16", end: "2026-04-15" },
           meta: {
             simulatedSourceDetailByDate: {
-              "2026-04-10": "SIMULATED_INCOMPLETE_METER",
+              "2026-04-12": "SIMULATED_INCOMPLETE_METER",
             },
           },
           daily: [
             {
-              date: "2026-04-10",
+              date: "2026-04-12",
               kwh: 22,
               source: "SIMULATED",
               sourceDetail: "SIMULATED_INCOMPLETE_METER",
@@ -1191,14 +1213,14 @@ describe("admin one path sim route", () => {
         compareProjection: { rows: [], metrics: null },
         dataset: {
           summary: { source: "SIMULATED", start: "2025-04-16", end: "2026-04-15" },
-          daily: [{ date: "2026-04-10", kwh: 22, source: "ACTUAL", sourceDetail: "ACTUAL" }],
+          daily: [{ date: "2026-04-12", kwh: 22, source: "ACTUAL", sourceDetail: "ACTUAL" }],
           monthly: [{ month: "2026-04", kwh: 22 }],
           series: { intervals15: [] },
         },
       });
 
     const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
-    const res = await POST(
+    const pending = POST(
       buildRequest({
         action: "run",
         email: "customer@example.com",
@@ -1208,6 +1230,9 @@ describe("admin one path sim route", () => {
         includeDebugDiagnostics: true,
       })
     );
+
+    await vi.advanceTimersByTimeAsync(45_000);
+    const res = await pending;
     const json = await res.json();
 
     expect(res.status).toBe(200);
@@ -1218,7 +1243,7 @@ describe("admin one path sim route", () => {
     expect(json.smtIncompleteMeterRetry).toEqual(
       expect.objectContaining({
         attempted: true,
-        requestedDateKeys: ["2026-04-10"],
+        requestedDateKeys: ["2026-04-12"],
         postRetryIncompleteDateKeys: [],
       })
     );

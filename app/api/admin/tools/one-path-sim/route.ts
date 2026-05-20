@@ -57,12 +57,18 @@ import type { ManualUsagePayload } from "@/modules/onePathSim/simulatedUsage/typ
 import { buildValidationCompareProjectionSidecar } from "@/modules/onePathSim/usageSimulator/compareProjection";
 import { createSimCorrelationId, getMemoryRssMb, logSimPipelineEvent } from "@/modules/onePathSim/usageSimulator/simObservability";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/onePathSim/usageSimulator/metadataWindow";
-import { runDeferredPendingSmtDayRepairs } from "@/lib/usage/smtDayCoverageLedger";
 import {
+  chicagoPullDateKey,
+  reconcileSmtIntervalDayLedger,
+  runDeferredPendingSmtDayRepairs,
+} from "@/lib/usage/smtDayCoverageLedger";
+import {
+  filterDateKeysNearTargetEnd,
   loadSmtDateCoverage,
   loadSmtTailCoverage,
   normalizeDateKeys,
   ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS,
+  SMT_INCOMPLETE_METER_BACKFILL_LOOKBACK_DAYS,
   SMT_TAIL_WAIT_INTERVAL_MS,
   waitForSmtDateCoverage,
   waitForSmtTailCoverage,
@@ -1023,7 +1029,19 @@ function extractIncompleteMeterDateKeysFromDataset(dataset: unknown): string[] {
   return normalizeDateKeys(values);
 }
 
-async function maybeRunOnePathDeferredSmtDayRepairs(args: {
+type OnePathSmtPostSimHealingResult = {
+  attempted: boolean;
+  repairKind?: "deferred_pending" | "incomplete_meter_backfill";
+  pullDateKey: string;
+  requestedDateKeys: string[];
+  eligibleDateKeys?: string[];
+  refreshResult?: Awaited<ReturnType<typeof requestUsageRefreshForUserHouse>>;
+  waitTimedOut?: boolean;
+  reconcile?: Awaited<ReturnType<typeof reconcileSmtIntervalDayLedger>>;
+  postRetryIncompleteDateKeys?: string[];
+};
+
+async function maybeRunOnePathSmtPostSimHealing(args: {
   mode: CanonicalSimulationInputType;
   preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
   sourceUserId: string;
@@ -1032,13 +1050,16 @@ async function maybeRunOnePathDeferredSmtDayRepairs(args: {
   effectiveHouseId: string;
   actualContextHouseId: string;
   correlationId: string;
-}) {
+  artifactDataset: unknown;
+}): Promise<OnePathSmtPostSimHealingResult | null> {
   if (args.mode !== "INTERVAL") return null;
   if (args.preferredActualSource === "GREEN_BUTTON") return null;
   const esiid = String(args.sourceEsiid ?? "").trim();
   if (!esiid) return null;
 
-  const repair = await runDeferredPendingSmtDayRepairs({
+  const pullDateKey = chicagoPullDateKey();
+
+  const deferredRepair = await runDeferredPendingSmtDayRepairs({
     esiid,
     userId: args.sourceUserId,
     houseId: args.sourceHouseId,
@@ -1050,21 +1071,80 @@ async function maybeRunOnePathDeferredSmtDayRepairs(args: {
     sourceHouseId: args.actualContextHouseId !== args.effectiveHouseId ? args.actualContextHouseId : undefined,
     sourceUserId: args.sourceUserId,
     sourceEsiid: esiid,
-    attempted: repair.attempted,
-    eligibleDateKeys: repair.eligibleDateKeys.join(","),
-    pullDateKey: repair.pullDateKey,
-    refreshOk: repair.refreshResult?.ok,
-    waitTimedOut: repair.waitTimedOut,
+    attempted: deferredRepair.attempted,
+    eligibleDateKeys: deferredRepair.eligibleDateKeys.join(","),
+    pullDateKey: deferredRepair.pullDateKey,
+    refreshOk: deferredRepair.refreshResult?.ok,
+    waitTimedOut: deferredRepair.waitTimedOut,
     source: "one-path-admin",
     memoryRssMb: getMemoryRssMb(),
   });
-  if (!repair.attempted) return null;
-  return repair;
+  if (deferredRepair.attempted) {
+    return {
+      attempted: true,
+      repairKind: "deferred_pending",
+      pullDateKey: deferredRepair.pullDateKey,
+      requestedDateKeys: deferredRepair.eligibleDateKeys,
+      eligibleDateKeys: deferredRepair.eligibleDateKeys,
+      refreshResult: deferredRepair.refreshResult,
+      waitTimedOut: deferredRepair.waitTimedOut,
+      reconcile: deferredRepair.reconcile,
+    };
+  }
+
+  const targetEndDate = resolveCanonicalUsage365CoverageWindow().endDate;
+  const requestedDateKeys = filterDateKeysNearTargetEnd(
+    extractIncompleteMeterDateKeysFromDataset(args.artifactDataset),
+    targetEndDate,
+    SMT_INCOMPLETE_METER_BACKFILL_LOOKBACK_DAYS
+  );
+  if (requestedDateKeys.length === 0) return null;
+
+  logSimPipelineEvent("one_path_smt_incomplete_meter_backfill_requested", {
+    correlationId: args.correlationId,
+    houseId: args.effectiveHouseId,
+    sourceHouseId: args.actualContextHouseId !== args.effectiveHouseId ? args.actualContextHouseId : undefined,
+    sourceUserId: args.sourceUserId,
+    sourceEsiid: esiid,
+    requestedDateKeys: requestedDateKeys.join(","),
+    targetEndDate,
+    pullDateKey,
+    source: "one-path-admin",
+    memoryRssMb: getMemoryRssMb(),
+  });
+
+  const refreshResult = await requestUsageRefreshForUserHouse({
+    userId: args.sourceUserId,
+    houseId: args.sourceHouseId,
+  }).catch((error) => ({
+    ok: false as const,
+    error: "refresh_failed" as const,
+    message: error instanceof Error ? error.message : String(error),
+  }));
+
+  const waitResult = await waitForOnePathSmtDateCoverage({
+    esiid,
+    dateKeys: requestedDateKeys,
+    correlationId: args.correlationId,
+    effectiveHouseId: args.effectiveHouseId,
+    actualContextHouseId: args.actualContextHouseId,
+    sourceUserId: args.sourceUserId,
+  });
+
+  const reconcile = await reconcileSmtIntervalDayLedger({ esiid }).catch(() => null);
+
+  return {
+    attempted: true,
+    repairKind: "incomplete_meter_backfill",
+    pullDateKey,
+    requestedDateKeys,
+    refreshResult: refreshResult.ok === false ? undefined : refreshResult,
+    waitTimedOut: waitResult.timedOut,
+    reconcile: reconcile ?? undefined,
+  };
 }
 
-type OnePathIncompleteMeterBackfillRetry = NonNullable<
-  Awaited<ReturnType<typeof maybeRunOnePathDeferredSmtDayRepairs>>
-> & {
+type OnePathIncompleteMeterBackfillRetry = OnePathSmtPostSimHealingResult & {
   postRetryIncompleteDateKeys?: string[];
 };
 
@@ -1536,7 +1616,7 @@ export async function POST(request: NextRequest) {
       }
       const shouldReturnCompactPastResponse = Boolean(effectiveRawInputBase.scenarioId && !isManualMode);
       let smtIncompleteMeterRetry: OnePathIncompleteMeterBackfillRetry | null =
-        await maybeRunOnePathDeferredSmtDayRepairs({
+        await maybeRunOnePathSmtPostSimHealing({
           mode,
           preferredActualSource: effectiveRawInputBase.preferredActualSource,
           sourceUserId: resolved.userId,
@@ -1545,6 +1625,7 @@ export async function POST(request: NextRequest) {
           effectiveHouseId,
           actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
           correlationId,
+          artifactDataset,
         });
       if (smtIncompleteMeterRetry?.attempted) {
         engineInput = await adaptIntervalRawInput(effectiveRawInputBase);
