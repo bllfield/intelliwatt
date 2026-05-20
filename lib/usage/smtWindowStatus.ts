@@ -1,9 +1,6 @@
 import { prisma } from "@/lib/db";
-import {
-  CANONICAL_COVERAGE_LAG_DAYS,
-  CANONICAL_COVERAGE_TOTAL_DAYS,
-} from "@/lib/usage/canonicalCoverageConfig";
-import { canonicalUsageWindowChicago, chicagoSlot96FromTs, enumerateDateKeysInclusive, smtCoverageDateKey } from "@/lib/time/chicago";
+import { chicagoSlot96FromTs, enumerateDateKeysInclusive, smtCoverageDateKey } from "@/lib/time/chicago";
+import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
 import {
   loadSmtDayLedgerSnapshot,
   SMT_DAY_LEDGER_STATUS,
@@ -38,15 +35,7 @@ export type SmtWindowStatusSnapshot = {
 };
 
 export function resolveSmtCanonicalWindow(now: Date = new Date()): SmtCanonicalWindow {
-  const win = canonicalUsageWindowChicago({
-    now,
-    reliableLagDays: CANONICAL_COVERAGE_LAG_DAYS,
-    totalDays: CANONICAL_COVERAGE_TOTAL_DAYS,
-  });
-  return {
-    startDate: String(win.startDate).slice(0, 10),
-    endDate: String(win.endDate).slice(0, 10),
-  };
+  return resolveCanonicalUsage365CoverageWindow(now);
 }
 
 export function missingChicagoSlotsFromFilledSlots(filledSlots: ReadonlySet<number>): number[] {

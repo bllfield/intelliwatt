@@ -201,10 +201,6 @@ export function buildOnePathTruthSummary(args: {
       ? resolveOnePathCanonicalUsage365CoverageWindow(new Date(), {
           canonicalCoverageLagDays: adapterLagDays,
           canonicalCoverageTotalDays: adapterTotalDays,
-          manualMonthlyDefaultBillEndDay: 15,
-          manualAnnualWindowDays: 365,
-          longTermWeatherBaselineStartYear: 1991,
-          longTermWeatherBaselineEndYear: 2020,
         })
       : null;
   const reportedWindow = resolveOnePathReportedCoverageWindow({
