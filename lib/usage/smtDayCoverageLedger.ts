@@ -21,12 +21,20 @@ export const SMT_DAY_LEDGER_STATUS = {
 export type SmtDayLedgerStatus = (typeof SMT_DAY_LEDGER_STATUS)[keyof typeof SMT_DAY_LEDGER_STATUS];
 
 export const ACTUAL_SMT_SOURCE_DETAIL = {
+  /** @deprecated Prefer SIMULATED_SMT_SOURCE_DETAIL for pending tail days. */
   INTERVALS_NOT_AVAILABLE_YET: "ACTUAL_INTERVALS_NOT_AVAILABLE_YET",
   INCOMPLETE_METER: "ACTUAL_INCOMPLETE_METER",
 } as const;
 
+export const SIMULATED_SMT_SOURCE_DETAIL = {
+  INTERVALS_NOT_AVAILABLE_YET: "SIMULATED_INTERVALS_NOT_AVAILABLE_YET",
+} as const;
+
 export type ActualSmtDailySourceDetail =
   (typeof ACTUAL_SMT_SOURCE_DETAIL)[keyof typeof ACTUAL_SMT_SOURCE_DETAIL];
+
+export type SimulatedSmtDailySourceDetail =
+  (typeof SIMULATED_SMT_SOURCE_DETAIL)[keyof typeof SIMULATED_SMT_SOURCE_DETAIL];
 
 export type SmtDayLedgerSnapshot = {
   canonicalEndDate: string;
@@ -66,9 +74,9 @@ export function isSmtDayLedgerSettledForTail(status: string | null | undefined):
 
 export function sourceDetailForSmtLedgerStatus(
   status: SmtDayLedgerStatus | null | undefined
-): ActualSmtDailySourceDetail | undefined {
+): ActualSmtDailySourceDetail | SimulatedSmtDailySourceDetail | undefined {
   if (status === SMT_DAY_LEDGER_STATUS.PENDING_SMT) {
-    return ACTUAL_SMT_SOURCE_DETAIL.INTERVALS_NOT_AVAILABLE_YET;
+    return SIMULATED_SMT_SOURCE_DETAIL.INTERVALS_NOT_AVAILABLE_YET;
   }
   if (status === SMT_DAY_LEDGER_STATUS.INCOMPLETE_METER) {
     return ACTUAL_SMT_SOURCE_DETAIL.INCOMPLETE_METER;
@@ -76,14 +84,22 @@ export function sourceDetailForSmtLedgerStatus(
   return undefined;
 }
 
-export function displayLabelForActualSmtSourceDetail(sourceDetail: string | null | undefined): string | null {
-  if (sourceDetail === ACTUAL_SMT_SOURCE_DETAIL.INTERVALS_NOT_AVAILABLE_YET) {
+export function displayLabelForSmtSourceDetail(sourceDetail: string | null | undefined): string | null {
+  if (
+    sourceDetail === SIMULATED_SMT_SOURCE_DETAIL.INTERVALS_NOT_AVAILABLE_YET ||
+    sourceDetail === ACTUAL_SMT_SOURCE_DETAIL.INTERVALS_NOT_AVAILABLE_YET
+  ) {
     return "Intervals not available yet";
   }
   if (sourceDetail === ACTUAL_SMT_SOURCE_DETAIL.INCOMPLETE_METER) {
     return "Incomplete meter";
   }
   return null;
+}
+
+/** @deprecated Use displayLabelForSmtSourceDetail */
+export function displayLabelForActualSmtSourceDetail(sourceDetail: string | null | undefined): string | null {
+  return displayLabelForSmtSourceDetail(sourceDetail);
 }
 
 async function loadLedgerRowsForWindow(args: { esiid: string; startDate: string; endDate: string }) {
@@ -418,8 +434,8 @@ export async function runDeferredPendingSmtDayRepairs(args: {
 export type AnnotatedActualDailyRow = {
   date: string;
   kwh: number;
-  source?: "ACTUAL";
-  sourceDetail?: ActualSmtDailySourceDetail;
+  source?: "ACTUAL" | "SIMULATED";
+  sourceDetail?: ActualSmtDailySourceDetail | SimulatedSmtDailySourceDetail;
 };
 
 export function annotateActualDailyWithSmtLedger(
@@ -431,11 +447,19 @@ export function annotateActualDailyWithSmtLedger(
     const status = ledger.byDate[date];
     const sourceDetail = sourceDetailForSmtLedgerStatus(status);
     if (!sourceDetail) return { ...row };
+    if (status === SMT_DAY_LEDGER_STATUS.PENDING_SMT) {
+      return {
+        date,
+        kwh: Number(row.kwh) || 0,
+        source: "SIMULATED" as const,
+        sourceDetail: SIMULATED_SMT_SOURCE_DETAIL.INTERVALS_NOT_AVAILABLE_YET,
+      };
+    }
     return {
       date,
       kwh: Number(row.kwh) || 0,
       source: "ACTUAL" as const,
-      sourceDetail,
+      sourceDetail: sourceDetail as ActualSmtDailySourceDetail,
     };
   });
 }

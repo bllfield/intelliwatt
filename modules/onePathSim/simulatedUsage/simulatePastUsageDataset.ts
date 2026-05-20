@@ -7,6 +7,7 @@
 import { prisma } from "@/lib/db";
 import { dateKeyInTimezone } from "@/lib/admin/gapfillLab";
 import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
+import { buildSmtDayLedgerMeta, loadSmtDayLedgerSnapshot } from "@/lib/usage/smtDayCoverageLedger";
 import { buildUniformMonthlyTotalsFromAnnualWindow, travelRangesToExcludeDateKeys } from "@/modules/onePathSim/usageSimulator/build";
 import { boundDateKeysToCoverageWindow } from "@/modules/onePathSim/usageSimulator/metadataWindow";
 import {
@@ -1785,6 +1786,19 @@ export async function simulatePastUsageDataset(
       { startDate, endDate }
     );
     const excludedDateKeysFingerprint = Array.from(excludedDateKeys).sort().join(",");
+    const smtDayLedgerSnapshot = esiid
+      ? await loadSmtDayLedgerSnapshot({
+          esiid,
+          canonicalStartDate: startDate,
+          canonicalEndDate: endDate,
+        }).catch(() => null)
+      : null;
+    const pendingSmtIntervalDateKeys = new Set<string>(
+      (smtDayLedgerSnapshot?.pendingDateKeys ?? []).filter((dk) => canonicalDateKeys.includes(dk))
+    );
+    const ledgerIncompleteMeterDateKeys = new Set<string>(
+      (smtDayLedgerSnapshot?.incompleteMeterDateKeys ?? []).filter((dk) => canonicalDateKeys.includes(dk))
+    );
 
     const mergedKeepRefLocalDateKeys = new Set<string>(forceModeledOutputKeepReferencePoolDateKeysLocalSet);
     logSimPipelineEvent("day_simulation_input_prep_success", {
@@ -2159,6 +2173,10 @@ export async function simulatePastUsageDataset(
         applianceProfile: applianceProfileForPast,
         usageShapeProfile: usageShapeProfileSnap ?? undefined,
         timezoneForProfile: timezone ?? undefined,
+        pendingSmtIntervalDateKeys:
+          pendingSmtIntervalDateKeys.size > 0 ? pendingSmtIntervalDateKeys : undefined,
+        ledgerIncompleteMeterDateKeys:
+          ledgerIncompleteMeterDateKeys.size > 0 ? ledgerIncompleteMeterDateKeys : undefined,
         trustedActualDateKeys: greenButtonCoverageIntervals?.trustedActualDateKeys
           ? new Set(greenButtonCoverageIntervals.trustedActualDateKeys)
           : undefined,
@@ -2634,6 +2652,7 @@ export async function simulatePastUsageDataset(
           greenButtonShiftedWeatherDateCount: greenButtonShiftedWeatherDateCount || undefined,
           greenButtonWeatherSourceCoverageStart: greenButtonWeatherSourceCoverageStart ?? undefined,
           greenButtonWeatherSourceCoverageEnd: greenButtonWeatherSourceCoverageEnd ?? undefined,
+          ...(smtDayLedgerSnapshot ? buildSmtDayLedgerMeta(smtDayLedgerSnapshot) : {}),
           actualDayCount:
             typeof pastDayCounts.totalDays === "number" && typeof pastDayCounts.simulatedDays === "number"
               ? pastDayCounts.totalDays - pastDayCounts.simulatedDays

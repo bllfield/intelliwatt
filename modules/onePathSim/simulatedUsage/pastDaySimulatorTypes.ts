@@ -206,6 +206,7 @@ export type SimulatedDayResult = {
     | "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
     | "FORCED_SELECTED_DAY"
     | "INCOMPLETE_METER_DAY"
+    | "INTERVALS_NOT_AVAILABLE_YET_DAY"
     | "DAILY_USAGE_MISSING_DAY"
     | "LEADING_MISSING_DAY";
   intervals: Array<{ timestamp: string; kwh: number }>;

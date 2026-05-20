@@ -75,6 +75,7 @@ export type PastSimulatedDaySourceDetail =
   | "SIMULATED_MANUAL_CONSTRAINED"
   | "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL"
   | "SIMULATED_INCOMPLETE_METER"
+  | "SIMULATED_INTERVALS_NOT_AVAILABLE_YET"
   | "SIMULATED_DAILY_USAGE_MISSING"
   | "SIMULATED_LEADING_MISSING"
   | "SIMULATED_OTHER";
@@ -722,6 +723,7 @@ export function enrichPastDailyRowsWithSourceDetailFromMeta(
         detail === "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL"
           ? detail
           : detail === "SIMULATED_INCOMPLETE_METER" ||
+              detail === "SIMULATED_INTERVALS_NOT_AVAILABLE_YET" ||
               detail === "SIMULATED_DAILY_USAGE_MISSING" ||
               detail === "SIMULATED_LEADING_MISSING"
             ? detail
@@ -735,6 +737,7 @@ export function enrichPastDailyRowsWithSourceDetailFromMeta(
       legacyDetail === "SIMULATED_MANUAL_CONSTRAINED" ||
       legacyDetail === "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL" ||
       legacyDetail === "SIMULATED_INCOMPLETE_METER" ||
+      legacyDetail === "SIMULATED_INTERVALS_NOT_AVAILABLE_YET" ||
       legacyDetail === "SIMULATED_DAILY_USAGE_MISSING" ||
       legacyDetail === "SIMULATED_LEADING_MISSING"
     ) {
@@ -1581,6 +1584,8 @@ export function buildSimulatedUsageDatasetFromCurve(
               ? "SIMULATED_TEST_DAY"
               : reason === "INCOMPLETE_METER_DAY"
                 ? "SIMULATED_INCOMPLETE_METER"
+                : reason === "INTERVALS_NOT_AVAILABLE_YET_DAY"
+                  ? "SIMULATED_INTERVALS_NOT_AVAILABLE_YET"
                 : reason === "DAILY_USAGE_MISSING_DAY"
                   ? "SIMULATED_DAILY_USAGE_MISSING"
                 : reason === "LEADING_MISSING_DAY"

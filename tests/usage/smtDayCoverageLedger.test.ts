@@ -2,16 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   ACTUAL_SMT_SOURCE_DETAIL,
   annotateActualDailyWithSmtLedger,
-  displayLabelForActualSmtSourceDetail,
+  displayLabelForSmtSourceDetail,
   isSmtDayLedgerSettledForTail,
+  SIMULATED_SMT_SOURCE_DETAIL,
   SMT_DAY_LEDGER_STATUS,
   sourceDetailForSmtLedgerStatus,
 } from "@/lib/usage/smtDayCoverageLedger";
 
 describe("smt day coverage ledger helpers", () => {
-  it("maps ledger statuses to actual daily source details", () => {
+  it("maps ledger statuses to daily source details", () => {
     expect(sourceDetailForSmtLedgerStatus(SMT_DAY_LEDGER_STATUS.PENDING_SMT)).toBe(
-      ACTUAL_SMT_SOURCE_DETAIL.INTERVALS_NOT_AVAILABLE_YET
+      SIMULATED_SMT_SOURCE_DETAIL.INTERVALS_NOT_AVAILABLE_YET
     );
     expect(sourceDetailForSmtLedgerStatus(SMT_DAY_LEDGER_STATUS.INCOMPLETE_METER)).toBe(
       ACTUAL_SMT_SOURCE_DETAIL.INCOMPLETE_METER
@@ -19,11 +20,11 @@ describe("smt day coverage ledger helpers", () => {
     expect(sourceDetailForSmtLedgerStatus(SMT_DAY_LEDGER_STATUS.COMPLETE)).toBeUndefined();
   });
 
-  it("provides user-facing labels for actual SMT source details", () => {
-    expect(displayLabelForActualSmtSourceDetail(ACTUAL_SMT_SOURCE_DETAIL.INTERVALS_NOT_AVAILABLE_YET)).toBe(
+  it("provides user-facing labels for SMT source details", () => {
+    expect(displayLabelForSmtSourceDetail(SIMULATED_SMT_SOURCE_DETAIL.INTERVALS_NOT_AVAILABLE_YET)).toBe(
       "Intervals not available yet"
     );
-    expect(displayLabelForActualSmtSourceDetail(ACTUAL_SMT_SOURCE_DETAIL.INCOMPLETE_METER)).toBe(
+    expect(displayLabelForSmtSourceDetail(ACTUAL_SMT_SOURCE_DETAIL.INCOMPLETE_METER)).toBe(
       "Incomplete meter"
     );
   });
@@ -58,8 +59,8 @@ describe("smt day coverage ledger helpers", () => {
     });
     expect(annotated[1]).toMatchObject({
       date: "2026-05-17",
-      source: "ACTUAL",
-      sourceDetail: ACTUAL_SMT_SOURCE_DETAIL.INTERVALS_NOT_AVAILABLE_YET,
+      source: "SIMULATED",
+      sourceDetail: SIMULATED_SMT_SOURCE_DETAIL.INTERVALS_NOT_AVAILABLE_YET,
     });
   });
 });

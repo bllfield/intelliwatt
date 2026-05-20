@@ -222,6 +222,7 @@ function buildLocalDailyRowsFromIntervals15(args: {
   coverageEnd: string | null;
   existingRows: Array<ReturnType<typeof dailyRowFieldsFromSourceRow>>;
   simulatedSourceDetailByDate?: Record<string, string> | null;
+  smtPendingIntervalDateKeys?: string[] | null;
 }): Array<ReturnType<typeof dailyRowFieldsFromSourceRow>> {
   const coverageStart = asDateKey(args.coverageStart);
   const coverageEnd = asDateKey(args.coverageEnd);
@@ -239,12 +240,25 @@ function buildLocalDailyRowsFromIntervals15(args: {
     sumsByDate.set(date, (sumsByDate.get(date) ?? 0) + (Number(row?.kwh ?? row?.consumption_kwh) || 0));
   }
   if (sumsByDate.size === 0) return [];
+  const pendingSmtDateKeys = new Set(
+    (args.smtPendingIntervalDateKeys ?? [])
+      .map((value) => asDateKey(value))
+      .filter((value): value is string => Boolean(value))
+  );
   const existingByDate = new Map(args.existingRows.map((row) => [row.date, row] as const));
   return Array.from(sumsByDate.entries())
     .sort((left, right) => (left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0))
     .map(([date, kwh]) => {
       const existing = existingByDate.get(date);
       const simulatedSourceDetail = args.simulatedSourceDetailByDate?.[date];
+      if (pendingSmtDateKeys.has(date)) {
+        return dailyRowFieldsFromSourceRow({
+          date,
+          kwh: round2(kwh),
+          source: "SIMULATED",
+          sourceDetail: "SIMULATED_INTERVALS_NOT_AVAILABLE_YET",
+        });
+      }
       return dailyRowFieldsFromSourceRow({
         date,
         kwh: round2(kwh),
@@ -362,6 +376,9 @@ export function buildOnePathRunReadOnlyView(args: {
       !Array.isArray(meta.simulatedSourceDetailByDate)
         ? (meta.simulatedSourceDetailByDate as Record<string, string>)
         : null,
+    smtPendingIntervalDateKeys: Array.isArray(meta?.smtPendingIntervalDateKeys)
+      ? (meta.smtPendingIntervalDateKeys as string[])
+      : null,
   });
   const datasetDailyEnd = datasetDailyRows.length > 0 ? datasetDailyRows[datasetDailyRows.length - 1]?.date ?? null : null;
   const localDailyEnd =
