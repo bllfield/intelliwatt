@@ -5,11 +5,25 @@
  * Usage: npx tsx scripts/audit-smt-day-coverage.ts <esiid> <dateKey>
  * Example: npx tsx scripts/audit-smt-day-coverage.ts 10400511114390001 2026-05-17
  */
-import "dotenv/config";
-import { config } from "dotenv";
+/**
+ * Local-only: load .env.local when present (no dotenv dep — keeps Next production typecheck clean).
+ * On Vercel/CI, rely on DATABASE_URL already in the environment.
+ */
+import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 
-config({ path: resolve(process.cwd(), ".env.local"), override: true });
+const envLocalPath = resolve(process.cwd(), ".env.local");
+if (existsSync(envLocalPath)) {
+  for (const line of readFileSync(envLocalPath, "utf8").split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const value = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
+    if (key && process.env[key] === undefined) process.env[key] = value;
+  }
+}
 
 import { prisma } from "@/lib/db";
 import {
