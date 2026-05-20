@@ -5,7 +5,7 @@ import { bucketDefsFromBucketKeys } from "@/lib/plan-engine/usageBuckets";
 import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
 import { calculatePlanCostForUsage } from "@/lib/plan-engine/calculatePlanCostForUsage";
 import { inferTdspTerritoryFromEflText } from "@/lib/efl/eflValidator";
-import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
+import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
 
 function normalizeEmailLoose(s: string | null | undefined): string {
   return String(s ?? "").trim().toLowerCase();

@@ -17,7 +17,7 @@ import {
   getLatestUsableRawGreenButtonIdForHouse,
 } from "@/modules/realUsageAdapter/greenButton";
 import { applySmtLedgerToActualDataset } from "@/lib/usage/smtDayCoverageLedger";
-import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
+import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
 import { buildUtcRangeForChicagoLocalDateRange } from "@/lib/usage/greenButtonCoverage";
 import { chicagoDateKey, dateTimePartsInTimezone, prevCalendarDayDateKey } from "@/lib/time/chicago";
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
-import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
+import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
 
 describe("user usage dashboard view model", () => {
   it("builds the same baseline display sections from the shared user-usage contract", () => {

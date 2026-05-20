@@ -1,7 +1,7 @@
 import { randomBytes } from "crypto";
 import { prisma } from "@/lib/db";
 import { syncHouseIdentifiersFromAuthorization } from "@/lib/house/syncIdentifiers";
-import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
+import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
 
 export type SmtAgreementRequest = {
   esiid: string;

@@ -1,5 +1,5 @@
 import { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
-import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
+import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
 import { buildDisplayedMonthlyRows } from "@/modules/usageSimulator/monthlyCompareRows";
 import type { UserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
 

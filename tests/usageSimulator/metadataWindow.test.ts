@@ -4,7 +4,7 @@ import {
   boundDateKeysToCoverageWindow,
   resolveCanonicalUsage365CoverageWindow,
   resolveReportedCoverageWindow,
-} from "@/modules/usageSimulator/metadataWindow";
+} from "@/lib/usage/canonicalMetadataWindow";
 
 describe("usageSimulator metadataWindow helpers", () => {
   it("prefers dataset summary window when present", () => {
@@ -27,6 +27,19 @@ describe("usageSimulator metadataWindow helpers", () => {
   it("resolves canonical 365-day chicago coverage window", () => {
     const out = resolveCanonicalUsage365CoverageWindow(new Date("2026-03-16T12:00:00.000Z"));
     expect(out).toEqual({ startDate: "2025-03-15", endDate: "2026-03-14" });
+  });
+
+  it("matches one-path and live shared metadataWindow re-exports", async () => {
+    const now = new Date("2026-03-16T12:00:00.000Z");
+    const { resolveCanonicalUsage365CoverageWindow: liveShared } = await import(
+      "@/modules/usageSimulator/metadataWindow"
+    );
+    const { resolveCanonicalUsage365CoverageWindow: onePath } = await import(
+      "@/modules/onePathSim/usageSimulator/metadataWindow"
+    );
+    const lib = resolveCanonicalUsage365CoverageWindow(now);
+    expect(liveShared(now)).toEqual(lib);
+    expect(onePath(now)).toEqual(lib);
   });
 });
 

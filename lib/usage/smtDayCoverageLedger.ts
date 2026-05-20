@@ -10,7 +10,7 @@ import {
   requestUsageRefreshForUserHouse,
   type UsageRefreshResult,
 } from "@/lib/usage/userUsageRefresh";
-import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
+import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
 
 export const SMT_DAY_LEDGER_STATUS = {
   COMPLETE: "COMPLETE",
