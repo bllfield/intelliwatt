@@ -1337,6 +1337,7 @@ describe("admin one path sim route", () => {
         requestedDateKeys: ["2026-04-11", "2026-04-12"],
       })
     );
+    expect(requestUsageRefreshForUserHouse.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(adaptIntervalRawInput).toHaveBeenCalledTimes(2);
     expect(runSharedSimulation).toHaveBeenCalledTimes(2);
   });

@@ -1116,16 +1116,16 @@ async function maybeRunOnePathSmtPostSimHealing(args: {
       memoryRssMb: getMemoryRssMb(),
     });
 
-    if (!deferredRepair.attempted) {
-      const backfillRefreshResult = await requestUsageRefreshForUserHouse({
-        userId: args.sourceUserId,
-        houseId: args.sourceHouseId,
-      }).catch((error) => ({
-        ok: false as const,
-        error: "refresh_failed" as const,
-        message: error instanceof Error ? error.message : String(error),
-      }));
-      refreshResult = backfillRefreshResult.ok === false ? undefined : backfillRefreshResult;
+    const backfillRefreshResult = await requestUsageRefreshForUserHouse({
+      userId: args.sourceUserId,
+      houseId: args.sourceHouseId,
+    }).catch((error) => ({
+      ok: false as const,
+      error: "refresh_failed" as const,
+      message: error instanceof Error ? error.message : String(error),
+    }));
+    if (backfillRefreshResult.ok !== false) {
+      refreshResult = backfillRefreshResult;
     }
 
     const waitResult = await waitForOnePathSmtDateCoverage({
