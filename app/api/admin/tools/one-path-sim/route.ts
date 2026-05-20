@@ -1212,7 +1212,8 @@ export async function POST(request: NextRequest) {
           sourceUserId: resolved.userId,
           sourceHouseId: resolved.selectedHouse.id,
           testHomeHouseId: effectiveHouseId,
-          overwriteExisting: action === "lookup",
+          // Lookup should not rewrite profiles every time (pool pressure); repair-missing still runs inside sync.
+          overwriteExisting: body?.overwriteProfilesFromSource === true,
         }).catch(() => null)
       : null;
 
@@ -1940,34 +1941,50 @@ export async function POST(request: NextRequest) {
     weatherDerivedInput: weatherEnvelope.derivedInput ?? null,
   } as const;
   const compactLookupBaselineResponse = previewMode === "GREEN_BUTTON";
-  const userUsagePageBaselineContract = compactLookupBaselineResponse
-    ? null
-    : await buildUserUsageHouseContract({
-        userId: resolved.userId,
-        house: {
-          id: resolved.selectedHouse.id,
-          label: resolved.selectedHouse.label ?? null,
-          esiid: resolved.selectedHouse.esiid ?? null,
-        },
-      }).catch(() => null);
-  const userUsageBaselineContract = await buildUserUsageHouseContract({
-    userId: effectiveUserId,
-    house: {
-      id: effectiveHouseId,
-      label: onePathTestHomeState.testHomeHouse?.label ?? resolved.selectedHouse.label ?? null,
-      esiid: onePathTestHomeState.testHomeHouse?.esiid ?? resolved.selectedHouse.esiid ?? null,
-    },
-    resolvedUsage: usageTruth
-      ? {
-          dataset: usageTruth.dataset ?? null,
-          alternatives: usageTruth.alternatives ?? { smt: null, greenButton: null },
-        }
-      : { dataset: null, alternatives: { smt: null, greenButton: null } },
-    homeProfile: homeProfile ?? null,
-    applianceProfileRecord: applianceProfileRecord ?? null,
-    manualUsageRecord: manualUsage ?? null,
-    weatherSensitivity: weatherEnvelope,
-  }).catch(() => null);
+  const sharedResolvedUsageLayer = usageTruth
+    ? {
+        dataset: usageTruth.dataset ?? null,
+        alternatives: usageTruth.alternatives ?? { smt: null, greenButton: null },
+      }
+    : null;
+  const lookupContractOpts = {
+    lightweightActualUsage: true as const,
+    skipLightweightInsightRecompute: true as const,
+  };
+  const [userUsagePageBaselineContract, userUsageBaselineContract] = await Promise.all([
+    compactLookupBaselineResponse
+      ? Promise.resolve(null)
+      : buildUserUsageHouseContract({
+          userId: resolved.userId,
+          house: {
+            id: resolved.selectedHouse.id,
+            label: resolved.selectedHouse.label ?? null,
+            esiid: resolved.selectedHouse.esiid ?? null,
+          },
+          ...lookupContractOpts,
+          ...(sharedResolvedUsageLayer &&
+          resolved.selectedHouse.id === previewActualContextHouse.id
+            ? { resolvedUsage: sharedResolvedUsageLayer }
+            : {}),
+        }).catch(() => null),
+    buildUserUsageHouseContract({
+      userId: effectiveUserId,
+      house: {
+        id: effectiveHouseId,
+        label: onePathTestHomeState.testHomeHouse?.label ?? resolved.selectedHouse.label ?? null,
+        esiid: onePathTestHomeState.testHomeHouse?.esiid ?? resolved.selectedHouse.esiid ?? null,
+      },
+      resolvedUsage: sharedResolvedUsageLayer ?? {
+        dataset: null,
+        alternatives: { smt: null, greenButton: null },
+      },
+      homeProfile: homeProfile ?? null,
+      applianceProfileRecord: applianceProfileRecord ?? null,
+      manualUsageRecord: manualUsage ?? null,
+      weatherSensitivity: weatherEnvelope,
+      ...lookupContractOpts,
+    }).catch(() => null),
+  ]);
   const baselineParityAudit = buildOnePathBaselineParityAudit({
     houseContract: userUsageBaselineContract,
   });

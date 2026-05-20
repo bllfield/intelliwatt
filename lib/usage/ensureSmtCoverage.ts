@@ -71,7 +71,7 @@ function waitBudgetForProfile(profile: EnsureSmtCoverageProfile): {
     return {
       tailWaitMs: USER_USAGE_SMT_TAIL_WAIT_TIMEOUT_MS,
       incompleteMeterWaitMs: USER_USAGE_SMT_TAIL_WAIT_TIMEOUT_MS,
-      deferredWaitMs: Math.min(USER_USAGE_SMT_TAIL_WAIT_TIMEOUT_MS, 12_000),
+      deferredWaitMs: USER_USAGE_DEFERRED_REPAIR_WAIT_MS,
       tailExitEarlyWhenStalled: true,
     };
   }

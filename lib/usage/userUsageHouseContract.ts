@@ -67,6 +67,9 @@ export async function buildUserUsageHouseContract(args: {
   userId: string;
   house: UserUsageHouseSelection;
   resolvedUsage?: ResolvedUsageLayer | null;
+  /** When true, skip full-year interval fetch (admin lookup / parity reads). */
+  lightweightActualUsage?: boolean;
+  skipLightweightInsightRecompute?: boolean;
   homeProfile?: unknown;
   applianceProfileRecord?: { appliancesJson?: unknown } | null;
   manualUsageRecord?: { payload?: unknown } | null;
@@ -82,6 +85,8 @@ export async function buildUserUsageHouseContract(args: {
       houseId: args.house.id,
       layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
       esiid: args.house.esiid ?? null,
+      lightweightActualUsage: args.lightweightActualUsage === true,
+      skipLightweightInsightRecompute: args.skipLightweightInsightRecompute === true,
     }).catch(() => ({ dataset: null, alternatives: { smt: null, greenButton: null } })));
   const [homeProfile, applianceProfileRecord, manualUsageRecord] = await Promise.all([
     args.homeProfile !== undefined
