@@ -844,7 +844,11 @@ function chooseDataset(
   return null;
 }
 
-async function fetchSmtDataset(esiid: string | null, homeTimezone: string): Promise<UsageDatasetResult | null> {
+async function fetchSmtDataset(
+  esiid: string | null,
+  homeTimezone: string,
+  options?: { skipFullIntervalRowLoad?: boolean },
+): Promise<UsageDatasetResult | null> {
   if (!esiid) return null;
   const window = await getSmtWindow(esiid);
   if (!window) return null;
@@ -874,35 +878,59 @@ async function fetchSmtDataset(esiid: string | null, homeTimezone: string): Prom
   const exportKwh = round2(Number(agg?.exportkwh ?? 0));
   const totalKwh = round2(importKwh - exportKwh);
   const latestTs = agg?.end ?? null;
-  const intervalRows = await prisma.$queryRaw<Array<{ ts: Date; kwh: number }>>(Prisma.sql`
-    SELECT DISTINCT ON ("ts") "ts", GREATEST("kwh", 0)::float AS kwh
-    FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${window.cutoff} AND "ts" <= ${window.end}
-    ORDER BY "ts" ASC, CASE WHEN "meter" = 'unknown' THEN 1 ELSE 0 END ASC, "updatedAt" DESC
-  `);
+  const skipFullIntervalRowLoad = options?.skipFullIntervalRowLoad === true;
   const canonicalCoverage = { startDate: window.startDate, endDate: window.endDate };
-  const smtConverted = convertSmtPersistedRowsToHome(
-    intervalRows.map((row) => ({ ts: row.ts, kwh: decimalToNumber(row.kwh) })),
-    homeTimezone,
-  );
-  const intervalsInWindow = smtConverted.intervals.filter((row) =>
-    isHomeDateKeyInCoverageWindow(row.homeDateKey, canonicalCoverage),
-  );
-  const intervals15 = tailIntervals15(intervalsInWindow, 192);
-  const dailyFromCalendar = homeDailyToUsageSeriesPoints({
-    ...smtConverted,
-    daily: smtConverted.daily.filter((row) =>
+  let intervalsInWindow: ReturnType<typeof convertSmtPersistedRowsToHome>["intervals"] = [];
+  let intervals15: Array<{ timestamp: string; kwh: number }> = [];
+  let smtConverted: ReturnType<typeof convertSmtPersistedRowsToHome> | null = null;
+  if (!skipFullIntervalRowLoad) {
+    const intervalRows = await prisma.$queryRaw<Array<{ ts: Date; kwh: number }>>(Prisma.sql`
+      SELECT DISTINCT ON ("ts") "ts", GREATEST("kwh", 0)::float AS kwh
+      FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${window.cutoff} AND "ts" <= ${window.end}
+      ORDER BY "ts" ASC, CASE WHEN "meter" = 'unknown' THEN 1 ELSE 0 END ASC, "updatedAt" DESC
+    `);
+    smtConverted = convertSmtPersistedRowsToHome(
+      intervalRows.map((row) => ({ ts: row.ts, kwh: decimalToNumber(row.kwh) })),
+      homeTimezone,
+    );
+    intervalsInWindow = smtConverted.intervals.filter((row) =>
       isHomeDateKeyInCoverageWindow(row.homeDateKey, canonicalCoverage),
-    ),
-  }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-  const intervalsCountInWindow = intervalsInWindow.length;
+    );
+    intervals15 = tailIntervals15(intervalsInWindow, 192);
+  }
+  const smtLoc = prismaSmtLocalTs(homeTimezone);
+  const intervalsCountInWindow = skipFullIntervalRowLoad ? count : intervalsInWindow.length;
   const hourlyRows = await prisma.$queryRaw<Array<{ bucket: Date; kwh: number }>>(Prisma.sql`
     WITH iv AS (SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${window.cutoff} AND "ts" <= ${window.end} AND "ts" >= NOW() - INTERVAL '14 days' GROUP BY "ts")
     SELECT date_trunc('hour', "ts") AS bucket, COALESCE(SUM("kwh"), 0)::float AS kwh FROM iv GROUP BY bucket ORDER BY bucket ASC
   `);
-  const dailyRows = dailyFromCalendar.slice(0, 400).map((row) => ({
-    bucket: new Date(row.timestamp),
-    kwh: row.kwh,
-  }));
+  const dailyRows = skipFullIntervalRowLoad
+    ? (
+        (await prisma.$queryRaw(Prisma.sql`
+          WITH iv AS (
+            SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh
+            FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${window.cutoff} AND "ts" <= ${window.end}
+            GROUP BY "ts"
+          )
+          SELECT to_char((${smtLoc})::date, 'YYYY-MM-DD') AS date, COALESCE(SUM("kwh"), 0)::float AS kwh
+          FROM iv GROUP BY 1 ORDER BY 1 DESC LIMIT 400
+        `)) as Array<{ date: string; kwh: number }>
+      ).map((row) => ({
+        bucket: new Date(`${String(row.date).slice(0, 10)}T00:00:00.000Z`),
+        kwh: round2(row.kwh),
+      }))
+    : homeDailyToUsageSeriesPoints({
+        ...smtConverted!,
+        daily: smtConverted!.daily.filter((row) =>
+          isHomeDateKeyInCoverageWindow(row.homeDateKey, canonicalCoverage),
+        ),
+      })
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+        .slice(0, 400)
+        .map((row) => ({
+          bucket: new Date(row.timestamp),
+          kwh: row.kwh,
+        }));
   const monthlyRows = await prisma.$queryRaw<Array<{ bucket: Date; kwh: number }>>(Prisma.sql`
     WITH iv AS (SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${window.cutoff} AND "ts" <= ${window.end} GROUP BY "ts")
     SELECT date_trunc('month', ${prismaSmtLocalTs(homeTimezone)}) AS bucket, COALESCE(SUM("kwh"), 0)::float AS kwh FROM iv GROUP BY bucket ORDER BY bucket DESC LIMIT 120
@@ -1166,6 +1194,10 @@ export async function getActualUsageDatasetForHouse(
     skipFullYearIntervalFetch?: boolean;
     /** When true, keep lightweight reads on the cheap aggregate path and skip extra DB insight recompute. */
     skipLightweightInsightRecompute?: boolean;
+    /**
+     * User Usage / sim baseline read: SQL aggregates + insights only (no full-year interval row load or baseload rescan).
+     */
+    userUsageDashboardLoad?: boolean;
   }
 ): Promise<{
   dataset: ActualHouseDataset | null;
@@ -1178,6 +1210,7 @@ export async function getActualUsageDatasetForHouse(
   });
   const skippedFullYearIntervalFetch = Boolean(args?.skipFullYearIntervalFetch);
   const skipLightweightInsightRecompute = Boolean(args?.skipLightweightInsightRecompute);
+  const userUsageDashboardLoad = Boolean(args?.userUsageDashboardLoad);
   const preferredSource = args?.preferredSource ?? null;
   const fetchOnlyPreferredSource =
     skippedFullYearIntervalFetch && (preferredSource === "SMT" || preferredSource === "GREEN_BUTTON");
@@ -1186,7 +1219,9 @@ export async function getActualUsageDatasetForHouse(
   let greenButtonRawId: string | null = null;
   if (!fetchOnlyPreferredSource || preferredSource === "SMT") {
     try {
-      smtDataset = await fetchSmtDataset(esiid, homeTimezone);
+      smtDataset = await fetchSmtDataset(esiid, homeTimezone, {
+        skipFullIntervalRowLoad: userUsageDashboardLoad,
+      });
     } catch {
       smtDataset = null;
     }
@@ -1471,8 +1506,9 @@ export async function getActualUsageDatasetForHouse(
         ? (greenButtonRawId ?? (await getLatestUsableRawGreenButtonIdForHouse(houseId).catch(() => null)))
         : null;
     if (
-      (selected?.summary?.source === "SMT" && esiid) ||
-      (selected?.summary?.source === "GREEN_BUTTON" && bucketBuildGreenButtonRawId)
+      !userUsageDashboardLoad &&
+      ((selected?.summary?.source === "SMT" && esiid) ||
+        (selected?.summary?.source === "GREEN_BUTTON" && bucketBuildGreenButtonRawId))
     ) {
       const bucketWindowEnd =
         selected.summary.source === "GREEN_BUTTON" ? displayUtcBounds.rangeEndInclusive : canonicalEnd;
@@ -1538,31 +1574,39 @@ export async function getActualUsageDatasetForHouse(
       });
       const rangeStart = selectedWindowStartDate ?? canonicalWindow.startDate;
       const rangeEnd = selectedWindowEndDate ?? canonicalWindow.endDate;
-      const baseloadFiltered = computeHomeBaseloadKw(
-        (
-          await getActualIntervalsForRange({
-            houseId,
-            esiid,
-            startDate: rangeStart,
-            endDate: rangeEnd,
-            preferredSource: args?.preferredSource ?? null,
+      const baseloadFiltered = userUsageDashboardLoad
+        ? {
+            baseloadKw: computed.baseload ?? null,
+            fallbackUsed: false,
+            debugNote: null as string | null,
+          }
+        : computeHomeBaseloadKw(
+            (
+              await getActualIntervalsForRange({
+                houseId,
+                esiid,
+                startDate: rangeStart,
+                endDate: rangeEnd,
+                preferredSource: args?.preferredSource ?? null,
+                homeTimezone,
+              })
+            ).map((r) => ({
+              tsIso: String(r.timestamp ?? ""),
+              kwh: Number(r.kwh) || 0,
+              homeDateKey: r.homeDateKey ?? null,
+            })),
             homeTimezone,
-          })
-        ).map((r) => ({
-          tsIso: String(r.timestamp ?? ""),
-          kwh: Number(r.kwh) || 0,
-          homeDateKey: r.homeDateKey ?? null,
-        })),
-        homeTimezone,
-        { excludedDateKeys: args?.excludedDateKeys },
-      );
+            { excludedDateKeys: args?.excludedDateKeys },
+          );
       const baseload = baseloadFiltered.baseloadKw ?? computed.baseload;
       const baseloadMethod: ActualHouseBaseloadMethod =
-        baseloadFiltered.baseloadKw == null
+        userUsageDashboardLoad
           ? (computed.baseloadMethod ?? "SQL_P10_V1")
-          : baseloadFiltered.fallbackUsed
-            ? "FALLBACK_V1"
-            : "FILTERED_NORMAL_LIFE_V1";
+          : baseloadFiltered.baseloadKw == null
+            ? (computed.baseloadMethod ?? "SQL_P10_V1")
+            : baseloadFiltered.fallbackUsed
+              ? "FALLBACK_V1"
+              : "FILTERED_NORMAL_LIFE_V1";
       dailyTotals = computed.dailyTotals;
       monthlyTotals = computed.monthlyTotals;
       totals = await computeImportExportTotalsFromDb({ source: selected.summary.source, esiid, houseId, rawId, cutoff, end });

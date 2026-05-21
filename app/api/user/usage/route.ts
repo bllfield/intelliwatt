@@ -5,25 +5,16 @@ import { prisma } from '@/lib/db';
 import { normalizeEmail } from '@/lib/utils/email';
 import { resolveIntervalsLayer } from '@/lib/usage/resolveIntervalsLayer';
 import { buildUserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
+import { smtLedgerFieldsFromDatasetMeta } from "@/lib/usage/smtDayCoverageLedger";
 import {
-  loadSmtDayLedgerSnapshot,
-  smtLedgerFieldsFromDatasetMeta,
-} from "@/lib/usage/smtDayCoverageLedger";
-import { ensureSmtCoverageForHouse } from "@/lib/usage/ensureSmtCoverage";
-import {
-  buildUsageIngestionStatusFromEnsure,
   isGreenButtonPrimaryDataset,
   isResolvedDatasetTailDisplayReady,
-  isSmtHealScopeReady,
   reconcileUsageIngestionWithDataset,
 } from "@/lib/usage/smtTailCoverage";
-import { loadSmtWindowDayStatus, resolveSmtPersistedCoverageSpan } from "@/lib/usage/smtWindowStatus";
-import { resolveUserUsageSessionKey } from "@/lib/usage/userUsageSessionKey";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 import { IntervalSeriesKind } from '@/modules/usageSimulator/kinds';
 import { toPublicHouseLabel } from "@/modules/usageSimulator/houseLabel";
-import { mergeGreenButtonChartInsightsOntoPassthroughDataset } from "@/lib/usage/greenButtonChartInsights";
-import { adaptGreenButtonRawInput, runSharedSimulation } from "@/modules/onePathSim/onePathSim";
+import { prepareUserSiteGreenButtonDisplayUsage } from "@/lib/usage/greenButtonChartInsights";
 import {
   classifySimulationFailure,
   recordSimulationDataAlert,
@@ -34,43 +25,6 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const maxDuration = 120;
 const PER_HOUSE_RESOLVE_TIMEOUT_MS = 45_000;
-
-function isGreenButtonDataset(dataset: any): boolean {
-  const summarySource = String(dataset?.summary?.source ?? "").trim().toUpperCase();
-  const metaSource = String(dataset?.meta?.actualSource ?? "").trim().toUpperCase();
-  return summarySource === "GREEN_BUTTON" || metaSource === "GREEN_BUTTON";
-}
-
-async function applyUserSiteGreenButtonBaselinePassthrough(args: {
-  userId: string;
-  houseId: string;
-  esiid: string | null;
-  resolvedUsage: { dataset: any | null; alternatives: { smt: any; greenButton: any } };
-}): Promise<{ dataset: any | null; alternatives: { smt: any; greenButton: any } }> {
-  if (!isGreenButtonDataset(args.resolvedUsage?.dataset)) return args.resolvedUsage;
-
-  const engineInput = await adaptGreenButtonRawInput({
-    userId: args.userId,
-    houseId: args.houseId,
-    actualContextHouseId: args.houseId,
-    smtSourceEsiid: args.esiid,
-    scenarioId: null,
-    weatherPreference: "LAST_YEAR_WEATHER",
-    validationSelectionMode: null,
-    validationDayCount: null,
-    validationOnlyDateKeysLocal: [],
-    travelRanges: [],
-    persistRequested: true,
-  });
-  const artifact = await runSharedSimulation(engineInput);
-  return {
-    dataset: mergeGreenButtonChartInsightsOntoPassthroughDataset({
-      passthroughDataset: artifact.dataset,
-      resolvedDataset: args.resolvedUsage.dataset,
-    }),
-    alternatives: args.resolvedUsage.alternatives,
-  };
-}
 
 async function withTaskTimeout<T>(task: Promise<T>, timeoutMs: number, label: string): Promise<T | null> {
   let timer: NodeJS.Timeout | null = null;
@@ -119,11 +73,6 @@ export async function GET(request: NextRequest) {
 
     const results = [];
     const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
-    const usageSessionKey = resolveUserUsageSessionKey({
-      userId: user.id,
-      request,
-      cookieValue: cookieStore.get("intelliwatt_usage_session")?.value ?? null,
-    });
     for (const house of houses) {
       let result: { dataset: any | null; alternatives: { smt: any; greenButton: any } };
       try {
@@ -133,6 +82,7 @@ export async function GET(request: NextRequest) {
             houseId: house.id,
             layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
             esiid: house.esiid ?? null,
+            userUsageDashboardLoad: true,
           }),
           PER_HOUSE_RESOLVE_TIMEOUT_MS,
           `resolveIntervalsLayer:${house.id}`
@@ -169,15 +119,7 @@ export async function GET(request: NextRequest) {
         }).catch(() => null);
         result = { dataset: null, alternatives: { smt: null, greenButton: null } };
       }
-      const usageForContract = await applyUserSiteGreenButtonBaselinePassthrough({
-        userId: user.id,
-        houseId: house.id,
-        esiid: house.esiid ?? null,
-        resolvedUsage: result,
-      }).catch((err) => {
-        console.warn("[user/usage] Green Button baseline passthrough failed; using resolved usage", house.id, err);
-        return result;
-      });
+      const usageForContract = await prepareUserSiteGreenButtonDisplayUsage(result);
 
       const contract = await buildUserUsageHouseContract({
         userId: user.id,
@@ -196,84 +138,27 @@ export async function GET(request: NextRequest) {
       const resolvedDataset = contract.dataset;
       if (esiid && resolvedDataset && !isGreenButtonPrimaryDataset(resolvedDataset)) {
         const ledgerFromDataset = smtLedgerFieldsFromDatasetMeta(resolvedDataset);
-        const [persistedSpan, smtWindowStatus] = await Promise.all([
-          resolveSmtPersistedCoverageSpan(esiid).catch(() => null),
-          loadSmtWindowDayStatus({ esiid }).catch(() => null),
-        ]);
-        const healScopeReady = smtWindowStatus
-          ? isSmtHealScopeReady(smtWindowStatus, persistedSpan)
-          : true;
         const tailDisplayReady = isResolvedDatasetTailDisplayReady(
           resolvedDataset,
-          canonicalCoverage.endDate
+          canonicalCoverage.endDate,
         );
-        if (healScopeReady && tailDisplayReady) {
-          if (process.env.NODE_ENV === "production") {
-            console.info("[user/usage] SMT tail heal skipped (coverage current)", {
-              houseId: house.id,
-              targetEndDate: canonicalCoverage.endDate,
-              persistedEndDate: persistedSpan?.endDate ?? null,
-              latestCoverageDate: resolvedDataset?.summary?.latest ?? null,
-            });
-          }
-          usageIngestion = {
-            ...(reconcileUsageIngestionWithDataset({
-              ingestion: null,
-              dataset: resolvedDataset,
-              targetEndDate: canonicalCoverage.endDate,
-            }) ?? {
-              tailReady: true,
-              targetEndDate: canonicalCoverage.endDate,
-              tailRefreshAttempted: false,
-              tailRefreshReason: "coverage_tail_current" as const,
-              tailTimedOut: false,
-              incompleteTailDateKeys: [],
-              coverageEndDate: null,
-            }),
-            smtPendingIntervalDateKeys: ledgerFromDataset.pendingDateKeys,
-            smtIncompleteMeterDateKeys: ledgerFromDataset.incompleteMeterDateKeys,
-          };
-        } else if (persistedSpan) {
-          console.info("[user/usage] SMT tail heal starting", {
-            houseId: house.id,
+        usageIngestion = {
+          ...(reconcileUsageIngestionWithDataset({
+            ingestion: null,
+            dataset: resolvedDataset,
             targetEndDate: canonicalCoverage.endDate,
-            persistedEndDate: persistedSpan.endDate,
-            healScopeReady,
-            tailDisplayReady,
-          });
-          const ensure = await ensureSmtCoverageForHouse({
-            userId: user.id,
-            houseId: house.id,
-            profile: "user_session",
-            sessionKey: usageSessionKey,
-          }).catch((error) => {
-            console.warn("[user/usage] SMT ensure failed; continuing with current persisted usage", house.id, error);
-            return null;
-          });
-          const ledger =
-            (await loadSmtDayLedgerSnapshot({ esiid }).catch(() => null)) ?? ledgerFromDataset;
-          usageIngestion = {
-            ...(reconcileUsageIngestionWithDataset({
-              ingestion: ensure ? buildUsageIngestionStatusFromEnsure(ensure, ledger) : null,
-              dataset: resolvedDataset,
-              targetEndDate: canonicalCoverage.endDate,
-            }) ?? {
-              tailReady: false,
-              targetEndDate: canonicalCoverage.endDate,
-              tailRefreshAttempted: Boolean(ensure?.healed),
-              tailRefreshReason: ensure?.healed ? "refresh_requested" : "coverage_tail_current",
-              tailTimedOut: Boolean(ensure?.tailWaitTimedOut),
-              incompleteTailDateKeys: ensure?.dayStatus.incompleteDateKeys ?? [],
-              coverageEndDate: ensure?.window.endDate ?? null,
-            }),
-            smtPendingIntervalDateKeys:
-              ledger.pendingDateKeys?.length ? ledger.pendingDateKeys : ledgerFromDataset.pendingDateKeys,
-            smtIncompleteMeterDateKeys:
-              ledger.incompleteMeterDateKeys?.length
-                ? ledger.incompleteMeterDateKeys
-                : ledgerFromDataset.incompleteMeterDateKeys,
-          };
-        }
+          }) ?? {
+            tailReady: tailDisplayReady,
+            targetEndDate: canonicalCoverage.endDate,
+            tailRefreshAttempted: false,
+            tailRefreshReason: tailDisplayReady ? "coverage_tail_current" : "refresh_disabled",
+            tailTimedOut: false,
+            incompleteTailDateKeys: [],
+            coverageEndDate: null,
+          }),
+          smtPendingIntervalDateKeys: ledgerFromDataset.pendingDateKeys,
+          smtIncompleteMeterDateKeys: ledgerFromDataset.incompleteMeterDateKeys,
+        };
       }
       results.push({
         ...contract,

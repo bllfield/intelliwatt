@@ -96,6 +96,7 @@ export async function resolveIntervalsLayer(args: {
   preferredActualSource?: ActualUsageSource | null;
   lightweightActualUsage?: boolean;
   skipLightweightInsightRecompute?: boolean;
+  userUsageDashboardLoad?: boolean;
 }): Promise<ResolveIntervalsLayerResult | null> {
   if (
     args.layerKind === IntervalSeriesKind.ACTUAL_USAGE_INTERVALS ||
@@ -105,6 +106,7 @@ export async function resolveIntervalsLayer(args: {
       preferredSource: args.preferredActualSource ?? null,
       skipFullYearIntervalFetch: args.lightweightActualUsage === true,
       skipLightweightInsightRecompute: args.skipLightweightInsightRecompute === true,
+      userUsageDashboardLoad: args.userUsageDashboardLoad === true,
     });
   }
 

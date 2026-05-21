@@ -1,6 +1,24 @@
 import { describe, expect, it } from "vitest";
 
-import { mergeGreenButtonChartInsightsOntoPassthroughDataset } from "@/lib/usage/greenButtonChartInsights";
+import {
+  mergeGreenButtonChartInsightsOntoPassthroughDataset,
+  prepareUserSiteGreenButtonDisplayUsage,
+} from "@/lib/usage/greenButtonChartInsights";
+
+describe("prepareUserSiteGreenButtonDisplayUsage", () => {
+  it("returns resolved usage without running One Path passthrough", async () => {
+    const resolved = {
+      dataset: {
+        summary: { source: "GREEN_BUTTON" },
+        insights: { fifteenMinuteAverages: [{ hhmm: "12:00", avgKw: 1 }] },
+      },
+      alternatives: { smt: null, greenButton: null },
+    };
+    const out = await prepareUserSiteGreenButtonDisplayUsage(resolved);
+    expect(out).toBe(resolved);
+    expect(out.dataset).toEqual(resolved.dataset);
+  });
+});
 
 describe("mergeGreenButtonChartInsightsOntoPassthroughDataset", () => {
   it("fills missing passthrough fifteenMinuteAverages from the full resolved dataset", () => {

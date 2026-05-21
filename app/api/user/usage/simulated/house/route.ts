@@ -18,8 +18,7 @@ import {
   buildWeatherEfficiencyDerivedInput,
   resolveSharedWeatherSensitivityEnvelope,
 } from "@/modules/weatherSensitivity/shared";
-import { mergeGreenButtonChartInsightsOntoPassthroughDataset } from "@/lib/usage/greenButtonChartInsights";
-import { adaptGreenButtonRawInput, runSharedSimulation } from "@/modules/onePathSim/onePathSim";
+import { prepareUserSiteGreenButtonDisplayUsage } from "@/lib/usage/greenButtonChartInsights";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -45,43 +44,6 @@ async function requireUser() {
     };
   }
   return { ok: true as const, user };
-}
-
-function isGreenButtonDataset(dataset: any): boolean {
-  const summarySource = String(dataset?.summary?.source ?? "").trim().toUpperCase();
-  const metaSource = String(dataset?.meta?.actualSource ?? "").trim().toUpperCase();
-  return summarySource === "GREEN_BUTTON" || metaSource === "GREEN_BUTTON";
-}
-
-async function applyUserSiteGreenButtonBaselinePassthrough(args: {
-  userId: string;
-  houseId: string;
-  esiid: string | null;
-  resolvedUsage: { dataset: any | null; alternatives: { smt: any; greenButton: any } };
-}): Promise<{ dataset: any | null; alternatives: { smt: any; greenButton: any } }> {
-  if (!isGreenButtonDataset(args.resolvedUsage?.dataset)) return args.resolvedUsage;
-
-  const engineInput = await adaptGreenButtonRawInput({
-    userId: args.userId,
-    houseId: args.houseId,
-    actualContextHouseId: args.houseId,
-    smtSourceEsiid: args.esiid,
-    scenarioId: null,
-    weatherPreference: "LAST_YEAR_WEATHER",
-    validationSelectionMode: null,
-    validationDayCount: null,
-    validationOnlyDateKeysLocal: [],
-    travelRanges: [],
-    persistRequested: true,
-  });
-  const artifact = await runSharedSimulation(engineInput);
-  return {
-    dataset: mergeGreenButtonChartInsightsOntoPassthroughDataset({
-      passthroughDataset: artifact.dataset,
-      resolvedDataset: args.resolvedUsage.dataset,
-    }),
-    alternatives: args.resolvedUsage.alternatives,
-  };
 }
 
 export async function GET(request: NextRequest) {
@@ -137,20 +99,11 @@ export async function GET(request: NextRequest) {
         layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
         scenarioId: null,
         esiid: house.esiid ?? null,
+        userUsageDashboardLoad: true,
       });
-      const usageForContract = await applyUserSiteGreenButtonBaselinePassthrough({
-        userId: u.user.id,
-        houseId: house.id,
-        esiid: house.esiid ?? null,
-        resolvedUsage: resolved ?? { dataset: null, alternatives: { smt: null, greenButton: null } },
-      }).catch((err) => {
-        console.warn(
-          "[user/usage/simulated/house] Green Button baseline passthrough failed; using resolved usage",
-          house.id,
-          err,
-        );
-        return resolved ?? { dataset: null, alternatives: { smt: null, greenButton: null } };
-      });
+      const usageForContract = await prepareUserSiteGreenButtonDisplayUsage(
+        resolved ?? { dataset: null, alternatives: { smt: null, greenButton: null } }
+      );
       const contract = await buildUserUsageHouseContract({
         userId: u.user.id,
         house,
