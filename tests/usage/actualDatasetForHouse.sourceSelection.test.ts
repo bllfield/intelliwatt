@@ -45,12 +45,16 @@ vi.mock("@/modules/realUsageAdapter/greenButton", () => ({
   getLatestGreenButtonFullDayDateKey: (...args: any[]) => getLatestGreenButtonFullDayDateKey(...args),
 }));
 
-vi.mock("@/lib/usage/canonicalMetadataWindow", () => ({
-  resolveCanonicalUsage365CoverageWindow: () => ({
-    startDate: "2024-12-02",
-    endDate: "2025-12-01",
-  }),
-}));
+vi.mock("@/lib/usage/canonicalMetadataWindow", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/usage/canonicalMetadataWindow")>();
+  return {
+    ...actual,
+    resolveCanonicalUsage365CoverageWindow: () => ({
+      startDate: "2024-12-02",
+      endDate: "2025-12-01",
+    }),
+  };
+});
 
 describe("actualDatasetForHouse source selection", () => {
   beforeEach(() => {
@@ -141,5 +145,38 @@ describe("actualDatasetForHouse source selection", () => {
         }),
       }),
     );
+  });
+
+  it("uses canonicalCoverageWindowUtcBounds for production dataset and interval range scans", async () => {
+    const canonicalModule = await import("@/lib/usage/canonicalMetadataWindow");
+    const boundsSpy = vi.spyOn(canonicalModule, "canonicalCoverageWindowUtcBounds");
+
+    const { getActualUsageDatasetForHouse, getActualIntervalsForRange } = await import(
+      "@/lib/usage/actualDatasetForHouse"
+    );
+
+    await getActualIntervalsForRange({
+      houseId: "house-1",
+      esiid: "esiid-1",
+      startDate: "2025-12-01",
+      endDate: "2025-12-01",
+      preferredSource: "SMT",
+    });
+
+    await getActualUsageDatasetForHouse("house-1", "esiid-1");
+
+    expect(boundsSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ startDate: "2024-12-02", endDate: "2025-12-01" })
+    );
+    const tailBounds = canonicalModule.canonicalCoverageWindowUtcBounds({
+      startDate: "2025-12-01",
+      endDate: "2025-12-01",
+    });
+    expect(tailBounds.rangeEndInclusive.toISOString()).toBe("2025-12-02T05:59:59.999Z");
+    expect(tailBounds.rangeEndInclusive.toISOString()).not.toBe(
+      new Date("2025-12-01T23:59:59.999Z").toISOString()
+    );
+
+    boundsSpy.mockRestore();
   });
 });

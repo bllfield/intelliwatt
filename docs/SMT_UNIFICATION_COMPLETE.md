@@ -14,7 +14,7 @@
 | Chicago date / slot | `lib/time/chicago.ts` |
 | Per-day 96/96 status | `lib/usage/smtWindowStatus.ts` |
 | Heal (pull, backfill, wait, targeted days) | `lib/usage/ensureSmtCoverage.ts` |
-| 365-day window metadata | `lib/usage/canonicalMetadataWindow.ts` |
+| 365-day window metadata | `lib/usage/canonicalMetadataWindow.ts` (`canonicalCoverageWindowUtcBounds` for Chicago-local DB range scans) |
 
 Simulator modules re-export window helpers from `canonicalMetadataWindow.ts` for backward compatibility. Green Button remains separate (`modules/realUsageAdapter/greenButton.ts`, 90-slot trusted rule unchanged).
 
@@ -64,3 +64,4 @@ Raw row counts, distinct Chicago slot counts, coverage loader, and ledger reconc
 3. **Heal** — `ensureSmtCoverage.ts` only; targeted backfill via `smtIncompleteMeterBackfill.ts` only from ensure. Heal targets incomplete days between first/last persisted SMT interval only (`resolveSmtHealBackfillDateKeys`); wide backfill does not request dates before persisted start; refresh wide-backfill retries sooner (30m) while heal-scope gaps remain.
 4. **Green Button** — do not edit `greenButton.ts` for SMT coverage fixes unless scope is explicitly expanded.
 5. **Docs** — update this file and `docs/PROJECT_PLAN.md` PC-2026-05 in the same pass when owners or semantics change.
+6. **Daily aggregation bounds** — production Usage (`getActualUsageDatasetForHouse` full path) and `getActualIntervalsForRange*` must use `canonicalCoverageWindowUtcBounds()` for `cutoff`/`end` passed to SMT insight SQL. Naive `YYYY-MM-DDT23:59:59.999Z` truncates the Chicago tail evening (~76/96 slots on canonical end day).

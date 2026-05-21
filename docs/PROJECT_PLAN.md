@@ -56,7 +56,7 @@
 - **Heal:** all surfaces **trigger** one usage-owned orchestrator; **no** One Path–only SMT pull/backfill/wait after Phase 4/5.
 - **Heal throttle:** at most **once per session** per `userId + houseId + sessionKey` unless `force: true` (usage refresh, manual refresh, Past Sim run may use run-scoped key or force).
 - **One Path isolation:** `modules/onePathSim/**` must **not** import `modules/usageSimulator/**`; shared SMT code lives in `lib/**` only.
-- **Shared sim window lock:** non-baseline coverage metadata stays owned by `resolveCanonicalUsage365CoverageWindow()` in `lib/usage/canonicalMetadataWindow.ts` (`.cursor/rules/shared-sim-window-lock.mdc`).
+- **Shared sim window lock:** non-baseline coverage metadata stays owned by `resolveCanonicalUsage365CoverageWindow()` in `lib/usage/canonicalMetadataWindow.ts` (`.cursor/rules/shared-sim-window-lock.mdc`). SMT daily insight/range SQL in `getActualUsageDatasetForHouse` uses `canonicalCoverageWindowUtcBounds()` so canonical end days include full Chicago evenings (fixes Usage vs One Path tail kWh parity).
 - **Lag knob scope:** changing `CANONICAL_COVERAGE_LAG_DAYS` in `lib/usage/canonicalCoverageConfig.ts` moves **Past Sim** `coverageStart`/`coverageEnd` and admin manual synthetic anchor (`resolveGapfillSyntheticAnchorEndDate`) for **all** input types including **GREEN_BUTTON** and **INTERVAL**. **Usage page / GB upload anchor / baseline passthrough** keep upload-backed or data-backed windows (`getLatestGreenButtonFullDayDateKey`, `usesGreenButtonAnchorWindow` only when `scenarioId == null`).
 
 **Single owners (shipped — do not duplicate):**

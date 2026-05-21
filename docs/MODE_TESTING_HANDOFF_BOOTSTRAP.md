@@ -68,9 +68,8 @@ Payload audited from user paste (One Path copy v2, `BASELINE_PASSTHROUGH`):
 
 **Broken / mismatch (user-reported + payload confirms):**
 
-1. **User Usage site:** table shows **"SOURCE UNKNOWN"** on all days and **5/18 as SIMULATED (INTERVALS NOT AVAILABLE YET)** with kwh ~37.78 — wrong; should match persisted SMT (baseline payload shows 5/18 **51.47 kWh ACTUAL**).
-   - UI fallback: `components/usage/UsageChartsPanel.tsx` → `row.source ?? "SOURCE UNKNOWN"` when `source` missing on daily rows.
-   - Trace: `app/api/user/usage/route.ts` → `lib/usage/actualDatasetForHouse.ts` → `lib/usage/userUsageDashboardViewModel.ts` — daily rows may not carry `source`/`sourceDetail` on the Usage API path.
+1. **User Usage tail kWh (FIXED 2026-05-20):** production `/api/user/usage` used naive `T23:59:59.999Z` for insight SQL end bound → canonical end day showed **~37.78 kWh (76 slots)** instead of **~51.47 kWh (96 slots)**. Fix: `getActualUsageDatasetForHouse` full path + `getActualIntervalsForRange*` now use `canonicalCoverageWindowUtcBounds()` from `lib/usage/canonicalMetadataWindow.ts` (same as lightweight admin/baseline path).
+   - Re-test: Usage dashboard 5/18 should match One Path baseline passthrough after refresh.
 
 2. **One Path baseline UI:** **15-minute load curve empty** ("Not enough interval data yet") while Usage shows the curve.
    - Payload top-level `userUsageDashboardViewModel.derived.fifteenCurve` was **empty** even though `rawReadModel.dataset.insights.fifteenMinuteAverages` had 96 points.

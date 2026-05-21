@@ -17,7 +17,10 @@ import {
   getLatestUsableRawGreenButtonIdForHouse,
 } from "@/modules/realUsageAdapter/greenButton";
 import { applySmtLedgerToActualDataset } from "@/lib/usage/smtDayCoverageLedger";
-import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
+import {
+  canonicalCoverageWindowUtcBounds,
+  resolveCanonicalUsage365CoverageWindow,
+} from "@/lib/usage/canonicalMetadataWindow";
 import { buildUtcRangeForChicagoLocalDateRange } from "@/lib/usage/greenButtonCoverage";
 import { chicagoDateKey, dateTimePartsInTimezone, prevCalendarDayDateKey } from "@/lib/time/chicago";
 
@@ -1188,8 +1191,9 @@ export async function getActualUsageDatasetForHouse(
   }
   const selected = chooseDataset(smtDataset, greenDataset, preferredSource);
   const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
-  const canonicalCutoff = new Date(canonicalWindow.startDate + "T00:00:00.000Z");
-  const canonicalEnd = new Date(canonicalWindow.endDate + "T23:59:59.999Z");
+  const canonicalUtcBounds = canonicalCoverageWindowUtcBounds(canonicalWindow);
+  const canonicalCutoff = canonicalUtcBounds.rangeStart;
+  const canonicalEnd = canonicalUtcBounds.rangeEndInclusive;
   const selectedWindowStartDate = normalizeDateKey(selected?.summary?.start ?? null);
   const selectedWindowEndDate = normalizeDateKey(selected?.summary?.end ?? null);
 
@@ -1431,13 +1435,17 @@ export async function getActualUsageDatasetForHouse(
     const latestIso = selected?.summary?.latest ?? null;
     const latest = latestIso ? new Date(latestIso) : null;
     if (selected?.summary?.source && latest && Number.isFinite(latest.getTime())) {
+      const insightWindowStartDate = selectedWindowStartDate ?? canonicalWindow.startDate;
+      const insightWindowEndDate = selectedWindowEndDate ?? canonicalWindow.endDate;
+      const insightUtcBounds = canonicalCoverageWindowUtcBounds({
+        startDate: insightWindowStartDate,
+        endDate: insightWindowEndDate,
+      });
       const cutoff =
         args?.cutoff && Number.isFinite(args.cutoff.getTime())
           ? new Date(args.cutoff.getTime())
-          : selectedWindowStartDate
-            ? new Date(`${selectedWindowStartDate}T00:00:00.000Z`)
-            : canonicalCutoff;
-      const end = selectedWindowEndDate ? new Date(`${selectedWindowEndDate}T23:59:59.999Z`) : canonicalEnd;
+          : insightUtcBounds.rangeStart;
+      const end = insightUtcBounds.rangeEndInclusive;
       let rawId: string | null = null;
       if (selected.summary.source === "GREEN_BUTTON") {
         rawId = await getLatestUsableRawGreenButtonIdForHouse(houseId);
@@ -1601,11 +1609,14 @@ export async function getActualIntervalsForRangeWithSource(args: {
   endDate: string;
   preferredSource?: ActualUsageSource | null;
 }): Promise<{ source: "SMT" | "GREEN_BUTTON" | null; intervals: ActualIntervalPoint[] }> {
-  const start = new Date(args.startDate + "T00:00:00.000Z");
-  const end = new Date(args.endDate + "T23:59:59.999Z");
-  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start.getTime() > end.getTime()) {
+  const startDateKey = normalizeDateKey(args.startDate);
+  const endDateKey = normalizeDateKey(args.endDate);
+  if (!startDateKey || !endDateKey || startDateKey > endDateKey) {
     return { source: null, intervals: [] };
   }
+  const rangeBounds = canonicalCoverageWindowUtcBounds({ startDate: startDateKey, endDate: endDateKey });
+  const start = rangeBounds.rangeStart;
+  const end = rangeBounds.rangeEndInclusive;
   const source = await chooseActualSource({
     houseId: args.houseId,
     esiid: args.esiid,
@@ -1679,11 +1690,14 @@ export async function getIntervalDataFingerprint(args: {
   endDate: string;
   preferredSource?: ActualUsageSource | null;
 }): Promise<string> {
-  const start = new Date(args.startDate + "T00:00:00.000Z");
-  const end = new Date(args.endDate + "T23:59:59.999Z");
-  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start.getTime() > end.getTime()) {
+  const startDateKey = normalizeDateKey(args.startDate);
+  const endDateKey = normalizeDateKey(args.endDate);
+  if (!startDateKey || !endDateKey || startDateKey > endDateKey) {
     return "";
   }
+  const rangeBounds = canonicalCoverageWindowUtcBounds({ startDate: startDateKey, endDate: endDateKey });
+  const start = rangeBounds.rangeStart;
+  const end = rangeBounds.rangeEndInclusive;
   const source = await chooseActualSource({
     houseId: args.houseId,
     esiid: args.esiid,
