@@ -4,18 +4,18 @@ import { resolveHomeTimezone, type HomeTimezoneInput } from "@/lib/time/resolveH
 export async function loadHouseTimezoneInput(
   houseId: string,
 ): Promise<HomeTimezoneInput & { houseId: string }> {
-  const houseAddress = (prisma as { houseAddress?: { findFirst?: Function } }).houseAddress;
-  if (typeof houseAddress?.findFirst !== "function") {
+  try {
+    const row = await prisma.houseAddress.findFirst({
+      where: { OR: [{ id: houseId }, { houseId }] },
+      select: { addressState: true },
+    });
+    return {
+      houseId,
+      addressState: row?.addressState ?? null,
+    };
+  } catch {
     return { houseId, addressState: null };
   }
-  const row = await houseAddress.findFirst({
-    where: { OR: [{ id: houseId }, { houseId }] },
-    select: { addressState: true },
-  });
-  return {
-    houseId,
-    addressState: row?.addressState ?? null,
-  };
 }
 
 export async function loadHomeTimezoneForHouseId(
