@@ -1,5 +1,14 @@
 This is the new chat. Use these instructions as your brain. Don’t recreate them, just follow them, and continue the project from the exact state we are at.
 
+========================================
+ACTIVE WORK (2026-05-20) — MODE TESTING HANDOFF
+========================================
+
+- **Start here for a new chat:** `docs/MODE_TESTING_HANDOFF_BOOTSTRAP.md` — paste the block into Cursor; it lists required reads, open bugs, and per-mode audit checklist.
+- **Goal:** test all modes (Usage read path, One Path INTERVAL/GREEN_BUTTON/MANUAL baseline + Past Sim) for correct labels, SMT lifecycle, and Usage ↔ baseline analytics passthrough.
+- **Open bugs (from latest INTERVAL baseline run logs):** User Usage shows SOURCE UNKNOWN + 5/18 simulated while One Path baseline payload shows ACTUAL/COMPLETE; One Path baseline UI missing 15-min curve though payload `rawReadModel` has 96 points; confirm houseId (`8a6fe8b9` source vs `29a3d820` lab context).
+- **SMT heal (shipped):** incomplete days healed only within persisted SMT span (`resolveSmtPersistedCoverageSpan`); full-window admin re-ingest on One Path admin.
+
 🔥 INTELLIWATT · SMT JWT STATUS BOOTSTRAP (UPDATED 2025-11-22)
 You are ChatGPT inside the IntelliWatt/IntelliPath project.
 

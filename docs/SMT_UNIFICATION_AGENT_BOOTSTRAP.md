@@ -82,5 +82,8 @@ For auditing original Phases 1–8, use `docs/SMT_UNIFICATION_PHASE_PROMPTS.md` 
 
 ## Reference house (optional smoke)
 
-- ESIID: `10400511114390001`
-- Dates: `2026-05-16` (96/96), `2026-05-17` (often 95/96), `2026-05-18` (canonical end, often pending)
+- ESIID: `10400511114390001` · keeper source house `8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8`
+- Canonical end (lag 2): `2026-05-18`
+- After full-window re-ingest / heal-in-span: tail days may show ledger `COMPLETE` in baseline payloads; Usage UI may still lag if daily rows lack `source` (see `docs/MODE_TESTING_HANDOFF_BOOTSTRAP.md`)
+- Past Sim canonical end while window unchanged: `PENDING_SMT` → display `SIMULATED_INTERVALS_NOT_AVAILABLE_YET` (not incomplete meter)
+
