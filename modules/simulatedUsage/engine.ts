@@ -1588,6 +1588,7 @@ export function buildPastSimulatedBaselineV1(args: {
   actualIntervals: Array<{ timestamp: string; kwh: number; homeDateKey?: string; homeSlot?: number }>;
   canonicalDayStartsMs: number[];
   excludedDateKeys: Set<string>;
+  trustedActualDateKeys?: Set<string>;
   dateKeyFromTimestamp: (ts: string) => string;
   getDayGridTimestamps: (dayStartMs: number) => string[];
   intervalTrustedSource?: "SMT" | "GREEN_BUTTON";
@@ -1632,6 +1633,10 @@ export function buildPastSimulatedBaselineV1(args: {
    * Forced-simulated days are excluded from reference-day selection (e.g. expanded selected-day forcing).
    */
   forceSimulateDateKeys?: Set<string>;
+  /** SMT ledger: canonical-end days waiting on utility intervals (full simulate, no partial blend). */
+  pendingSmtIntervalDateKeys?: Set<string>;
+  /** SMT ledger: settled incomplete-meter days (force simulate even when slot count is trusted). */
+  ledgerIncompleteMeterDateKeys?: Set<string>;
   /**
    * Gap-Fill Lab graded test days: same UTC keys as `forceSimulateDateKeys`, but **actual** intervals for
    * these days **remain** in the reference-day pool while **stitched output** is modeled via `simulatePastDay`
@@ -1683,7 +1688,10 @@ export function buildPastSimulatedBaselineV1(args: {
   const simulationVariablePolicy = args.simulationVariablePolicy ?? DEFAULT_SIMULATION_VARIABLE_POLICY;
   const engineProfilePolicy = simulationVariablePolicy.engineProfile;
   const forcedDateKeys = args.forceSimulateDateKeys ?? new Set<string>();
+  const pendingSmtIntervalDateKeys = args.pendingSmtIntervalDateKeys ?? new Set<string>();
+  const ledgerIncompleteMeterDateKeys = args.ledgerIncompleteMeterDateKeys ?? new Set<string>();
   const keepRefModeledKeys = args.forceModeledOutputKeepReferencePoolDateKeys ?? new Set<string>();
+  const trustedActualDateKeys = args.trustedActualDateKeys ?? new Set<string>();
   const emitAllIntervals = args.emitAllIntervals !== false;
   const lowDataSyntheticContext = args.lowDataSyntheticContext ?? null;
   const useLowDataSyntheticContext = Boolean(lowDataSyntheticContext);
@@ -1746,13 +1754,20 @@ export function buildPastSimulatedBaselineV1(args: {
       return Boolean(dateKey) && dk === dateKey;
     });
     const presentSlotCount = countPresentSlotsForDay(dayIntervalList);
-    const trustedThreshold = trustedIntervalThresholdForDateKey(
-      dateKey,
-      args.intervalTrustedSource ?? "SMT",
-    );
+    const trustedThreshold =
+      dateKey && /^\d{4}-\d{2}-\d{2}$/.test(dateKey)
+        ? trustedIntervalThresholdForDateKey(dateKey, args.intervalTrustedSource ?? "SMT")
+        : MIN_TRUSTED_ACTUAL_INTERVALS_PER_DAY;
     const dayIsExcluded = Boolean(dateKey) && args.excludedDateKeys.has(dateKey);
     const dayIsForcedSimulate = Boolean(dateKey) && forcedDateKeys.has(dateKey);
+    const dayIsPendingSmtIntervals = Boolean(dateKey) && pendingSmtIntervalDateKeys.has(dateKey);
+    const dayIsLedgerIncompleteMeter = Boolean(dateKey) && ledgerIncompleteMeterDateKeys.has(dateKey);
     const dayIsForceModeledKeepRef = Boolean(dateKey) && keepRefModeledKeys.has(dateKey);
+    const dayIsTrustedActual =
+      Boolean(dateKey) &&
+      trustedActualDateKeys.has(dateKey) &&
+      !dayIsPendingSmtIntervals &&
+      !dayIsLedgerIncompleteMeter;
     const dayIsLeadingMissing =
       oldestActualTsMs !== Number.POSITIVE_INFINITY &&
       gridTs.length > 0 &&
@@ -1772,10 +1787,14 @@ export function buildPastSimulatedBaselineV1(args: {
       !dayIsLowDataSyntheticModeled &&
       !dayIsExcluded &&
       !dayIsLeadingMissing &&
+      !dayIsTrustedActual &&
+      !dayIsLedgerIncompleteMeter &&
       presentSlotCount > 0 &&
       presentSlotCount < trustedThreshold;
     const shouldSimulateDay =
       dayIsForcedSimulate ||
+      dayIsPendingSmtIntervals ||
+      dayIsLedgerIncompleteMeter ||
       dayIsExcluded ||
       dayIsLeadingMissing ||
       dayIsDailyUsageMissing ||
@@ -1790,6 +1809,8 @@ export function buildPastSimulatedBaselineV1(args: {
       dateKey,
       presentSlotCount,
       dayIsForcedSimulate,
+      dayIsPendingSmtIntervals,
+      dayIsLedgerIncompleteMeter,
       dayIsForceModeledKeepRef,
       dayIsExcluded,
       dayIsLeadingMissing,
@@ -2648,21 +2669,26 @@ export function buildPastSimulatedBaselineV1(args: {
         | "DAILY_USAGE_MISSING"
         | "LOW_DATA_CONSTRAINED"
         | "INCOMPLETE"
+        | "PENDING_SMT_INTERVALS"
         | "FORCED_SELECTED_DAY"
         | "GAPFILL_MODELED_KEEP_REF" =
         day.dayIsForceModeledKeepRef
           ? "GAPFILL_MODELED_KEEP_REF"
-          : day.dayIsForcedSimulate
-            ? "FORCED_SELECTED_DAY"
-            : day.dayIsExcluded
-              ? "EXCLUDED"
-              : day.dayIsLeadingMissing
-                ? "LEADING_MISSING"
-                : day.dayIsDailyUsageMissing
-                  ? "DAILY_USAGE_MISSING"
-                : day.dayIsLowDataSyntheticModeled
-                  ? "LOW_DATA_CONSTRAINED"
-                : "INCOMPLETE";
+          : day.dayIsPendingSmtIntervals
+            ? "PENDING_SMT_INTERVALS"
+            : day.dayIsLedgerIncompleteMeter
+              ? "INCOMPLETE"
+              : day.dayIsForcedSimulate
+                ? "FORCED_SELECTED_DAY"
+                : day.dayIsExcluded
+                  ? "EXCLUDED"
+                  : day.dayIsLeadingMissing
+                    ? "LEADING_MISSING"
+                    : day.dayIsDailyUsageMissing
+                      ? "DAILY_USAGE_MISSING"
+                      : day.dayIsLowDataSyntheticModeled
+                        ? "LOW_DATA_CONSTRAINED"
+                        : "INCOMPLETE";
       const simulatedReasonCode:
         | "TRAVEL_VACANT"
         | "TEST_MODELED_KEEP_REF"
@@ -2670,6 +2696,7 @@ export function buildPastSimulatedBaselineV1(args: {
         | "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
         | "FORCED_SELECTED_DAY"
         | "INCOMPLETE_METER_DAY"
+        | "INTERVALS_NOT_AVAILABLE_YET_DAY"
         | "DAILY_USAGE_MISSING_DAY"
         | "LEADING_MISSING_DAY" =
         simulatedReason === "EXCLUDED"
@@ -2678,13 +2705,15 @@ export function buildPastSimulatedBaselineV1(args: {
             ? modeledKeepRefReasonCode
             : simulatedReason === "LOW_DATA_CONSTRAINED"
               ? modeledKeepRefReasonCode
-            : simulatedReason === "FORCED_SELECTED_DAY"
-              ? "FORCED_SELECTED_DAY"
-              : simulatedReason === "LEADING_MISSING"
-                ? "LEADING_MISSING_DAY"
-                : simulatedReason === "DAILY_USAGE_MISSING"
-                  ? "DAILY_USAGE_MISSING_DAY"
-                : defaultModeledReasonCode;
+            : simulatedReason === "PENDING_SMT_INTERVALS"
+              ? "INTERVALS_NOT_AVAILABLE_YET_DAY"
+              : simulatedReason === "FORCED_SELECTED_DAY"
+                ? "FORCED_SELECTED_DAY"
+                : simulatedReason === "LEADING_MISSING"
+                  ? "LEADING_MISSING_DAY"
+                  : simulatedReason === "DAILY_USAGE_MISSING"
+                    ? "DAILY_USAGE_MISSING_DAY"
+                    : defaultModeledReasonCode;
       const wx = args.actualWxByDateKey?.get(dateKey) ?? null;
       const weatherForDay = wx ? engineWxToPastDayWeather(wx) : null;
       // One shared core for all modeled-day reasons (travel, incomplete, forced, keep-ref modeled).

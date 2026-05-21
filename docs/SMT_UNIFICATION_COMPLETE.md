@@ -19,6 +19,7 @@
 | Per-home IANA timezone | `lib/time/resolveHomeTimezone.ts` (`addressState` / explicit override; TX → `America/Chicago`) |
 | Past interval grid (no UTC slice) | `lib/time/pastIntervalGrid.ts`; `modules/usageSimulator/pastStitchedCurve.ts` requires `homeTimezone` |
 | Baseload (Usage / baseline / Past) | `lib/usage/computeHomeBaseloadKw.ts` — full-interval `FILTERED_NORMAL_LIFE_V1`; lightweight paths overlay interval baseload (no SQL P10 as primary) |
+| Past Sim SMT ledger prep (both producers) | `lib/usage/pastSimSmtLedgerPrep.ts` — pending + incomplete-meter keys with slot-complete filter |
 
 Simulator modules re-export window helpers from `canonicalMetadataWindow.ts` for backward compatibility. Green Button ingest remains in `modules/realUsageAdapter/greenButton.ts`; read/display paths use `greenButtonPersistedIntervalConvert.ts` with DST-aware trusted thresholds (92/96/100).
 

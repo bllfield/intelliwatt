@@ -1,3 +1,6 @@
+import { dateKeyInTimezone } from "@/lib/admin/gapfillLab";
+import { resolveHomeTimezone } from "@/lib/time/resolveHomeTimezone";
+import { computeHomeBaseloadKw } from "@/lib/usage/computeHomeBaseloadKw";
 import { getMemoryRssMb, logSimPipelineEvent } from "@/modules/usageSimulator/simObservability";
 import { generateSimulatedCurve } from "@/modules/simulatedUsage/engine";
 import { roundDayKwhDisplay } from "@/modules/simulatedUsage/pastDaySimulator";
@@ -105,160 +108,48 @@ type BaseloadOptions = {
   percentile?: number;
 };
 
-function dateKeyUtcFromIso(tsIso: string): string {
-  return tsIso.slice(0, 10);
-}
+type BaseloadFromCurveOptions = BaseloadOptions & {
+  homeTimezone: string;
+  simulatedHomeDateKeys?: Set<string>;
+};
 
-function percentileCont(sorted: number[], p: number): number | null {
-  if (!sorted.length) return null;
-  const idx = (sorted.length - 1) * p;
-  const lo = Math.floor(idx);
-  const hi = Math.ceil(idx);
-  if (lo === hi) return sorted[lo]!;
-  const w = idx - lo;
-  return sorted[lo]! * (1 - w) + sorted[hi]! * w;
-}
-
-function computeNormalLifeBaseloadKw(
-  intervals: Array<{ tsIso: string; kwh: number }>,
-  options: BaseloadOptions = {}
-): { baseloadKw: number | null; fallbackUsed: boolean; debugNote: string | null } {
-  const minDayKwhFloor = Number.isFinite(options.minDayKwhFloor) ? Number(options.minDayKwhFloor) : 4;
-  const baseloadDayMultiplier = Number.isFinite(options.baseloadDayMultiplier)
-    ? Number(options.baseloadDayMultiplier)
-    : 1.3;
-  const percentile = Number.isFinite(options.percentile) ? Number(options.percentile) : 0.1;
-  const excluded = options.excludedDateKeys;
-
-  const kept: Array<{ tsIso: string; kwh: number; dayKey: string }> = [];
-  for (const row of intervals ?? []) {
-    const tsIso = String(row?.tsIso ?? "");
-    const kwh = Number(row?.kwh);
-    if (!tsIso || !Number.isFinite(kwh)) continue;
-    const dayKey = dateKeyUtcFromIso(tsIso);
-    if (excluded?.has(dayKey)) continue;
-    kept.push({ tsIso, kwh, dayKey });
-  }
-
-  const dayTotals = new Map<string, number>();
-  for (const row of kept) dayTotals.set(row.dayKey, (dayTotals.get(row.dayKey) ?? 0) + row.kwh);
-  const positiveDayTotals = Array.from(dayTotals.values())
-    .filter((v) => Number.isFinite(v) && v > 1e-6)
-    .sort((a, b) => a - b);
-  const lowCount = Math.max(1, Math.floor(positiveDayTotals.length * 0.2));
-  const lowSlice = positiveDayTotals.slice(0, lowCount);
-  const avgLowDayKwh =
-    lowSlice.length > 0 ? lowSlice.reduce((a, b) => a + b, 0) / lowSlice.length : null;
-  const baseloadKwhPerDayCandidate = avgLowDayKwh ?? 0;
-  const minDayKwh = Math.max(minDayKwhFloor, baseloadKwhPerDayCandidate * baseloadDayMultiplier);
-
-  const qualityDays = new Set<string>();
-  dayTotals.forEach((total, dayKey) => {
-    if ((Number(total) || 0) >= minDayKwh) qualityDays.add(dayKey);
-  });
-  const qualityRows = kept.filter((row) => qualityDays.has(row.dayKey));
-  const filteredKwSamples = qualityRows
-    .map((row) => (Number(row.kwh) || 0) * 4)
-    .filter((kw) => Number.isFinite(kw) && kw > 1e-6)
-    .sort((a, b) => a - b);
-
-  if (filteredKwSamples.length < 500) {
-    const fallbackKw = kept
-      .map((row) => (Number(row.kwh) || 0) * 4)
-      .filter((kw) => Number.isFinite(kw) && kw > 1e-6)
-      .sort((a, b) => a - b);
-    const p10Fallback = percentileCont(fallbackKw, percentile);
-    const fallbackSlice = p10Fallback == null ? [] : fallbackKw.filter((kw) => kw <= p10Fallback);
-    const fallbackAvg =
-      fallbackSlice.length > 0
-        ? fallbackSlice.reduce((a, b) => a + b, 0) / fallbackSlice.length
-        : null;
-    return {
-      baseloadKw: fallbackAvg == null ? null : round2(fallbackAvg),
-      fallbackUsed: true,
-      debugNote: "Baseload fallback used: fewer than 500 filtered interval samples.",
-    };
-  }
-
-  const p10 = percentileCont(filteredKwSamples, percentile);
-  const pool = p10 == null ? [] : filteredKwSamples.filter((kw) => kw <= p10);
-  const avg = pool.length > 0 ? pool.reduce((a, b) => a + b, 0) / pool.length : null;
-  return { baseloadKw: avg == null ? null : round2(avg), fallbackUsed: false, debugNote: null };
-}
-
-function computeNormalLifeBaseloadKwFromCurveIntervals(
+function computeBaseloadKwFromCurveIntervals(
   intervals: Array<{ timestamp: string; consumption_kwh: number }>,
+  options: BaseloadFromCurveOptions
+): { baseloadKw: number | null; fallbackUsed: boolean; debugNote: string | null } {
+  const homeTimezone = resolveHomeTimezone({ timezone: options.homeTimezone });
+  const rows: Array<{ tsIso: string; kwh: number; homeDateKey: string }> = [];
+  for (const row of intervals ?? []) {
+    const tsIso = String(row?.timestamp ?? "");
+    const kwh = Number(row?.consumption_kwh);
+    if (!tsIso || !Number.isFinite(kwh)) continue;
+    const homeDateKey = dateKeyInTimezone(tsIso, homeTimezone);
+    if (options.excludedDateKeys?.has(homeDateKey)) continue;
+    if (options.simulatedHomeDateKeys?.has(homeDateKey)) continue;
+    rows.push({ tsIso, kwh, homeDateKey });
+  }
+  return computeHomeBaseloadKw(rows, homeTimezone, {
+    minDayKwhFloor: options.minDayKwhFloor,
+    baseloadDayMultiplier: options.baseloadDayMultiplier,
+    percentile: options.percentile,
+  });
+}
+
+function computeBaseloadKwFromSimpleIntervals(
+  intervals: Array<{ tsIso: string; kwh: number }>,
+  homeTimezone: string,
   options: BaseloadOptions = {}
 ): { baseloadKw: number | null; fallbackUsed: boolean; debugNote: string | null } {
-  const minDayKwhFloor = Number.isFinite(options.minDayKwhFloor) ? Number(options.minDayKwhFloor) : 4;
-  const baseloadDayMultiplier = Number.isFinite(options.baseloadDayMultiplier)
-    ? Number(options.baseloadDayMultiplier)
-    : 1.3;
-  const percentile = Number.isFinite(options.percentile) ? Number(options.percentile) : 0.1;
-  const excluded = options.excludedDateKeys;
-
-  const dayTotals = new Map<string, number>();
-  for (const row of intervals ?? []) {
-    const tsIso = String(row?.timestamp ?? "");
-    const kwh = Number(row?.consumption_kwh);
-    if (!tsIso || !Number.isFinite(kwh)) continue;
-    const dayKey = dateKeyUtcFromIso(tsIso);
-    if (excluded?.has(dayKey)) continue;
-    dayTotals.set(dayKey, (dayTotals.get(dayKey) ?? 0) + kwh);
-  }
-  const positiveDayTotals = Array.from(dayTotals.values())
-    .filter((v) => Number.isFinite(v) && v > 1e-6)
-    .sort((a, b) => a - b);
-  const lowCount = Math.max(1, Math.floor(positiveDayTotals.length * 0.2));
-  const lowSlice = positiveDayTotals.slice(0, lowCount);
-  const avgLowDayKwh =
-    lowSlice.length > 0 ? lowSlice.reduce((a, b) => a + b, 0) / lowSlice.length : null;
-  const baseloadKwhPerDayCandidate = avgLowDayKwh ?? 0;
-  const minDayKwh = Math.max(minDayKwhFloor, baseloadKwhPerDayCandidate * baseloadDayMultiplier);
-
-  const qualityDays = new Set<string>();
-  dayTotals.forEach((total, dayKey) => {
-    if ((Number(total) || 0) >= minDayKwh) qualityDays.add(dayKey);
-  });
-
-  const filteredKwSamples: number[] = [];
-  const fallbackKwSamples: number[] = [];
-  for (const row of intervals ?? []) {
-    const tsIso = String(row?.timestamp ?? "");
-    const kwh = Number(row?.consumption_kwh);
-    if (!tsIso || !Number.isFinite(kwh)) continue;
-    const dayKey = dateKeyUtcFromIso(tsIso);
-    if (excluded?.has(dayKey)) continue;
-    const kw = kwh * 4;
-    if (!Number.isFinite(kw) || kw <= 1e-6) continue;
-    fallbackKwSamples.push(kw);
-    if (qualityDays.has(dayKey)) filteredKwSamples.push(kw);
-  }
-  filteredKwSamples.sort((a, b) => a - b);
-
-  if (filteredKwSamples.length < 500) {
-    fallbackKwSamples.sort((a, b) => a - b);
-    const p10Fallback = percentileCont(fallbackKwSamples, percentile);
-    const fallbackSlice = p10Fallback == null ? [] : fallbackKwSamples.filter((kw) => kw <= p10Fallback);
-    const fallbackAvg =
-      fallbackSlice.length > 0
-        ? fallbackSlice.reduce((a, b) => a + b, 0) / fallbackSlice.length
-        : null;
-    return {
-      baseloadKw: fallbackAvg == null ? null : round2(fallbackAvg),
-      fallbackUsed: true,
-      debugNote: "insufficient_filtered_samples",
-    };
-  }
-
-  const p10 = percentileCont(filteredKwSamples, percentile);
-  const lowKwSlice = p10 == null ? [] : filteredKwSamples.filter((kw) => kw <= p10);
-  const avgKw = lowKwSlice.length > 0 ? lowKwSlice.reduce((a, b) => a + b, 0) / lowKwSlice.length : null;
-  return {
-    baseloadKw: avgKw == null ? null : round2(avgKw),
-    fallbackUsed: false,
-    debugNote: null,
-  };
+  const tz = resolveHomeTimezone({ timezone: homeTimezone });
+  return computeHomeBaseloadKw(
+    intervals.map((row) => ({
+      tsIso: String(row.tsIso ?? ""),
+      kwh: Number(row.kwh) || 0,
+      homeDateKey: dateKeyInTimezone(String(row.tsIso ?? ""), tz),
+    })),
+    tz,
+    options
+  );
 }
 
 function toDateKey(tsIso: string): string {
@@ -1319,8 +1210,9 @@ export function buildSimulatedUsageDatasetFromBuildInputs(
   const peakDay = daily.length > 0 ? daily.reduce((a, b) => (b.kwh > a.kwh ? b : a)) : null;
 
   const excludedDateKeys = options?.excludedDateKeys ?? excludedDateKeysFromTravelRanges(buildInputs.travelRanges);
-  const baseloadComputed = computeNormalLifeBaseloadKw(
+  const baseloadComputed = computeBaseloadKwFromSimpleIntervals(
     curve.intervals.map((i) => ({ tsIso: String(i.timestamp ?? ""), kwh: Number(i.consumption_kwh) || 0 })),
+    "America/Chicago",
     { excludedDateKeys: excludedDateKeys.size > 0 ? excludedDateKeys : undefined }
   );
   const baseload = baseloadComputed.baseloadKw;
@@ -1465,6 +1357,8 @@ export function buildSimulatedUsageDatasetFromCurve(
     excludedDateKeys?: Set<string>;
     /** When set, monthly display groups by this timezone (fixes 0 kWh for non-Chicago). */
     timezone?: string;
+    /** Home IANA timezone for baseload (defaults to `timezone` or America/Chicago). */
+    homeTimezone?: string;
     /** When true, group monthly by UTC month so it matches daily (fixes Past simulated zeros). */
     useUtcMonth?: boolean;
     /** Canonical simulated-day artifacts used for simulated-date daily display parity. */
@@ -1709,9 +1603,19 @@ export function buildSimulatedUsageDatasetFromCurve(
     () => {
       const nextFifteenMinuteAverages = skipHeavyInsights ? [] : computeFifteenMinuteAverages(curve.intervals);
       const nextTimeOfDayBuckets = skipHeavyInsights ? [] : computeTimeOfDayBuckets(curve.intervals);
+      const simulatedHomeDateKeys = new Set<string>();
+      for (const row of options?.simulatedDayResults ?? []) {
+        const dk = String(row?.localDate ?? "").slice(0, 10);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dk)) simulatedHomeDateKeys.add(dk);
+      }
+      const homeTimezone = String(options?.homeTimezone ?? options?.timezone ?? "America/Chicago");
       const nextBaseloadComputed = skipHeavyInsights
         ? { baseloadKw: null as number | null, fallbackUsed: true, debugNote: "sparse_curve_lab_skip" as string | null }
-        : computeNormalLifeBaseloadKwFromCurveIntervals(curve.intervals, { excludedDateKeys: options?.excludedDateKeys });
+        : computeBaseloadKwFromCurveIntervals(curve.intervals, {
+            homeTimezone,
+            excludedDateKeys: options?.excludedDateKeys,
+            simulatedHomeDateKeys: simulatedHomeDateKeys.size > 0 ? simulatedHomeDateKeys : undefined,
+          });
       return {
         fifteenMinuteAverages: nextFifteenMinuteAverages,
         timeOfDayBuckets: nextTimeOfDayBuckets,

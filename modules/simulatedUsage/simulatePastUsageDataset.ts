@@ -7,6 +7,7 @@
 import { prisma } from "@/lib/db";
 import { dateKeyInTimezone } from "@/lib/admin/gapfillLab";
 import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
+import { preparePastSimSmtLedgerDateKeys } from "@/lib/usage/pastSimSmtLedgerPrep";
 import { buildUniformMonthlyTotalsFromAnnualWindow, travelRangesToExcludeDateKeys } from "@/modules/usageSimulator/build";
 import { boundDateKeysToCoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 import {
@@ -1603,6 +1604,16 @@ export async function simulatePastUsageDataset(
       { startDate, endDate }
     );
     const excludedDateKeysFingerprint = Array.from(excludedDateKeys).sort().join(",");
+    const {
+      pendingSmtIntervalDateKeys,
+      ledgerIncompleteMeterDateKeys,
+    } = await preparePastSimSmtLedgerDateKeys({
+      esiid,
+      coverageStartDate: startDate,
+      coverageEndDate: endDate,
+      canonicalDateKeys,
+      reconcile: true,
+    });
 
     const mergedKeepRefLocalDateKeys = new Set<string>(forceModeledOutputKeepReferencePoolDateKeysLocalSet);
     logSimPipelineEvent("day_simulation_input_prep_success", {
@@ -1957,6 +1968,13 @@ export async function simulatePastUsageDataset(
         applianceProfile: applianceProfileForPast,
         usageShapeProfile: usageShapeProfileSnap ?? undefined,
         timezoneForProfile: timezone ?? undefined,
+        pendingSmtIntervalDateKeys:
+          pendingSmtIntervalDateKeys.size > 0 ? pendingSmtIntervalDateKeys : undefined,
+        ledgerIncompleteMeterDateKeys:
+          ledgerIncompleteMeterDateKeys.size > 0 ? ledgerIncompleteMeterDateKeys : undefined,
+        trustedActualDateKeys: greenButtonCoverageIntervals?.trustedActualDateKeys
+          ? new Set(greenButtonCoverageIntervals.trustedActualDateKeys)
+          : undefined,
         actualWxByDateKey: weatherByDateKeyForSimulation,
         _normalWxByDateKey: normalWxByDateKey,
         collectSimulatedDayResults: collectSimulatedDayResultsForDiagnostics,
@@ -1985,6 +2003,13 @@ export async function simulatePastUsageDataset(
       });
       patchedIntervals = baselineBuild.intervals;
       dayResults = baselineBuild.dayResults;
+      if (pendingSmtIntervalDateKeys.size > 0) {
+        for (const dayResult of dayResults) {
+          const dateKey = String(dayResult.localDate ?? "").slice(0, 10);
+          if (!pendingSmtIntervalDateKeys.has(dateKey)) continue;
+          dayResult.simulatedReasonCode = "INTERVALS_NOT_AVAILABLE_YET_DAY";
+        }
+      }
       const manualUsageInputMode =
         buildInputs.mode === "MANUAL_TOTALS"
           ? typeof (buildInputs as any)?.snapshots?.manualUsagePayload?.mode === "string" &&
@@ -2300,8 +2325,10 @@ export async function simulatePastUsageDataset(
         },
         {
           timezone: timezone ?? undefined,
+          homeTimezone: timezone ?? undefined,
           useUtcMonth: true,
           simulatedDayResults: dayResults,
+          excludedDateKeys: excludedDateKeys.size > 0 ? excludedDateKeys : undefined,
           skipHeavyInsights: skipHeavyDatasetInsights,
           correlationId,
         }

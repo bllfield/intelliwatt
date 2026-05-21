@@ -30,7 +30,8 @@ Do NOT start implementation until you have read the above.
 
 5. docs/SMT_UNIFICATION_PLAN.md — architecture detail (must align with PROJECT_PLAN)
 6. docs/USAGE_LAYER_MAP.md — SMT layer owners
-7. docs/ONE_PATH_SIM_ARCHITECTURE.md — One Path triggers ensureSmtCoverage only
+7. docs/SURFACE_PARITY_OWNERS.md — Usage / Baseline / Past Sim parity map (SMT + Green Button, dual Past stacks)
+8. docs/ONE_PATH_SIM_ARCHITECTURE.md — One Path triggers ensureSmtCoverage only
 
 Optional: `npx tsx scripts/audit-smt-day-coverage.ts <esiid> <dateKey>` when changing slot counting or day status.
 

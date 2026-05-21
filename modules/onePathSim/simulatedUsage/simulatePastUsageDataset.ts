@@ -7,11 +7,8 @@
 import { prisma } from "@/lib/db";
 import { dateKeyInTimezone } from "@/lib/admin/gapfillLab";
 import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
-import { buildSmtDayLedgerMeta, resolveSmtLedgerDateKeysForPastSim } from "@/lib/usage/smtDayCoverageLedger";
-import {
-  filterLedgerIncompleteMeterDateKeysToSlotIncomplete,
-  loadSmtWindowDayStatus,
-} from "@/lib/usage/smtWindowStatus";
+import { buildSmtDayLedgerMeta } from "@/lib/usage/smtDayCoverageLedger";
+import { preparePastSimSmtLedgerDateKeys } from "@/lib/usage/pastSimSmtLedgerPrep";
 import { buildUniformMonthlyTotalsFromAnnualWindow, travelRangesToExcludeDateKeys } from "@/modules/onePathSim/usageSimulator/build";
 import { boundDateKeysToCoverageWindow } from "@/modules/onePathSim/usageSimulator/metadataWindow";
 import {
@@ -1830,35 +1827,17 @@ export async function simulatePastUsageDataset(
       { startDate, endDate }
     );
     const excludedDateKeysFingerprint = Array.from(excludedDateKeys).sort().join(",");
-    const smtLedgerForSim = esiid
-      ? await resolveSmtLedgerDateKeysForPastSim({
-          esiid,
-          coverageStartDate: startDate,
-          coverageEndDate: endDate,
-          reconcile: true,
-        }).catch(() => null)
-      : null;
-    const smtDayLedgerSnapshot = smtLedgerForSim?.ledger ?? null;
-    const pendingSmtIntervalDateKeys = new Set<string>(
-      Array.from(smtLedgerForSim?.pendingDateKeys ?? []).filter((dk) => canonicalDateKeys.includes(dk))
-    );
-    let ledgerIncompleteMeterDateKeys = new Set<string>(
-      Array.from(smtLedgerForSim?.incompleteMeterDateKeys ?? []).filter((dk) => canonicalDateKeys.includes(dk))
-    );
-    if (esiid && ledgerIncompleteMeterDateKeys.size > 0) {
-      const slotStatus = await loadSmtWindowDayStatus({
-        esiid,
-        dateKeys: Array.from(ledgerIncompleteMeterDateKeys),
-      }).catch(() => null);
-      if (slotStatus) {
-        ledgerIncompleteMeterDateKeys = new Set(
-          filterLedgerIncompleteMeterDateKeysToSlotIncomplete({
-            incompleteMeterDateKeys: ledgerIncompleteMeterDateKeys,
-            byDate: slotStatus.byDate,
-          })
-        );
-      }
-    }
+    const {
+      smtDayLedgerSnapshot,
+      pendingSmtIntervalDateKeys,
+      ledgerIncompleteMeterDateKeys,
+    } = await preparePastSimSmtLedgerDateKeys({
+      esiid,
+      coverageStartDate: startDate,
+      coverageEndDate: endDate,
+      canonicalDateKeys,
+      reconcile: true,
+    });
 
     const mergedKeepRefLocalDateKeys = new Set<string>(forceModeledOutputKeepReferencePoolDateKeysLocalSet);
     logSimPipelineEvent("day_simulation_input_prep_success", {
