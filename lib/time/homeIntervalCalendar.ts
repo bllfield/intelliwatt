@@ -268,9 +268,12 @@ export function resolveIntervalInstant(
       const dateKey = text.slice(0, 10);
       const parsed = parseInZoneToUTC(text, zone, delivery.ambiguous ?? "earlier");
       const dayStart = DateTime.fromISO(`${dateKey}T00:00:00`, { zone });
+      const parsedDt = parsed
+        ? DateTime.fromJSDate(parsed, { zone: "utc" }).setZone(zone)
+        : null;
       const slot =
-        parsed && dayStart.isValid
-          ? Math.floor(parsed.diff(dayStart.toUTC(), "minutes").minutes / 15)
+        parsedDt?.isValid && dayStart.isValid
+          ? Math.floor(parsedDt.diff(dayStart, "minutes").minutes / 15)
           : 0;
       instant = gridInstantLocal(dateKey, slot, zone);
       break;
