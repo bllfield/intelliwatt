@@ -28,7 +28,7 @@ describe("actual usage source preference", () => {
     getLatestGreenButtonFullDayDateKey.mockReset();
   });
 
-  it("prefers Green Button when requested even if SMT is newer", async () => {
+  it("prefers SMT when both exist even if Green Button was requested explicitly", async () => {
     smtFindFirst.mockResolvedValue({ ts: new Date("2026-04-22T12:00:00.000Z") });
     getLatestGreenButtonFullDayDateKey.mockResolvedValue("2026-04-20");
 
@@ -39,7 +39,7 @@ describe("actual usage source preference", () => {
       preferredSource: "GREEN_BUTTON",
     });
 
-    expect(out).toBe("GREEN_BUTTON");
+    expect(out).toBe("SMT");
   });
 
   it("falls back to the normal freshest-source chooser when the preferred source is unavailable", async () => {

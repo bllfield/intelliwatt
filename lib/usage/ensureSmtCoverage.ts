@@ -28,6 +28,7 @@ import {
   waitForSmtDateCoverage,
   waitForSmtTailCoverage,
 } from "@/lib/usage/smtTailCoverage";
+import { clearGreenButtonSupersededBySmtForHouse } from "@/lib/usage/greenButtonHouseCleanup";
 import {
   requestUsageRefreshForUserHouse,
   type UsageRefreshResult,
@@ -50,6 +51,8 @@ export type EnsureSmtCoverageResult = {
   backfillDateKeys?: string[];
   tailWaitTimedOut?: boolean;
   incompleteMeterWaitTimedOut?: boolean;
+  /** Green Button rows removed because canonical SMT now owns this home. */
+  greenButtonSuperseded?: boolean;
 };
 
 const healedSessionKeys = new Set<string>();
@@ -161,11 +164,16 @@ export async function ensureSmtCoverageForHouse(args: {
     }
     if (healScopeReady) {
       healedSessionKeys.add(throttleKey);
+      const greenButtonSuperseded = await clearGreenButtonSupersededBySmtForHouse({
+        houseId: args.houseId,
+        esiid,
+      }).catch(() => false);
       return {
         healed: false,
         skippedReason: "window_ready",
         dayStatus,
         window,
+        greenButtonSuperseded,
       };
     }
   }
@@ -257,6 +265,11 @@ export async function ensureSmtCoverageForHouse(args: {
   dayStatus = await loadSmtWindowDayStatus({ esiid });
   healedSessionKeys.add(throttleKey);
 
+  const greenButtonSuperseded = await clearGreenButtonSupersededBySmtForHouse({
+    houseId: args.houseId,
+    esiid,
+  }).catch(() => false);
+
   return {
     healed: true,
     dayStatus,
@@ -269,5 +282,6 @@ export async function ensureSmtCoverageForHouse(args: {
     backfillDateKeys,
     tailWaitTimedOut,
     incompleteMeterWaitTimedOut,
+    greenButtonSuperseded,
   };
 }

@@ -44,7 +44,15 @@ import {
 import { loadHomeTimezoneForHouseId } from "@/lib/time/loadHouseTimezone";
 import { resolveHomeTimezone } from "@/lib/time/resolveHomeTimezone";
 import { computeHomeBaseloadKw } from "@/lib/usage/computeHomeBaseloadKw";
+import { clearGreenButtonSupersededBySmtForHouse } from "@/lib/usage/greenButtonHouseCleanup";
+import {
+  hasSmtIntervalsInCanonicalWindow,
+  resolveSmtCanonicalFetchWindow,
+  type SmtCanonicalFetchWindow,
+} from "@/lib/usage/smtCanonicalAvailability";
 import { buildDisplayedMonthlyRows } from "@/modules/usageSimulator/monthlyCompareRows";
+
+export { hasSmtIntervalsInCanonicalWindow } from "@/lib/usage/smtCanonicalAvailability";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const USAGE_DB_ENABLED = Boolean((process.env.USAGE_DATABASE_URL ?? "").trim());
@@ -789,36 +797,10 @@ async function getGreenButtonWindow(usageClient: any, houseId: string, rawId: st
   return { cutoff: range.startInclusive, end: range.endInclusive };
 }
 
-type SmtFetchWindow = {
-  cutoff: Date;
-  end: Date;
-  startDate: string;
-  endDate: string;
-};
+type SmtFetchWindow = SmtCanonicalFetchWindow;
 
 async function getSmtWindow(esiid: string): Promise<SmtFetchWindow | null> {
-  const { startDate, endDate } = resolveCanonicalUsage365CoverageWindow();
-  const range = buildUtcRangeForChicagoLocalDateRange({
-    startDateKey: startDate,
-    endDateKey: endDate,
-  });
-  if (!range) return null;
-  const cutoff = range.startInclusive;
-  const end = range.endInclusive;
-  const hasRows = await prisma.smtInterval.findFirst({
-    where: { esiid, ts: { gte: cutoff, lte: end } },
-    orderBy: { ts: "desc" },
-    select: { ts: true },
-  });
-  if (!hasRows?.ts) return null;
-  return { cutoff, end, startDate, endDate };
-}
-
-/** True when any SMT interval exists in the shared canonical 365-day window. */
-export async function hasSmtIntervalsInCanonicalWindow(esiid: string | null | undefined): Promise<boolean> {
-  const normalized = String(esiid ?? "").trim();
-  if (!normalized) return false;
-  return (await getSmtWindow(normalized)) != null;
+  return resolveSmtCanonicalFetchWindow(esiid);
 }
 
 function applyCanonicalCoverageToUsageSummary(
@@ -839,13 +821,11 @@ function isHomeDateKeyInCoverageWindow(
   return dateKey >= window.startDate && dateKey <= window.endDate;
 }
 
+/** SMT always wins when present; Green Button is only used when SMT is unavailable for the load. */
 function chooseDataset(
   smt: UsageDatasetResult | null,
   greenButton: UsageDatasetResult | null,
-  preferredSource?: ActualUsageSource | null
 ): UsageDatasetResult | null {
-  if (preferredSource === "SMT" && smt) return smt;
-  if (preferredSource === "GREEN_BUTTON" && greenButton) return greenButton;
   if (smt) return smt;
   if (greenButton) return greenButton;
   return null;
@@ -1248,40 +1228,24 @@ export async function getActualUsageDatasetForHouse(
     }
   }
   const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
+  const greenButtonOnlyLoad = fetchOnlyPreferredSource && preferredSource === "GREEN_BUTTON";
   if (
-    userUsageDashboardLoad &&
-    preferredSource !== "GREEN_BUTTON" &&
-    esiid &&
+    !greenButtonOnlyLoad &&
     !smtDataset &&
-    greenDataset &&
+    esiid &&
     (await hasSmtIntervalsInCanonicalWindow(esiid))
   ) {
     try {
       smtDataset = await fetchSmtDataset(esiid, homeTimezone, {
-        skipFullIntervalRowLoad: true,
+        skipFullIntervalRowLoad: userUsageDashboardLoad,
       });
     } catch {
       smtDataset = null;
     }
   }
-  let selected = chooseDataset(smtDataset, greenDataset, preferredSource);
-  if (
-    userUsageDashboardLoad &&
-    preferredSource !== "GREEN_BUTTON" &&
-    selected?.summary?.source === "GREEN_BUTTON" &&
-    esiid &&
-    (await hasSmtIntervalsInCanonicalWindow(esiid))
-  ) {
-    if (!smtDataset) {
-      try {
-        smtDataset = await fetchSmtDataset(esiid, homeTimezone, {
-          skipFullIntervalRowLoad: userUsageDashboardLoad,
-        });
-      } catch {
-        smtDataset = null;
-      }
-    }
-    selected = chooseDataset(smtDataset, greenDataset, "SMT");
+  const selected = chooseDataset(smtDataset, greenDataset);
+  if (!greenButtonOnlyLoad && selected?.summary?.source === "SMT" && esiid) {
+    await clearGreenButtonSupersededBySmtForHouse({ houseId, esiid });
   }
   const greenButtonBaselineWindow =
     selected?.summary?.source === "GREEN_BUTTON"

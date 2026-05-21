@@ -46,6 +46,10 @@ vi.mock("@/modules/realUsageAdapter/greenButton", () => ({
   getLatestGreenButtonFullDayDateKey: (...args: any[]) => getLatestGreenButtonFullDayDateKey(...args),
 }));
 
+vi.mock("@/modules/usageSimulator/labTestHome", () => ({
+  getOnePathLabTestHomeLink: vi.fn().mockResolvedValue({ testHomeHouseId: "test-home-1" }),
+}));
+
 vi.mock("@/lib/usage/canonicalMetadataWindow", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/usage/canonicalMetadataWindow")>();
   return {
@@ -54,8 +58,17 @@ vi.mock("@/lib/usage/canonicalMetadataWindow", async (importOriginal) => {
       startDate: "2024-12-02",
       endDate: "2025-12-01",
     }),
+    buildUtcRangeForChicagoLocalDateRange: () => ({
+      startInclusive: new Date("2024-12-02T06:00:00.000Z"),
+      endInclusive: new Date("2025-12-02T05:59:59.999Z"),
+    }),
   };
 });
+
+vi.mock("@/lib/usage/greenButtonHouseCleanup", () => ({
+  clearGreenButtonSupersededBySmtForHouse: vi.fn().mockResolvedValue(false),
+  clearGreenButtonUsageForHouse: vi.fn().mockResolvedValue(undefined),
+}));
 
 describe("actualDatasetForHouse source selection", () => {
   beforeEach(() => {
