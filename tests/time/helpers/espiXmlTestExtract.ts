@@ -16,7 +16,7 @@ export function extractEspiReadingsFromXmlForTest(xml: string): {
   const tzMatch = xml.match(/<tzOffset>(-?\d+)<\/tzOffset>/);
   const tzOffsetSeconds = tzMatch ? Number(tzMatch[1]) : null;
 
-  const titleHints = [...xml.matchAll(/<title>([^<]+)<\/title>/gi)]
+  const titleHints = Array.from(xml.matchAll(/<title>([^<]+)<\/title>/gi))
     .map((m) => m[1]?.trim() ?? "")
     .filter(Boolean)
     .slice(0, 20);
