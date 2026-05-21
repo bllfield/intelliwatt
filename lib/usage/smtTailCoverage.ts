@@ -13,6 +13,7 @@ import {
   loadSmtWindowDayStatus,
   missingChicagoSlotsFromFilledSlots,
   resolveSmtCanonicalWindow,
+  smtRequiredSlotsForDateKey,
   SMT_REQUIRED_SLOTS_PER_DAY,
   type SmtPersistedCoverageSpan,
   type SmtWindowStatusSnapshot,
@@ -38,6 +39,12 @@ export const ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS = 90_000;
 /** Second pass when a day is one or two intervals short after the first wait times out. */
 export const ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_SECOND_PASS_WAIT_TIMEOUT_MS = 60_000;
 /** Days at or above this count get a padded second targeted backfill + wait. */
+/** Two slots short of the DST-aware required count for that local day. */
+export function smtNearCompleteIntervalThreshold(dateKey: string): number {
+  return Math.max(1, smtRequiredSlotsForDateKey(dateKey) - 2);
+}
+
+/** @deprecated Use smtNearCompleteIntervalThreshold(dateKey) for DST-aware days. */
 export const SMT_NEAR_COMPLETE_INTERVAL_THRESHOLD = 94;
 /** Pause after a post-backfill pull so ingestion can finish before polling counts. */
 export const SMT_POST_BACKFILL_SETTLE_DELAY_MS = 3_000;
@@ -209,7 +216,8 @@ export function smtTargetEndDayIntervalCount(
 export function smtCanonicalEndDayIncomplete(
   coverage: Pick<SmtTailCoverageSnapshot, "targetEndDate" | "tailCountsByDate">
 ): boolean {
-  return smtTargetEndDayIntervalCount(coverage) < SMT_TAIL_REQUIRED_INTERVALS_PER_DAY;
+  const required = smtRequiredSlotsForDateKey(coverage.targetEndDate);
+  return smtTargetEndDayIntervalCount(coverage) < required;
 }
 
 /**

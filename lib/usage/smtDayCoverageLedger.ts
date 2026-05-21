@@ -11,6 +11,7 @@ import {
   type UsageRefreshResult,
 } from "@/lib/usage/userUsageRefresh";
 import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
+import { smtRequiredSlotsForDateKey } from "@/lib/usage/smtWindowStatus";
 
 export const SMT_DAY_LEDGER_STATUS = {
   COMPLETE: "COMPLETE",
@@ -219,7 +220,7 @@ export function resolveSmtDayLedgerStatusForDate(args: {
 }): SmtDayLedgerStatus {
   const existingStatus = String(args.existingStatus ?? "").trim().toUpperCase() as SmtDayLedgerStatus;
 
-  if (args.intervalCount >= SMT_TAIL_REQUIRED_INTERVALS_PER_DAY) {
+  if (args.intervalCount >= smtRequiredSlotsForDateKey(args.dateKey)) {
     return SMT_DAY_LEDGER_STATUS.COMPLETE;
   }
   if (args.dateKey === args.canonicalEndDate) {

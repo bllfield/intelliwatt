@@ -23,6 +23,11 @@ import {
 } from "@/lib/usage/canonicalMetadataWindow";
 import { buildUtcRangeForChicagoLocalDateRange } from "@/lib/usage/greenButtonCoverage";
 import { chicagoDateKey, dateTimePartsInTimezone, prevCalendarDayDateKey } from "@/lib/time/chicago";
+import {
+  convertSmtPersistedRowsToHome,
+  homeDailyToUsageSeriesPoints,
+  tailIntervals15,
+} from "@/lib/time/smtPersistedIntervalConvert";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const USAGE_DB_ENABLED = Boolean((process.env.USAGE_DATABASE_URL ?? "").trim());
@@ -912,21 +917,27 @@ async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult
   const totalKwh = round2(importKwh - exportKwh);
   const start = agg?.start ?? null;
   const end = agg?.end ?? null;
-  const recentIntervals = await prisma.$queryRaw<Array<{ ts: Date; kwh: number }>>(Prisma.sql`
+  const intervalRows = await prisma.$queryRaw<Array<{ ts: Date; kwh: number }>>(Prisma.sql`
     SELECT DISTINCT ON ("ts") "ts", GREATEST("kwh", 0)::float AS kwh
     FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${window.cutoff} AND "ts" <= ${window.end}
-    ORDER BY "ts" DESC, CASE WHEN "meter" = 'unknown' THEN 1 ELSE 0 END ASC, "updatedAt" DESC
-    LIMIT 192
+    ORDER BY "ts" ASC, CASE WHEN "meter" = 'unknown' THEN 1 ELSE 0 END ASC, "updatedAt" DESC
   `);
-  const intervals15 = recentIntervals.map((row) => ({ timestamp: row.ts.toISOString(), kwh: decimalToNumber(row.kwh) })).reverse();
+  const smtConverted = convertSmtPersistedRowsToHome(
+    intervalRows.map((row) => ({ ts: row.ts, kwh: decimalToNumber(row.kwh) })),
+    SMT_TZ,
+  );
+  const intervals15 = tailIntervals15(smtConverted.intervals, 192);
+  const dailyFromCalendar = homeDailyToUsageSeriesPoints(smtConverted).sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+  );
   const hourlyRows = await prisma.$queryRaw<Array<{ bucket: Date; kwh: number }>>(Prisma.sql`
     WITH iv AS (SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${window.cutoff} AND "ts" <= ${window.end} AND "ts" >= NOW() - INTERVAL '14 days' GROUP BY "ts")
     SELECT date_trunc('hour', "ts") AS bucket, COALESCE(SUM("kwh"), 0)::float AS kwh FROM iv GROUP BY bucket ORDER BY bucket ASC
   `);
-  const dailyRows = await prisma.$queryRaw<Array<{ bucket: Date; kwh: number }>>(Prisma.sql`
-    WITH iv AS (SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${window.cutoff} AND "ts" <= ${window.end} GROUP BY "ts")
-    SELECT date_trunc('day', (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) AT TIME ZONE 'America/Chicago' AS bucket, COALESCE(SUM("kwh"), 0)::float AS kwh FROM iv GROUP BY bucket ORDER BY bucket DESC LIMIT 400
-  `);
+  const dailyRows = dailyFromCalendar.slice(0, 400).map((row) => ({
+    bucket: new Date(row.timestamp),
+    kwh: row.kwh,
+  }));
   const monthlyRows = await prisma.$queryRaw<Array<{ bucket: Date; kwh: number }>>(Prisma.sql`
     WITH iv AS (SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${window.cutoff} AND "ts" <= ${window.end} GROUP BY "ts")
     SELECT date_trunc('month', (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) AT TIME ZONE 'America/Chicago' AS bucket, COALESCE(SUM("kwh"), 0)::float AS kwh FROM iv GROUP BY bucket ORDER BY bucket DESC LIMIT 120
