@@ -1,4 +1,5 @@
-import { canonicalUsageWindowChicago } from "@/lib/time/chicago";
+import { DateTime } from "luxon";
+import { canonicalUsageWindowChicago, smtCoverageDateKey } from "@/lib/time/chicago";
 import {
   CANONICAL_COVERAGE_LAG_DAYS,
   CANONICAL_COVERAGE_TOTAL_DAYS,
@@ -74,5 +75,42 @@ export function resolveCanonicalUsage365CoverageWindow(
   return {
     startDate: String(win.startDate).slice(0, 10),
     endDate: String(win.endDate).slice(0, 10),
+  };
+}
+
+/** True when an interval timestamp maps to a Chicago date key inside the coverage window. */
+export function isSmtIntervalInCanonicalCoverageWindow(ts: Date, window: CoverageWindow): boolean {
+  const dateKey = smtCoverageDateKey(ts);
+  if (!dateKey) return false;
+  return dateKey >= window.startDate && dateKey <= window.endDate;
+}
+
+export function filterIntervalsToCanonicalCoverageWindow<T extends { ts: Date }>(
+  intervals: T[],
+  window: CoverageWindow
+): T[] {
+  return intervals.filter((interval) =>
+    isSmtIntervalInCanonicalCoverageWindow(
+      interval.ts instanceof Date ? interval.ts : new Date(interval.ts),
+      window
+    )
+  );
+}
+
+/** UTC bounds that fully cover every Chicago calendar day in the coverage window (for DB range scans). */
+export function canonicalCoverageWindowUtcBounds(window: CoverageWindow): {
+  rangeStart: Date;
+  rangeEndInclusive: Date;
+} {
+  const zone = "America/Chicago";
+  const rangeStart = DateTime.fromISO(window.startDate, { zone }).startOf("day").toUTC();
+  const rangeEndInclusive = DateTime.fromISO(window.endDate, { zone })
+    .plus({ days: 1 })
+    .startOf("day")
+    .minus({ milliseconds: 1 })
+    .toUTC();
+  return {
+    rangeStart: rangeStart.toJSDate(),
+    rangeEndInclusive: rangeEndInclusive.toJSDate(),
   };
 }

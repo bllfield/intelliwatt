@@ -12,7 +12,11 @@ import {
   enqueueDeferredPostIngestTasks,
   shouldThrottleInlinePostIngest,
 } from '@/lib/usage/smtDeferredPostIngest';
-import { resolveCanonicalUsage365CoverageWindow } from '@/modules/usageSimulator/metadataWindow';
+import {
+  canonicalCoverageWindowUtcBounds,
+  filterIntervalsToCanonicalCoverageWindow,
+  resolveCanonicalUsage365CoverageWindow,
+} from '@/lib/usage/canonicalMetadataWindow';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300; // allow large SMT raw uploads
@@ -258,9 +262,9 @@ export async function POST(req: NextRequest) {
         }
 
         const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
-        const windowStart = new Date(`${canonicalCoverage.startDate}T00:00:00.000Z`);
-        const windowEnd = new Date(`${canonicalCoverage.endDate}T23:59:59.999Z`);
-        const bounded = intervals.filter((i) => i.ts >= windowStart && i.ts <= windowEnd);
+        const { rangeStart: windowStart, rangeEndInclusive: windowEnd } =
+          canonicalCoverageWindowUtcBounds(canonicalCoverage);
+        const bounded = filterIntervalsToCanonicalCoverageWindow(intervals, canonicalCoverage);
 
         const distinctEsiids = Array.from(new Set(bounded.map((i) => i.esiid))).filter(Boolean);
 

@@ -340,6 +340,9 @@ export async function replaceNormalizedSmtIntervals(args: {
   }
 
   const distinctEsiids = Array.from(new Set(pairs.map((p) => p.esiid))).filter(Boolean);
+  if (distinctEsiids.length > 0) {
+    await reconcileSmtLedgerAfterPersist({ esiids: distinctEsiids }).catch(() => null);
+  }
   return {
     inserted,
     skipped: Math.max(0, records - inserted),

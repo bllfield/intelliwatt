@@ -7,7 +7,11 @@ import { ensureCoreMonthlyBuckets } from '@/lib/usage/aggregateMonthlyBuckets';
 import { replaceNormalizedSmtIntervals } from '@/lib/usage/normalizeSmtIntervals';
 import { normalizeSmtIntervals, type NormalizeStats } from '@/app/lib/smt/normalize';
 import { runPlanPipelineForHome } from '@/lib/plan-engine/runPlanPipelineForHome';
-import { resolveCanonicalUsage365CoverageWindow } from '@/modules/usageSimulator/metadataWindow';
+import {
+  canonicalCoverageWindowUtcBounds,
+  filterIntervalsToCanonicalCoverageWindow,
+  resolveCanonicalUsage365CoverageWindow,
+} from '@/lib/usage/canonicalMetadataWindow';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -212,9 +216,9 @@ export async function POST(req: NextRequest) {
     const tsMaxDate = timestamps.length ? new Date(Math.max(...timestamps)) : undefined;
 
     const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
-    const windowStart = new Date(`${canonicalCoverage.startDate}T00:00:00.000Z`);
-    const windowEnd = new Date(`${canonicalCoverage.endDate}T23:59:59.999Z`);
-    const boundedIntervals = intervals.filter((i) => i.ts >= windowStart && i.ts <= windowEnd);
+    const { rangeStart: windowStart, rangeEndInclusive: windowEnd } =
+      canonicalCoverageWindowUtcBounds(canonicalCoverage);
+    const boundedIntervals = filterIntervalsToCanonicalCoverageWindow(intervals, canonicalCoverage);
 
     if (boundedIntervals.length === 0) {
       summary.files.push({
