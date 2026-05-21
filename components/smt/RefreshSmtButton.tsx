@@ -1,7 +1,11 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState, useTransition } from 'react';
+import { useCallback, useEffect, useState, useTransition } from 'react';
+import {
+  resolveSmtOrchestrateUiPhase,
+  smtOrchestrateCoverageSuffix,
+} from '@/components/smt/applySmtOrchestrateState';
 
 interface RefreshSmtButtonProps {
   homeId: string;
@@ -16,19 +20,101 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
   const [isPending, startTransition] = useTransition();
   const [isWaitingOnSmt, setIsWaitingOnSmt] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isDoneProcessing, setIsDoneProcessing] = useState(false);
+
+  const applyOrchestratePayload = useCallback(
+    (payload: any): boolean => {
+      const uiPhase = resolveSmtOrchestrateUiPhase(payload);
+      if (!uiPhase) return false;
+
+      const coverageText = smtOrchestrateCoverageSuffix(payload);
+      const usageMessage =
+        (payload?.usage?.message as string | undefined) ??
+        (payload?.message as string | undefined) ??
+        null;
+
+      if (uiPhase === 'ready') {
+        setIsWaitingOnSmt(false);
+        setIsProcessing(false);
+        setIsDoneProcessing(false);
+        setStatus('success');
+        setMessage(
+          usageMessage ||
+            'Your full SMT history has been ingested and your usage has been refreshed.',
+        );
+        router.refresh();
+        return true;
+      }
+
+      if (uiPhase === 'ingest_complete') {
+        setIsWaitingOnSmt(false);
+        setIsProcessing(false);
+        setIsDoneProcessing(true);
+        setStatus('success');
+        setMessage((usageMessage || 'Done processing SMT data.') + coverageText);
+        router.refresh();
+        return true;
+      }
+
+      if (uiPhase === 'processing') {
+        setIsWaitingOnSmt(false);
+        setIsProcessing(true);
+        setIsDoneProcessing(false);
+        setStatus('success');
+        setMessage(
+          (usageMessage ||
+            'We are processing your SMT usage. Historical backfill can take some time.') +
+            coverageText,
+        );
+        return false;
+      }
+
+      setIsWaitingOnSmt(true);
+      setIsProcessing(false);
+      setIsDoneProcessing(false);
+      setStatus('success');
+      setMessage(usageMessage || 'Waiting for SMT interval data delivery.');
+      return false;
+    },
+    [router],
+  );
+
+  useEffect(() => {
+    if (!homeId) return;
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const res = await fetch('/api/user/usage/status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ homeId }),
+          cache: 'no-store',
+        });
+        const payload: any = await res.json().catch(() => null);
+        if (cancelled || !payload?.ok) return;
+        applyOrchestratePayload(payload);
+      } catch {
+        // non-fatal; button stays idle until user clicks refresh
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [homeId, applyOrchestratePayload]);
 
   function pollDelayMs(attempts: number): number {
-    // Reduce DB pressure while still giving quick initial feedback.
-    if (attempts < 6) return 5000; // ~30s fast checks
-    if (attempts < 20) return 15000; // ~3.5 min
-    return 30000; // thereafter
+    if (attempts < 6) return 5000;
+    if (attempts < 20) return 15000;
+    return 30000;
   }
 
   async function pollUsageReady(homeIdToPoll: string, attempts: number = 0): Promise<void> {
-    // Cap polling to about ~20 minutes with backoff.
     if (attempts > 60) {
       setIsWaitingOnSmt(false);
       setIsProcessing(false);
+      setIsDoneProcessing(false);
       setStatus('error');
       setMessage('Still waiting on SMT data after several minutes. Try again later.');
       return;
@@ -44,35 +130,12 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
 
       const payload: any = await res.json().catch(() => null);
       if (res.ok && payload?.ok) {
-        if (payload.phase === 'ready' || payload?.usage?.ready) {
-          setIsWaitingOnSmt(false);
-          setIsProcessing(false);
-          setStatus('success');
-          setMessage('Your full SMT history has been ingested and your usage has been refreshed.');
-          router.refresh();
-          return;
-        }
-        if (payload.phase === 'active_waiting_usage' || payload?.usage?.status === 'processing' || (payload?.usage?.rawFiles > 0 && !payload?.usage?.ready)) {
-          // We have raw files but intervals are not fully ready; show "processing".
-          setIsWaitingOnSmt(false);
-          setIsProcessing(true);
-          setStatus('success');
-          const coverage = payload?.usage?.coverage;
-          const coverageText =
-            coverage?.start && coverage?.end
-              ? ` Current coverage: ${String(coverage.start).slice(0, 10)} – ${String(coverage.end).slice(0, 10)} (${coverage.days ?? '?'} day(s)).`
-              : '';
-          setMessage(
-            (payload?.usage?.message ||
-              'We are processing your SMT usage. Historical backfill can take some time.') + coverageText,
-          );
-        }
+        if (applyOrchestratePayload(payload)) return;
       }
     } catch {
-      // swallow transient polling errors; we will try again
+      // swallow transient polling errors
     }
 
-    // Try again with backoff.
     setTimeout(() => {
       void pollUsageReady(homeIdToPoll, attempts + 1);
     }, pollDelayMs(attempts));
@@ -84,10 +147,10 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
     setMessage(null);
     setIsWaitingOnSmt(false);
     setIsProcessing(false);
+    setIsDoneProcessing(false);
 
     startTransition(async () => {
       try {
-        // Call usage refresh first so backfill + pull run immediately (no 60s orchestrate throttle).
         try {
           await fetch('/api/user/usage/refresh', {
             method: 'POST',
@@ -96,15 +159,14 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
             cache: 'no-store',
           });
         } catch {
-          // Non-blocking; orchestrate below still runs for status and pull if needed.
+          // non-blocking
         }
 
         const usageResponse = await fetch('/api/user/smt/orchestrate', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ homeId, force: true }),
+          cache: 'no-store',
         });
 
         let usagePayload: any = null;
@@ -122,27 +184,15 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
           );
         }
 
-        // If the server says we're in a 30-day cooldown (data is fresh and no gaps),
-        // surface that and avoid long polling loops.
         const pullEligibleNow = Boolean(usagePayload?.actions?.pullEligibleNow ?? true);
         const pullEligibleAt = usagePayload?.actions?.pullEligibleAt ?? null;
         if (!pullEligibleNow && (usagePayload?.usage?.ready || usagePayload?.phase === 'ready')) {
-          setIsWaitingOnSmt(false);
-          setIsProcessing(false);
-          setStatus('success');
-          setMessage(
-            (usagePayload?.usage?.message as string) ||
-              (pullEligibleAt
-                ? `Your SMT data is up to date. Next refresh available after ${String(pullEligibleAt).slice(0, 10)}.`
-                : 'Your SMT data is up to date.'),
-          );
-          router.refresh();
+          applyOrchestratePayload(usagePayload);
           return;
         }
 
-        // If SMT pull/backfill/normalize succeeded, start polling to see when
-        // the data actually lands. This is primarily for the SMT path, which
-        // may take some time between backfill request and SFTP delivery.
+        if (applyOrchestratePayload(usagePayload)) return;
+
         setIsWaitingOnSmt(true);
         setStatus('success');
         setMessage(
@@ -173,8 +223,10 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
         {isPending || isWaitingOnSmt
           ? 'Waiting on SMT…'
           : isProcessing
-          ? 'Processing SMT Data…'
-          : 'Refresh SMT Data'}
+            ? 'Processing SMT Data…'
+            : isDoneProcessing
+              ? 'Done Processing'
+              : 'Refresh SMT Data'}
       </button>
       {status === 'success' && message ? (
         <span className="text-xs text-emerald-300">{message}</span>
@@ -185,5 +237,3 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
     </div>
   );
 }
-
-

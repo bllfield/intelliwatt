@@ -13,6 +13,10 @@ import {
   smtWindowCompletenessRatio,
 } from "@/lib/usage/smtWindowStatus";
 import {
+  resolveSmtUserProcessingStage,
+  type SmtUserProcessingStage,
+} from "@/lib/usage/smtUserProcessingStage";
+import {
   resolveUserUsageSessionKey,
   USER_USAGE_SESSION_COOKIE,
 } from "@/lib/usage/userUsageSessionKey";
@@ -93,7 +97,9 @@ type UsageCoverage = {
   pullEligibleNow: boolean;
   pullEligibleAt: string | null;
   ready: boolean;
-  phase: "ready" | "processing" | "pending";
+  ingestComplete: boolean;
+  userStage: SmtUserProcessingStage;
+  phase: "ready" | "ingest_complete" | "processing" | "pending";
   message: string | null;
 };
 
@@ -169,8 +175,22 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
   const missingGapsForEligibility = missingGapsOrPendingDelivery;
 
   const ready = historyReady;
+  const userStage = resolveSmtUserProcessingStage({
+    intervalCount,
+    rawCount,
+    windowReady: completenessOk,
+    completenessRatio: intervalCompletenessBySpan,
+    coverageDays,
+  });
+  const ingestComplete = userStage === "ingest_complete" || userStage === "ready";
   const phase: UsageCoverage["phase"] =
-    ready ? "ready" : intervalCount > 0 || rawCount > 0 ? "processing" : "pending";
+    userStage === "ready"
+      ? "ready"
+      : userStage === "ingest_complete"
+        ? "ingest_complete"
+        : userStage === "ingesting"
+          ? "processing"
+          : "pending";
 
   const pullEligibleNow = intervalCount === 0 || dataOlderThan30d || missingGapsForEligibility;
   const pullEligibleAt = coverageEnd
@@ -196,6 +216,18 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
         : base;
     }
     if (phase === "pending") return "Waiting for SMT interval data delivery.";
+    if (phase === "ingest_complete") {
+      if (intervalCount > 0 && coverageStart && coverageEnd) {
+        const pct = intervalCompletenessBySpan > 0 ? Math.round(intervalCompletenessBySpan * 100) : 0;
+        const gapsNote =
+          headGapDays > 0 || tailGapDays > 0
+            ? ` Missing ~${headGapDays} day(s) at start and ~${tailGapDays} day(s) at end of the 12‑month window (to yesterday).`
+            : "";
+        const shortRangeLead = coverageDays < 365 && rangeText ? `${rangeText} ` : "";
+        return `${shortRangeLead}SMT intervals ingested (${coverageDays} day(s)). Coverage completeness ~${pct}%.${gapsNote} Done processing SMT data.`.trim();
+      }
+      return "Done processing SMT data.";
+    }
     if (phase === "processing") {
       if (intervalCount > 0 && coverageStart && coverageEnd) {
         const pct = intervalCompletenessBySpan > 0 ? Math.round(intervalCompletenessBySpan * 100) : 0;
@@ -205,12 +237,11 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
             : "";
         const shortRangeLead = coverageDays < 365 && rangeText ? `${rangeText} ` : "";
         if (rawCount === 0) {
-          return `${shortRangeLead}SMT intervals ingested (${coverageDays} day(s)). Coverage completeness ~${pct}%.${gapsNote}`.trim();
+          return `${shortRangeLead}SMT intervals ingested (${coverageDays} day(s)). Coverage completeness ~${pct}%.${gapsNote} Finishing processing.`.trim();
         }
-        return `${shortRangeLead}SMT intervals ingested (${coverageDays} day(s)). Coverage completeness ~${pct}%.${gapsNote} Processing newly received SMT files; we will keep checking for more older dates from SMT.`.trim();
+        return `${shortRangeLead}SMT intervals ingested (${coverageDays} day(s)). Coverage completeness ~${pct}%.${gapsNote} Processing newly received SMT files.`.trim();
       }
-      if (rawCount > 0)
-        return "SMT files received; processing intervals. We will keep checking for more older dates from SMT.";
+      if (rawCount > 0) return "SMT files received; processing intervals.";
       return "Processing SMT usage.";
     }
     return null;
@@ -220,6 +251,8 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
     intervalCount,
     intervalExpectedBySpan,
     intervalCompletenessBySpan,
+    ingestComplete,
+    userStage,
     rawCount,
     coverageStart,
     coverageEnd,
@@ -503,14 +536,16 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const done = Boolean(isExpired || usage.ready);
+  const done = Boolean(isExpired || usage.ready || usage.ingestComplete);
   const phase =
     isExpired
       ? "expired"
       : active
         ? usage.ready
           ? "ready"
-          : "active_waiting_usage"
+          : usage.userStage === "ingest_complete"
+            ? "ingest_complete"
+            : "active_waiting_usage"
         : "waiting_authorization";
 
   const nextPollMs =
@@ -541,6 +576,8 @@ export async function POST(req: NextRequest) {
     },
     usage: {
       ready: usage.ready,
+      ingestComplete: usage.ingestComplete,
+      userStage: usage.userStage,
       status: usage.phase,
       intervals: usage.intervalCount,
       rawFiles: usage.rawCount,

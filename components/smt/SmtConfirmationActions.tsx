@@ -1,7 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  resolveSmtOrchestrateUiPhase,
+  smtOrchestrateCoverageSuffix,
+} from "@/components/smt/applySmtOrchestrateState";
 
 type ActionState = "idle" | "approved" | "declined" | "refresh";
 
@@ -17,6 +21,62 @@ export function SmtConfirmationActions({ homeId }: Props) {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isWaitingOnSmt, setIsWaitingOnSmt] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isDoneProcessing, setIsDoneProcessing] = useState(false);
+
+  const applyOrchestratePayload = useCallback(
+    (payload: any): boolean => {
+      const uiPhase = resolveSmtOrchestrateUiPhase(payload);
+      if (!uiPhase) return false;
+
+      const coverageText = smtOrchestrateCoverageSuffix(payload);
+      const usageMessage =
+        (payload?.usage?.message as string | undefined) ??
+        (payload?.message as string | undefined) ??
+        null;
+
+      if (uiPhase === "ready") {
+        setIsWaitingOnSmt(false);
+        setIsProcessing(false);
+        setIsDoneProcessing(false);
+        setStatusMessage(
+          usageMessage ||
+            "Your full SMT history has been ingested and your dashboard has been updated.",
+        );
+        setState("idle");
+        router.replace("/dashboard");
+        router.refresh();
+        return true;
+      }
+
+      if (uiPhase === "ingest_complete") {
+        setIsWaitingOnSmt(false);
+        setIsProcessing(false);
+        setIsDoneProcessing(true);
+        setStatusMessage((usageMessage || "Done processing SMT data.") + coverageText);
+        router.refresh();
+        return true;
+      }
+
+      if (uiPhase === "processing") {
+        setIsWaitingOnSmt(false);
+        setIsProcessing(true);
+        setIsDoneProcessing(false);
+        setStatusMessage(
+          (usageMessage ||
+            "We are processing your SMT usage. Historical backfill can take some time.") +
+            coverageText,
+        );
+        return false;
+      }
+
+      setIsWaitingOnSmt(true);
+      setIsProcessing(false);
+      setIsDoneProcessing(false);
+      setStatusMessage(usageMessage || "Waiting for SMT interval data delivery.");
+      return false;
+    },
+    [router],
+  );
 
   function pollDelayMs(attempts: number): number {
     if (attempts < 6) return 5000;
@@ -29,6 +89,7 @@ export function SmtConfirmationActions({ homeId }: Props) {
     if (attempts > 60) {
       setIsWaitingOnSmt(false);
       setIsProcessing(false);
+      setIsDoneProcessing(false);
       setError("Still waiting on SMT data after several minutes. Try again later.");
       return;
     }
@@ -42,29 +103,8 @@ export function SmtConfirmationActions({ homeId }: Props) {
       });
       const payload: any = await res.json().catch(() => null);
 
-      if (res.ok && payload?.ok) {
-        if (payload.phase === "ready" || payload?.usage?.ready) {
-          setIsWaitingOnSmt(false);
-          setIsProcessing(false);
-          setStatusMessage("Your full SMT history has been ingested and your dashboard has been updated.");
-          setState("idle");
-          router.replace("/dashboard");
-          router.refresh();
-          return;
-        }
-        if (payload.phase === "active_waiting_usage" || payload?.usage?.status === "processing" || (payload?.usage?.rawFiles > 0 && !payload?.usage?.ready)) {
-          setIsWaitingOnSmt(false);
-          setIsProcessing(true);
-          const coverage = payload?.usage?.coverage;
-          const coverageText =
-            coverage?.start && coverage?.end
-              ? ` Current coverage: ${String(coverage.start).slice(0, 10)} – ${String(coverage.end).slice(0, 10)} (${coverage.days ?? "?"} day(s)).`
-              : "";
-          setStatusMessage(
-            (payload?.usage?.message ||
-              "We are processing your SMT usage. Historical backfill can take some time.") + coverageText,
-          );
-        }
+      if (res.ok && payload?.ok && applyOrchestratePayload(payload)) {
+        return;
       }
     } catch {
       // swallow transient polling errors; we will try again
@@ -99,6 +139,8 @@ export function SmtConfirmationActions({ homeId }: Props) {
         throw new Error(message);
       }
 
+      if (applyOrchestratePayload(usagePayload)) return;
+
       setIsWaitingOnSmt(true);
       setIsProcessing(false);
       if (!options?.preserveStatusMessage) {
@@ -121,6 +163,7 @@ export function SmtConfirmationActions({ homeId }: Props) {
     setStatusMessage(null);
     setIsWaitingOnSmt(false);
     setIsProcessing(false);
+    setIsDoneProcessing(false);
 
     try {
       const confirmation = await fetch("/api/user/smt/email-confirmation", {
@@ -246,9 +289,11 @@ export function SmtConfirmationActions({ homeId }: Props) {
           disabled={state !== "idle" || isWaitingOnSmt || isProcessing}
           className="inline-flex items-center justify-center rounded-md border border-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {state === "approved" || isWaitingOnSmt || isProcessing
+          {state === "approved" || isWaitingOnSmt || isProcessing || isDoneProcessing
             ? isProcessing
               ? "Processing SMT data…"
+              : isDoneProcessing
+              ? "Done processing"
               : "Waiting on SMT…"
             : "I approved the SMT email"}
         </button>

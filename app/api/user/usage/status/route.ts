@@ -5,7 +5,8 @@ import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { getRollingBackfillRange } from "@/lib/smt/agreements";
 import { chicagoDateKey } from "@/lib/time/chicago";
-import { loadSmtWindowDayStatus } from "@/lib/usage/smtWindowStatus";
+import { resolveSmtUserProcessingStage } from "@/lib/usage/smtUserProcessingStage";
+import { loadSmtWindowDayStatus, smtWindowCompletenessRatio } from "@/lib/usage/smtWindowStatus";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -128,9 +129,25 @@ export async function POST(req: NextRequest) {
   });
 
   const windowStatus = await loadSmtWindowDayStatus({ esiid: house.esiid });
+  const completenessRatio = smtWindowCompletenessRatio(windowStatus);
+  const userStage = resolveSmtUserProcessingStage({
+    intervalCount,
+    rawCount,
+    windowReady: windowStatus.ready,
+    completenessRatio,
+    coverageDays,
+  });
   const historyReady = Boolean(windowStatus.ready && rawCount === 0);
   const ready = historyReady;
-  const phase = ready ? "ready" : intervalCount > 0 || rawCount > 0 ? "processing" : "pending";
+  const ingestComplete = userStage === "ingest_complete" || userStage === "ready";
+  const phase =
+    userStage === "ready"
+      ? "ready"
+      : userStage === "ingest_complete"
+        ? "ingest_complete"
+        : userStage === "ingesting"
+          ? "processing"
+          : "pending";
 
   const tailGapDays =
     coverageEndDate
@@ -172,6 +189,8 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     ok: true,
     status: phase,
+    userStage,
+    ingestComplete,
     ready,
     intervals: intervalCount,
     rawFiles: rawCount,
