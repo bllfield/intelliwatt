@@ -2591,8 +2591,10 @@ export async function simulatePastUsageDataset(
         },
         {
           timezone: timezone ?? undefined,
+          homeTimezone: timezone ?? undefined,
           useUtcMonth: true,
           simulatedDayResults: dayResults,
+          excludedDateKeys: excludedDateKeys.size > 0 ? excludedDateKeys : undefined,
           skipHeavyInsights: skipHeavyDatasetInsights,
           correlationId,
         }
