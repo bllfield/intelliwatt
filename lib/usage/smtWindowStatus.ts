@@ -285,7 +285,7 @@ export function filterLedgerIncompleteMeterDateKeysToSlotIncomplete(args: {
   byDate: Readonly<Record<string, SmtWindowDayStatus>>;
 }): string[] {
   const out: string[] = [];
-  for (const dateKey of args.incompleteMeterDateKeys) {
+  for (const dateKey of Array.from(args.incompleteMeterDateKeys)) {
     const dk = String(dateKey ?? "").slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
     if (args.byDate[dk]?.isComplete === true) continue;
