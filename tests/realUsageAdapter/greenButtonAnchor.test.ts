@@ -27,8 +27,8 @@ describe("green button full-day anchor", () => {
     usageQueryRaw
       .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-04-21T05:00:00.000Z") }])
       .mockResolvedValueOnce([
-        { bucket: new Date("2026-04-21T05:00:00.000Z"), intervalscount: 40 },
-        { bucket: new Date("2026-04-20T05:00:00.000Z"), intervalscount: 96 },
+        { date_key: "2026-04-21", intervalscount: 40 },
+        { date_key: "2026-04-20", intervalscount: 96 },
       ]);
 
     const mod = await import("@/modules/realUsageAdapter/greenButton");
@@ -40,7 +40,7 @@ describe("green button full-day anchor", () => {
   it("accepts DST-short days when the interval count matches the expected local-day coverage", async () => {
     usageQueryRaw
       .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-03-08T06:00:00.000Z") }])
-      .mockResolvedValueOnce([{ bucket: new Date("2026-03-08T06:00:00.000Z"), intervalscount: 92 }]);
+      .mockResolvedValueOnce([{ date_key: "2026-03-08", intervalscount: 92 }]);
 
     const mod = await import("@/modules/realUsageAdapter/greenButton");
     const out = await mod.getLatestGreenButtonFullDayDateKey({ houseId: "house-1" });
@@ -52,8 +52,8 @@ describe("green button full-day anchor", () => {
     usageQueryRaw
       .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2025-12-01T23:00:00.000Z") }])
       .mockResolvedValueOnce([
-        { bucket: new Date("2025-12-02T05:00:00.000Z"), intervalscount: 51 },
-        { bucket: new Date("2025-12-01T05:00:00.000Z"), intervalscount: 53 },
+        { date_key: "2025-12-02", intervalscount: 51 },
+        { date_key: "2025-12-01", intervalscount: 53 },
       ]);
 
     const mod = await import("@/modules/realUsageAdapter/greenButton");
@@ -62,11 +62,27 @@ describe("green button full-day anchor", () => {
     expect(out).toBeNull();
   });
 
+  it("finds the latest complete day beyond a long partial upload tail", async () => {
+    const partialTail = Array.from({ length: 36 }, (_, index) => {
+      const day = new Date("2026-06-25T12:00:00.000Z");
+      day.setUTCDate(day.getUTCDate() - index);
+      return { date_key: day.toISOString().slice(0, 10), intervalscount: 12 };
+    });
+    usageQueryRaw
+      .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-06-25T23:00:00.000Z") }])
+      .mockResolvedValueOnce([...partialTail, { date_key: "2026-05-14", intervalscount: 96 }]);
+
+    const mod = await import("@/modules/realUsageAdapter/greenButton");
+    const out = await mod.getLatestGreenButtonFullDayDateKey({ houseId: "house-1" });
+
+    expect(out).toBe("2026-05-14");
+  });
+
   it("rebases older Green Button intervals into the active coverage window", async () => {
     usageQueryRaw
       .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2025-12-01T23:00:00.000Z") }])
       .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2025-12-01T23:00:00.000Z") }])
-      .mockResolvedValueOnce([{ bucket: new Date("2025-12-01T06:00:00.000Z"), intervalscount: 96 }])
+      .mockResolvedValueOnce([{ date_key: "2025-12-01", intervalscount: 96 }])
       .mockResolvedValueOnce([
         { ts: new Date("2025-01-15T12:00:00.000Z"), kwh: 1.25 },
         { ts: new Date("2025-09-01T12:00:00.000Z"), kwh: 2.5 },
@@ -97,7 +113,7 @@ describe("green button full-day anchor", () => {
     usageQueryRaw
       .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2025-09-02T04:45:00.000Z") }])
       .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2025-09-02T04:45:00.000Z") }])
-      .mockResolvedValueOnce([{ bucket: new Date("2025-09-01T05:00:00.000Z"), intervalscount: 96 }])
+      .mockResolvedValueOnce([{ date_key: "2025-09-01", intervalscount: 96 }])
       .mockResolvedValueOnce(utcGridDayIntervals);
 
     const mod = await import("@/modules/realUsageAdapter/greenButton");
@@ -126,7 +142,7 @@ describe("green button full-day anchor", () => {
     usageQueryRaw
       .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-05-13T23:45:00.000Z") }])
       .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-05-13T23:45:00.000Z") }])
-      .mockResolvedValueOnce([{ bucket: new Date("2026-05-13T05:00:00.000Z"), intervalscount: 96 }])
+      .mockResolvedValueOnce([{ date_key: "2026-05-13", intervalscount: 96 }])
       .mockResolvedValueOnce(utcGridDayIntervals);
 
     const mod = await import("@/modules/realUsageAdapter/greenButton");
@@ -153,7 +169,7 @@ describe("green button full-day anchor", () => {
     usageQueryRaw
       .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2025-03-09T05:45:00.000Z") }])
       .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2025-03-09T05:45:00.000Z") }])
-      .mockResolvedValueOnce([{ bucket: new Date("2025-03-08T06:00:00.000Z"), intervalscount: 96 }])
+      .mockResolvedValueOnce([{ date_key: "2025-03-08", intervalscount: 96 }])
       .mockResolvedValueOnce(sourceUtcGridDayIntervals);
 
     const mod = await import("@/modules/realUsageAdapter/greenButton");
@@ -182,8 +198,8 @@ describe("green button full-day anchor", () => {
       .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-05-14T00:00:00.000Z") }])
       .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-05-14T00:00:00.000Z") }])
       .mockResolvedValueOnce([
-        { bucket: new Date("2026-05-14T05:00:00.000Z"), intervalscount: 1 },
-        { bucket: new Date("2026-05-13T05:00:00.000Z"), intervalscount: 96 },
+        { date_key: "2026-05-14", intervalscount: 1 },
+        { date_key: "2026-05-13", intervalscount: 96 },
       ])
       .mockResolvedValueOnce([...shiftedSourceDayIntervals, ...trailingPartialCurrentYearDay]);
 
@@ -212,7 +228,7 @@ describe("green button full-day anchor", () => {
     usageQueryRaw
       .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-05-20T23:45:00.000Z") }])
       .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-05-20T23:45:00.000Z") }])
-      .mockResolvedValueOnce([{ bucket: new Date("2026-05-20T05:00:00.000Z"), intervalscount: 96 }])
+      .mockResolvedValueOnce([{ date_key: "2026-05-20", intervalscount: 96 }])
       .mockResolvedValueOnce([...shiftedSourceDayIntervals, ...trailingPartialCurrentYearDay]);
 
     const mod = await import("@/modules/realUsageAdapter/greenButton");
@@ -244,7 +260,7 @@ describe("green button full-day anchor", () => {
     usageQueryRaw
       .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-05-13T04:45:00.000Z") }])
       .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-05-13T04:45:00.000Z") }])
-      .mockResolvedValueOnce([{ bucket: new Date("2026-05-12T05:00:00.000Z"), intervalscount: 96 }])
+      .mockResolvedValueOnce([{ date_key: "2026-05-12", intervalscount: 96 }])
       .mockResolvedValueOnce([...shiftedSourceDayIntervals, ...trailingPartialCurrentYearDay]);
 
     const greenButton = await import("@/modules/realUsageAdapter/greenButton");
@@ -336,7 +352,7 @@ describe("green button full-day anchor", () => {
     usageQueryRaw
       .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-05-20T23:45:00.000Z") }])
       .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-05-20T23:45:00.000Z") }])
-      .mockResolvedValueOnce([{ bucket: new Date("2026-05-20T05:00:00.000Z"), intervalscount: 96 }])
+      .mockResolvedValueOnce([{ date_key: "2026-05-20", intervalscount: 96 }])
       .mockResolvedValueOnce([...shiftedSourceDayIntervals, ...trustedCurrentYearDayIntervals]);
 
     const mod = await import("@/modules/realUsageAdapter/greenButton");
@@ -362,7 +378,7 @@ describe("green button full-day anchor", () => {
     usageQueryRaw
       .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-05-20T23:45:00.000Z") }])
       .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-05-20T23:45:00.000Z") }])
-      .mockResolvedValueOnce([{ bucket: new Date("2026-05-20T05:00:00.000Z"), intervalscount: 96 }])
+      .mockResolvedValueOnce([{ date_key: "2026-05-20", intervalscount: 96 }])
       .mockResolvedValueOnce(shiftedSourceDayIntervals);
 
     const mod = await import("@/modules/realUsageAdapter/greenButton");
@@ -389,7 +405,7 @@ describe("green button full-day anchor", () => {
     usageQueryRaw
       .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2025-03-10T04:45:00.000Z") }])
       .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2025-03-10T04:45:00.000Z") }])
-      .mockResolvedValueOnce([{ bucket: new Date("2025-03-09T06:00:00.000Z"), intervalscount: 92 }])
+      .mockResolvedValueOnce([{ date_key: "2025-03-09", intervalscount: 92 }])
       .mockResolvedValueOnce(dstShortUtcGridDayIntervals);
 
     const mod = await import("@/modules/realUsageAdapter/greenButton");

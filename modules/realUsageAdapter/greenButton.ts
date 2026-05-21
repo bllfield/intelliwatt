@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
+import { expectedIntervalsForDateISO } from "@/lib/analysis/dst";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { dateTimePartsInTimezone, enumerateDateKeysInclusive } from "@/lib/time/chicago";
-import { expectedSlotsForLocalDate } from "@/lib/time/homeIntervalCalendar";
 import {
   greenButtonHomeIntervalCalendar,
   greenButtonTrustedIntervalThreshold,
@@ -9,6 +9,8 @@ import {
 import { coverageWindowEndingOnDateKey } from "@/lib/usage/canonicalMetadataWindow";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+/** Scan enough trailing local days to find the last complete day inside a 365-day GB file. */
+const GREEN_BUTTON_ANCHOR_DAY_SCAN_LIMIT = 400;
 const MIN_TRUSTED_GREEN_BUTTON_INTERVALS_PER_DAY = 90;
 const MIN_SPLIT_GRID_GREEN_BUTTON_INTERVALS_PER_DAY = 72;
 const USAGE_DB_ENABLED = Boolean((process.env.USAGE_DATABASE_URL ?? "").trim());
@@ -248,18 +250,22 @@ export async function getLatestGreenButtonFullDayDateKey(args: { houseId: string
     const usageClient = usagePrisma as any;
     const rows = (await usageClient.$queryRaw(Prisma.sql`
       SELECT
-        date_trunc('day', ("timestamp" AT TIME ZONE 'America/Chicago')) AT TIME ZONE 'America/Chicago' AS bucket,
-        COUNT(*)::int AS intervalscount
+        to_char(("timestamp" AT TIME ZONE 'America/Chicago')::timestamp, 'YYYY-MM-DD') AS date_key,
+        COUNT(DISTINCT (
+          (EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago'))::int * 4)
+          + (FLOOR(EXTRACT(MINUTE FROM ("timestamp" AT TIME ZONE 'America/Chicago')) / 15)::int)
+        ))::int AS intervalscount
       FROM "GreenButtonInterval"
       WHERE "homeId" = ${args.houseId}
         AND "rawId" = ${rawId}
-      GROUP BY bucket
-      ORDER BY bucket DESC
-      LIMIT 35
-    `)) as Array<{ bucket: Date; intervalscount: number }>;
+      GROUP BY date_key
+      ORDER BY date_key DESC
+      LIMIT ${GREEN_BUTTON_ANCHOR_DAY_SCAN_LIMIT}
+    `)) as Array<{ date_key: string; intervalscount: number }>;
     for (const row of rows) {
-      const dateKey = chicagoDateKeyFromBucket(row.bucket);
-      const expectedIntervals = expectedSlotsForLocalDate(dateKey, greenButtonHomeIntervalCalendar());
+      const dateKey = normalizeDateKey(row.date_key);
+      if (!dateKey) continue;
+      const expectedIntervals = expectedIntervalsForDateISO(dateKey);
       if ((Number(row.intervalscount) || 0) >= expectedIntervals) return dateKey;
     }
     return null;
