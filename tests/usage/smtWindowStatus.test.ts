@@ -48,7 +48,8 @@ function rowsForLocalDateSlots(dateKey: string, slotIndices: number[]): Array<{ 
     const ts = new Date(ms);
     const slot = localSlotIndex(ts, SMT_HOME);
     if (!slotIndices.includes(slot)) continue;
-    if (out.some((row) => localSlotIndex(row.ts, SMT_HOME) === slot)) continue;
+    const tsKey = ts.toISOString();
+    if (out.some((row) => row.ts.toISOString() === tsKey)) continue;
     out.push({ ts });
     if (out.length >= slotIndices.length) break;
   }
@@ -65,9 +66,11 @@ describe("smtWindowStatus", () => {
     expect(smtRequiredSlotsForDateKey("2026-05-17")).toBe(96);
   });
 
-  it("expects 92 slots on Chicago spring-forward day", () => {
+  it("expects 92 slots on Chicago spring-forward day and 100 on fall-back", () => {
     expect(smtRequiredSlotsForDateKey("2026-03-08")).toBe(92);
     expect(enumerateExpectedLocalSlotsForDate("2026-03-08", SMT_HOME)).toHaveLength(92);
+    expect(smtRequiredSlotsForDateKey("2025-11-02")).toBe(100);
+    expect(enumerateExpectedLocalSlotsForDate("2025-11-02", SMT_HOME)).toHaveLength(100);
   });
 
   it("marks spring-forward day complete with 92 distinct local slots", async () => {
@@ -88,7 +91,31 @@ describe("smtWindowStatus", () => {
     });
 
     expect(status.byDate[dateKey]?.requiredSlots).toBe(92);
-    expect(status.byDate[dateKey]?.slotCount).toBe(92);
+    expect(status.byDate[dateKey]?.intervalCount).toBe(92);
+    expect(status.byDate[dateKey]?.isComplete).toBe(true);
+    expect(status.incompleteMeterDateKeys).not.toContain(dateKey);
+  });
+
+  it("marks fall-back day complete at 96 SMT intervals when Luxon expects 100 periods", async () => {
+    const dateKey = "2025-11-02";
+    findManyMock.mockResolvedValue(
+      rowsForLocalDateSlots(dateKey, Array.from({ length: 96 }, (_, i) => i)) as never,
+    );
+    loadSmtDayLedgerSnapshotMock.mockResolvedValue({
+      canonicalEndDate: dateKey,
+      byDate: { [dateKey]: SMT_DAY_LEDGER_STATUS.INCOMPLETE_METER },
+      pendingDateKeys: [],
+      incompleteMeterDateKeys: [dateKey],
+    });
+
+    const status = await loadSmtWindowDayStatus({
+      esiid: "10400511114390001",
+      dateKeys: [dateKey],
+      now: new Date("2025-11-10T12:00:00.000Z"),
+    });
+
+    expect(status.byDate[dateKey]?.requiredSlots).toBe(100);
+    expect(status.byDate[dateKey]?.intervalCount).toBe(96);
     expect(status.byDate[dateKey]?.isComplete).toBe(true);
     expect(status.incompleteMeterDateKeys).not.toContain(dateKey);
   });
@@ -118,7 +145,7 @@ describe("smtWindowStatus", () => {
       now: new Date("2026-05-20T12:00:00.000Z"),
     });
 
-    expect(status.byDate[window.endDate]?.slotCount).toBe(95);
+    expect(status.byDate[window.endDate]?.intervalCount).toBe(95);
     expect(status.byDate[window.endDate]?.requiredSlots).toBe(96);
     expect(status.byDate[window.endDate]?.isComplete).toBe(false);
     expect(status.incompleteDateKeys).toContain(window.endDate);
@@ -166,7 +193,7 @@ describe("smtWindowStatus", () => {
       now: new Date("2026-05-20T12:00:00.000Z"),
     });
 
-    expect(status.byDate[dateKey]?.slotCount).toBe(96);
+    expect(status.byDate[dateKey]?.intervalCount).toBe(96);
     expect(status.byDate[dateKey]?.isComplete).toBe(true);
     expect(status.ready).toBe(true);
     expect(smtWindowCompletenessRatio(status)).toBe(1);

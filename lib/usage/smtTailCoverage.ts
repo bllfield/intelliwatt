@@ -13,6 +13,7 @@ import {
   loadSmtWindowDayStatus,
   missingChicagoSlotsFromFilledSlots,
   resolveSmtCanonicalWindow,
+  smtCompletenessIntervalThreshold,
   smtRequiredSlotsForDateKey,
   SMT_REQUIRED_SLOTS_PER_DAY,
   type SmtPersistedCoverageSpan,
@@ -216,7 +217,9 @@ export function smtTargetEndDayIntervalCount(
 export function smtCanonicalEndDayIncomplete(
   coverage: Pick<SmtTailCoverageSnapshot, "targetEndDate" | "tailCountsByDate">
 ): boolean {
-  const required = smtRequiredSlotsForDateKey(coverage.targetEndDate);
+  const required = smtCompletenessIntervalThreshold(
+    smtRequiredSlotsForDateKey(coverage.targetEndDate),
+  );
   return smtTargetEndDayIntervalCount(coverage) < required;
 }
 
@@ -321,7 +324,7 @@ function dateCoverageProgressFingerprint(
 export async function loadSmtDateCoverage(args: { esiid: string; dateKeys: string[] }): Promise<SmtDateCoverageSnapshot> {
   const windowStatus = await loadSmtWindowDayStatus({ esiid: args.esiid, dateKeys: args.dateKeys });
   const countsByDate = Object.fromEntries(
-    windowStatus.dateKeys.map((dateKey) => [dateKey, windowStatus.byDate[dateKey]?.slotCount ?? 0])
+    windowStatus.dateKeys.map((dateKey) => [dateKey, windowStatus.byDate[dateKey]?.intervalCount ?? 0])
   );
   const missingSlotsByDate = Object.fromEntries(
     windowStatus.dateKeys.map((dateKey) => [dateKey, windowStatus.byDate[dateKey]?.missingSlots ?? []])
@@ -357,7 +360,7 @@ export async function loadSmtTailCoverage(args: {
   const tailDateKeys = enumerateDateKeysInclusive(tailStartDate, targetEndDate);
   const tailWindowStatus = await loadSmtWindowDayStatus({ esiid: args.esiid, dateKeys: tailDateKeys });
   const tailCountsByDate = Object.fromEntries(
-    tailDateKeys.map((dateKey) => [dateKey, tailWindowStatus.byDate[dateKey]?.slotCount ?? 0])
+    tailDateKeys.map((dateKey) => [dateKey, tailWindowStatus.byDate[dateKey]?.intervalCount ?? 0])
   );
   const incompleteTailDateKeys = tailWindowStatus.incompleteDateKeys;
   const targetEndDayLedgerStatus = await loadSmtDayLedgerStatusForDate({

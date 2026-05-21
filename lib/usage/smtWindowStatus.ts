@@ -4,6 +4,7 @@ import {
   enumerateExpectedLocalSlotsForDate,
   expectedSlotsForLocalDate,
   localDateKey,
+  localDayBoundsUtc,
   localSlotIndex,
   missingLocalSlotsForDate,
   smtHomeIntervalCalendar,
@@ -24,6 +25,14 @@ export function smtRequiredSlotsForDateKey(dateKey: string): number {
   return expectedSlotsForLocalDate(dateKey, SMT_HOME);
 }
 
+/**
+ * SMT feeds cap at 96 rows/day. Fall-back Luxon days expect 100 wall periods but meters
+ * still deliver 96 intervals; spring-forward expects 92.
+ */
+export function smtCompletenessIntervalThreshold(requiredSlots: number): number {
+  return Math.min(requiredSlots, SMT_REQUIRED_SLOTS_PER_DAY);
+}
+
 export type SmtCanonicalWindow = {
   startDate: string;
   endDate: string;
@@ -37,6 +46,11 @@ export type SmtPersistedCoverageSpan = {
 
 export type SmtWindowDayStatus = {
   dateKey: string;
+  /** Distinct 15-minute intervals on this local calendar day (used for completeness). */
+  intervalCount: number;
+  /** Distinct local slot indices 0–95 present (falls below intervalCount on fall-back DST). */
+  distinctSlotCount: number;
+  /** @deprecated Use intervalCount — kept for callers that still read slotCount. */
   slotCount: number;
   requiredSlots: number;
   missingSlots: number[];
@@ -89,22 +103,33 @@ function addDateKeyDays(dateKey: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-function accumulateLocalSlotsByDate(args: {
+function accumulateLocalCoverageByDate(args: {
   rows: Array<{ ts: Date | string | null | undefined }>;
   requestedDateSet: Set<string>;
-}): Map<string, Set<number>> {
+}): {
+  intervalsByDate: Map<string, Set<string>>;
+  slotsByDate: Map<string, Set<number>>;
+} {
+  const intervalsByDate = new Map<string, Set<string>>();
   const slotsByDate = new Map<string, Set<number>>();
   for (const row of args.rows) {
     const ts = row?.ts instanceof Date ? row.ts : row?.ts ? new Date(row.ts) : null;
     if (!ts || Number.isNaN(ts.getTime())) continue;
     const dateKey = localDateKey(ts, SMT_HOME);
-    const slot = localSlotIndex(ts, SMT_HOME);
     if (!dateKey || !args.requestedDateSet.has(dateKey)) continue;
-    const bucket = slotsByDate.get(dateKey) ?? new Set<number>();
-    bucket.add(slot);
-    slotsByDate.set(dateKey, bucket);
+    const { startUtc, endUtcExclusive } = localDayBoundsUtc(dateKey, SMT_HOME);
+    if (ts < startUtc || ts >= endUtcExclusive) continue;
+
+    const tsKey = ts.toISOString();
+    const intervalBucket = intervalsByDate.get(dateKey) ?? new Set<string>();
+    intervalBucket.add(tsKey);
+    intervalsByDate.set(dateKey, intervalBucket);
+
+    const slotBucket = slotsByDate.get(dateKey) ?? new Set<number>();
+    slotBucket.add(localSlotIndex(ts, SMT_HOME));
+    slotsByDate.set(dateKey, slotBucket);
   }
-  return slotsByDate;
+  return { intervalsByDate, slotsByDate };
 }
 
 async function loadChicagoSlotCountsByDateKeys(args: {
@@ -112,12 +137,18 @@ async function loadChicagoSlotCountsByDateKeys(args: {
   dateKeys: string[];
 }): Promise<{
   countsByDate: Record<string, number>;
+  distinctSlotCountByDate: Record<string, number>;
   missingSlotsByDate: Record<string, number[]>;
   requiredSlotsByDate: Record<string, number>;
 }> {
   const dateKeys = normalizeDateKeys(args.dateKeys);
   if (dateKeys.length === 0) {
-    return { countsByDate: {}, missingSlotsByDate: {}, requiredSlotsByDate: {} };
+    return {
+      countsByDate: {},
+      distinctSlotCountByDate: {},
+      missingSlotsByDate: {},
+      requiredSlotsByDate: {},
+    };
   }
   const startDate = addDateKeyDays(dateKeys[0]!, -1);
   const endDate = addDateKeyDays(dateKeys[dateKeys.length - 1]!, 1);
@@ -135,11 +166,14 @@ async function loadChicagoSlotCountsByDateKeys(args: {
     })
     .catch(() => []);
   const requestedDateSet = new Set(dateKeys);
-  const slotsByDate = accumulateLocalSlotsByDate({ rows, requestedDateSet });
+  const { intervalsByDate, slotsByDate } = accumulateLocalCoverageByDate({ rows, requestedDateSet });
   const requiredSlotsByDate = Object.fromEntries(
     dateKeys.map((dateKey) => [dateKey, smtRequiredSlotsForDateKey(dateKey)])
   );
   const countsByDate = Object.fromEntries(
+    dateKeys.map((dateKey) => [dateKey, intervalsByDate.get(dateKey)?.size ?? 0])
+  );
+  const distinctSlotCountByDate = Object.fromEntries(
     dateKeys.map((dateKey) => [dateKey, slotsByDate.get(dateKey)?.size ?? 0])
   );
   const missingSlotsByDate = Object.fromEntries(
@@ -148,20 +182,24 @@ async function loadChicagoSlotCountsByDateKeys(args: {
       missingLocalSlotsForDate(slotsByDate.get(dateKey) ?? new Set<number>(), dateKey, SMT_HOME),
     ])
   );
-  return { countsByDate, missingSlotsByDate, requiredSlotsByDate };
+  return { countsByDate, distinctSlotCountByDate, missingSlotsByDate, requiredSlotsByDate };
 }
 
 function buildDayStatus(args: {
   dateKey: string;
-  slotCount: number;
+  intervalCount: number;
+  distinctSlotCount: number;
   requiredSlots: number;
   missingSlots: number[];
   ledgerStatus: SmtDayLedgerStatus | null;
 }): SmtWindowDayStatus {
-  const isComplete = args.slotCount === args.requiredSlots;
+  const isComplete =
+    args.intervalCount >= smtCompletenessIntervalThreshold(args.requiredSlots);
   return {
     dateKey: args.dateKey,
-    slotCount: args.slotCount,
+    intervalCount: args.intervalCount,
+    distinctSlotCount: args.distinctSlotCount,
+    slotCount: args.intervalCount,
     requiredSlots: args.requiredSlots,
     missingSlots: args.missingSlots,
     ledgerStatus: args.ledgerStatus,
@@ -178,7 +216,8 @@ export async function loadSmtWindowDayStatus(args: {
   const dateKeys = normalizeDateKeys(
     args.dateKeys ?? enumerateDateKeysInclusive(window.startDate, window.endDate)
   );
-  const [{ countsByDate, missingSlotsByDate, requiredSlotsByDate }, ledger] = await Promise.all([
+  const [{ countsByDate, distinctSlotCountByDate, missingSlotsByDate, requiredSlotsByDate }, ledger] =
+    await Promise.all([
     loadChicagoSlotCountsByDateKeys({ esiid: args.esiid, dateKeys }),
     loadSmtDayLedgerSnapshot({
       esiid: args.esiid,
@@ -193,10 +232,11 @@ export async function loadSmtWindowDayStatus(args: {
 
   for (const dateKey of dateKeys) {
     const requiredSlots = requiredSlotsByDate[dateKey] ?? smtRequiredSlotsForDateKey(dateKey);
-    const slotCount = countsByDate[dateKey] ?? 0;
+    const intervalCount = countsByDate[dateKey] ?? 0;
     const day = buildDayStatus({
       dateKey,
-      slotCount,
+      intervalCount,
+      distinctSlotCount: distinctSlotCountByDate[dateKey] ?? 0,
       requiredSlots,
       missingSlots: missingSlotsByDate[dateKey] ?? missingLocalSlotsForDate(new Set(), dateKey, SMT_HOME),
       ledgerStatus: ledger.byDate[dateKey] ?? null,
