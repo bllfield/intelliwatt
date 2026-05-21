@@ -610,21 +610,23 @@ export function buildSimulationVariableCopyPayload(args: {
           })()
         : null,
   };
-  const sageBaselineDaily =
-    loadedSourceContext.userUsagePageBaselineContract?.dataset?.daily ??
-    loadedSourceContext.userUsageBaselineContract?.dataset?.daily ??
-    null;
+  const sageBaselineDatasetRaw = asRecord(dashboardContract).dataset;
+  const sageBaselineDataset =
+    sageBaselineDatasetRaw &&
+    typeof sageBaselineDatasetRaw === "object" &&
+    !Array.isArray(sageBaselineDatasetRaw)
+      ? (sageBaselineDatasetRaw as Record<string, unknown>)
+      : null;
+  const sageBaselineDailyRaw = asRecord(sageBaselineDataset).daily;
+  const sageBaselineDaily = Array.isArray(sageBaselineDailyRaw) ? sageBaselineDailyRaw : null;
   const derivedRunDisplayView =
     !lookupOnly && readModelDataset
       ? buildOnePathRunReadOnlyView({
           dataset: readModelDataset,
           engineInput: asNullableRecord(args.engineInput),
           readModel,
-          sageActualDataset:
-            loadedSourceContext.userUsagePageBaselineContract?.dataset ??
-            loadedSourceContext.userUsageBaselineContract?.dataset ??
-            null,
-          sageActualDaily: Array.isArray(sageBaselineDaily) ? sageBaselineDaily : null,
+          sageActualDataset: sageBaselineDataset,
+          sageActualDaily: sageBaselineDaily,
         })
       : null;
   const effectiveRunDisplayView = hasSuppliedRunDisplayView ? runDisplayView : derivedRunDisplayView;
