@@ -39,6 +39,7 @@ import {
 import { loadHomeTimezoneForHouseId } from "@/lib/time/loadHouseTimezone";
 import { resolveHomeTimezone } from "@/lib/time/resolveHomeTimezone";
 import { computeHomeBaseloadKw } from "@/lib/usage/computeHomeBaseloadKw";
+import { buildDisplayedMonthlyRows } from "@/modules/usageSimulator/monthlyCompareRows";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const USAGE_DB_ENABLED = Boolean((process.env.USAGE_DATABASE_URL ?? "").trim());
@@ -155,6 +156,18 @@ function low10Average(values: number[]): number | null {
   if (!slice.length) return null;
   const avg = slice.reduce((a, b) => a + b, 0) / slice.length;
   return Number.isFinite(avg) ? round2(avg) : null;
+}
+
+/** Same monthly series Usage dashboard charts use (stitched tail month merged). */
+function baseloadMonthlyFromDisplayedMonthly(
+  monthlyTotals: Array<{ month: string; kwh: number }>,
+  stitchedMonth: ActualHouseStitchedMonth | null,
+): number | null {
+  const displayed = buildDisplayedMonthlyRows({
+    monthly: monthlyTotals,
+    insights: { stitchedMonth },
+  });
+  return low10Average(displayed.map((row) => Number(row.kwh) || 0));
 }
 
 function percentileCont(sorted: number[], p: number): number | null {
@@ -1378,6 +1391,17 @@ export async function getActualUsageDatasetForHouse(
         baseloadDebugNote: baseloadFiltered.debugNote,
       };
     })();
+    const monthlyForDisplay = buildDisplayedMonthlyRows({
+      monthly: monthlyTotals,
+      insights: { stitchedMonth: insights.stitchedMonth ?? stitchedMonth ?? null },
+    });
+    const baseloadMonthlyForDisplay = baseloadMonthlyFromDisplayedMonthly(
+      monthlyTotals,
+      insights.stitchedMonth ?? stitchedMonth ?? null,
+    );
+    if (baseloadMonthlyForDisplay != null) {
+      insights = { ...insights, baseloadMonthly: baseloadMonthlyForDisplay };
+    }
     const dataset: ActualHouseDataset = {
       summary: applyCanonicalCoverageToUsageSummary(
         {
@@ -1393,7 +1417,7 @@ export async function getActualUsageDatasetForHouse(
           : selected.series.annual,
       },
       daily: dailyTotalsForDataset,
-      monthly: monthlyTotals,
+      monthly: monthlyForDisplay,
       insights,
       totals: { importKwh: totalKwh, exportKwh: 0, netKwh: totalKwh },
       meta: {
@@ -1571,8 +1595,9 @@ export async function getActualUsageDatasetForHouse(
     monthlyTotals: monthlyForDataset,
     stitchedMonth: stitchedMonthForDataset,
   });
-  const baseloadMonthlyFromDataset = low10Average(
-    (monthlyForDataset ?? []).map((m) => Number(m?.kwh) || 0)
+  const baseloadMonthlyFromDataset = baseloadMonthlyFromDisplayedMonthly(
+    monthlyForDataset,
+    stitchedMonthForDataset,
   );
   if (insights && typeof insights === "object") {
     (insights as any).baseloadMonthly = baseloadMonthlyFromDataset;
