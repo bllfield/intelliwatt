@@ -1,8 +1,19 @@
 import { describe, expect, test } from "vitest";
+import { enumerateDateKeysInclusive } from "@/lib/time/chicago";
 import {
+  coverageWindowEndingOnDateKey,
   fillCanonicalDailyTotals,
   resolveCanonicalUsage365CoverageWindow,
 } from "@/lib/usage/canonicalMetadataWindow";
+import { CANONICAL_COVERAGE_TOTAL_DAYS } from "@/lib/usage/canonicalCoverageConfig";
+
+describe("coverageWindowEndingOnDateKey", () => {
+  test("returns 365 inclusive local days ending on the anchor complete day", () => {
+    const window = coverageWindowEndingOnDateKey("2026-05-14", CANONICAL_COVERAGE_TOTAL_DAYS);
+    expect(window).toEqual({ startDate: "2025-05-15", endDate: "2026-05-14" });
+    expect(enumerateDateKeysInclusive(window!.startDate, window!.endDate)).toHaveLength(365);
+  });
+});
 
 describe("fillCanonicalDailyTotals", () => {
   test("zero-fills missing tail day so daily count matches 365-day coverage window", () => {

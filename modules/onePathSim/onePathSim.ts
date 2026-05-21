@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/db";
 import { monthsEndingAt } from "@/lib/time/chicago";
 import { hydrateGreenButtonInsightsForCoverageWindow } from "@/lib/usage/actualDatasetForHouse";
+import { fillCanonicalDailyTotals } from "@/lib/usage/canonicalMetadataWindow";
+import { resolveGreenButtonBaselineCoverageWindow } from "@/lib/usage/greenButtonCoverage";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import {
   attachOnePathRunIdentityToEffectiveSimulationVariablesUsed,
@@ -596,30 +598,53 @@ function isUsableManualStageOnePayload(payload: ManualUsagePayload | null | unde
   );
 }
 
+async function resolveIntervalBaselineDisplayCoverageWindow(args: {
+  engineInput: CanonicalSimulationEngineInput;
+  upstreamDataset: Record<string, unknown>;
+}): Promise<{ window: { startDate: string; endDate: string }; owner: string }> {
+  const canonical = resolveOnePathCanonicalUsage365CoverageWindow();
+  const isGreenButtonBaseline =
+    args.engineInput.scenarioId == null && args.engineInput.inputType === "GREEN_BUTTON";
+  if (isGreenButtonBaseline) {
+    const fromFileAnchor = await resolveGreenButtonBaselineCoverageWindow(args.engineInput.actualContextHouseId);
+    if (fromFileAnchor) {
+      return { window: fromFileAnchor, owner: "resolveGreenButtonBaselineCoverageWindow" };
+    }
+    const meta = asRecord(args.upstreamDataset.meta) ?? {};
+    const metaStart = String(meta.coverageStart ?? "").slice(0, 10);
+    const metaEnd = String(meta.coverageEnd ?? "").slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(metaStart) && /^\d{4}-\d{2}-\d{2}$/.test(metaEnd)) {
+      return { window: { startDate: metaStart, endDate: metaEnd }, owner: "upstream.meta.coverageStart/coverageEnd" };
+    }
+  }
+  if (
+    typeof args.engineInput.coverageWindowStart === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(args.engineInput.coverageWindowStart) &&
+    typeof args.engineInput.coverageWindowEnd === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(args.engineInput.coverageWindowEnd)
+  ) {
+    return {
+      window: {
+        startDate: args.engineInput.coverageWindowStart,
+        endDate: args.engineInput.coverageWindowEnd,
+      },
+      owner: "engineInput.coverageWindowStart/coverageWindowEnd",
+    };
+  }
+  return { window: canonical, owner: "resolveCanonicalUsage365CoverageWindow" };
+}
+
 function buildIntervalBaselinePassthroughDataset(args: {
   engineInput: CanonicalSimulationEngineInput;
   upstreamUsageTruth: BaselinePassthroughUpstreamUsageTruth;
+  displayCoverageWindow: { startDate: string; endDate: string };
+  displayCoverageOwner: string;
 }) {
   const sourceDataset = args.upstreamUsageTruth.dataset ?? {};
   const summary = asRecord((sourceDataset as any).summary) ?? {};
   const meta = asRecord((sourceDataset as any).meta) ?? {};
-  const displayCoverageWindow =
-    typeof args.engineInput.coverageWindowStart === "string" &&
-    /^\d{4}-\d{2}-\d{2}$/.test(args.engineInput.coverageWindowStart) &&
-    typeof args.engineInput.coverageWindowEnd === "string" &&
-    /^\d{4}-\d{2}-\d{2}$/.test(args.engineInput.coverageWindowEnd)
-      ? {
-          startDate: args.engineInput.coverageWindowStart,
-          endDate: args.engineInput.coverageWindowEnd,
-        }
-      : resolveOnePathCanonicalUsage365CoverageWindow();
-  const displayCoverageOwner =
-    typeof args.engineInput.coverageWindowStart === "string" &&
-    /^\d{4}-\d{2}-\d{2}$/.test(args.engineInput.coverageWindowStart) &&
-    typeof args.engineInput.coverageWindowEnd === "string" &&
-    /^\d{4}-\d{2}-\d{2}$/.test(args.engineInput.coverageWindowEnd)
-      ? "engineInput.coverageWindowStart/coverageWindowEnd"
-      : "resolveCanonicalUsage365CoverageWindow";
+  const displayCoverageWindow = args.displayCoverageWindow;
+  const displayCoverageOwner = args.displayCoverageOwner;
   const timezone =
     (typeof meta.timezone === "string" && meta.timezone.trim()) || args.engineInput.timezone || "America/Chicago";
   const dateInDisplayWindow = (date: string | null) =>
@@ -633,7 +658,7 @@ function buildIntervalBaselinePassthroughDataset(args: {
         .filter((row) => row.timestamp.length > 0)
         .filter((row) => dateInDisplayWindow(dateKeyInTimezone(row.timestamp, timezone)))
     : [];
-  const boundedDaily =
+  const boundedDailyRaw =
     Array.isArray((sourceDataset as any).daily) && (sourceDataset as any).daily.length > 0
       ? ((sourceDataset as any).daily as Array<{ date?: unknown; kwh?: unknown; source?: unknown; sourceDetail?: unknown }>)
           .map((row) => ({
@@ -644,6 +669,27 @@ function buildIntervalBaselinePassthroughDataset(args: {
           }))
           .filter((row) => dateInDisplayWindow(asDateKey(row.date)))
       : buildDailyRowsFromBoundedIntervals(boundedIntervals15, timezone);
+  const shouldFillGreenButtonBaselineDailyGrid =
+    args.engineInput.scenarioId == null &&
+    args.engineInput.inputType === "GREEN_BUTTON" &&
+    displayCoverageOwner === "resolveGreenButtonBaselineCoverageWindow";
+  const boundedDaily = shouldFillGreenButtonBaselineDailyGrid
+    ? (() => {
+        const dailyByDate = new Map(boundedDailyRaw.map((row) => [row.date, row]));
+        return fillCanonicalDailyTotals(
+          boundedDailyRaw.map((row) => ({ date: row.date, kwh: row.kwh })),
+          displayCoverageWindow,
+        ).map((row) => {
+          const existing = dailyByDate.get(row.date);
+          return {
+            date: row.date,
+            kwh: row.kwh,
+            source: existing?.source ?? "ACTUAL",
+            sourceDetail: existing?.sourceDetail ?? "ACTUAL",
+          };
+        });
+      })()
+    : boundedDailyRaw;
   const sourceStitchedMonth = asRecord((sourceDataset as any)?.insights)?.stitchedMonth;
   const hasSourceStitchedMonth =
     sourceStitchedMonth != null &&
@@ -1056,11 +1102,19 @@ async function buildBaselinePassthroughArtifactFromResolvedTruth(args: {
 }): Promise<CanonicalSimulationArtifact> {
   const upstreamUsageTruth = args.upstreamUsageTruth;
 
+  const intervalDisplayCoverage = isIntervalLikeInputType(args.engineInput.inputType)
+    ? await resolveIntervalBaselineDisplayCoverageWindow({
+        engineInput: args.engineInput,
+        upstreamDataset: (upstreamUsageTruth.dataset ?? {}) as Record<string, unknown>,
+      })
+    : null;
   const dataset =
-    isIntervalLikeInputType(args.engineInput.inputType)
+    isIntervalLikeInputType(args.engineInput.inputType) && intervalDisplayCoverage
       ? buildIntervalBaselinePassthroughDataset({
           engineInput: args.engineInput,
           upstreamUsageTruth,
+          displayCoverageWindow: intervalDisplayCoverage.window,
+          displayCoverageOwner: intervalDisplayCoverage.owner,
         })
       : buildManualBaselinePassthroughDataset({
           engineInput: args.engineInput,
@@ -1372,18 +1426,26 @@ function buildCanonicalEngineInput(args: {
     typeof args.loaded.actualDataset?.summary?.start === "string" ? String(args.loaded.actualDataset.summary.start).slice(0, 10) : null;
   const actualSummaryEnd =
     typeof args.loaded.actualDataset?.summary?.end === "string" ? String(args.loaded.actualDataset.summary.end).slice(0, 10) : null;
+  const actualCoverageStart =
+    typeof actualMeta.coverageStart === "string" && /^\d{4}-\d{2}-\d{2}$/.test(String(actualMeta.coverageStart).slice(0, 10))
+      ? String(actualMeta.coverageStart).slice(0, 10)
+      : actualSummaryStart;
+  const actualCoverageEnd =
+    typeof actualMeta.coverageEnd === "string" && /^\d{4}-\d{2}-\d{2}$/.test(String(actualMeta.coverageEnd).slice(0, 10))
+      ? String(actualMeta.coverageEnd).slice(0, 10)
+      : actualSummaryEnd;
   // Green Button upload span is baseline/usage display only. Past Sim (scenarioId set) always uses canonical lag window.
   const usesGreenButtonAnchorWindow =
     args.scenarioId == null &&
     isIntervalLikeInputType(args.inputType) &&
     actualMeta.actualSource === "GREEN_BUTTON" &&
-    !!actualSummaryStart &&
-    !!actualSummaryEnd &&
-    /^\d{4}-\d{2}-\d{2}$/.test(actualSummaryStart) &&
-    /^\d{4}-\d{2}-\d{2}$/.test(actualSummaryEnd);
+    !!actualCoverageStart &&
+    !!actualCoverageEnd &&
+    /^\d{4}-\d{2}-\d{2}$/.test(actualCoverageStart) &&
+    /^\d{4}-\d{2}-\d{2}$/.test(actualCoverageEnd);
   const anchorEndDate =
-    usesGreenButtonAnchorWindow && actualSummaryEnd
-      ? actualSummaryEnd
+    usesGreenButtonAnchorWindow && actualCoverageEnd
+      ? actualCoverageEnd
       :
     typeof (manualUsagePayload as any)?.anchorEndDate === "string"
       ? String((manualUsagePayload as any).anchorEndDate).slice(0, 10)
@@ -1409,18 +1471,18 @@ function buildCanonicalEngineInput(args: {
     actualContextHouseId: args.loaded.actualContextHouseId,
     scenarioId: args.scenarioId,
     timezone: String(actualMeta.timezone ?? "America/Chicago"),
-    coverageWindowStart: usesGreenButtonAnchorWindow && actualSummaryStart ? actualSummaryStart : coverageWindow.startDate,
-    coverageWindowEnd: usesGreenButtonAnchorWindow && actualSummaryEnd ? actualSummaryEnd : coverageWindow.endDate,
+    coverageWindowStart: usesGreenButtonAnchorWindow && actualCoverageStart ? actualCoverageStart : coverageWindow.startDate,
+    coverageWindowEnd: usesGreenButtonAnchorWindow && actualCoverageEnd ? actualCoverageEnd : coverageWindow.endDate,
     canonicalMonths: Array.isArray(actualMeta.canonicalMonths)
       ? (actualMeta.canonicalMonths as string[])
-      : usesGreenButtonAnchorWindow && actualSummaryEnd
-        ? monthsEndingAt(actualSummaryEnd.slice(0, 7), 12)
+      : usesGreenButtonAnchorWindow && actualCoverageEnd
+        ? monthsEndingAt(actualCoverageEnd.slice(0, 7), 12)
         : [],
     canonicalEndMonth:
       typeof actualMeta.canonicalEndMonth === "string"
         ? String(actualMeta.canonicalEndMonth)
-        : usesGreenButtonAnchorWindow && actualSummaryEnd
-          ? actualSummaryEnd.slice(0, 7)
+        : usesGreenButtonAnchorWindow && actualCoverageEnd
+          ? actualCoverageEnd.slice(0, 7)
           : coverageWindow.endDate.slice(0, 7),
     anchorEndDate,
     billEndDay,
@@ -1545,6 +1607,52 @@ export async function adaptGreenButtonRawInput(raw: IntervalRawInput): Promise<C
     skipOptionalEnrichment: isBaselineGreenButtonRun,
     skipLightweightInsightRecompute: true,
   });
+  if (isBaselineGreenButtonRun && loaded.actualDataset) {
+    const greenButtonWindow = await resolveGreenButtonBaselineCoverageWindow(loaded.actualContextHouseId);
+    if (greenButtonWindow) {
+      const dataset = loaded.actualDataset as Record<string, any>;
+      const summary = asRecord(dataset.summary) ?? {};
+      const meta = asRecord(dataset.meta) ?? {};
+      dataset.summary = {
+        ...summary,
+        start: greenButtonWindow.startDate,
+        end: greenButtonWindow.endDate,
+      };
+      dataset.meta = {
+        ...meta,
+        coverageStart: greenButtonWindow.startDate,
+        coverageEnd: greenButtonWindow.endDate,
+      };
+      if (Array.isArray(dataset.daily)) {
+        const dailyByDate = new Map(
+          (dataset.daily as Array<{ date?: unknown; kwh?: unknown; source?: unknown; sourceDetail?: unknown }>).map(
+            (row) => [
+              String(row?.date ?? "").slice(0, 10),
+              {
+                source: typeof row?.source === "string" ? row.source : "ACTUAL",
+                sourceDetail: typeof row?.sourceDetail === "string" ? row.sourceDetail : "ACTUAL",
+                kwh: Number(row?.kwh ?? 0) || 0,
+              },
+            ]
+          )
+        );
+        dataset.daily = fillCanonicalDailyTotals(
+          (dataset.daily as Array<{ date?: unknown; kwh?: unknown }>).map((row) => ({
+            date: String(row?.date ?? "").slice(0, 10),
+            kwh: Number(row?.kwh ?? 0) || 0,
+          })),
+          greenButtonWindow,
+        ).map((row) => {
+          const existing = dailyByDate.get(row.date);
+          return {
+            ...row,
+            source: existing?.source ?? "ACTUAL",
+            sourceDetail: existing?.sourceDetail ?? "ACTUAL",
+          };
+        });
+      }
+    }
+  }
   return buildCanonicalEngineInput({
     inputType: "GREEN_BUTTON",
     scenarioId: raw.scenarioId ?? null,
@@ -1594,9 +1702,16 @@ export async function buildIntervalLikeBaselinePassthroughDataset(
     });
   }
 
+  const { window: displayCoverageWindow, owner: displayCoverageOwner } =
+    await resolveIntervalBaselineDisplayCoverageWindow({
+      engineInput,
+      upstreamDataset: (upstreamUsageTruth.dataset ?? {}) as Record<string, unknown>,
+    });
   const dataset = buildIntervalBaselinePassthroughDataset({
     engineInput,
     upstreamUsageTruth,
+    displayCoverageWindow,
+    displayCoverageOwner,
   }) as Record<string, any>;
   return engineInput.inputType === "GREEN_BUTTON"
     ? options?.skipGreenButtonInsightHydration === true

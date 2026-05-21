@@ -48,7 +48,7 @@ describe("green button full-day anchor", () => {
     expect(out).toBe("2026-03-08");
   });
 
-  it("falls back to the latest local interval day when no full day exists", async () => {
+  it("returns null when no complete local day exists in the recent upload tail", async () => {
     usageQueryRaw
       .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2025-12-01T23:00:00.000Z") }])
       .mockResolvedValueOnce([
@@ -59,7 +59,7 @@ describe("green button full-day anchor", () => {
     const mod = await import("@/modules/realUsageAdapter/greenButton");
     const out = await mod.getLatestGreenButtonFullDayDateKey({ houseId: "house-1" });
 
-    expect(out).toBe("2025-12-01");
+    expect(out).toBeNull();
   });
 
   it("rebases older Green Button intervals into the active coverage window", async () => {
@@ -258,11 +258,12 @@ describe("green button full-day anchor", () => {
     const stitchedCurve = await import("@/modules/onePathSim/usageSimulator/pastStitchedCurve");
     const dayStartMs = new Date("2026-05-14T00:00:00.000Z").getTime();
     const trustedActualDateKeys = new Set(adapterOut.trustedActualDateKeys ?? []);
+    const homeTimezone = "America/Chicago";
     const engineArgs = {
       canonicalDayStartsMs: [dayStartMs],
       excludedDateKeys: new Set<string>(),
-      dateKeyFromTimestamp: stitchedCurve.dateKeyFromTimestamp,
-      getDayGridTimestamps: stitchedCurve.getDayGridTimestamps,
+      dateKeyFromTimestamp: (ts: string) => stitchedCurve.dateKeyFromTimestamp(ts, homeTimezone),
+      getDayGridTimestamps: (ms: number) => stitchedCurve.getDayGridTimestamps(ms, homeTimezone),
       collectSimulatedDayResults: true,
     };
 

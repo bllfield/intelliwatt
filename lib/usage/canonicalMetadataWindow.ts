@@ -1,5 +1,10 @@
 import { DateTime } from "luxon";
-import { canonicalUsageWindowChicago, enumerateDateKeysInclusive, smtCoverageDateKey } from "@/lib/time/chicago";
+import {
+  canonicalUsageWindowChicago,
+  enumerateDateKeysInclusive,
+  prevCalendarDayDateKey,
+  smtCoverageDateKey,
+} from "@/lib/time/chicago";
 import {
   CANONICAL_COVERAGE_LAG_DAYS,
   CANONICAL_COVERAGE_TOTAL_DAYS,
@@ -79,6 +84,19 @@ export function fillCanonicalDailyTotals<T extends { date: string; kwh: number }
     if (existing) return existing;
     return { date, kwh: 0 } as T;
   });
+}
+
+/** Inclusive local-day window ending on a fixed anchor date (same span math as canonical SMT window). */
+export function coverageWindowEndingOnDateKey(
+  endDate: string,
+  totalDays = CANONICAL_COVERAGE_TOTAL_DAYS
+): CoverageWindow | null {
+  const end = normalizeDateKey(endDate);
+  if (!end) return null;
+  const span = Math.max(1, Math.trunc(totalDays));
+  const startDate = prevCalendarDayDateKey(end, span - 1);
+  if (!normalizeDateKey(startDate)) return null;
+  return { startDate, endDate: end };
 }
 
 export function resolveCanonicalUsage365CoverageWindow(

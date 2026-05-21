@@ -10,6 +10,7 @@ const buildOnePathValidationCompareProjectionSidecar = vi.fn();
 const buildOnePathSharedPastSimDiagnostics = vi.fn();
 const buildOnePathManualArtifactDecorations = vi.fn();
 const resolveOnePathCanonicalUsage365CoverageWindow = vi.fn();
+const resolveGreenButtonBaselineCoverageWindow = vi.fn();
 const runOnePathSimulatorBuild = vi.fn();
 const readOnePathSimulatedUsageScenario = vi.fn();
 const logSimPipelineEvent = vi.fn();
@@ -75,6 +76,15 @@ vi.mock("@/modules/onePathSim/serviceBridge", () => ({
   runOnePathSimulatorBuild: (...args: any[]) => runOnePathSimulatorBuild(...args),
   readOnePathSimulatedUsageScenario: (...args: any[]) => readOnePathSimulatedUsageScenario(...args),
 }));
+
+vi.mock("@/lib/usage/greenButtonCoverage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/usage/greenButtonCoverage")>();
+  return {
+    ...actual,
+    resolveGreenButtonBaselineCoverageWindow: (...args: unknown[]) =>
+      resolveGreenButtonBaselineCoverageWindow(...args),
+  };
+});
 
 vi.mock("@/modules/onePathSim/usageSimulator/simObservability", () => ({
   getMemoryRssMb: vi.fn(() => 123),
@@ -179,6 +189,8 @@ describe("one path baseline passthrough", () => {
     getOnePathManualUsageInput.mockReset();
     resolveOnePathManualStageOnePresentation.mockReset();
     resolveOnePathCanonicalUsage365CoverageWindow.mockReset();
+    resolveGreenButtonBaselineCoverageWindow.mockReset();
+    resolveGreenButtonBaselineCoverageWindow.mockResolvedValue(null);
     buildOnePathDailyCurveComparePayload.mockReset();
     buildOnePathValidationCompareProjectionSidecar.mockReset();
     buildOnePathSharedPastSimDiagnostics.mockReset();
@@ -415,6 +427,58 @@ describe("one path baseline passthrough", () => {
     expect(artifact.dataset.meta.coverageStart).toBe("2024-12-01");
     expect(artifact.dataset.meta.coverageEnd).toBe("2025-12-31");
     expect(artifact.dataset.meta.baselineCoverageDisplayOwner).toBe("engineInput.coverageWindowStart/coverageWindowEnd");
+  });
+
+  it("anchors Green Button baseline passthrough to the uploaded file 365-day window", async () => {
+    resolveGreenButtonBaselineCoverageWindow.mockResolvedValue({
+      startDate: "2025-05-15",
+      endDate: "2026-05-14",
+    });
+    const upstreamDataset = {
+      summary: {
+        source: "GREEN_BUTTON",
+        totalKwh: 14082,
+        start: "2025-05-20",
+        end: "2026-05-19",
+        latest: "2026-05-14T23:45:00.000Z",
+        intervalsCount: 34562,
+      },
+      daily: [
+        { date: "2025-05-20", kwh: 84.04 },
+        { date: "2026-05-14", kwh: 9.62 },
+      ],
+      monthly: [{ month: "2026-05", kwh: 500 }],
+      series: {
+        intervals15: [
+          { timestamp: "2025-05-20T12:00:00.000Z", kwh: 1 },
+          { timestamp: "2026-05-14T20:00:00.000Z", kwh: 2 },
+        ],
+      },
+      meta: {
+        datasetKind: "ACTUAL",
+        actualSource: "GREEN_BUTTON",
+        timezone: "America/Chicago",
+      },
+    };
+    resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue(buildUsageTruth(upstreamDataset));
+
+    const { runSharedSimulation } = await import("@/modules/onePathSim/onePathSim");
+    const artifact = await runSharedSimulation(
+      buildBaseEngineInput({
+        inputType: "GREEN_BUTTON",
+        manualConstraintMode: "GREEN_BUTTON",
+        coverageWindowStart: "2025-05-20",
+        coverageWindowEnd: "2026-05-19",
+      })
+    );
+
+    expect(artifact.dataset.summary.start).toBe("2025-05-15");
+    expect(artifact.dataset.summary.end).toBe("2026-05-14");
+    expect(artifact.dataset.meta.baselineCoverageDisplayOwner).toBe("resolveGreenButtonBaselineCoverageWindow");
+    expect(artifact.dataset.daily).toHaveLength(365);
+    expect(artifact.dataset.daily.find((row: { date: string }) => row.date === "2025-05-15")?.kwh).toBe(0);
+    expect(artifact.dataset.daily.find((row: { date: string }) => row.date === "2025-05-20")?.kwh).toBe(84.04);
+    expect(artifact.dataset.daily.some((row: { date: string }) => row.date === "2026-05-19")).toBe(false);
   });
 
   it("keeps Green Button baseline on the uploaded file's full persisted 365-day window when available", async () => {

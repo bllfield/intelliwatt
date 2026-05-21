@@ -150,7 +150,7 @@ describe("actualDatasetForHouse source selection", () => {
 
   it("anchors GREEN_BUTTON baseline display to the uploaded file window, not the SMT canonical lag window", async () => {
     const anchorEnd = "2026-05-14";
-    const anchorStart = prevCalendarDayDateKey(anchorEnd, 364);
+    const anchorStart = prevCalendarDayDateKey(anchorEnd, 365 - 1);
     getLatestGreenButtonFullDayDateKey.mockResolvedValue(anchorEnd);
     greenButtonFindFirst.mockResolvedValue({ timestamp: new Date(`${anchorEnd}T12:00:00.000Z`) });
     greenButtonAggregate.mockResolvedValue({

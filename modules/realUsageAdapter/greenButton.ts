@@ -6,6 +6,7 @@ import {
   greenButtonHomeIntervalCalendar,
   greenButtonTrustedIntervalThreshold,
 } from "@/lib/time/greenButtonPersistedIntervalConvert";
+import { coverageWindowEndingOnDateKey } from "@/lib/usage/canonicalMetadataWindow";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MIN_TRUSTED_GREEN_BUTTON_INTERVALS_PER_DAY = 90;
@@ -137,10 +138,12 @@ function coverageWindowFromCanonicalMonths(months: string[]): { startDate: strin
 function resolveSourceCoverageWindowFromAnchorEnd(anchorEndDate: string): { startDate: string; endDate: string } | null {
   const normalizedEnd = normalizeDateKey(anchorEndDate);
   if (!normalizedEnd) return null;
-  return {
-    startDate: shiftDateKeyByDays(normalizedEnd, -364),
-    endDate: normalizedEnd,
-  };
+  return (
+    coverageWindowEndingOnDateKey(normalizedEnd) ?? {
+      startDate: shiftDateKeyByDays(normalizedEnd, -364),
+      endDate: normalizedEnd,
+    }
+  );
 }
 
 export type GreenButtonCoverageWindowIntervals = {
@@ -259,7 +262,6 @@ export async function getLatestGreenButtonFullDayDateKey(args: { houseId: string
       const expectedIntervals = expectedSlotsForLocalDate(dateKey, greenButtonHomeIntervalCalendar());
       if ((Number(row.intervalscount) || 0) >= expectedIntervals) return dateKey;
     }
-    if (rows[0]?.bucket) return chicagoDateKeyFromBucket(rows[0].bucket);
     return null;
   } catch {
     return null;

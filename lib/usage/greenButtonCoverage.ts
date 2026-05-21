@@ -1,8 +1,8 @@
 import { DateTime } from "luxon";
 import { expectedIntervalsForDateISO } from "@/lib/analysis/dst";
 import { getLatestGreenButtonFullDayDateKey } from "@/modules/realUsageAdapter/greenButton";
-import { dateTimePartsInTimezone, prevCalendarDayDateKey } from "@/lib/time/chicago";
-import type { CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
+import { dateTimePartsInTimezone, enumerateDateKeysInclusive, prevCalendarDayDateKey } from "@/lib/time/chicago";
+import { coverageWindowEndingOnDateKey, type CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
 import { CANONICAL_COVERAGE_TOTAL_DAYS } from "@/lib/usage/canonicalCoverageConfig";
 
 const GREEN_BUTTON_TIMEZONE = "America/Chicago";
@@ -58,11 +58,12 @@ export async function resolveGreenButtonBaselineCoverageWindow(
   totalDays = CANONICAL_COVERAGE_TOTAL_DAYS
 ): Promise<CoverageWindow | null> {
   const anchorEndDate = await getLatestGreenButtonFullDayDateKey({ houseId: String(houseId ?? "").trim() });
-  if (!anchorEndDate || !/^\d{4}-\d{2}-\d{2}$/.test(anchorEndDate)) return null;
-  return {
-    startDate: prevCalendarDayDateKey(anchorEndDate, Math.max(0, Math.trunc(totalDays) - 1)),
-    endDate: anchorEndDate,
-  };
+  if (!anchorEndDate) return null;
+  const window = coverageWindowEndingOnDateKey(anchorEndDate, totalDays);
+  if (!window) return null;
+  const dayCount = enumerateDateKeysInclusive(window.startDate, window.endDate).length;
+  if (dayCount !== Math.max(1, Math.trunc(totalDays))) return null;
+  return window;
 }
 
 export function trimGreenButtonIntervalsToLatestLocalDays<T extends GreenButtonTimestampedInterval>(
@@ -79,7 +80,9 @@ export function trimGreenButtonIntervalsToLatestLocalDays<T extends GreenButtonT
   if (!earliestDateKey || !endDateKey) {
     return { trimmed: sorted, startDateKey: earliestDateKey, endDateKey };
   }
-  const targetStartDateKey = prevCalendarDayDateKey(endDateKey, Math.max(0, Math.trunc(totalDays) - 1));
+  const targetStartDateKey =
+    coverageWindowEndingOnDateKey(endDateKey, totalDays)?.startDate ??
+    prevCalendarDayDateKey(endDateKey, Math.max(0, Math.trunc(totalDays) - 1));
   const startDateKey = earliestDateKey > targetStartDateKey ? earliestDateKey : targetStartDateKey;
   const range = buildUtcRangeForChicagoLocalDateRange({ startDateKey, endDateKey });
   if (!range) {

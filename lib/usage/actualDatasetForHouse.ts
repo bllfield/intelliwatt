@@ -16,10 +16,12 @@ import {
   getLatestGreenButtonFullDayDateKey,
   getLatestUsableRawGreenButtonIdForHouse,
 } from "@/modules/realUsageAdapter/greenButton";
+import { CANONICAL_COVERAGE_TOTAL_DAYS } from "@/lib/usage/canonicalCoverageConfig";
 import { applySmtLedgerToActualDataset } from "@/lib/usage/smtDayCoverageLedger";
 import {
   canonicalCoverageWindowUtcBounds,
   fillCanonicalDailyTotals,
+  coverageWindowEndingOnDateKey,
   resolveCanonicalUsage365CoverageWindow,
 } from "@/lib/usage/canonicalMetadataWindow";
 import {
@@ -769,7 +771,10 @@ async function getGreenButtonWindow(usageClient: any, houseId: string, rawId: st
   if (typeof greenButtonAnchorEndDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(greenButtonAnchorEndDate)) {
     return null;
   }
-  const greenButtonStartDate = prevCalendarDayDateKey(greenButtonAnchorEndDate, 364);
+  const greenButtonWindowSpan =
+    coverageWindowEndingOnDateKey(greenButtonAnchorEndDate, CANONICAL_COVERAGE_TOTAL_DAYS) ?? null;
+  const greenButtonStartDate = greenButtonWindowSpan?.startDate ?? null;
+  if (!greenButtonStartDate) return null;
   const range = buildUtcRangeForChicagoLocalDateRange({
     startDateKey: greenButtonStartDate,
     endDateKey: greenButtonAnchorEndDate,
