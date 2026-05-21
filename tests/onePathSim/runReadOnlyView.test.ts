@@ -739,4 +739,45 @@ describe("buildOnePathRunReadOnlyView", () => {
       },
     ]);
   });
+
+  it("overlays sage actual daily kWh for Past Sim ACTUAL-labeled days instead of stitched interval re-sums", () => {
+    const view = buildOnePathRunReadOnlyView({
+      dataset: {
+        summary: {
+          source: "SMT with simulated fill for Travel/Vacant",
+          intervalsCount: 96,
+          start: "2026-05-18",
+          end: "2026-05-18",
+        },
+        daily: [{ date: "2026-05-18", kwh: 45.08, source: "ACTUAL" }],
+        monthly: [{ month: "2026-05", kwh: 45.08 }],
+        insights: {
+          fifteenMinuteAverages: [{ hhmm: "00:00", avgKw: 1.2 }],
+          weekdayVsWeekend: { weekday: 45.08, weekend: 0 },
+          timeOfDayBuckets: [],
+          peakDay: { date: "2026-05-18", kwh: 45.08 },
+          peakHour: { hour: 20, kw: 2.1 },
+          baseload: 0.2,
+        },
+        meta: {
+          datasetKind: "SIMULATED",
+          actualSource: "SMT",
+          timezone: "America/Chicago",
+          coverageStart: "2026-05-18",
+          coverageEnd: "2026-05-18",
+        },
+        series: {
+          intervals15: Array.from({ length: 96 }, (_, slot) => ({
+            timestamp: new Date(Date.UTC(2026, 4, 18, 0, slot * 15, 0, 0)).toISOString(),
+            kwh: 45.08 / 96,
+          })),
+        },
+      },
+      sageActualDaily: [{ date: "2026-05-18", kwh: 51.47 }],
+    });
+
+    expect(view?.dailyRows).toEqual([
+      { date: "2026-05-18", kwh: 51.47, source: "ACTUAL", sourceDetail: undefined },
+    ]);
+  });
 });

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { sageActualDailyRowsFromDataset } from "@/lib/usage/sageActualDailyTruth";
 import { buildUserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
 import {
   ensureSmtCoverageForHouse,
@@ -563,6 +564,36 @@ type PastSimReadbackSmtHealingArgs = {
   actualContextHouseId: string;
 };
 
+async function resolveSageActualTruthForRunDisplay(args: {
+  userId: string;
+  houseId: string;
+  actualContextHouseId?: string | null;
+  smtSourceEsiid?: string | null;
+  preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
+}) {
+  return resolveOnePathUpstreamUsageTruthForSimulation({
+    userId: args.userId,
+    houseId: args.houseId,
+    actualContextHouseId: args.actualContextHouseId ?? args.houseId,
+    smtSourceEsiid: args.smtSourceEsiid ?? null,
+    seedIfMissing: false,
+    preferredActualSource: args.preferredActualSource ?? null,
+  }).catch(() => null);
+}
+
+function sageRunDisplayViewArgsFromTruth(
+  truth: Awaited<ReturnType<typeof resolveSageActualTruthForRunDisplay>>
+): {
+  sageActualDataset: Record<string, unknown> | null;
+  sageActualDaily: ReturnType<typeof sageActualDailyRowsFromDataset>;
+} {
+  const dataset = truth?.dataset;
+  return {
+    sageActualDataset: dataset && typeof dataset === "object" ? (dataset as Record<string, unknown>) : null,
+    sageActualDaily: sageActualDailyRowsFromDataset(dataset),
+  };
+}
+
 async function buildPastSimRunReadbackResponse(args: {
   userId: string;
   houseId: string;
@@ -570,6 +601,9 @@ async function buildPastSimRunReadbackResponse(args: {
   correlationId?: string | null;
   readMode?: "artifact_only" | "allow_rebuild";
   smtPostSimHealing?: PastSimReadbackSmtHealingArgs | null;
+  actualContextHouseId?: string | null;
+  preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
+  smtSourceEsiid?: string | null;
 }) {
   const readMode = args.readMode ?? "artifact_only";
   const startedAt = Date.now();
@@ -681,10 +715,21 @@ async function buildPastSimRunReadbackResponse(args: {
     memoryRssMb: getMemoryRssMb(),
   });
   const displayViewStartedAt = Date.now();
+  const sageTruth = await resolveSageActualTruthForRunDisplay({
+    userId: args.userId,
+    houseId: args.houseId,
+    actualContextHouseId:
+      args.actualContextHouseId ?? args.smtPostSimHealing?.actualContextHouseId ?? args.houseId,
+    smtSourceEsiid: args.smtSourceEsiid ?? args.smtPostSimHealing?.sourceEsiid ?? null,
+    preferredActualSource:
+      args.preferredActualSource ?? args.smtPostSimHealing?.preferredActualSource ?? null,
+  });
+  const sageDisplayArgs = sageRunDisplayViewArgsFromTruth(sageTruth);
   const runDisplayViewBase =
     buildOnePathRunReadOnlyView({
       dataset: asRecord(readback.dataset),
       readModel: { compareProjection },
+      ...sageDisplayArgs,
     }) ?? null;
   logSimPipelineEvent("one_path_admin_past_display_view_success", {
     correlationId: args.correlationId ?? null,
@@ -1423,6 +1468,9 @@ export async function POST(request: NextRequest) {
           scenarioId: effectiveRawInputBase.scenarioId,
           correlationId,
           readMode: "allow_rebuild",
+          actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
+          preferredActualSource: effectiveRawInputBase.preferredActualSource,
+          smtSourceEsiid,
           smtPostSimHealing:
             mode === "INTERVAL"
               ? {
@@ -1615,12 +1663,21 @@ export async function POST(request: NextRequest) {
           postRetryIncompleteDateKeys: extractIncompleteMeterDateKeysFromDataset(artifactDataset),
         };
       }
+      const sageTruthForPastDisplay = await resolveSageActualTruthForRunDisplay({
+        userId: effectiveUserId,
+        houseId: effectiveHouseId,
+        actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
+        smtSourceEsiid,
+        preferredActualSource: effectiveRawInputBase.preferredActualSource,
+      });
+      const sageDisplayArgsForPast = sageRunDisplayViewArgsFromTruth(sageTruthForPastDisplay);
       if (shouldReturnCompactPastResponse) {
         const compactRunDisplayView =
           buildOnePathRunReadOnlyView({
             dataset: artifactDataset,
             engineInput: asRecord(engineInput),
             readModel: { compareProjection: artifact.compareProjection },
+            ...sageDisplayArgsForPast,
           }) ?? null;
         const compactReadModel = buildCompactSimulationReadModel({
           artifact: asRecord(artifact),
@@ -1675,12 +1732,19 @@ export async function POST(request: NextRequest) {
               actualDataset: actualDatasetForManualRun,
             })
           : null;
+      const manualSageDisplayArgs = actualDatasetForManualRun
+        ? {
+            sageActualDataset: actualDatasetForManualRun as Record<string, unknown>,
+            sageActualDaily: sageActualDailyRowsFromDataset(actualDatasetForManualRun),
+          }
+        : sageDisplayArgsForPast;
       const manualRunDisplayView =
         manualPastReadResult && manualPastReadResult.ok
           ? buildOnePathRunReadOnlyView({
               dataset: asRecord(manualPastReadResult.displayDataset),
               engineInput: asRecord(engineInput),
               readModel: { compareProjection: manualPastReadResult.compareProjection },
+              ...manualSageDisplayArgs,
             })
           : null;
       const runDisplayView =
@@ -1689,6 +1753,7 @@ export async function POST(request: NextRequest) {
           dataset: asRecord(readModel.dataset),
           engineInput: asRecord(engineInput),
           readModel: asRecord(readModel),
+          ...sageDisplayArgsForPast,
         }) ??
         null;
       if (!includeDebugDiagnostics) {

@@ -1,4 +1,11 @@
 import { dateKeyInTimezone } from "@/lib/admin/gapfillLab";
+import {
+  applySageActualDailyTruthToCompareRows,
+  applySageActualDailyTruthToDisplayRows,
+  sageActualDailyKwhByDate,
+  sageActualDailyKwhByDateFromRows,
+  type SageActualDailyRow,
+} from "@/lib/usage/sageActualDailyTruth";
 import { smtPendingIntervalDateKeysFromMeta } from "@/lib/usage/smtDayCoverageLedger";
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
 import { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
@@ -331,6 +338,9 @@ export function buildOnePathRunReadOnlyView(args: {
   dataset?: Record<string, unknown> | null;
   engineInput?: Record<string, unknown> | null;
   readModel?: Record<string, unknown> | null;
+  /** Sage Usage truth daily rows (getActualUsageDatasetForHouse). Required for Past Sim ACTUAL day kWh parity. */
+  sageActualDaily?: SageActualDailyRow[] | null;
+  sageActualDataset?: Record<string, unknown> | null;
 }): OnePathRunReadOnlyView | null {
   const dataset = asRecord(args.dataset);
   if (!dataset) return null;
@@ -386,7 +396,13 @@ export function buildOnePathRunReadOnlyView(args: {
   const tuningSummary = asRecord(readModel.tuningSummary) ?? {};
   const compareRowsPrimary = asCompareRows(compareProjection.rows);
   const selectedValidationRows = asArray<Record<string, unknown>>(tuningSummary.selectedValidationRows);
-  const compareRows = compareRowsPrimary.length ? compareRowsPrimary : asCompareRows(selectedValidationRows);
+  let compareRows = compareRowsPrimary.length ? compareRowsPrimary : asCompareRows(selectedValidationRows);
+  const sageByDate =
+    args.sageActualDaily && args.sageActualDaily.length > 0
+      ? sageActualDailyKwhByDateFromRows(args.sageActualDaily)
+      : args.sageActualDataset
+        ? sageActualDailyKwhByDate(args.sageActualDataset)
+        : new Map<string, number>();
 
   let dailyRows: Array<ReturnType<typeof dailyRowFieldsFromSourceRow>>;
   let fifteenMinuteAverages: Array<{ hhmm: string; avgKw: number }>;
@@ -452,6 +468,12 @@ export function buildOnePathRunReadOnlyView(args: {
     fifteenMinuteCurveSourceOwner = rebuiltFifteenMinuteAverages.length
       ? "buildOnePathRunReadOnlyView(...).dataset.series.intervals15"
       : "buildUserUsageDashboardViewModel(...).derived.fifteenCurve";
+    if (sageByDate.size > 0) {
+      dailyRows = applySageActualDailyTruthToDisplayRows(dailyRows, sageByDate);
+    }
+  }
+  if (!isBaselinePassthrough && sageByDate.size > 0 && compareRows.length > 0) {
+    compareRows = applySageActualDailyTruthToCompareRows(compareRows, sageByDate);
   }
   const compareMetrics =
     compareProjection.metrics && typeof compareProjection.metrics === "object"

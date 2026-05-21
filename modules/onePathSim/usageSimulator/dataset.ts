@@ -1,3 +1,4 @@
+import { chicagoDateKey } from "@/lib/time/chicago";
 import { getMemoryRssMb, logSimPipelineEvent } from "@/modules/onePathSim/usageSimulator/simObservability";
 import { generateSimulatedCurve } from "@/modules/onePathSim/simulatedUsage/engine";
 import { roundDayKwhDisplay } from "@/modules/onePathSim/simulatedUsage/pastDaySimulator";
@@ -262,7 +263,9 @@ function computeNormalLifeBaseloadKwFromCurveIntervals(
 }
 
 function toDateKey(tsIso: string): string {
-  return tsIso.slice(0, 10);
+  const parsed = new Date(tsIso);
+  if (!Number.isFinite(parsed.getTime())) return String(tsIso ?? "").slice(0, 10);
+  return chicagoDateKey(parsed);
 }
 
 function dayOfWeekUtc(dateKey: string): number {
@@ -465,7 +468,9 @@ export function buildDailyFromIntervals(
 ): Array<{ date: string; kwh: number; source?: "ACTUAL" | "SIMULATED" }> {
   const dailyMap = new Map<string, number>();
   for (const iv of intervals ?? []) {
-    const dk = String(iv?.timestamp ?? "").slice(0, 10);
+    const ts = String(iv?.timestamp ?? "");
+    const parsed = new Date(ts);
+    const dk = Number.isFinite(parsed.getTime()) ? chicagoDateKey(parsed) : ts.slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
     const kwh = Number(iv?.consumption_kwh ?? iv?.kwh ?? 0) || 0;
     dailyMap.set(dk, (dailyMap.get(dk) ?? 0) + kwh);
