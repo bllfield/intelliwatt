@@ -242,7 +242,13 @@ export async function requestUsageRefreshForUserHouse(args: {
         historyReady = Boolean(windowStatus.ready && rawCount === 0);
       }
 
-      const retryAfterMs = rawCount === 0 && coverageDays < 30 ? 60 * 60 * 1000 : 6 * 60 * 60 * 1000;
+      const gapsInCanonicalWindow = Boolean(auth?.esiid) && !historyReady;
+      const retryAfterMs =
+        rawCount === 0 && coverageDays < 30
+          ? 60 * 60 * 1000
+          : gapsInCanonicalWindow
+            ? 30 * 60 * 1000
+            : 6 * 60 * 60 * 1000;
       const requestedAt = (auth as any)?.smtBackfillRequestedAt
         ? new Date((auth as any).smtBackfillRequestedAt)
         : null;

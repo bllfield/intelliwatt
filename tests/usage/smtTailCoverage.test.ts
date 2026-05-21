@@ -4,6 +4,7 @@ import { chicagoSlot96FromTs } from "@/lib/time/chicago";
 import { missingChicagoSlotsFromFilledSlots } from "@/lib/usage/smtWindowStatus";
 import {
   filterDateKeysNearTargetEnd,
+  filterDateKeysWithinCanonicalWindow,
   isGreenButtonPrimaryDataset,
   isResolvedDatasetTailDisplayReady,
   ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS,
@@ -130,7 +131,7 @@ describe("smt tail coverage helpers", () => {
     ).toBe(false);
   });
 
-  it("limits incomplete-meter backfill waits to days near canonical end", () => {
+  it("limits near-end backfill clip to lookback days (legacy tail helper)", () => {
     expect(
       filterDateKeysNearTargetEnd(
         ["2025-07-09", "2026-03-25", "2026-05-16", "2026-05-17"],
@@ -138,6 +139,15 @@ describe("smt tail coverage helpers", () => {
         3
       )
     ).toEqual(["2026-05-16", "2026-05-17"]);
+  });
+
+  it("keeps all incomplete heal days inside the canonical window", () => {
+    expect(
+      filterDateKeysWithinCanonicalWindow(
+        ["2025-07-09", "2026-03-25", "2026-05-16", "2026-05-17"],
+        { startDate: "2026-01-01", endDate: "2026-05-17" }
+      )
+    ).toEqual(["2026-03-25", "2026-05-16", "2026-05-17"]);
   });
 
   it("allows a longer admin wait after targeted incomplete-meter backfill", () => {

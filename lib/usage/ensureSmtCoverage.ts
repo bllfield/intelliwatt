@@ -16,7 +16,7 @@ import {
   type SmtWindowStatusSnapshot,
 } from "@/lib/usage/smtWindowStatus";
 import {
-  filterDateKeysNearTargetEnd,
+  filterDateKeysWithinCanonicalWindow,
   normalizeDateKeys,
   ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS,
   ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS,
@@ -168,14 +168,14 @@ export async function ensureSmtCoverageForHouse(args: {
   }
 
   const waits = waitBudgetForProfile(args.profile);
-  const ledgerBackfillCandidates = normalizeDateKeys([
-    ...dayStatus.incompleteMeterDateKeys,
-    ...dayStatus.pendingDateKeys,
-    ...(args.extraBackfillDateKeys ?? []),
-  ]);
-  const backfillDateKeys = filterDateKeysNearTargetEnd(
-    ledgerBackfillCandidates.length > 0 ? ledgerBackfillCandidates : dayStatus.incompleteDateKeys,
-    dayStatus.window.endDate
+  const backfillDateKeys = filterDateKeysWithinCanonicalWindow(
+    normalizeDateKeys([
+      ...dayStatus.incompleteDateKeys,
+      ...dayStatus.incompleteMeterDateKeys,
+      ...dayStatus.pendingDateKeys,
+      ...(args.extraBackfillDateKeys ?? []),
+    ]),
+    dayStatus.window
   );
 
   let refreshResult: UsageRefreshResult | undefined;

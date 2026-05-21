@@ -18,7 +18,7 @@ SMT coverage today is inconsistent because:
 - Multiple “ready” definitions (`SMT_READY_COMPLETENESS` 99% span vs ledger 96 slots vs Past Sim `MIN_TRUSTED_ACTUAL_INTERVALS_PER_DAY = 90`).
 - Duplicate Chicago timestamp helpers (`chicagoDateKey`, slot-96) in routes, `actualDatasetForHouse`, `smtTailCoverage`, adapters.
 - Lag `2` duplicated in policy files and hardcoded in admin tools; `rollingAutoAnchorEndDateChicago` uses ms subtraction instead of calendar lag.
-- `history_ready` skips wide backfill while per-day gaps (e.g. 95/96, 0/96) remain.
+- `history_ready` could skip wide backfill while per-day gaps remained; heal now targets all incomplete canonical-window days and refresh retries wide backfill after 30m when gaps remain.
 
 **Product rules (locked):**
 

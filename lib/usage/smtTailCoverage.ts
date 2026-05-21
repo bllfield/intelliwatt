@@ -39,7 +39,10 @@ export const ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_SECOND_PASS_WAIT_TIMEOUT_MS = 6
 export const SMT_NEAR_COMPLETE_INTERVAL_THRESHOLD = 94;
 /** Pause after a post-backfill pull so ingestion can finish before polling counts. */
 export const SMT_POST_BACKFILL_SETTLE_DELAY_MS = 3_000;
-/** Only block incomplete-meter backfill waits on days near the canonical window end. */
+/**
+ * Legacy near-end clip for tail-only helpers. Canonical-window heal uses
+ * `filterDateKeysWithinCanonicalWindow` (see ensureSmtCoverage).
+ */
 export const SMT_INCOMPLETE_METER_BACKFILL_LOOKBACK_DAYS = 3;
 
 export type SmtTailCoverageSnapshot = {
@@ -234,6 +237,16 @@ export function filterDateKeysNearTargetEnd(
 ): string[] {
   const minKey = addDateKeyDays(targetEndDate, -(lookbackDays - 1));
   return normalizeDateKeys(dateKeys).filter((dateKey) => dateKey >= minKey && dateKey <= targetEndDate);
+}
+
+/** Bounds heal/backfill date keys to the shared canonical coverage window (full 365-day span). */
+export function filterDateKeysWithinCanonicalWindow(
+  dateKeys: string[],
+  window: { startDate: string; endDate: string }
+): string[] {
+  return normalizeDateKeys(dateKeys).filter(
+    (dateKey) => dateKey >= window.startDate && dateKey <= window.endDate
+  );
 }
 
 function coverageProgressFingerprint(
