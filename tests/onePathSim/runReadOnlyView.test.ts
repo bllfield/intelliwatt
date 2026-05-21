@@ -575,6 +575,74 @@ describe("buildOnePathRunReadOnlyView", () => {
     expect(view?.stitchedMonth).toBeNull();
   });
 
+  it("uses the shared usage dashboard contract for baseline passthrough instead of artifact interval tails", () => {
+    const view = buildOnePathRunReadOnlyView({
+      dataset: {
+        summary: {
+          source: "SMT",
+          intervalsCount: 34875,
+          totalKwh: 14355,
+          start: "2025-05-19",
+          end: "2026-05-18",
+        },
+        daily: [
+          { date: "2026-05-17", kwh: 34.26, source: "ACTUAL" },
+          {
+            date: "2026-05-18",
+            kwh: 37.78,
+            source: "ACTUAL",
+            sourceDetail: "ACTUAL_INTERVALS_NOT_AVAILABLE_YET",
+          },
+        ],
+        monthly: [{ month: "2026-05", kwh: 900 }],
+        insights: {
+          fifteenMinuteAverages: [
+            { hhmm: "00:00", avgKw: 0.2 },
+            { hhmm: "12:00", avgKw: 1.5 },
+          ],
+          weekdayVsWeekend: { weekday: 10348.7, weekend: 4005.8 },
+          timeOfDayBuckets: [{ key: "evening", label: "Evening", kwh: 4509.1 }],
+          peakDay: { date: "2026-01-25", kwh: 80.79 },
+          peakHour: { hour: 20, kw: 2.3 },
+          baseload: 0.2,
+          baseloadDaily: 15.16,
+          baseloadMonthly: 362.01,
+        },
+        totals: { importKwh: 14355, exportKwh: 0, netKwh: 14355 },
+        meta: {
+          datasetKind: "ACTUAL",
+          actualSource: "SMT",
+          baselinePassthrough: true,
+          coverageStart: "2025-05-19",
+          coverageEnd: "2026-05-18",
+          smtPendingIntervalDateKeys: ["2026-05-18"],
+        },
+        series: {
+          intervals15: [
+            { timestamp: "2026-05-18T00:00:00.000Z", kwh: 51.47 },
+            { timestamp: "2026-05-18T00:15:00.000Z", kwh: 51.47 },
+          ],
+        },
+      },
+    });
+
+    expect(view?.dailyRows).toEqual([
+      { date: "2026-05-17", kwh: 34.26, source: "ACTUAL", sourceDetail: undefined },
+      {
+        date: "2026-05-18",
+        kwh: 37.78,
+        source: "ACTUAL",
+        sourceDetail: "ACTUAL_INTERVALS_NOT_AVAILABLE_YET",
+      },
+    ]);
+    expect(view?.fifteenMinuteAverages).toEqual([
+      { hhmm: "00:00", avgKw: 0.2 },
+      { hhmm: "12:00", avgKw: 1.5 },
+    ]);
+    expect(view?.fifteenMinuteCurveSourceOwner).toBe("buildUserUsageDashboardViewModel(...).derived.fifteenCurve");
+    expect(view?.summary.baseload).toBe(0.2);
+  });
+
   it("binds validation compare rows and metrics from the persisted read model", () => {
     const view = buildOnePathRunReadOnlyView({
       dataset: {

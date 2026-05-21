@@ -362,6 +362,7 @@ export function buildOnePathRunReadOnlyView(args: {
         }
       : dataset;
   const weatherScore = (meta?.weatherSensitivityScore as WeatherSensitivityScore | null | undefined) ?? null;
+  const isBaselinePassthrough = meta?.baselinePassthrough === true;
   const viewModel = buildUserUsageDashboardViewModel({
     dataset: datasetForDisplay,
     weatherSensitivityScore: weatherScore,
@@ -381,64 +382,77 @@ export function buildOnePathRunReadOnlyView(args: {
         }))
         .filter((value) => value.payloadJson.startDate && value.payloadJson.endDate)
     : [];
-  const smtPendingDateKeys = smtPendingIntervalDateKeysFromMeta(meta);
-  const datasetDailyRows = buildDisplayDailyRows(dataset.daily, smtPendingDateKeys);
-  const timezone = typeof meta?.timezone === "string" && meta.timezone.trim() ? meta.timezone : "America/Chicago";
-  const intervalTimestampMode = resolveIntervalTimestampMode(meta);
-  const intervalBackedLocalDailyRows = buildLocalDailyRowsFromIntervals15({
-    intervals15: asRecord(dataset.series)?.intervals15,
-    timezone,
-    timestampMode: intervalTimestampMode,
-    coverageStart: viewModel.coverage.start,
-    coverageEnd: viewModel.coverage.end,
-    existingRows: datasetDailyRows,
-    simulatedSourceDetailByDate:
-      meta?.simulatedSourceDetailByDate &&
-      typeof meta.simulatedSourceDetailByDate === "object" &&
-      !Array.isArray(meta.simulatedSourceDetailByDate)
-        ? (meta.simulatedSourceDetailByDate as Record<string, string>)
-        : null,
-    smtPendingIntervalDateKeys: Array.from(smtPendingDateKeys),
-  });
-  const datasetDailyEnd = datasetDailyRows.length > 0 ? datasetDailyRows[datasetDailyRows.length - 1]?.date ?? null : null;
-  const localDailyEnd =
-    intervalBackedLocalDailyRows.length > 0
-      ? intervalBackedLocalDailyRows[intervalBackedLocalDailyRows.length - 1]?.date ?? null
-      : null;
-  const shouldPreferIntervalBackedLocalDailyRows =
-    intervalBackedLocalDailyRows.length > 0 &&
-    (datasetDailyRows.length === 0 ||
-      intervalBackedLocalDailyRows.length > datasetDailyRows.length ||
-      (viewModel.coverage.end != null && localDailyEnd === viewModel.coverage.end && datasetDailyEnd !== viewModel.coverage.end));
-  const dailyRows = applySmtPendingLabelsToDailyRows(
-    shouldPreferIntervalBackedLocalDailyRows
-      ? intervalBackedLocalDailyRows
-      : datasetDailyRows.length > 0
-        ? datasetDailyRows
-        : viewModel.derived.daily,
-    smtPendingDateKeys
-  );
   const compareProjection = asRecord(readModel.compareProjection) ?? {};
   const tuningSummary = asRecord(readModel.tuningSummary) ?? {};
   const compareRowsPrimary = asCompareRows(compareProjection.rows);
   const selectedValidationRows = asArray<Record<string, unknown>>(tuningSummary.selectedValidationRows);
   const compareRows = compareRowsPrimary.length ? compareRowsPrimary : asCompareRows(selectedValidationRows);
-  const shouldIgnoreGreenButtonGridZeroSamples =
-    intervalTimestampMode === "utcDayGrid" &&
-    Number(meta?.greenButtonPaddedIntervalCount ?? 0) > 0 &&
-    Number(meta?.greenButtonZeroRedistributedIntervalCount ?? 0) <= 0;
-  const rebuiltFifteenMinuteAverages = buildFifteenMinuteAveragesFromIntervals15(
-    asRecord(dataset.series)?.intervals15,
-    timezone,
-    intervalTimestampMode,
-    { redistributeZeroKwhSamples: shouldIgnoreGreenButtonGridZeroSamples }
-  );
-  const fifteenMinuteAverages = rebuiltFifteenMinuteAverages.length
-    ? rebuiltFifteenMinuteAverages
-    : viewModel.derived.fifteenCurve;
-  const fifteenMinuteCurveSourceOwner = rebuiltFifteenMinuteAverages.length
+
+  let dailyRows: Array<ReturnType<typeof dailyRowFieldsFromSourceRow>>;
+  let fifteenMinuteAverages: Array<{ hhmm: string; avgKw: number }>;
+  let fifteenMinuteCurveSourceOwner: string;
+
+  if (isBaselinePassthrough) {
+    dailyRows = viewModel.derived.daily;
+    fifteenMinuteAverages = viewModel.derived.fifteenCurve;
+    fifteenMinuteCurveSourceOwner = "buildUserUsageDashboardViewModel(...).derived.fifteenCurve";
+  } else {
+    const smtPendingDateKeys = smtPendingIntervalDateKeysFromMeta(meta);
+    const datasetDailyRows = buildDisplayDailyRows(dataset.daily, smtPendingDateKeys);
+    const timezone = typeof meta?.timezone === "string" && meta.timezone.trim() ? meta.timezone : "America/Chicago";
+    const intervalTimestampMode = resolveIntervalTimestampMode(meta);
+    const intervalBackedLocalDailyRows = buildLocalDailyRowsFromIntervals15({
+      intervals15: asRecord(dataset.series)?.intervals15,
+      timezone,
+      timestampMode: intervalTimestampMode,
+      coverageStart: viewModel.coverage.start,
+      coverageEnd: viewModel.coverage.end,
+      existingRows: datasetDailyRows,
+      simulatedSourceDetailByDate:
+        meta?.simulatedSourceDetailByDate &&
+        typeof meta.simulatedSourceDetailByDate === "object" &&
+        !Array.isArray(meta.simulatedSourceDetailByDate)
+          ? (meta.simulatedSourceDetailByDate as Record<string, string>)
+          : null,
+      smtPendingIntervalDateKeys: Array.from(smtPendingDateKeys),
+    });
+    const datasetDailyEnd = datasetDailyRows.length > 0 ? datasetDailyRows[datasetDailyRows.length - 1]?.date ?? null : null;
+    const localDailyEnd =
+      intervalBackedLocalDailyRows.length > 0
+        ? intervalBackedLocalDailyRows[intervalBackedLocalDailyRows.length - 1]?.date ?? null
+        : null;
+    const shouldPreferIntervalBackedLocalDailyRows =
+      intervalBackedLocalDailyRows.length > 0 &&
+      (datasetDailyRows.length === 0 ||
+        intervalBackedLocalDailyRows.length > datasetDailyRows.length ||
+        (viewModel.coverage.end != null &&
+          localDailyEnd === viewModel.coverage.end &&
+          datasetDailyEnd !== viewModel.coverage.end));
+    dailyRows = applySmtPendingLabelsToDailyRows(
+      shouldPreferIntervalBackedLocalDailyRows
+        ? intervalBackedLocalDailyRows
+        : datasetDailyRows.length > 0
+          ? datasetDailyRows
+          : viewModel.derived.daily,
+      smtPendingDateKeys
+    );
+    const shouldIgnoreGreenButtonGridZeroSamples =
+      intervalTimestampMode === "utcDayGrid" &&
+      Number(meta?.greenButtonPaddedIntervalCount ?? 0) > 0 &&
+      Number(meta?.greenButtonZeroRedistributedIntervalCount ?? 0) <= 0;
+    const rebuiltFifteenMinuteAverages = buildFifteenMinuteAveragesFromIntervals15(
+      asRecord(dataset.series)?.intervals15,
+      timezone,
+      intervalTimestampMode,
+      { redistributeZeroKwhSamples: shouldIgnoreGreenButtonGridZeroSamples }
+    );
+    fifteenMinuteAverages = rebuiltFifteenMinuteAverages.length
+      ? rebuiltFifteenMinuteAverages
+      : viewModel.derived.fifteenCurve;
+    fifteenMinuteCurveSourceOwner = rebuiltFifteenMinuteAverages.length
       ? "buildOnePathRunReadOnlyView(...).dataset.series.intervals15"
       : "buildUserUsageDashboardViewModel(...).derived.fifteenCurve";
+  }
   const compareMetrics =
     compareProjection.metrics && typeof compareProjection.metrics === "object"
       ? (compareProjection.metrics as Record<string, unknown>)
