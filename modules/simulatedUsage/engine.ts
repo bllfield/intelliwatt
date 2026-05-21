@@ -839,7 +839,9 @@ export function completeActualIntervalsV1(args: {
   excludedDateKeys: Set<string>;
   simulateIncompleteDays?: boolean;
   intervalTrustedSource?: "SMT" | "GREEN_BUTTON";
+  homeTimezone?: string;
 }): Array<{ timestamp: string; kwh: number }> {
+  const homeTimezone = String(args.homeTimezone ?? "America/Chicago");
   const { actualIntervals, canonicalStartTsUtc, canonicalEndTsUtc, excludedDateKeys } = args;
   const simulateIncompleteDays = args.simulateIncompleteDays ?? true;
 
@@ -985,7 +987,7 @@ export function completeActualIntervalsV1(args: {
   const out: Array<{ timestamp: string; kwh: number }> = [];
 
   for (const day of days) {
-    const dk = dateKeyFromTimestamp(day.toISOString());
+    const dk = dateKeyFromTimestamp(day.toISOString(), homeTimezone);
     const ym = dk.slice(0, 7);
     const dow = day.getUTCDay();
     const list = dayIntervals.get(dk) ?? [];
@@ -994,7 +996,7 @@ export function completeActualIntervalsV1(args: {
       excludedDateKeys.has(dk) ||
       (simulateIncompleteDays && presentSlotCount > 0 && presentSlotCount < MIN_TRUSTED_ACTUAL_INTERVALS_PER_DAY) ||
       (simulateIncompleteDays && presentSlotCount === 0);
-    const gridTs = getDayGridTimestamps(day.getTime());
+    const gridTs = getDayGridTimestamps(day.getTime(), homeTimezone);
 
     if (needSimulate) {
       let hourWeights = avgHourly[ym]?.[dow];

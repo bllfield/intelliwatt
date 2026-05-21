@@ -376,9 +376,9 @@ export async function buildAndSavePastForGapfillLab(args: {
     if (String(pastResult.error ?? "").startsWith("actual_weather_required:")) {
       const canonicalDateKeys = Array.from(
         new Set(
-          enumerateDayStartsMsForWindow(startDate, endDate)
-            .map((ms) => getDayGridTimestamps(ms)[0] ?? "")
-            .map((ts) => dateKeyFromTimestamp(ts))
+          enumerateDayStartsMsForWindow(startDate, endDate, timezone)
+            .map((ms) => getDayGridTimestamps(ms, timezone)[0] ?? "")
+            .map((ts) => dateKeyFromTimestamp(ts, timezone))
             .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
         )
       ).sort();

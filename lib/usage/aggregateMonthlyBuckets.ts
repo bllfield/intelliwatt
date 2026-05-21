@@ -45,8 +45,7 @@ export async function ensureBucketsExist(args: {
   for (const key of uniq) {
     const parsed = parseMonthlyBucketKey(key);
     if (!parsed) throw new BucketKeyParseError(key);
-    if (parsed.tz !== "America/Chicago" || tz !== "America/Chicago") {
-      // For now we only support America/Chicago in the stored rule format + evaluator.
+    if (parsed.tz !== tz) {
       skipped.push(key);
       continue;
     }

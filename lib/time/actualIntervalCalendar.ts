@@ -3,19 +3,17 @@
  */
 
 import {
+  createHomeIntervalCalendar,
   enumerateExpectedLocalSlotsForDate,
   enumerateLocalDateKeys,
   expectedSlotsForLocalDate,
   localDayBoundsUtc,
-  smtHomeIntervalCalendar,
   type HomeIntervalCalendar,
   type HomeIntervalRecord,
 } from "@/lib/time/homeIntervalCalendar";
+import { resolveHomeTimezone } from "@/lib/time/resolveHomeTimezone";
 import { smtCompletenessIntervalThreshold, smtRequiredSlotsForDateKey } from "@/lib/usage/smtWindowStatus";
-import {
-  greenButtonHomeIntervalCalendar,
-  greenButtonTrustedIntervalThreshold,
-} from "@/lib/time/greenButtonPersistedIntervalConvert";
+import { greenButtonTrustedIntervalThreshold } from "@/lib/time/greenButtonPersistedIntervalConvert";
 
 const FIFTEEN_MIN_MS = 15 * 60 * 1000;
 
@@ -55,7 +53,9 @@ export function trustedIntervalThresholdForDateKey(
   if (source === "SMT") {
     return smtCompletenessIntervalThreshold(smtRequiredSlotsForDateKey(dateKey));
   }
-  return greenButtonTrustedIntervalThreshold(dateKey, home ?? greenButtonHomeIntervalCalendar());
+  const calendar =
+    home ?? createHomeIntervalCalendar(resolveHomeTimezone({ preferredActualSource: "GREEN_BUTTON" }));
+  return greenButtonTrustedIntervalThreshold(dateKey, calendar);
 }
 
 export function countPresentSlotsForIntervalDay(
@@ -138,9 +138,10 @@ export function resolveHomeCalendarForActualSource(
   source: "SMT" | "GREEN_BUTTON",
   homeTimezone?: string,
 ): HomeIntervalCalendar {
-  return source === "SMT"
-    ? smtHomeIntervalCalendar()
-    : greenButtonHomeIntervalCalendar(homeTimezone);
+  const tz =
+    homeTimezone?.trim() ||
+    resolveHomeTimezone({ preferredActualSource: source === "SMT" ? "SMT" : "GREEN_BUTTON" });
+  return createHomeIntervalCalendar(tz);
 }
 
 export function expectedSlotsForDateKey(dateKey: string, home: HomeIntervalCalendar): number {

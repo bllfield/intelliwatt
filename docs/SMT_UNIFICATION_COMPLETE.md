@@ -15,8 +15,12 @@
 | Per-day 96/96 status | `lib/usage/smtWindowStatus.ts` |
 | Heal (pull, backfill, wait, targeted days) | `lib/usage/ensureSmtCoverage.ts` |
 | 365-day window metadata | `lib/usage/canonicalMetadataWindow.ts` (`canonicalCoverageWindowUtcBounds` for Chicago-local DB range scans) |
+| Home-local 15m calendar (all sources) | `lib/time/homeIntervalCalendar.ts` + `lib/time/actualIntervalCalendar.ts` |
+| Per-home IANA timezone | `lib/time/resolveHomeTimezone.ts` (`addressState` / explicit override; TX → `America/Chicago`) |
+| Past interval grid (no UTC slice) | `lib/time/pastIntervalGrid.ts`; `modules/usageSimulator/pastStitchedCurve.ts` requires `homeTimezone` |
+| Baseload (Usage / baseline / Past) | `lib/usage/computeHomeBaseloadKw.ts` — full-interval `FILTERED_NORMAL_LIFE_V1`; lightweight paths overlay interval baseload (no SQL P10 as primary) |
 
-Simulator modules re-export window helpers from `canonicalMetadataWindow.ts` for backward compatibility. Green Button remains separate (`modules/realUsageAdapter/greenButton.ts`, 90-slot trusted rule unchanged).
+Simulator modules re-export window helpers from `canonicalMetadataWindow.ts` for backward compatibility. Green Button ingest remains in `modules/realUsageAdapter/greenButton.ts`; read/display paths use `greenButtonPersistedIntervalConvert.ts` with DST-aware trusted thresholds (92/96/100).
 
 ## Phase checklist
 

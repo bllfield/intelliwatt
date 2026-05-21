@@ -3,6 +3,7 @@ import { usagePrisma } from "@/lib/db/usageClient";
 import type { BucketRuleV1, OvernightAttribution } from "@/lib/plan-engine/usageBuckets";
 import { bucketDefsFromBucketKeys, canonicalizeMonthlyBucketKey } from "@/lib/plan-engine/usageBuckets";
 import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
+import { loadHomeTimezoneForHouseId } from "@/lib/time/loadHouseTimezone";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -83,7 +84,7 @@ function lastNYearMonthsChicagoFrom(date: Date, n: number): string[] {
   return out;
 }
 
-function chicagoParts(ts: Date): {
+function timezoneParts(ts: Date, homeTimezone: string): {
   yearMonth: string;
   year: number;
   month: number;
@@ -93,7 +94,7 @@ function chicagoParts(ts: Date): {
 } | null {
   try {
     const fmt = new Intl.DateTimeFormat("en-US", {
-      timeZone: "America/Chicago",
+      timeZone: homeTimezone,
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -127,7 +128,11 @@ function chicagoParts(ts: Date): {
   }
 }
 
-function lastCompleteChicagoDay(ts: Date, opts?: { minMinutesOfDay?: number; maxStepDays?: number }): {
+function lastCompleteLocalDay(
+  ts: Date,
+  homeTimezone: string,
+  opts?: { minMinutesOfDay?: number; maxStepDays?: number },
+): {
   year: number;
   month: number;
   yearMonth: string;
@@ -137,7 +142,7 @@ function lastCompleteChicagoDay(ts: Date, opts?: { minMinutesOfDay?: number; max
     typeof opts?.minMinutesOfDay === "number" ? opts!.minMinutesOfDay : 23 * 60 + 45; // 23:45
   const maxStepDays = typeof opts?.maxStepDays === "number" ? opts!.maxStepDays : 2;
 
-  const p0 = chicagoParts(ts);
+  const p0 = timezoneParts(ts, homeTimezone);
   if (!p0) return null;
   if (p0.minutesOfDay >= minMinutesOfDay) {
     return { year: p0.year, month: p0.month, yearMonth: p0.yearMonth, day: p0.day };
@@ -146,7 +151,7 @@ function lastCompleteChicagoDay(ts: Date, opts?: { minMinutesOfDay?: number; max
   const anchor = new Date(Date.UTC(p0.year, p0.month - 1, p0.day, 18, 0, 0));
   for (let step = 1; step <= Math.max(1, maxStepDays); step++) {
     const prev = new Date(anchor.getTime() - step * DAY_MS);
-    const p = chicagoParts(prev);
+    const p = timezoneParts(prev, homeTimezone);
     if (!p) continue;
     return { year: p.year, month: p.month, yearMonth: p.yearMonth, day: p.day };
   }
@@ -171,9 +176,10 @@ function hhmmToMinutes(hhmm: string): number | null {
 function evalRule(
   rule: BucketRuleV1,
   local: { month: number; dayOfMonth: number; weekdayIndex: number; minutesOfDay: number },
+  homeTimezone: string,
 ): boolean {
   if (!rule || rule.v !== 1) return false;
-  if (rule.tz !== "America/Chicago") return false;
+  if (rule.tz !== homeTimezone) return false;
 
   const startMin = hhmmToMinutes(String(rule.window?.startHHMM ?? "").trim());
   const endMin = hhmmToMinutes(String(rule.window?.endHHMM ?? "").trim());
@@ -234,6 +240,7 @@ export async function buildUsageBucketsForEstimate(args: {
   monthsCount?: number;
   maxStepDays?: number;
   stitchMode?: "DAILY_ONLY" | "DAILY_OR_INTERVAL" | "NONE";
+  homeTimezone?: string;
   // If false, this function becomes READ-ONLY: it will not attempt to compute/ensure missing buckets.
   // Callers like the customer Plans list must be display-only and should rely on the pipeline to populate buckets.
   computeMissing?: boolean;
@@ -254,12 +261,19 @@ export async function buildUsageBucketsForEstimate(args: {
       }
     | null;
 }> {
+  const homeTimezone =
+    args.homeTimezone?.trim() ||
+    (await loadHomeTimezoneForHouseId(args.homeId, {
+      preferredActualSource: args.usageSource,
+    }));
   const monthsCount = Math.max(1, Math.floor(args.monthsCount ?? 12));
   const stitchMode = args.stitchMode ?? "DAILY_OR_INTERVAL";
   const computeMissing = args.computeMissing !== false;
-  const windowEndParts = chicagoParts(args.windowEnd);
+  const windowEndParts = timezoneParts(args.windowEnd, homeTimezone);
   const windowEndYearMonth = windowEndParts?.yearMonth ?? null;
-  const completeDay = lastCompleteChicagoDay(args.windowEnd, { maxStepDays: args.maxStepDays ?? 2 });
+  const completeDay = lastCompleteLocalDay(args.windowEnd, homeTimezone, {
+    maxStepDays: args.maxStepDays ?? 2,
+  });
   const stitchYm = windowEndYearMonth ?? completeDay?.yearMonth ?? null;
 
   const yearMonths = (windowEndYearMonth
@@ -275,7 +289,10 @@ export async function buildUsageBucketsForEstimate(args: {
         .filter(Boolean),
     ),
   );
-  const bucketDefs = bucketDefsFromBucketKeys(keysToLoad);
+  const bucketDefs = bucketDefsFromBucketKeys(keysToLoad).map((def) => ({
+    ...def,
+    rule: { ...def.rule, tz: homeTimezone },
+  }));
 
   // Check bucket coverage first; compute only when missing so plan cost never "stalls"
   // on missing TOU buckets while keeping fast paths cheap.
@@ -626,19 +643,23 @@ export async function buildUsageBucketsForEstimate(args: {
               dayMax: number,
             ) => {
               for (const r of rows) {
-                const p = chicagoParts(r.ts);
+                const p = timezoneParts(r.ts, homeTimezone);
                 if (!p) continue;
                 if (p.yearMonth !== onlyYearMonth) continue;
                 if (p.day < dayMin || p.day > dayMax) continue;
                 for (const def of bucketDefs) {
                   const rule = def.rule as BucketRuleV1;
                   if (
-                    !evalRule(rule, {
-                      month: p.month,
-                      dayOfMonth: p.day,
-                      weekdayIndex: p.weekdayIndex,
-                      minutesOfDay: p.minutesOfDay,
-                    })
+                    !evalRule(
+                      rule,
+                      {
+                        month: p.month,
+                        dayOfMonth: p.day,
+                        weekdayIndex: p.weekdayIndex,
+                        minutesOfDay: p.minutesOfDay,
+                      },
+                      homeTimezone,
+                    )
                   )
                     continue;
                   totals[def.key] = (totals[def.key] ?? 0) + r.kwh;
@@ -731,19 +752,23 @@ export async function buildUsageBucketsForEstimate(args: {
               dayMax: number,
             ) => {
               for (const r of rows) {
-                const p = chicagoParts(r.ts);
+                const p = timezoneParts(r.ts, homeTimezone);
                 if (!p) continue;
                 if (p.yearMonth !== onlyYearMonth) continue;
                 if (p.day < dayMin || p.day > dayMax) continue;
                 for (const def of bucketDefs) {
                   const rule = def.rule as BucketRuleV1;
                   if (
-                    !evalRule(rule, {
-                      month: p.month,
-                      dayOfMonth: p.day,
-                      weekdayIndex: p.weekdayIndex,
-                      minutesOfDay: p.minutesOfDay,
-                    })
+                    !evalRule(
+                      rule,
+                      {
+                        month: p.month,
+                        dayOfMonth: p.day,
+                        weekdayIndex: p.weekdayIndex,
+                        minutesOfDay: p.minutesOfDay,
+                      },
+                      homeTimezone,
+                    )
                   )
                     continue;
                   totals[def.key] = (totals[def.key] ?? 0) + r.kwh;

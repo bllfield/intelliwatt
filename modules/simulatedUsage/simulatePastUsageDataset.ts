@@ -20,6 +20,7 @@ import {
   resolveHomeCalendarForActualSource,
 } from "@/lib/time/actualIntervalCalendar";
 import { convertGreenButtonPersistedRowsToHome } from "@/lib/time/greenButtonPersistedIntervalConvert";
+import type { PastIntervalGrid } from "@/lib/time/pastIntervalGrid";
 import { dateKeyFromTimestamp, getDayGridTimestamps } from "@/modules/usageSimulator/pastStitchedCurve";
 import { buildPastSimulatedBaselineV1 } from "@/modules/simulatedUsage/engine";
 import { getHouseWeatherDays } from "@/modules/weather/repo";
@@ -112,14 +113,17 @@ export type WeatherProvenance = {
   weatherActualRowCount: number;
 };
 
-function dateKeysFromCanonicalDayStarts(canonicalDayStartsMs: number[]): string[] {
+function dateKeysFromCanonicalDayStarts(
+  canonicalDayStartsMs: number[],
+  homeDayGrid: Pick<PastIntervalGrid, "getDayGridTimestamps" | "dateKeyFromTimestamp">,
+): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const dayStartMs of canonicalDayStartsMs ?? []) {
     if (!Number.isFinite(dayStartMs)) continue;
-    const gridTs = getDayGridTimestamps(dayStartMs);
+    const gridTs = homeDayGrid.getDayGridTimestamps(dayStartMs);
     if (!gridTs.length) continue;
-    const dateKey = dateKeyFromTimestamp(gridTs[0]);
+    const dateKey = homeDayGrid.dateKeyFromTimestamp(gridTs[0]!);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey) || seen.has(dateKey)) continue;
     seen.add(dateKey);
     out.push(dateKey);
@@ -850,9 +854,9 @@ function resolveUtcDateKeySelectionsFromLocalDateSets(args: {
 
   if (args.timezoneResolved) {
     for (const dayStartMs of args.canonicalDayStartsMs) {
-      const gridTs = getDayGridTimestamps(dayStartMs);
+      const gridTs = getDayGridTimestamps(dayStartMs, args.timezoneResolved);
       if (!gridTs.length) continue;
-      const utcDateKey = dateKeyFromTimestamp(gridTs[0]);
+      const utcDateKey = dateKeyFromTimestamp(gridTs[0]!, args.timezoneResolved);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(utcDateKey)) continue;
       // Map each UTC day to one dominant local day key (majority of 15-min slots) so
       // local-day selections do not spill into adjacent UTC days.
@@ -1574,9 +1578,9 @@ export async function simulatePastUsageDataset(
     const dateKeyFromTimestampForPast = (ts: string) => {
       const homeKey = homeDateKeyByTs.get(ts);
       if (homeKey && /^\d{4}-\d{2}-\d{2}$/.test(homeKey)) return homeKey;
-      return dateKeyFromTimestamp(ts);
+      return homeDayGrid.dateKeyFromTimestamp(ts);
     };
-    const canonicalDateKeys = dateKeysFromCanonicalDayStarts(canonicalDayStartsMs);
+    const canonicalDateKeys = dateKeysFromCanonicalDayStarts(canonicalDayStartsMs, homeDayGrid);
     const forcedSimulateDateKeysLocal = new Set<string>(
       Array.from(forceSimulateDateKeysLocal ?? [])
         .map((dk) => String(dk ?? "").slice(0, 10))

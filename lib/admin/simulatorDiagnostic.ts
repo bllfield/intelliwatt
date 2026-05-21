@@ -31,14 +31,14 @@ function normalizeWeatherFallbackReason(value: unknown): string | null {
   return s === "" ? null : s;
 }
 
-function canonicalDateKeysFromWindow(startDate: string, endDate: string): string[] {
-  const dayStarts = enumerateDayStartsMsForWindow(startDate, endDate);
+function canonicalDateKeysFromWindow(startDate: string, endDate: string, homeTimezone: string): string[] {
+  const dayStarts = enumerateDayStartsMsForWindow(startDate, endDate, homeTimezone);
   const keys: string[] = [];
   const seen = new Set<string>();
   for (const ms of dayStarts) {
-    const grid = getDayGridTimestamps(ms);
+    const grid = getDayGridTimestamps(ms, homeTimezone);
     if (grid.length === 0) continue;
-    const dk = dateKeyFromTimestamp(grid[0]!);
+    const dk = dateKeyFromTimestamp(grid[0]!, homeTimezone);
     if (!YYYY_MM_DD.test(dk) || seen.has(dk)) continue;
     seen.add(dk);
     keys.push(dk);
@@ -392,7 +392,11 @@ export async function runSimulatorDiagnostic(
     weatherIdentity,
   });
 
-  const canonicalDateKeys = canonicalDateKeysFromWindow(startDate, endDate);
+  const canonicalDateKeys = canonicalDateKeysFromWindow(
+    startDate,
+    endDate,
+    String((buildInputs as { timezone?: string })?.timezone ?? "America/Chicago"),
+  );
   const excludedDateKeys = new Set(
     travelRangesToExcludeDateKeys(Array.isArray(travelRanges) ? travelRanges : [])
   );

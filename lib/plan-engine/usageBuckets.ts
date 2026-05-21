@@ -7,7 +7,7 @@ export type OvernightAttribution = "ACTUAL_DAY" | "START_DAY";
 // - HHMM strings are 4-digit "0000".."2400" (2400 allowed only as an end boundary).
 export type BucketRuleV1 = {
   v: 1;
-  tz: "America/Chicago";
+  tz: string;
   // One of:
   dayType?: DayType; // coarse filter
   daysOfWeek?: number[]; // 0=Sun..6=Sat (finer filter)
@@ -91,7 +91,7 @@ export type ParsedBucketKey = {
   dayType: "all" | "weekday" | "weekend";
   startHHMM: string | null; // null when "total"
   endHHMM: string | null;
-  tz: "America/Chicago";
+  tz: string;
   isTotal: boolean;
 };
 
@@ -247,7 +247,7 @@ export function bucketDefsFromBucketKeys(bucketKeys: string[]): UsageBucketDef[]
   return out;
 }
 
-export function bucketRuleFromParsedKey(p: ParsedBucketKey): BucketRuleV1 {
+export function bucketRuleFromParsedKey(p: ParsedBucketKey, homeTimezone = "America/Chicago"): BucketRuleV1 {
   const dayType: DayType = p.dayType === "all" ? "ALL" : p.dayType === "weekday" ? "WEEKDAY" : "WEEKEND";
 
   const window =
@@ -258,7 +258,7 @@ export function bucketRuleFromParsedKey(p: ParsedBucketKey): BucketRuleV1 {
   // Parse-time validation ensures HHMM format correctness.
   return {
     v: 1,
-    tz: "America/Chicago",
+    tz: homeTimezone,
     dayType,
     window,
     overnightAttribution: "ACTUAL_DAY",
