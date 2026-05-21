@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { prevCalendarDayDateKey } from "@/lib/time/chicago";
 
 vi.mock("server-only", () => ({}));
 
@@ -145,6 +146,35 @@ describe("actualDatasetForHouse source selection", () => {
         }),
       }),
     );
+  });
+
+  it("anchors GREEN_BUTTON baseline display to the uploaded file window, not the SMT canonical lag window", async () => {
+    const anchorEnd = "2026-05-14";
+    const anchorStart = prevCalendarDayDateKey(anchorEnd, 364);
+    getLatestGreenButtonFullDayDateKey.mockResolvedValue(anchorEnd);
+    greenButtonFindFirst.mockResolvedValue({ timestamp: new Date(`${anchorEnd}T12:00:00.000Z`) });
+    greenButtonAggregate.mockResolvedValue({
+      _count: { _all: 96 },
+      _sum: { consumptionKwh: 14082 },
+      _min: { timestamp: new Date(`${anchorStart}T06:00:00.000Z`) },
+      _max: { timestamp: new Date(`${anchorEnd}T23:45:00.000Z`) },
+    });
+
+    const { getActualUsageDatasetForHouse } = await import("@/lib/usage/actualDatasetForHouse");
+    const result = await getActualUsageDatasetForHouse("house-1", "esiid-1", {
+      preferredSource: "GREEN_BUTTON",
+      skipFullYearIntervalFetch: true,
+    });
+
+    expect(result.dataset?.summary.source).toBe("GREEN_BUTTON");
+    expect(result.dataset?.summary.start).toBe(anchorStart);
+    expect(result.dataset?.summary.end).toBe(anchorEnd);
+    expect(result.dataset?.meta?.coverageStart).toBe(anchorStart);
+    expect(result.dataset?.meta?.coverageEnd).toBe(anchorEnd);
+    expect(result.dataset?.summary.start).not.toBe("2024-12-02");
+    expect(result.dataset?.summary.end).not.toBe("2025-12-01");
+    expect(result.dataset?.daily?.some((row) => row.date === anchorEnd)).toBe(true);
+    expect(result.dataset?.daily?.some((row) => row.date === "2026-05-19")).toBe(false);
   });
 
   it("uses canonicalCoverageWindowUtcBounds for production dataset and interval range scans", async () => {

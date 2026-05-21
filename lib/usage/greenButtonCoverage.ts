@@ -1,6 +1,9 @@
 import { DateTime } from "luxon";
 import { expectedIntervalsForDateISO } from "@/lib/analysis/dst";
+import { getLatestGreenButtonFullDayDateKey } from "@/modules/realUsageAdapter/greenButton";
 import { dateTimePartsInTimezone, prevCalendarDayDateKey } from "@/lib/time/chicago";
+import type { CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
+import { CANONICAL_COVERAGE_TOTAL_DAYS } from "@/lib/usage/canonicalCoverageConfig";
 
 const GREEN_BUTTON_TIMEZONE = "America/Chicago";
 
@@ -43,6 +46,23 @@ export function resolveLatestCompleteOrAvailableGreenButtonDateKey<T extends Gre
     }
   }
   return sortedDateKeys[sortedDateKeys.length - 1] ?? null;
+}
+
+/**
+ * Baseline / Usage Green Button display window: 365 inclusive local days ending on the
+ * latest complete day in the uploaded file (not the SMT canonical lag window).
+ * Past Sim keeps canonical window + year-shift via fetchGreenButtonIntervalsForCoverageWindow.
+ */
+export async function resolveGreenButtonBaselineCoverageWindow(
+  houseId: string,
+  totalDays = CANONICAL_COVERAGE_TOTAL_DAYS
+): Promise<CoverageWindow | null> {
+  const anchorEndDate = await getLatestGreenButtonFullDayDateKey({ houseId: String(houseId ?? "").trim() });
+  if (!anchorEndDate || !/^\d{4}-\d{2}-\d{2}$/.test(anchorEndDate)) return null;
+  return {
+    startDate: prevCalendarDayDateKey(anchorEndDate, Math.max(0, Math.trunc(totalDays) - 1)),
+    endDate: anchorEndDate,
+  };
 }
 
 export function trimGreenButtonIntervalsToLatestLocalDays<T extends GreenButtonTimestampedInterval>(

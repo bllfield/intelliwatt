@@ -22,7 +22,10 @@ import {
   fillCanonicalDailyTotals,
   resolveCanonicalUsage365CoverageWindow,
 } from "@/lib/usage/canonicalMetadataWindow";
-import { buildUtcRangeForChicagoLocalDateRange } from "@/lib/usage/greenButtonCoverage";
+import {
+  buildUtcRangeForChicagoLocalDateRange,
+  resolveGreenButtonBaselineCoverageWindow,
+} from "@/lib/usage/greenButtonCoverage";
 import { chicagoDateKey, dateTimePartsInTimezone, enumerateDateKeysInclusive, prevCalendarDayDateKey } from "@/lib/time/chicago";
 import { homeProjectedIntervalFromRecord } from "@/lib/time/actualIntervalCalendar";
 import {
@@ -1198,12 +1201,21 @@ export async function getActualUsageDatasetForHouse(
     }
   }
   const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
+  const selected = chooseDataset(smtDataset, greenDataset, preferredSource);
+  const greenButtonBaselineWindow =
+    selected?.summary?.source === "GREEN_BUTTON"
+      ? await resolveGreenButtonBaselineCoverageWindow(houseId)
+      : null;
+  const displayCoverageWindow =
+    selected?.summary?.source === "GREEN_BUTTON" && greenButtonBaselineWindow
+      ? greenButtonBaselineWindow
+      : canonicalWindow;
+  const displayUtcBounds = canonicalCoverageWindowUtcBounds(displayCoverageWindow);
   const canonicalUtcBounds = canonicalCoverageWindowUtcBounds(canonicalWindow);
   const canonicalCutoff = canonicalUtcBounds.rangeStart;
   const canonicalEnd = canonicalUtcBounds.rangeEndInclusive;
-  const selected = chooseDataset(smtDataset, greenDataset, preferredSource);
-  const selectedWindowStartDate = canonicalWindow.startDate;
-  const selectedWindowEndDate = canonicalWindow.endDate;
+  const selectedWindowStartDate = displayCoverageWindow.startDate;
+  const selectedWindowEndDate = displayCoverageWindow.endDate;
 
   const emptyInsights: ActualHouseInsights = {
     fifteenMinuteAverages: [] as Array<{ hhmm: string; avgKw: number }>,
@@ -1362,7 +1374,7 @@ export async function getActualUsageDatasetForHouse(
       monthlyTotals,
       stitchedMonth,
     });
-    const dailyTotalsForDataset = fillCanonicalDailyTotals(dailyTotals, canonicalWindow);
+    const dailyTotalsForDataset = fillCanonicalDailyTotals(dailyTotals, displayCoverageWindow);
     insights = await (async () => {
       const baseloadFiltered = computeHomeBaseloadKw(
         (
@@ -1408,7 +1420,7 @@ export async function getActualUsageDatasetForHouse(
           ...selected.summary,
           totalKwh,
         },
-        canonicalWindow,
+        displayCoverageWindow,
       ),
       series: {
         ...selected.series,
@@ -1424,8 +1436,8 @@ export async function getActualUsageDatasetForHouse(
         datasetKind: "ACTUAL",
         actualSource: selected.summary.source,
         timezone: homeTimezone,
-        coverageStart: canonicalWindow.startDate,
-        coverageEnd: canonicalWindow.endDate,
+        coverageStart: displayCoverageWindow.startDate,
+        coverageEnd: displayCoverageWindow.endDate,
         canonicalMonths,
         canonicalEndMonth: canonicalMonths.length > 0 ? canonicalMonths[canonicalMonths.length - 1] ?? null : null,
       },
@@ -1457,14 +1469,18 @@ export async function getActualUsageDatasetForHouse(
       (selected?.summary?.source === "SMT" && esiid) ||
       (selected?.summary?.source === "GREEN_BUTTON" && bucketBuildGreenButtonRawId)
     ) {
-      if (Number.isFinite(canonicalEnd.getTime())) {
+      const bucketWindowEnd =
+        selected.summary.source === "GREEN_BUTTON" ? displayUtcBounds.rangeEndInclusive : canonicalEnd;
+      const bucketWindowCutoff =
+        selected.summary.source === "GREEN_BUTTON" ? displayUtcBounds.rangeStart : canonicalCutoff;
+      if (Number.isFinite(bucketWindowEnd.getTime())) {
         const bucketBuild = await buildUsageBucketsForEstimate({
           homeId: houseId,
           usageSource: selected.summary.source,
           esiid: selected.summary.source === "SMT" ? esiid : null,
           rawId: selected.summary.source === "GREEN_BUTTON" ? bucketBuildGreenButtonRawId : null,
-          windowEnd: canonicalEnd,
-          cutoff: canonicalCutoff,
+          windowEnd: bucketWindowEnd,
+          cutoff: bucketWindowCutoff,
           requiredBucketKeys: ["kwh.m.all.total"],
           monthsCount: 12,
           maxStepDays: 2,
@@ -1612,7 +1628,7 @@ export async function getActualUsageDatasetForHouse(
     monthlyForDataset.length > 0
       ? { importKwh: totalFromMonthly, exportKwh: 0, netKwh: totalFromMonthly }
       : totals;
-  const dailyTotalsForDataset = fillCanonicalDailyTotals(dailyTotals, canonicalWindow);
+  const dailyTotalsForDataset = fillCanonicalDailyTotals(dailyTotals, displayCoverageWindow);
 
   const dataset: ActualHouseDataset | null = selected
     ? {
@@ -1621,7 +1637,7 @@ export async function getActualUsageDatasetForHouse(
             ...selected.summary,
             totalKwh: monthlyForDataset.length > 0 ? totalFromMonthly : selected.summary.totalKwh,
           },
-          canonicalWindow,
+          displayCoverageWindow,
         ),
         series: {
           ...selected.series,
@@ -1637,8 +1653,8 @@ export async function getActualUsageDatasetForHouse(
           datasetKind: "ACTUAL",
           actualSource: selected.summary.source,
           timezone: homeTimezone,
-          coverageStart: canonicalWindow.startDate,
-          coverageEnd: canonicalWindow.endDate,
+          coverageStart: displayCoverageWindow.startDate,
+          coverageEnd: displayCoverageWindow.endDate,
           canonicalMonths: canonicalMonthsForDataset,
           canonicalEndMonth:
             canonicalMonthsForDataset.length > 0 ? canonicalMonthsForDataset[canonicalMonthsForDataset.length - 1] ?? null : null,
