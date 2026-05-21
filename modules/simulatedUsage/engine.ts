@@ -1055,6 +1055,7 @@ export type PastSimulatedDayDiagnostic = {
     | "DAILY_USAGE_MISSING"
     | "LOW_DATA_CONSTRAINED"
     | "INCOMPLETE"
+    | "PENDING_SMT_INTERVALS"
     | "FORCED_SELECTED_DAY"
     | "GAPFILL_MODELED_KEEP_REF"
     | null;
@@ -2610,6 +2611,7 @@ export function buildPastSimulatedBaselineV1(args: {
       | "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
       | "FORCED_SELECTED_DAY"
       | "INCOMPLETE_METER_DAY"
+      | "INTERVALS_NOT_AVAILABLE_YET_DAY"
       | "DAILY_USAGE_MISSING_DAY"
       | "LEADING_MISSING_DAY";
     modeledResult: SimulatedDayResult;
