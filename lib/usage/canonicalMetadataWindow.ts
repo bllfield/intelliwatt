@@ -1,5 +1,5 @@
 import { DateTime } from "luxon";
-import { canonicalUsageWindowChicago, smtCoverageDateKey } from "@/lib/time/chicago";
+import { canonicalUsageWindowChicago, enumerateDateKeysInclusive, smtCoverageDateKey } from "@/lib/time/chicago";
 import {
   CANONICAL_COVERAGE_LAG_DAYS,
   CANONICAL_COVERAGE_TOTAL_DAYS,
@@ -63,6 +63,24 @@ export function boundDateKeysToCoverageWindow(
  * Canonical usage dashboard coverage window (365 inclusive days in America/Chicago).
  * Single lib owner for coverage window metadata (PC-2026-05 Phase 7).
  */
+/** Ensure daily rows include every calendar day in the canonical window (zero-fill gaps). */
+export function fillCanonicalDailyTotals<T extends { date: string; kwh: number }>(
+  rows: ReadonlyArray<T>,
+  window: CoverageWindow
+): T[] {
+  const byDate = new Map<string, T>();
+  for (const row of rows) {
+    const date = String(row.date ?? "").slice(0, 10);
+    if (!YYYY_MM_DD.test(date)) continue;
+    byDate.set(date, { ...row, date, kwh: Number(row.kwh) || 0 });
+  }
+  return enumerateDateKeysInclusive(window.startDate, window.endDate).map((date) => {
+    const existing = byDate.get(date);
+    if (existing) return existing;
+    return { date, kwh: 0 } as T;
+  });
+}
+
 export function resolveCanonicalUsage365CoverageWindow(
   now: Date = new Date(),
   policy?: CanonicalCoverageWindowPolicy

@@ -204,6 +204,14 @@ export async function GET(request: NextRequest) {
           canonicalCoverage.endDate
         );
         if (healScopeReady && tailDisplayReady) {
+          if (process.env.NODE_ENV === "production") {
+            console.info("[user/usage] SMT tail heal skipped (coverage current)", {
+              houseId: house.id,
+              targetEndDate: canonicalCoverage.endDate,
+              persistedEndDate: persistedSpan?.endDate ?? null,
+              latestCoverageDate: resolvedDataset?.summary?.latest ?? null,
+            });
+          }
           usageIngestion = {
             ...(reconcileUsageIngestionWithDataset({
               ingestion: null,
@@ -222,6 +230,13 @@ export async function GET(request: NextRequest) {
             smtIncompleteMeterDateKeys: ledgerFromDataset.incompleteMeterDateKeys,
           };
         } else if (persistedSpan) {
+          console.info("[user/usage] SMT tail heal starting", {
+            houseId: house.id,
+            targetEndDate: canonicalCoverage.endDate,
+            persistedEndDate: persistedSpan.endDate,
+            healScopeReady,
+            tailDisplayReady,
+          });
           const ensure = await ensureSmtCoverageForHouse({
             userId: user.id,
             houseId: house.id,

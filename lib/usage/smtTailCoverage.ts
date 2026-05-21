@@ -140,7 +140,8 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 export function latestUsageCoverageDateKeyFromDataset(dataset: unknown): string | null {
   const summary = asRecord(asRecord(dataset).summary);
-  const latest = String(summary.latest ?? summary.end ?? "").trim();
+  // Use only persisted meter progress — summary.end is canonical framing, not latest SMT data.
+  const latest = String(summary.latest ?? "").trim();
   if (!latest) return null;
   if (latest.includes("T")) {
     const parsed = new Date(latest);
@@ -293,11 +294,14 @@ export function resolveSmtHealBackfillDateKeys(args: {
   );
 }
 
-/** True when every incomplete day in the persisted span is complete (ignores pre-span canonical gaps). */
+/** True when persisted SMT data has reached and completed the canonical window end day. */
 export function isSmtHealScopeReady(
   dayStatus: SmtWindowStatusSnapshot,
   persistedSpan: SmtPersistedCoverageSpan | null
 ): boolean {
+  if (!persistedSpan) return false;
+  if (persistedSpan.endDate < dayStatus.window.endDate) return false;
+  if (!dayStatus.canonicalEndDayComplete) return false;
   return resolveSmtHealBackfillDateKeys({ dayStatus, persistedSpan }).length === 0;
 }
 

@@ -42,11 +42,19 @@ describe("smt tail coverage helpers", () => {
     expect(
       isResolvedDatasetTailDisplayReady(
         {
-          summary: { latest: "2026-05-17T23:45:00.000Z", end: "2026-05-17" },
+          summary: { latest: "2026-05-17T23:45:00.000Z", end: "2026-05-19" },
         },
         "2026-05-17"
       )
     ).toBe(true);
+    expect(
+      isResolvedDatasetTailDisplayReady(
+        {
+          summary: { end: "2026-05-19" },
+        },
+        "2026-05-19"
+      )
+    ).toBe(false);
     expect(
       reconcileUsageIngestionWithDataset({
         ingestion: {
@@ -151,6 +159,25 @@ describe("smt tail coverage helpers", () => {
         { startDate: "2026-03-01", endDate: "2026-05-17" }
       )
     ).toEqual(["2026-03-25", "2026-05-16"]);
+  });
+
+  it("treats heal scope not ready when persisted span has not reached canonical end", () => {
+    expect(
+      isSmtHealScopeReady(
+        {
+          window: { startDate: "2025-05-20", endDate: "2026-05-19" },
+          dateKeys: [],
+          byDate: {},
+          completeDateKeys: ["2026-05-18"],
+          incompleteDateKeys: [],
+          pendingDateKeys: [],
+          incompleteMeterDateKeys: [],
+          canonicalEndDayComplete: false,
+          ready: true,
+        },
+        { startDate: "2025-05-20", endDate: "2026-05-18" }
+      )
+    ).toBe(false);
   });
 
   it("treats heal scope ready when only pre-span canonical days are incomplete", () => {

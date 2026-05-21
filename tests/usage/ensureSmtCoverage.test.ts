@@ -220,7 +220,7 @@ describe("ensureSmtCoverageForHouse", () => {
     expect(waitForSmtTailCoverageMock).toHaveBeenCalled();
   });
 
-  it("skips heal when only pre-span canonical days are incomplete", async () => {
+  it("still heals when only pre-span canonical days are incomplete but tail has not reached window end", async () => {
     resolveSmtPersistedCoverageSpanMock.mockResolvedValue({
       startDate: "2026-04-12",
       endDate: "2026-04-14",
@@ -229,6 +229,7 @@ describe("ensureSmtCoverageForHouse", () => {
       windowStatus({
         incompleteDateKeys: ["2026-04-10"],
         completeDateKeys: ["2026-04-14"],
+        canonicalEndDayComplete: false,
         ready: false,
       })
     );
@@ -237,12 +238,13 @@ describe("ensureSmtCoverageForHouse", () => {
       userId: "user-1",
       houseId: "house-1",
       profile: "user_session",
-      sessionKey: "pre-span-ready",
+      sessionKey: "pre-span-tail-gap",
     });
 
-    expect(result.healed).toBe(false);
-    expect(result.skippedReason).toBe("window_ready");
+    expect(result.healed).toBe(true);
     expect(requestTargetedSmtIntervalBackfillForHouseMock).not.toHaveBeenCalled();
+    expect(requestUsageRefreshForUserHouseMock).toHaveBeenCalled();
+    expect(waitForSmtTailCoverageMock).toHaveBeenCalled();
   });
 
   it("uses short waits for user_session profile", async () => {

@@ -19,10 +19,11 @@ import {
 import { applySmtLedgerToActualDataset } from "@/lib/usage/smtDayCoverageLedger";
 import {
   canonicalCoverageWindowUtcBounds,
+  fillCanonicalDailyTotals,
   resolveCanonicalUsage365CoverageWindow,
 } from "@/lib/usage/canonicalMetadataWindow";
 import { buildUtcRangeForChicagoLocalDateRange } from "@/lib/usage/greenButtonCoverage";
-import { chicagoDateKey, dateTimePartsInTimezone, prevCalendarDayDateKey } from "@/lib/time/chicago";
+import { chicagoDateKey, dateTimePartsInTimezone, enumerateDateKeysInclusive, prevCalendarDayDateKey } from "@/lib/time/chicago";
 import {
   convertSmtPersistedRowsToHome,
   homeDailyToUsageSeriesPoints,
@@ -236,26 +237,20 @@ function fillDailyGaps(
   startIso?: string | null,
   endIso?: string | null
 ): UsageSeriesPoint[] {
-  if (points.length === 0 && !startIso && !endIso) return points;
-  const startDate = startIso ? new Date(startIso) : new Date(points[0].timestamp);
-  const endDate = endIso ? new Date(endIso) : new Date(points[points.length - 1].timestamp);
-  const startMs = Number.isFinite(startDate.getTime())
-    ? new Date(startDate.toISOString().slice(0, 10)).getTime()
-    : Number.NaN;
-  const endMs = Number.isFinite(endDate.getTime())
-    ? new Date(endDate.toISOString().slice(0, 10)).getTime()
-    : Number.NaN;
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs > endMs) return points;
-  const map = new Map<number, number>();
+  const startKey = startIso ? String(startIso).slice(0, 10) : null;
+  const endKey = endIso ? String(endIso).slice(0, 10) : null;
+  if (!startKey || !endKey || !YYYY_MM_DD.test(startKey) || !YYYY_MM_DD.test(endKey) || endKey < startKey) {
+    return points;
+  }
+  const map = new Map<string, number>();
   for (const p of points) {
-    const dayMs = new Date(new Date(p.timestamp).toISOString().slice(0, 10)).getTime();
-    if (Number.isFinite(dayMs)) map.set(dayMs, p.kwh);
+    const date = String(p.timestamp ?? "").slice(0, 10);
+    if (YYYY_MM_DD.test(date)) map.set(date, p.kwh);
   }
-  const out: UsageSeriesPoint[] = [];
-  for (let ms = startMs; ms <= endMs; ms += DAY_MS) {
-    out.push({ timestamp: new Date(ms).toISOString(), kwh: map.get(ms) ?? 0 });
-  }
-  return out;
+  return enumerateDateKeysInclusive(startKey, endKey).map((date) => ({
+    timestamp: `${date}T00:00:00.000Z`,
+    kwh: map.get(date) ?? 0,
+  }));
 }
 
 function chicagoYearMonth(d: Date): string {
@@ -1409,6 +1404,7 @@ export async function getActualUsageDatasetForHouse(
       monthlyTotals,
       stitchedMonth,
     });
+    const dailyTotalsForDataset = fillCanonicalDailyTotals(dailyTotals, canonicalWindow);
     const dataset: ActualHouseDataset = {
       summary: applyCanonicalCoverageToUsageSummary(
         {
@@ -1423,7 +1419,7 @@ export async function getActualUsageDatasetForHouse(
           ? [{ ...selected.series.annual[0], kwh: totalKwh }]
           : selected.series.annual,
       },
-      daily: dailyTotals,
+      daily: dailyTotalsForDataset,
       monthly: monthlyTotals,
       insights,
       totals: { importKwh: totalKwh, exportKwh: 0, netKwh: totalKwh },
@@ -1612,6 +1608,7 @@ export async function getActualUsageDatasetForHouse(
     monthlyForDataset.length > 0
       ? { importKwh: totalFromMonthly, exportKwh: 0, netKwh: totalFromMonthly }
       : totals;
+  const dailyTotalsForDataset = fillCanonicalDailyTotals(dailyTotals, canonicalWindow);
 
   const dataset: ActualHouseDataset | null = selected
     ? {
@@ -1628,7 +1625,7 @@ export async function getActualUsageDatasetForHouse(
             ? [{ ...selected.series.annual[0], kwh: monthlyForDataset.length > 0 ? totalFromMonthly : selected.series.annual[0].kwh }]
             : selected.series.annual,
         },
-        daily: dailyTotals,
+        daily: dailyTotalsForDataset,
         monthly: monthlyForDataset,
         insights,
         totals: totalsForDataset,
