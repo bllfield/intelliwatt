@@ -814,6 +814,13 @@ async function getSmtWindow(esiid: string): Promise<SmtFetchWindow | null> {
   return { cutoff, end, startDate, endDate };
 }
 
+/** True when any SMT interval exists in the shared canonical 365-day window. */
+export async function hasSmtIntervalsInCanonicalWindow(esiid: string | null | undefined): Promise<boolean> {
+  const normalized = String(esiid ?? "").trim();
+  if (!normalized) return false;
+  return (await getSmtWindow(normalized)) != null;
+}
+
 function applyCanonicalCoverageToUsageSummary(
   summary: UsageSummary,
   window: { startDate: string; endDate: string },
@@ -1241,7 +1248,41 @@ export async function getActualUsageDatasetForHouse(
     }
   }
   const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
-  const selected = chooseDataset(smtDataset, greenDataset, preferredSource);
+  if (
+    userUsageDashboardLoad &&
+    preferredSource !== "GREEN_BUTTON" &&
+    esiid &&
+    !smtDataset &&
+    greenDataset &&
+    (await hasSmtIntervalsInCanonicalWindow(esiid))
+  ) {
+    try {
+      smtDataset = await fetchSmtDataset(esiid, homeTimezone, {
+        skipFullIntervalRowLoad: true,
+      });
+    } catch {
+      smtDataset = null;
+    }
+  }
+  let selected = chooseDataset(smtDataset, greenDataset, preferredSource);
+  if (
+    userUsageDashboardLoad &&
+    preferredSource !== "GREEN_BUTTON" &&
+    selected?.summary?.source === "GREEN_BUTTON" &&
+    esiid &&
+    (await hasSmtIntervalsInCanonicalWindow(esiid))
+  ) {
+    if (!smtDataset) {
+      try {
+        smtDataset = await fetchSmtDataset(esiid, homeTimezone, {
+          skipFullIntervalRowLoad: userUsageDashboardLoad,
+        });
+      } catch {
+        smtDataset = null;
+      }
+    }
+    selected = chooseDataset(smtDataset, greenDataset, "SMT");
+  }
   const greenButtonBaselineWindow =
     selected?.summary?.source === "GREEN_BUTTON"
       ? await resolveGreenButtonBaselineCoverageWindow(houseId)

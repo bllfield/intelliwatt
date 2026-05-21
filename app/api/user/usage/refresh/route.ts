@@ -3,7 +3,10 @@ import { cookies } from "next/headers";
 
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
+import { hasSmtIntervalsInCanonicalWindow } from "@/lib/usage/actualDatasetForHouse";
 import { ensureSmtCoverageForHouse } from "@/lib/usage/ensureSmtCoverage";
+import { clearGreenButtonUsageForHouse } from "@/lib/usage/greenButtonHouseCleanup";
+import { getOnePathLabTestHomeLink } from "@/modules/usageSimulator/labTestHome";
 import {
   resolveUserUsageSessionKey,
   USER_USAGE_SESSION_COOKIE,
@@ -90,5 +93,6 @@ export async function POST(req: NextRequest) {
     homes: refreshResult?.ok ? refreshResult.homes : [],
     backfill: refreshResult?.ok ? refreshResult.backfill : [],
     ensure,
+    greenButtonCleared,
   });
 }
