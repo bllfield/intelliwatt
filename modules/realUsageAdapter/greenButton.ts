@@ -2,10 +2,8 @@ import { Prisma } from "@prisma/client";
 import { expectedIntervalsForDateISO } from "@/lib/analysis/dst";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { dateTimePartsInTimezone, enumerateDateKeysInclusive } from "@/lib/time/chicago";
-import {
-  GREEN_BUTTON_CHICAGO_LOCAL_SLOT_SQL,
-  greenButtonAnchorDayCompleteThreshold,
-} from "@/lib/usage/greenButtonLocalSlot";
+import { greenButtonAnchorDayCompleteThreshold } from "@/lib/usage/greenButtonLocalSlot";
+import { greenButtonChicagoLocalSlotSql } from "@/lib/usage/greenButtonLocalSlotSql";
 import {
   greenButtonHomeIntervalCalendar,
   greenButtonTrustedIntervalThreshold,
@@ -255,7 +253,7 @@ export async function getLatestGreenButtonFullDayDateKey(args: { houseId: string
     const rows = (await usageClient.$queryRaw(Prisma.sql`
       SELECT
         to_char(("timestamp" AT TIME ZONE 'America/Chicago')::timestamp, 'YYYY-MM-DD') AS date_key,
-        COUNT(DISTINCT ${GREEN_BUTTON_CHICAGO_LOCAL_SLOT_SQL})::int AS intervalscount
+        COUNT(DISTINCT ${greenButtonChicagoLocalSlotSql()})::int AS intervalscount
       FROM "GreenButtonInterval"
       WHERE "homeId" = ${args.houseId}
         AND "rawId" = ${rawId}

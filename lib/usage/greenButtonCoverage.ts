@@ -1,30 +1,27 @@
 import { DateTime } from "luxon";
 
 import { getLatestGreenButtonFullDayDateKey } from "@/modules/realUsageAdapter/greenButton";
-import { dateTimePartsInTimezone, enumerateDateKeysInclusive, prevCalendarDayDateKey } from "@/lib/time/chicago";
+import { enumerateDateKeysInclusive, prevCalendarDayDateKey } from "@/lib/time/chicago";
 import { coverageWindowEndingOnDateKey, type CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
 import { CANONICAL_COVERAGE_TOTAL_DAYS } from "@/lib/usage/canonicalCoverageConfig";
 import {
   countDistinctLocalSlotsByDateKey,
+  getChicagoDateKeyForTimestamp,
   resolveLatestCompleteGreenButtonDateKeyFromSlotCounts,
 } from "@/lib/usage/greenButtonLocalSlot";
-
-const GREEN_BUTTON_TIMEZONE = "America/Chicago";
 
 export type GreenButtonTimestampedInterval = {
   timestamp: Date;
 };
 
-export function getChicagoDateKeyForTimestamp(timestamp: Date | string): string | null {
-  return dateTimePartsInTimezone(timestamp, GREEN_BUTTON_TIMEZONE)?.dateKey ?? null;
-}
+export { getChicagoDateKeyForTimestamp };
 
 export function buildUtcRangeForChicagoLocalDateRange(args: {
   startDateKey: string;
   endDateKey: string;
 }): { startInclusive: Date; endInclusive: Date } | null {
-  const start = DateTime.fromISO(String(args.startDateKey ?? ""), { zone: GREEN_BUTTON_TIMEZONE }).startOf("day");
-  const end = DateTime.fromISO(String(args.endDateKey ?? ""), { zone: GREEN_BUTTON_TIMEZONE }).endOf("day");
+  const start = DateTime.fromISO(String(args.startDateKey ?? ""), { zone: "America/Chicago" }).startOf("day");
+  const end = DateTime.fromISO(String(args.endDateKey ?? ""), { zone: "America/Chicago" }).endOf("day");
   if (!start.isValid || !end.isValid) return null;
   return {
     startInclusive: start.toUTC().toJSDate(),

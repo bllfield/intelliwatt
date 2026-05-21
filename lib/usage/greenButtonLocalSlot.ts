@@ -1,7 +1,5 @@
-import { Prisma } from "@prisma/client";
-
 import { expectedIntervalsForDateISO } from "@/lib/analysis/dst";
-import { getChicagoDateKeyForTimestamp } from "@/lib/usage/greenButtonCoverage";
+import { dateTimePartsInTimezone } from "@/lib/time/chicago";
 import {
   createHomeIntervalCalendar,
   localSlotIndex,
@@ -10,17 +8,9 @@ import {
 
 const GREEN_BUTTON_HOME_TIMEZONE = "America/Chicago";
 
-/** Distinct 15-min slot index from local midnight (DST-safe; matches homeIntervalCalendar). */
-export const GREEN_BUTTON_CHICAGO_LOCAL_SLOT_SQL = Prisma.sql`
-  FLOOR(
-    EXTRACT(
-      EPOCH FROM (
-        ("timestamp" AT TIME ZONE 'America/Chicago')
-        - date_trunc('day', "timestamp" AT TIME ZONE 'America/Chicago')
-      )
-    ) / 900
-  )::int
-`;
+export function getChicagoDateKeyForTimestamp(timestamp: Date | string): string | null {
+  return dateTimePartsInTimezone(timestamp, GREEN_BUTTON_HOME_TIMEZONE)?.dateKey ?? null;
+}
 
 export function greenButtonHomeCalendar(): HomeIntervalCalendar {
   return createHomeIntervalCalendar(GREEN_BUTTON_HOME_TIMEZONE);
