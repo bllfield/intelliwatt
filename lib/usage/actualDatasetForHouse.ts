@@ -24,6 +24,13 @@ import {
 } from "@/lib/usage/canonicalMetadataWindow";
 import { buildUtcRangeForChicagoLocalDateRange } from "@/lib/usage/greenButtonCoverage";
 import { chicagoDateKey, dateTimePartsInTimezone, enumerateDateKeysInclusive, prevCalendarDayDateKey } from "@/lib/time/chicago";
+import { homeProjectedIntervalFromRecord } from "@/lib/time/actualIntervalCalendar";
+import {
+  convertGreenButtonPersistedRowsToHome,
+  greenButtonHomeIntervalCalendar,
+  homeDailyToUsageSeriesPoints as greenButtonHomeDailyToUsageSeriesPoints,
+  tailHomeIntervals,
+} from "@/lib/time/greenButtonPersistedIntervalConvert";
 import {
   convertSmtPersistedRowsToHome,
   homeDailyToUsageSeriesPoints,
@@ -1023,17 +1030,21 @@ async function fetchGreenButtonDataset(
     const start = aggregates._min?.timestamp ?? null;
     const end = aggregates._max?.timestamp ?? null;
     const lightweight = options?.lightweight === true;
-    const intervals15 = lightweight
+    const intervalRows = lightweight
       ? []
-      : (
-          (await usageClient.greenButtonInterval.findMany({
-            where: { homeId: houseId, rawId, timestamp: { gte: window.cutoff, lte: window.end } },
-            orderBy: { timestamp: "desc" },
-            take: 192,
-          })) as Array<{ timestamp: Date; consumptionKwh: Prisma.Decimal | number }>
-        )
-          .map((row) => ({ timestamp: row.timestamp.toISOString(), kwh: decimalToNumber(row.consumptionKwh) }))
-          .reverse();
+      : ((await usageClient.greenButtonInterval.findMany({
+          where: { homeId: houseId, rawId, timestamp: { gte: window.cutoff, lte: window.end } },
+          orderBy: { timestamp: "asc" },
+          select: { timestamp: true, consumptionKwh: true },
+        })) as Array<{ timestamp: Date; consumptionKwh: Prisma.Decimal | number }>);
+    const gbConverted = convertGreenButtonPersistedRowsToHome(
+      intervalRows.map((row) => ({
+        timestamp: row.timestamp,
+        consumptionKwh: decimalToNumber(row.consumptionKwh),
+      })),
+      greenButtonHomeIntervalCalendar().timezone,
+    );
+    const intervals15 = lightweight ? [] : tailHomeIntervals(gbConverted.intervals, 192);
     const hourlyRows = lightweight
       ? []
       : ((await usageClient.$queryRaw(Prisma.sql`
@@ -1041,12 +1052,19 @@ async function fetchGreenButtonDataset(
       FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${window.cutoff} AND "timestamp" <= ${window.end} AND "timestamp" >= NOW() - INTERVAL '14 days'
       GROUP BY bucket ORDER BY bucket ASC
     `)) as Array<{ bucket: Date; kwh: number }>);
-    const dailyRowsRaw = await usageClient.$queryRaw(Prisma.sql`
+    const dailyFromCalendar = greenButtonHomeDailyToUsageSeriesPoints(gbConverted).sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+    );
+    const dailyRows = lightweight
+      ? ((await usageClient.$queryRaw(Prisma.sql`
       SELECT date_trunc('day', "timestamp" AT TIME ZONE 'America/Chicago') AT TIME ZONE 'UTC' AS bucket, SUM("consumptionKwh")::float AS kwh
       FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${window.cutoff} AND "timestamp" <= ${window.end}
       GROUP BY bucket ORDER BY bucket DESC LIMIT 400
-    `);
-    const dailyRows = dailyRowsRaw as Array<{ bucket: Date; kwh: number }>;
+    `)) as Array<{ bucket: Date; kwh: number }>)
+      : dailyFromCalendar.slice(0, 400).map((row) => ({
+          bucket: new Date(row.timestamp),
+          kwh: row.kwh,
+        }));
     const monthlyRowsRaw = await usageClient.$queryRaw(Prisma.sql`
       SELECT date_trunc('month', ("timestamp" AT TIME ZONE 'America/Chicago')) AT TIME ZONE 'UTC' AS bucket, SUM("consumptionKwh")::float AS kwh
       FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${window.cutoff} AND "timestamp" <= ${window.end}
@@ -1086,9 +1104,9 @@ async function fetchGreenButtonDataset(
         source: "GREEN_BUTTON",
         intervalsCount: count,
         totalKwh,
-        start: start ? chicagoDateKey(start) : null,
-        end: end ? chicagoDateKey(end) : null,
-        latest: end ? end.toISOString() : null,
+        start: gbConverted.homeCoverageStart ?? (start ? chicagoDateKey(start) : null),
+        end: gbConverted.homeCoverageEnd ?? (end ? chicagoDateKey(end) : null),
+        latest: gbConverted.lastTsUtc ?? (end ? end.toISOString() : null),
       },
       series: {
         intervals15,
@@ -1660,7 +1678,13 @@ export async function getActualUsageDatasetForHouse(
 }
 
 /** 15-min interval point for the full window. Used by Past stitched curve. */
-export type ActualIntervalPoint = { timestamp: string; kwh: number };
+export type ActualIntervalPoint = {
+  timestamp: string;
+  kwh: number;
+  homeDateKey?: string;
+  homeSlot?: number;
+  homeSlotsExpected?: number;
+};
 
 /**
  * Fetches all actual 15-min intervals for a house in a date range (inclusive).
@@ -1699,9 +1723,13 @@ export async function getActualIntervalsForRangeWithSource(args: {
         )
         SELECT "ts", kwh FROM iv ORDER BY "ts" ASC
       `);
+      const smtConverted = convertSmtPersistedRowsToHome(
+        rows.map((row) => ({ ts: row.ts, kwh: decimalToNumber(row.kwh) })),
+        SMT_TZ,
+      );
       return {
         source: "SMT",
-        intervals: rows.map((r) => ({ timestamp: r.ts.toISOString(), kwh: Number(r.kwh) || 0 })),
+        intervals: smtConverted.intervals.map(homeProjectedIntervalFromRecord),
       };
     } catch {
       return { source: "SMT", intervals: [] };
@@ -1719,12 +1747,15 @@ export async function getActualIntervalsForRangeWithSource(args: {
         AND "timestamp" >= ${start} AND "timestamp" <= ${end}
       ORDER BY "timestamp" ASC
     `)) as Array<{ ts: Date; kwh: number }>;
+    const gbConverted = convertGreenButtonPersistedRowsToHome(
+      rows.map((row) => ({
+        timestamp: row.ts instanceof Date ? row.ts : new Date(row.ts),
+        consumptionKwh: Number(row.kwh) || 0,
+      })),
+    );
     return {
       source: "GREEN_BUTTON",
-      intervals: rows.map((r) => ({
-        timestamp: (r.ts instanceof Date ? r.ts : new Date(r.ts)).toISOString(),
-        kwh: Number(r.kwh) || 0,
-      })),
+      intervals: gbConverted.intervals.map(homeProjectedIntervalFromRecord),
     };
   } catch {
     return { source: "GREEN_BUTTON", intervals: [] };

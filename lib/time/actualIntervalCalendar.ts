@@ -1,0 +1,150 @@
+/**
+ * Shared home-local calendar helpers for actual interval payloads (Past sim, range fetch, completeness).
+ */
+
+import {
+  enumerateExpectedLocalSlotsForDate,
+  enumerateLocalDateKeys,
+  expectedSlotsForLocalDate,
+  localDayBoundsUtc,
+  smtHomeIntervalCalendar,
+  type HomeIntervalCalendar,
+  type HomeIntervalRecord,
+} from "@/lib/time/homeIntervalCalendar";
+import { smtCompletenessIntervalThreshold, smtRequiredSlotsForDateKey } from "@/lib/usage/smtWindowStatus";
+import {
+  greenButtonHomeIntervalCalendar,
+  greenButtonTrustedIntervalThreshold,
+} from "@/lib/time/greenButtonPersistedIntervalConvert";
+
+const FIFTEEN_MIN_MS = 15 * 60 * 1000;
+
+export type HomeProjectedIntervalPoint = {
+  timestamp: string;
+  kwh: number;
+  homeDateKey: string;
+  homeSlot: number;
+  homeSlotsExpected: number;
+};
+
+export function homeProjectedIntervalFromRecord(row: HomeIntervalRecord): HomeProjectedIntervalPoint {
+  return {
+    timestamp: row.tsUtc,
+    kwh: row.kwh,
+    homeDateKey: row.homeDateKey,
+    homeSlot: row.homeSlot,
+    homeSlotsExpected: row.homeSlotsExpected,
+  };
+}
+
+/** Prefer home-local date key when intervals were projected through homeIntervalCalendar. */
+export function dateKeyFromIntervalPoint(p: {
+  timestamp: string;
+  homeDateKey?: string | null;
+}): string {
+  const homeKey = String(p.homeDateKey ?? "").slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(homeKey)) return homeKey;
+  return String(p.timestamp ?? "").slice(0, 10);
+}
+
+export function trustedIntervalThresholdForDateKey(
+  dateKey: string,
+  source: "SMT" | "GREEN_BUTTON",
+  home?: HomeIntervalCalendar,
+): number {
+  if (source === "SMT") {
+    return smtCompletenessIntervalThreshold(smtRequiredSlotsForDateKey(dateKey));
+  }
+  return greenButtonTrustedIntervalThreshold(dateKey, home ?? greenButtonHomeIntervalCalendar());
+}
+
+export function countPresentSlotsForIntervalDay(
+  intervals: ReadonlyArray<{ timestamp: string; homeSlot?: number | null }>,
+  dateKey?: string,
+): number {
+  const slots = new Set<number>();
+  for (const row of intervals) {
+    if (dateKey) {
+      const dk = dateKeyFromIntervalPoint(row);
+      if (dk !== dateKey) continue;
+    }
+    if (typeof row.homeSlot === "number" && Number.isFinite(row.homeSlot)) {
+      slots.add(Math.trunc(row.homeSlot));
+      continue;
+    }
+  }
+  return slots.size;
+}
+
+export function dayMeetsTrustedIntervalThreshold(args: {
+  intervals: ReadonlyArray<{ timestamp: string; homeSlot?: number | null; homeDateKey?: string | null }>;
+  dateKey: string;
+  source: "SMT" | "GREEN_BUTTON";
+  home?: HomeIntervalCalendar;
+}): boolean {
+  const dayIntervals = args.intervals.filter((row) => dateKeyFromIntervalPoint(row) === args.dateKey);
+  const present = countPresentSlotsForIntervalDay(dayIntervals, args.dateKey);
+  return present >= trustedIntervalThresholdForDateKey(args.dateKey, args.source, args.home);
+}
+
+export function enumerateHomeDayStartsMsForWindow(
+  startDateKey: string,
+  endDateKey: string,
+  home: HomeIntervalCalendar,
+): number[] {
+  return enumerateLocalDateKeys(startDateKey, endDateKey, home).map(
+    (dateKey) => localDayBoundsUtc(dateKey, home).startUtc.getTime(),
+  );
+}
+
+/** DST-aware 15-minute grid for one home-local calendar day. */
+export function getHomeDayGridTimestamps(dateKey: string, home: HomeIntervalCalendar): string[] {
+  const { startUtc, endUtcExclusive } = localDayBoundsUtc(dateKey, home);
+  const out: string[] = [];
+  for (let ms = startUtc.getTime(); ms < endUtcExclusive.getTime(); ms += FIFTEEN_MIN_MS) {
+    out.push(new Date(ms).toISOString());
+  }
+  return out;
+}
+
+export function buildHomeDayGridContext(args: {
+  startDateKey: string;
+  endDateKey: string;
+  home: HomeIntervalCalendar;
+}): {
+  canonicalDayStartsMs: number[];
+  getDayGridTimestamps: (dayStartMs: number) => string[];
+  dateKeyFromTimestamp: (ts: string) => string;
+} {
+  const dateKeys = enumerateLocalDateKeys(args.startDateKey, args.endDateKey, args.home);
+  const dateKeyByDayStartMs = new Map<number, string>();
+  const canonicalDayStartsMs: number[] = [];
+  for (const dateKey of dateKeys) {
+    const dayStartMs = localDayBoundsUtc(dateKey, args.home).startUtc.getTime();
+    dateKeyByDayStartMs.set(dayStartMs, dateKey);
+    canonicalDayStartsMs.push(dayStartMs);
+  }
+  return {
+    canonicalDayStartsMs,
+    getDayGridTimestamps: (dayStartMs: number) => {
+      const dateKey = dateKeyByDayStartMs.get(dayStartMs);
+      return dateKey ? getHomeDayGridTimestamps(dateKey, args.home) : [];
+    },
+    dateKeyFromTimestamp: (ts: string) => dateKeyFromIntervalPoint({ timestamp: ts }),
+  };
+}
+
+export function resolveHomeCalendarForActualSource(
+  source: "SMT" | "GREEN_BUTTON",
+  homeTimezone?: string,
+): HomeIntervalCalendar {
+  return source === "SMT"
+    ? smtHomeIntervalCalendar()
+    : greenButtonHomeIntervalCalendar(homeTimezone);
+}
+
+export function expectedSlotsForDateKey(dateKey: string, home: HomeIntervalCalendar): number {
+  return expectedSlotsForLocalDate(dateKey, home);
+}
+
+export { enumerateExpectedLocalSlotsForDate };

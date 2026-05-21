@@ -1,7 +1,11 @@
 import { Prisma } from "@prisma/client";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { dateTimePartsInTimezone, enumerateDateKeysInclusive } from "@/lib/time/chicago";
-import { expectedIntervalsForDateISO } from "@/lib/analysis/dst";
+import { expectedSlotsForLocalDate } from "@/lib/time/homeIntervalCalendar";
+import {
+  greenButtonHomeIntervalCalendar,
+  greenButtonTrustedIntervalThreshold,
+} from "@/lib/time/greenButtonPersistedIntervalConvert";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MIN_TRUSTED_GREEN_BUTTON_INTERVALS_PER_DAY = 90;
@@ -72,7 +76,7 @@ function utcGridTimestampForDateSlot(dateKey: string, slot: number): string {
 }
 
 function minimumTrustedGreenButtonSlotCount(dateKey: string): number {
-  return Math.min(expectedIntervalsForDateISO(dateKey), MIN_TRUSTED_GREEN_BUTTON_INTERVALS_PER_DAY);
+  return greenButtonTrustedIntervalThreshold(dateKey);
 }
 
 function normalizeDateKey(value: unknown): string | null {
@@ -252,7 +256,7 @@ export async function getLatestGreenButtonFullDayDateKey(args: { houseId: string
     `)) as Array<{ bucket: Date; intervalscount: number }>;
     for (const row of rows) {
       const dateKey = chicagoDateKeyFromBucket(row.bucket);
-      const expectedIntervals = expectedIntervalsForDateISO(dateKey);
+      const expectedIntervals = expectedSlotsForLocalDate(dateKey, greenButtonHomeIntervalCalendar());
       if ((Number(row.intervalscount) || 0) >= expectedIntervals) return dateKey;
     }
     if (rows[0]?.bucket) return chicagoDateKeyFromBucket(rows[0].bucket);

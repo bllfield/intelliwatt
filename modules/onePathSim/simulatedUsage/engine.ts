@@ -2,6 +2,11 @@ import { createHash } from "crypto";
 import { ManualUsagePayload, SimulatedCurve, TravelRange } from "./types";
 import { billingPeriodsEndingAt } from "@/modules/onePathSim/manualBillingPeriods";
 import { anchorEndDateUtc } from "@/modules/onePathSim/manualAnchor";
+import {
+  countPresentSlotsForIntervalDay,
+  dateKeyFromIntervalPoint,
+  trustedIntervalThresholdForDateKey,
+} from "@/lib/time/actualIntervalCalendar";
 import { dateKeyFromTimestamp, getDayGridTimestamps } from "@/modules/onePathSim/usageSimulator/pastStitchedCurve";
 import {
   buildPastDaySimulationContext,
@@ -805,7 +810,12 @@ export function generateSimulatedCurve(args: {
 
 const SLOT_MS = INTERVAL_MINUTES * 60 * 1000;
 
-function countPresentSlotsForDay(intervals: Array<{ timestamp: string; kwh: number }>): number {
+function countPresentSlotsForDay(
+  intervals: Array<{ timestamp: string; kwh: number; homeSlot?: number | null }>,
+): number {
+  if (intervals.some((row) => typeof row.homeSlot === "number")) {
+    return countPresentSlotsForIntervalDay(intervals);
+  }
   const slots = new Set<number>();
   for (const p of intervals) {
     const ts = new Date(p.timestamp);
@@ -823,22 +833,24 @@ function countPresentSlotsForDay(intervals: Array<{ timestamp: string; kwh: numb
  * getDayGridTimestamps from pastStitchedCurve so date keys and interval grid match the stitcher.
  */
 export function completeActualIntervalsV1(args: {
-  actualIntervals: Array<{ timestamp: string; kwh: number }>;
+  actualIntervals: Array<{ timestamp: string; kwh: number; homeDateKey?: string; homeSlot?: number }>;
   canonicalStartTsUtc: number;
   canonicalEndTsUtc: number;
   excludedDateKeys: Set<string>;
   simulateIncompleteDays?: boolean;
+  intervalTrustedSource?: "SMT" | "GREEN_BUTTON";
 }): Array<{ timestamp: string; kwh: number }> {
   const { actualIntervals, canonicalStartTsUtc, canonicalEndTsUtc, excludedDateKeys } = args;
   const simulateIncompleteDays = args.simulateIncompleteDays ?? true;
+  const trustedSource = args.intervalTrustedSource ?? "SMT";
 
   const firstDayStart = new Date(new Date(canonicalStartTsUtc).toISOString().slice(0, 10) + "T00:00:00.000Z");
   const lastDayStart = new Date(new Date(canonicalEndTsUtc).toISOString().slice(0, 10) + "T00:00:00.000Z");
   const days = enumerateDaysInclusive(firstDayStart, lastDayStart);
 
-  const dayIntervals = new Map<string, Array<{ timestamp: string; kwh: number }>>();
+  const dayIntervals = new Map<string, Array<{ timestamp: string; kwh: number; homeSlot?: number }>>();
   for (const p of actualIntervals) {
-    const dk = dateKeyFromTimestamp(p.timestamp);
+    const dk = dateKeyFromIntervalPoint(p);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
     const list = dayIntervals.get(dk) ?? [];
     list.push(p);
@@ -854,7 +866,7 @@ export function completeActualIntervalsV1(args: {
   for (const [dk, list] of Array.from(dayIntervals.entries())) {
     if (
       !excludedDateKeys.has(dk) &&
-      countPresentSlotsForDay(list) >= MIN_TRUSTED_ACTUAL_INTERVALS_PER_DAY
+      countPresentSlotsForDay(list) >= trustedIntervalThresholdForDateKey(dk, trustedSource)
     ) {
       usableDays.add(dk);
     }
@@ -1578,6 +1590,7 @@ export function buildPastSimulatedBaselineV1(args: {
   trustedActualDateKeys?: Set<string>;
   dateKeyFromTimestamp: (ts: string) => string;
   getDayGridTimestamps: (dayStartMs: number) => string[];
+  intervalTrustedSource?: "SMT" | "GREEN_BUTTON";
   homeProfile?: any;
   applianceProfile?: any;
   /** When set, daily total for excluded days (no weather) uses weekday/weekend avg from profile (lookup by YYYY-MM). */
@@ -1734,10 +1747,16 @@ export function buildPastSimulatedBaselineV1(args: {
     const gridTs = args.getDayGridTimestamps(dayStartMs);
     const dateKey = gridTs.length > 0 ? args.dateKeyFromTimestamp(gridTs[0]) : "";
     const dayIntervalList = actualIntervals.filter((p) => {
-      const dk = args.dateKeyFromTimestamp(String(p?.timestamp ?? ""));
+      const dk = p.homeDateKey
+        ? dateKeyFromIntervalPoint(p)
+        : args.dateKeyFromTimestamp(String(p?.timestamp ?? ""));
       return Boolean(dateKey) && dk === dateKey;
     });
     const presentSlotCount = countPresentSlotsForDay(dayIntervalList);
+    const trustedThreshold =
+      dateKey && /^\d{4}-\d{2}-\d{2}$/.test(dateKey)
+        ? trustedIntervalThresholdForDateKey(dateKey, args.intervalTrustedSource ?? "SMT")
+        : MIN_TRUSTED_ACTUAL_INTERVALS_PER_DAY;
     const dayIsExcluded = Boolean(dateKey) && args.excludedDateKeys.has(dateKey);
     const dayIsForcedSimulate = Boolean(dateKey) && forcedDateKeys.has(dateKey);
     const dayIsPendingSmtIntervals = Boolean(dateKey) && pendingSmtIntervalDateKeys.has(dateKey);
@@ -1770,7 +1789,7 @@ export function buildPastSimulatedBaselineV1(args: {
       !dayIsTrustedActual &&
       !dayIsLedgerIncompleteMeter &&
       presentSlotCount > 0 &&
-      presentSlotCount < MIN_TRUSTED_ACTUAL_INTERVALS_PER_DAY;
+      presentSlotCount < trustedThreshold;
     const shouldSimulateDay =
       dayIsForcedSimulate ||
       dayIsPendingSmtIntervals ||

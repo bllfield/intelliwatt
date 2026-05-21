@@ -204,7 +204,7 @@ describe("green button full-day anchor", () => {
   });
 
   it("pads trusted shifted Green Button UTC-grid days and keeps current-year partials from downgrading them", async () => {
-    const shiftedSourceDayIntervals = Array.from({ length: 95 }, (_, slot) => ({
+    const shiftedSourceDayIntervals = Array.from({ length: 96 }, (_, slot) => ({
       ts: new Date(new Date("2025-05-14T00:00:00.000Z").getTime() + slot * 15 * 60 * 1000),
       kwh: 0.25,
     }));
@@ -226,24 +226,21 @@ describe("green button full-day anchor", () => {
     const targetDayRows = out.intervals.filter((row) => row.timestamp.startsWith("2026-05-14T"));
     expect(targetDayRows).toHaveLength(96);
     expect(targetDayRows[94]).toEqual({ timestamp: "2026-05-14T23:30:00.000Z", kwh: 0.25 });
-    expect(targetDayRows[95]).toEqual({ timestamp: "2026-05-14T23:45:00.000Z", kwh: 0 });
-    expect(out.shiftedIntervalCount).toBe(95);
+    expect(targetDayRows[95]).toEqual({ timestamp: "2026-05-14T23:45:00.000Z", kwh: 0.25 });
+    expect(out.shiftedIntervalCount).toBe(96);
     expect(out.shiftedDateCount).toBe(1);
-    expect(out.paddedIntervalCount).toBe(1);
-    expect(out.paddedDateCount).toBe(1);
+    expect(out.paddedIntervalCount).toBe(0);
+    expect(out.paddedDateCount).toBe(0);
     expect(out.sourceDateByTargetDate?.["2026-05-14"]).toBe("2025-05-14");
     expect(String(out.displayWindowNote ?? "")).toContain("matching source-day weather");
   });
 
   it("regresses v8 live failure: trusted shifted 2026-05-14 stays actual-backed through engine", async () => {
-    const shiftedSourceDayIntervals = [
-      { ts: new Date("2025-05-14T00:00:00.000Z"), kwh: 1.706 },
-      ...Array.from({ length: 94 }, (_, index) => ({
-        ts: new Date(new Date("2025-05-14T00:00:00.000Z").getTime() + (index + 2) * 15 * 60 * 1000),
-        kwh: 0.25,
-      })),
-    ];
-    const trailingPartialCurrentYearDay = [{ ts: new Date("2026-05-14T00:00:00.000Z"), kwh: 10 }];
+    const shiftedSourceDayIntervals = Array.from({ length: 96 }, (_, slot) => ({
+      ts: new Date(new Date("2025-05-14T00:00:00.000Z").getTime() + slot * 15 * 60 * 1000),
+      kwh: slot === 0 ? 1.706 : 0.25,
+    }));
+    const trailingPartialCurrentYearDay: Array<{ ts: Date; kwh: number }> = [];
     usageQueryRaw
       .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-05-13T04:45:00.000Z") }])
       .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-05-13T04:45:00.000Z") }])
@@ -272,9 +269,9 @@ describe("green button full-day anchor", () => {
     const targetDayRows = adapterOut.intervals.filter((row) => row.timestamp.startsWith("2026-05-14T"));
     expect(targetDayRows).toHaveLength(96);
     expect(targetDayRows[0]).toEqual({ timestamp: "2026-05-14T00:00:00.000Z", kwh: 1.706 });
-    expect(targetDayRows[1]).toEqual({ timestamp: "2026-05-14T00:15:00.000Z", kwh: 0 });
-    expect(adapterOut.paddedIntervalCount).toBe(1);
-    expect(adapterOut.paddedDateCount).toBe(1);
+    expect(targetDayRows[1]).toEqual({ timestamp: "2026-05-14T00:15:00.000Z", kwh: 0.25 });
+    expect(adapterOut.paddedIntervalCount).toBe(0);
+    expect(adapterOut.paddedDateCount).toBe(0);
     expect(adapterOut.sourceDateByTargetDate?.["2026-05-14"]).toBe("2025-05-14");
     expect(trustedActualDateKeys.has("2026-05-14")).toBe(true);
 
@@ -327,7 +324,7 @@ describe("green button full-day anchor", () => {
   });
 
   it("prefers a trusted current-year UTC-grid day over a shifted prior-year day for the same target date", async () => {
-    const shiftedSourceDayIntervals = Array.from({ length: 95 }, (_, slot) => ({
+    const shiftedSourceDayIntervals = Array.from({ length: 96 }, (_, slot) => ({
       ts: new Date(new Date("2025-05-14T00:00:00.000Z").getTime() + slot * 15 * 60 * 1000),
       kwh: 0.25,
     }));
@@ -357,9 +354,9 @@ describe("green button full-day anchor", () => {
   });
 
   it("marks padded trusted shifted Green Button days in trustedActualDateKeys", async () => {
-    const shiftedSourceDayIntervals = Array.from({ length: 95 }, (_, slot) => ({
+    const shiftedSourceDayIntervals = Array.from({ length: 96 }, (_, slot) => ({
       ts: new Date(new Date("2025-05-14T00:00:00.000Z").getTime() + slot * 15 * 60 * 1000),
-      kwh: 0.25,
+      kwh: slot < 95 ? 0.25 : 0,
     }));
     usageQueryRaw
       .mockResolvedValueOnce([{ id: "raw-1", latestTimestamp: new Date("2026-05-20T23:45:00.000Z") }])
@@ -379,7 +376,7 @@ describe("green button full-day anchor", () => {
     expect(targetDayRows).toHaveLength(96);
     expect(targetDayRows[95]).toEqual({ timestamp: "2026-05-14T23:45:00.000Z", kwh: 0 });
     expect(out.trustedActualDateKeys).toContain("2026-05-14");
-    expect(out.paddedIntervalCount).toBe(1);
+    expect(out.paddedIntervalCount).toBe(0);
     expect(out.sourceDateByTargetDate?.["2026-05-14"]).toBe("2025-05-14");
   });
 

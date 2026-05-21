@@ -14,7 +14,13 @@ import {
   buildSimulatedUsageDatasetFromCurve,
   type SimulatorBuildInputsV1,
 } from "@/modules/usageSimulator/dataset";
-import { dateKeyFromTimestamp, enumerateDayStartsMsForWindow, getDayGridTimestamps } from "@/modules/usageSimulator/pastStitchedCurve";
+import {
+  buildHomeDayGridContext,
+  homeProjectedIntervalFromRecord,
+  resolveHomeCalendarForActualSource,
+} from "@/lib/time/actualIntervalCalendar";
+import { convertGreenButtonPersistedRowsToHome } from "@/lib/time/greenButtonPersistedIntervalConvert";
+import { dateKeyFromTimestamp, getDayGridTimestamps } from "@/modules/usageSimulator/pastStitchedCurve";
 import { buildPastSimulatedBaselineV1 } from "@/modules/simulatedUsage/engine";
 import { getHouseWeatherDays } from "@/modules/weather/repo";
 import {
@@ -1528,21 +1534,23 @@ export async function simulatePastUsageDataset(
             timestampMode: "utcDayGrid",
           });
     const fetchedActualIntervals = greenButtonCoverageIntervals
-      ? greenButtonCoverageIntervals.intervals
+      ? convertGreenButtonPersistedRowsToHome(
+          greenButtonCoverageIntervals.intervals.map((row) => ({
+            timestamp: new Date(row.timestamp),
+            consumptionKwh: Number(row.kwh) || 0,
+          })),
+        ).intervals.map(homeProjectedIntervalFromRecord)
       : preloadedIntervals
       ? null
       : isLowDataSharedPastMode
         ? null
-        : (await getActualIntervalsForRange({
+        : await getActualIntervalsForRange({
             houseId: actualHouseId,
             esiid,
             startDate,
             endDate,
             preferredSource: intervalActualSource,
-          })).map((p) => ({
-          timestamp: p.timestamp,
-          kwh: p.kwh,
-        }));
+          });
     const sourceActualIntervals = preloadedIntervals != null ? preloadedIntervals : fetchedActualIntervals ?? [];
     const actualIntervals =
       useWholeHomeOnlyLowDataFastPath || lowDataSyntheticContextBase ? [] : sourceActualIntervals;
@@ -1550,7 +1558,24 @@ export async function simulatePastUsageDataset(
     const actualIntervalPayloadSuppressedCount = Math.max(0, sourceActualIntervalsCount - actualIntervals.length);
     const actualIntervalPayloadSuppressed = actualIntervalPayloadSuppressedCount > 0;
 
-    const canonicalDayStartsMs = enumerateDayStartsMsForWindow(startDate, endDate);
+    const homeCalendar = resolveHomeCalendarForActualSource(
+      intervalActualSource === "GREEN_BUTTON" ? "GREEN_BUTTON" : "SMT",
+      timezone,
+    );
+    const homeDayGrid = buildHomeDayGridContext({
+      startDateKey: startDate,
+      endDateKey: endDate,
+      home: homeCalendar,
+    });
+    const canonicalDayStartsMs = homeDayGrid.canonicalDayStartsMs;
+    const homeDateKeyByTs = new Map(
+      sourceActualIntervals.map((row) => [String(row.timestamp), String((row as any).homeDateKey ?? "").slice(0, 10)]),
+    );
+    const dateKeyFromTimestampForPast = (ts: string) => {
+      const homeKey = homeDateKeyByTs.get(ts);
+      if (homeKey && /^\d{4}-\d{2}-\d{2}$/.test(homeKey)) return homeKey;
+      return dateKeyFromTimestamp(ts);
+    };
     const canonicalDateKeys = dateKeysFromCanonicalDayStarts(canonicalDayStartsMs);
     const forcedSimulateDateKeysLocal = new Set<string>(
       Array.from(forceSimulateDateKeysLocal ?? [])
@@ -1921,8 +1946,9 @@ export async function simulatePastUsageDataset(
         actualIntervals,
         canonicalDayStartsMs,
         excludedDateKeys,
-        dateKeyFromTimestamp,
-        getDayGridTimestamps,
+        dateKeyFromTimestamp: dateKeyFromTimestampForPast,
+        getDayGridTimestamps: homeDayGrid.getDayGridTimestamps,
+        intervalTrustedSource: intervalActualSource === "GREEN_BUTTON" ? "GREEN_BUTTON" : "SMT",
         homeProfile: homeProfileForPast,
         applianceProfile: applianceProfileForPast,
         usageShapeProfile: usageShapeProfileSnap ?? undefined,
