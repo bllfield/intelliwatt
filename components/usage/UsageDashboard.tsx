@@ -164,8 +164,8 @@ function houseNeedsSmtIngestionPoll(house: HouseUsage | null | undefined): boole
 
 function houseShowsSmtTailFinishingState(house: HouseUsage | null | undefined): boolean {
   if (!house?.esiid) return false;
-  // Only block the dashboard when we already have data and the tail is still catching up.
-  // If the API returned no dataset (timeout/error), fall through to error/empty states instead of spinning forever.
+  const ingestion = house.usageIngestion;
+  if (ingestion && !ingestion.tailReady && !ingestion.tailTimedOut) return true;
   if (!house.dataset) return false;
   return houseNeedsSmtIngestionPoll(house);
 }

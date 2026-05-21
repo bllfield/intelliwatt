@@ -1574,13 +1574,10 @@ export async function getActualUsageDatasetForHouse(
       });
       const rangeStart = selectedWindowStartDate ?? canonicalWindow.startDate;
       const rangeEnd = selectedWindowEndDate ?? canonicalWindow.endDate;
-      const baseloadFiltered = userUsageDashboardLoad
-        ? {
-            baseloadKw: computed.baseload ?? null,
-            fallbackUsed: false,
-            debugNote: null as string | null,
-          }
-        : computeHomeBaseloadKw(
+      const useIntervalBaseloadForDashboardSmt =
+        userUsageDashboardLoad && selected.summary.source === "SMT" && Boolean(esiid);
+      const baseloadFiltered = useIntervalBaseloadForDashboardSmt
+        ? computeHomeBaseloadKw(
             (
               await getActualIntervalsForRange({
                 houseId,
@@ -1597,10 +1594,37 @@ export async function getActualUsageDatasetForHouse(
             })),
             homeTimezone,
             { excludedDateKeys: args?.excludedDateKeys },
-          );
+          )
+        : userUsageDashboardLoad
+          ? {
+              baseloadKw: computed.baseload ?? null,
+              fallbackUsed: false,
+              debugNote: null as string | null,
+            }
+          : computeHomeBaseloadKw(
+              (
+                await getActualIntervalsForRange({
+                  houseId,
+                  esiid,
+                  startDate: rangeStart,
+                  endDate: rangeEnd,
+                  preferredSource: args?.preferredSource ?? null,
+                  homeTimezone,
+                })
+              ).map((r) => ({
+                tsIso: String(r.timestamp ?? ""),
+                kwh: Number(r.kwh) || 0,
+                homeDateKey: r.homeDateKey ?? null,
+              })),
+              homeTimezone,
+              { excludedDateKeys: args?.excludedDateKeys },
+            );
       const baseload = baseloadFiltered.baseloadKw ?? computed.baseload;
-      const baseloadMethod: ActualHouseBaseloadMethod =
-        userUsageDashboardLoad
+      const baseloadMethod: ActualHouseBaseloadMethod = useIntervalBaseloadForDashboardSmt
+        ? baseloadFiltered.fallbackUsed
+          ? "FALLBACK_V1"
+          : "FILTERED_NORMAL_LIFE_V1"
+        : userUsageDashboardLoad
           ? (computed.baseloadMethod ?? "SQL_P10_V1")
           : baseloadFiltered.baseloadKw == null
             ? (computed.baseloadMethod ?? "SQL_P10_V1")

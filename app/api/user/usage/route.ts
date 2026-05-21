@@ -150,8 +150,8 @@ export async function GET(request: NextRequest) {
           }) ?? {
             tailReady: tailDisplayReady,
             targetEndDate: canonicalCoverage.endDate,
-            tailRefreshAttempted: false,
-            tailRefreshReason: tailDisplayReady ? "coverage_tail_current" : "refresh_disabled",
+            tailRefreshAttempted: !tailDisplayReady,
+            tailRefreshReason: tailDisplayReady ? "coverage_tail_current" : "refresh_requested",
             tailTimedOut: false,
             incompleteTailDateKeys: [],
             coverageEndDate: null,
