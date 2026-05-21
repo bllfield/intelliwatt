@@ -5,7 +5,9 @@ import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { getManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import { toPublicHouseLabel } from "@/modules/usageSimulator/houseLabel";
+import { weatherSensitivityFromPassthroughDataset } from "@/lib/usage/greenButtonUserSiteBaseline";
 import {
+  buildWeatherEfficiencyDerivedInput,
   resolveSharedWeatherSensitivityEnvelope,
   type WeatherEfficiencyDerivedInput,
   type WeatherSensitivityScore,
@@ -103,8 +105,10 @@ export async function buildUserUsageHouseContract(args: {
   ]);
   const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRecord?.appliancesJson as any) ?? null);
   const weatherHouseId = String(args.weatherHouseId ?? args.house.id ?? "").trim() || args.house.id;
+  const passthroughWeather = weatherSensitivityFromPassthroughDataset(resolvedUsage?.dataset ?? null);
   const weatherSensitivity =
     args.weatherSensitivity ??
+    passthroughWeather ??
     (await resolveSharedWeatherSensitivityEnvelope({
       actualDataset: resolvedUsage?.dataset ?? null,
       manualUsagePayload: (manualUsageRecord?.payload as any) ?? null,

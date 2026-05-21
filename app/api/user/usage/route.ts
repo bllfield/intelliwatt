@@ -119,7 +119,15 @@ export async function GET(request: NextRequest) {
         }).catch(() => null);
         result = { dataset: null, alternatives: { smt: null, greenButton: null } };
       }
-      const usageForContract = await prepareUserSiteGreenButtonDisplayUsage(result);
+      const usageForContract = await withTaskTimeout(
+        prepareUserSiteGreenButtonDisplayUsage(result, {
+          userId: user.id,
+          houseId: house.id,
+          actualContextHouseId: house.id,
+        }),
+        PER_HOUSE_RESOLVE_TIMEOUT_MS,
+        `greenButtonBaselinePassthrough:${house.id}`
+      ).then((resolved) => resolved ?? result);
 
       const contract = await buildUserUsageHouseContract({
         userId: user.id,
@@ -132,6 +140,7 @@ export async function GET(request: NextRequest) {
           esiid: house.esiid,
         },
         resolvedUsage: usageForContract,
+        weatherHouseId: house.id,
       });
       let usageIngestion = null;
       const esiid = house.esiid ? String(house.esiid).trim() : "";

@@ -102,12 +102,18 @@ export async function GET(request: NextRequest) {
         userUsageDashboardLoad: true,
       });
       const usageForContract = await prepareUserSiteGreenButtonDisplayUsage(
-        resolved ?? { dataset: null, alternatives: { smt: null, greenButton: null } }
+        resolved ?? { dataset: null, alternatives: { smt: null, greenButton: null } },
+        {
+          userId: u.user.id,
+          houseId: house.id,
+          actualContextHouseId: house.id,
+        }
       );
       const contract = await buildUserUsageHouseContract({
         userId: u.user.id,
         house,
         resolvedUsage: usageForContract,
+        weatherHouseId: house.id,
       });
       const baselineHeaders = new Headers({ "Cache-Control": "private, max-age=30" });
       baselineHeaders.set("X-Correlation-Id", correlationId);

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { sageActualDailyRowsFromDataset } from "@/lib/usage/sageActualDailyTruth";
 import { buildUserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
+import { resolveIntervalsLayer } from "@/lib/usage/resolveIntervalsLayer";
+import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import {
   ensureSmtCoverageForHouse,
   type EnsureSmtCoverageResult,
@@ -2068,22 +2070,46 @@ export async function POST(request: NextRequest) {
     lightweightActualUsage: true as const,
     skipLightweightInsightRecompute: true as const,
   };
-  // User-site baseline contract: always score the source home's actual usage with the same
-  // buildUserUsageHouseContract path as /api/user/usage (no precomputed One Path weather override).
-  const userUsagePageBaselineContract = compactLookupBaselineResponse
-    ? null
-    : await buildUserUsageHouseContract({
+  const { resolveGreenButtonBaselineUsageForUserSite } = await import("@/lib/usage/greenButtonUserSiteBaseline");
+  const { isGreenButtonPrimaryDataset } = await import("@/lib/usage/smtTailCoverage");
+
+  let sourceBaselineResolvedUsage: {
+    dataset: unknown;
+    alternatives: { smt: unknown; greenButton: unknown };
+  } | null = null;
+  if (compactLookupBaselineResponse) {
+    const sourceLayer = await resolveIntervalsLayer({
+      userId: resolved.userId,
+      houseId: resolved.selectedHouse.id,
+      layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
+      esiid: resolved.selectedHouse.esiid ?? null,
+      lightweightActualUsage: true,
+      skipLightweightInsightRecompute: true,
+    }).catch(() => null);
+    if (sourceLayer && isGreenButtonPrimaryDataset(sourceLayer.dataset)) {
+      sourceBaselineResolvedUsage = await resolveGreenButtonBaselineUsageForUserSite({
         userId: resolved.userId,
-        house: {
-          id: resolved.selectedHouse.id,
-          label: resolved.selectedHouse.label ?? null,
-          esiid: resolved.selectedHouse.esiid ?? null,
-        },
-        weatherHouseId: previewActualContextHouse.id,
-        homeProfile: homeProfile ?? null,
-        applianceProfileRecord: applianceProfileRecord ?? null,
-        ...lookupContractOpts,
+        houseId: resolved.selectedHouse.id,
+        actualContextHouseId: previewActualContextHouse.id,
+        resolvedUsage: sourceLayer,
       }).catch(() => null);
+    }
+  }
+
+  // User-site baseline contract: same GB passthrough + weather score as /api/user/usage.
+  const userUsagePageBaselineContract = await buildUserUsageHouseContract({
+    userId: resolved.userId,
+    house: {
+      id: resolved.selectedHouse.id,
+      label: resolved.selectedHouse.label ?? null,
+      esiid: resolved.selectedHouse.esiid ?? null,
+    },
+    weatherHouseId: previewActualContextHouse.id,
+    homeProfile: homeProfile ?? null,
+    applianceProfileRecord: applianceProfileRecord ?? null,
+    ...(sourceBaselineResolvedUsage ? { resolvedUsage: sourceBaselineResolvedUsage } : {}),
+    ...lookupContractOpts,
+  }).catch(() => null);
   const userUsageBaselineContract = userUsagePageBaselineContract;
   const baselineParityAudit = buildOnePathBaselineParityAudit({
     houseContract: userUsageBaselineContract,
@@ -2122,9 +2148,9 @@ export async function POST(request: NextRequest) {
       scenarios: effectiveScenarios,
       sourceContext: {
         ...previewLookupSourceContext,
-        userUsagePageBaselineContract: compactLookupBaselineResponse ? null : userUsagePageBaselineContract,
-        userUsageBaselineContract: compactLookupBaselineResponse ? null : userUsageBaselineContract,
-        userUsageBaselineView: compactLookupBaselineResponse ? userUsageBaselineView : null,
+        userUsagePageBaselineContract,
+        userUsageBaselineContract,
+        userUsageBaselineView,
         baselineParityAudit,
         baselineParityReport,
         environmentVisibility,

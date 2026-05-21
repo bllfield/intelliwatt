@@ -25,9 +25,27 @@ type ResolvedUsageLayer<TDataset = unknown> = {
  * Do not run One Path `runSharedSimulation` here — it duplicates work and can hang the page past route limits.
  */
 export async function prepareUserSiteGreenButtonDisplayUsage<T extends ResolvedUsageLayer>(
-  resolvedUsage: T
+  resolvedUsage: T,
+  options?: {
+    userId?: string;
+    houseId?: string;
+    actualContextHouseId?: string | null;
+  }
 ): Promise<T> {
-  return resolvedUsage;
+  const userId = String(options?.userId ?? "").trim();
+  const houseId = String(options?.houseId ?? "").trim();
+  if (!userId || !houseId || !isGreenButtonUsageDataset(resolvedUsage?.dataset)) {
+    return resolvedUsage;
+  }
+  const { resolveGreenButtonBaselineUsageForUserSite } = await import(
+    "@/lib/usage/greenButtonUserSiteBaseline"
+  );
+  return resolveGreenButtonBaselineUsageForUserSite({
+    userId,
+    houseId,
+    actualContextHouseId: options?.actualContextHouseId ?? houseId,
+    resolvedUsage,
+  }) as Promise<T>;
 }
 
 /**
