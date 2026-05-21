@@ -293,9 +293,11 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
   const displayDaily =
     greenButtonActual && coverageStart && coverageEnd
       ? (() => {
-          const dailyByDate = new Map(fallbackDaily.map((row) => [row.date, row]));
+          const dailyByDate = new Map<string, DailyRow>(
+            fallbackDaily.map((row: DailyRow) => [row.date, row] as const)
+          );
           return fillCanonicalDailyTotals(
-            fallbackDaily.map((row) => ({ date: row.date, kwh: row.kwh })),
+            fallbackDaily.map((row: DailyRow) => ({ date: row.date, kwh: row.kwh })),
             { startDate: coverageStart, endDate: coverageEnd }
           ).map((row) => {
             const existing = dailyByDate.get(row.date);
