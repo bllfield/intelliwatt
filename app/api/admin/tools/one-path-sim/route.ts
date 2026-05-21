@@ -44,6 +44,7 @@ import {
   type SimulationVariablePolicy,
 } from "@/modules/onePathSim/runtime";
 import { buildOnePathBaselineParityAudit } from "@/modules/onePathSim/baselineParityAudit";
+import { runFullWindowSmtReingestForHouse } from "@/lib/usage/fullWindowSmtReingest";
 import { buildBaselineParityReport } from "@/modules/onePathSim/baselineParityReport";
 import { buildOnePathBaselineReadOnlyView } from "@/modules/onePathSim/baselineReadOnlyView";
 import { buildKnownHouseScenarioPrereqStatus } from "@/modules/onePathSim/knownHouseScenarioPrereqs";
@@ -1201,6 +1202,44 @@ export async function POST(request: NextRequest) {
         lastReplacedAt: replacedState.lastReplacedAt,
         isPinned: replacedState.isPinned,
         needsReplace: replacedState.needsReplace,
+      },
+    });
+  }
+
+  if (action === "full_window_smt_reingest") {
+    const reingest = await runFullWindowSmtReingestForHouse({
+      userId: resolved.userId,
+      houseId: resolved.selectedHouse.id,
+    });
+    const userUsagePageBaselineContract = await buildUserUsageHouseContract({
+      userId: resolved.userId,
+      house: {
+        id: resolved.selectedHouse.id,
+        label: resolved.selectedHouse.label ?? null,
+        esiid: resolved.selectedHouse.esiid ?? null,
+      },
+      lightweightActualUsage: true,
+      skipLightweightInsightRecompute: true,
+    }).catch(() => null);
+    const baselineParityAudit = buildOnePathBaselineParityAudit({
+      houseContract: userUsagePageBaselineContract,
+    });
+    const userUsageBaselineView = buildOnePathBaselineReadOnlyView({
+      houseContract: userUsagePageBaselineContract,
+      parityAudit: baselineParityAudit,
+    });
+    return NextResponse.json({
+      ok: reingest.ok,
+      email: resolved.email,
+      userId: resolved.userId,
+      houses: resolved.houses,
+      selectedHouse: resolved.selectedHouse,
+      fullWindowSmtReingest: reingest,
+      sourceContext: {
+        userUsagePageBaselineContract,
+        userUsageBaselineContract: userUsagePageBaselineContract,
+        userUsageBaselineView,
+        baselineParityAudit,
       },
     });
   }

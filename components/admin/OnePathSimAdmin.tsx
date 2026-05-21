@@ -756,6 +756,75 @@ export function OnePathSimAdmin() {
     ]
   );
 
+  const runFullWindowSmtReingest = useCallback(async () => {
+    const trimmedEmail = email.trim();
+    const sourceHouseId = lookup?.selectedHouse?.id;
+    if (!trimmedEmail || !sourceHouseId) {
+      setError("Lookup a user and house first.");
+      return;
+    }
+    if (!lookup?.selectedHouse?.esiid) {
+      setError("Selected house has no ESIID; full-window SMT re-ingest cannot run.");
+      return;
+    }
+    if (mode !== "INTERVAL") {
+      setError("Full-window SMT re-ingest is only available in INTERVAL mode.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setStatus(
+      "Running full canonical-window SMT backfill and re-ingest for the loaded customer house (may take several minutes)..."
+    );
+    try {
+      const res = await fetch("/api/admin/tools/one-path-sim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "full_window_smt_reingest",
+          email: trimmedEmail,
+          houseId: sourceHouseId,
+          sourceHouseId,
+        }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        setStatus(null);
+        setError(json?.message ?? json?.error ?? `Full-window re-ingest failed (${res.status})`);
+        return;
+      }
+      if (json?.sourceContext && lookup) {
+        setLookup({
+          ...lookup,
+          sourceContext: {
+            ...lookup.sourceContext,
+            ...(json.sourceContext as Record<string, unknown>),
+          },
+        });
+      }
+      const reingest = json?.fullWindowSmtReingest as
+        | { ok?: boolean; message?: string; wait?: { completeDayCount?: number; totalDayCount?: number } }
+        | undefined;
+      setStatus(
+        reingest?.message ??
+          (reingest?.ok
+            ? "Full-window SMT re-ingest finished."
+            : "Full-window SMT re-ingest finished with incomplete coverage; see wait details in network response.")
+      );
+      if (!reingest?.ok) {
+        setError(
+          reingest?.message ??
+            `Coverage ${reingest?.wait?.completeDayCount ?? "?"}/${reingest?.wait?.totalDayCount ?? "?"} days complete.`
+        );
+      }
+    } catch (reingestError) {
+      setStatus(null);
+      setError(reingestError instanceof Error ? reingestError.message : "Full-window re-ingest failed.");
+    } finally {
+      setBusy(false);
+    }
+  }, [email, lookup, mode]);
+
   const replaceOnePathTestHome = useCallback(
     async (args: { email: string; sourceHouseId: string }) => {
       const res = await fetch("/api/admin/tools/one-path-sim", {
@@ -1303,6 +1372,25 @@ export function OnePathSimAdmin() {
               </button>
             </div>
           </div>
+
+          {lookup?.selectedHouse?.esiid ? (
+            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/50 p-4 text-sm text-slate-700">
+              <div className="font-semibold text-brand-navy">Full-window SMT re-ingest</div>
+              <p className="mt-1 text-xs text-slate-600">
+                After lookup, request the same canonical 365-day SMT interval window as user Usage (not the limited refresh
+                heal). Resets backfill flags, pulls intervals, waits for 96/96 Chicago slots per day, then reconciles the day
+                ledger. Requires <code className="text-[11px]">SMT_INTERVAL_BACKFILL_ENABLED</code> and active SMT auth.
+              </p>
+              <button
+                type="button"
+                onClick={() => void runFullWindowSmtReingest()}
+                disabled={busy || mode !== "INTERVAL"}
+                className="mt-3 rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-brand-navy hover:bg-amber-100/60 disabled:opacity-60"
+              >
+                Full window SMT re-ingest (365-day)
+              </button>
+            </div>
+          ) : null}
 
           {onePathTestHome ? (
             <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50/40 p-4 text-sm text-slate-700">
