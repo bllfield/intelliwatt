@@ -7627,8 +7627,12 @@ export async function getSimulatedUsageForHouseScenario(args: {
             }
             (dataset.meta as any).dailyRowCount = Array.isArray(dataset.daily) ? dataset.daily.length : 0;
             (dataset.meta as any).intervalCount = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15.length : 0;
-            (dataset.meta as any).coverageStart = dataset?.summary?.start ?? startDate;
-            (dataset.meta as any).coverageEnd = dataset?.summary?.end ?? endDate;
+            if (scenarioKey !== "BASELINE") {
+              applyCanonicalCoverageMetadataForNonBaseline(dataset, scenarioKey, { buildInputs });
+            } else {
+              (dataset.meta as any).coverageStart = dataset?.summary?.start ?? startDate;
+              (dataset.meta as any).coverageEnd = dataset?.summary?.end ?? endDate;
+            }
           } else {
             const keepRefDateKeysLocal = resolveProducerKeepRefDateKeysFromBuildInputs({
               buildInputs,
@@ -7681,8 +7685,12 @@ export async function getSimulatedUsageForHouseScenario(args: {
               (dataset.meta as any).sourceOfDaySimulationCore = SOURCE_OF_DAY_SIMULATION_CORE;
               (dataset.meta as any).dailyRowCount = Array.isArray(dataset.daily) ? dataset.daily.length : 0;
               (dataset.meta as any).intervalCount = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15.length : 0;
-              (dataset.meta as any).coverageStart = dataset?.summary?.start ?? startDate;
-              (dataset.meta as any).coverageEnd = dataset?.summary?.end ?? endDate;
+              if (scenarioKey !== "BASELINE") {
+                applyCanonicalCoverageMetadataForNonBaseline(dataset, scenarioKey, { buildInputs });
+              } else {
+                (dataset.meta as any).coverageStart = dataset?.summary?.start ?? startDate;
+                (dataset.meta as any).coverageEnd = dataset?.summary?.end ?? endDate;
+              }
             }
             const intervals15 = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15 : [];
             const { bytes } = encodeIntervalsV1(intervals15);

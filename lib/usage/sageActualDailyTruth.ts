@@ -1,4 +1,8 @@
 import { chicagoDateKey } from "@/lib/time/chicago";
+import {
+  resolveCanonicalUsage365CoverageWindow,
+  type CoverageWindow,
+} from "@/lib/usage/canonicalMetadataWindow";
 
 export type SageActualDailyRow = { date: string; kwh: number };
 
@@ -105,6 +109,23 @@ export function applySageActualDailyTruthToCompareRows<T extends ValidationCompa
 }
 
 /** Chicago calendar-day rollup for interval points (aligns with sage SMT daily SQL). */
+/** Keep one row per date inside the shared canonical 365-day window (drops pre/post bleed). */
+export function clampDailyRowsToCanonicalCoverageWindow<T extends { date: string }>(
+  rows: T[],
+  window?: CoverageWindow
+): T[] {
+  const canonical = window ?? resolveCanonicalUsage365CoverageWindow();
+  const byDate = new Map<string, T>();
+  for (const row of rows) {
+    const date = asDateKey(row.date);
+    if (!date || date < canonical.startDate || date > canonical.endDate) continue;
+    byDate.set(date, row);
+  }
+  return Array.from(byDate.entries())
+    .sort((left, right) => (left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0))
+    .map(([, row]) => row);
+}
+
 export function aggregateChicagoDailyKwhFromIntervals(
   intervals: Array<{ timestamp: string; kwh?: number; consumption_kwh?: number }>
 ): Map<string, number> {

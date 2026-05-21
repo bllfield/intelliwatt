@@ -1,4 +1,5 @@
 import { chicagoDateKey } from "@/lib/time/chicago";
+import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
 import { getMemoryRssMb, logSimPipelineEvent } from "@/modules/onePathSim/usageSimulator/simObservability";
 import { generateSimulatedCurve } from "@/modules/onePathSim/simulatedUsage/engine";
 import { roundDayKwhDisplay } from "@/modules/onePathSim/simulatedUsage/pastDaySimulator";
@@ -805,7 +806,11 @@ export function reconcileRestoredPastDatasetFromDecodedIntervals(args: {
     seenDailyDateKeys.add(dk);
   }
   mergedDaily.sort((left, right) => (left.date < right.date ? -1 : 1));
-  const enrichedDaily = enrichPastDailyRowsWithSourceDetailFromMeta(mergedDaily, (dataset as any)?.meta, {
+  const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
+  const boundedMergedDaily = mergedDaily.filter(
+    (row) => row.date >= canonicalCoverage.startDate && row.date <= canonicalCoverage.endDate
+  );
+  const enrichedDaily = enrichPastDailyRowsWithSourceDetailFromMeta(boundedMergedDaily, (dataset as any)?.meta, {
     legacyDailyByDate,
   });
   const monthlyFromDaily = buildMonthlyFromDailyRows(enrichedDaily);

@@ -1,7 +1,9 @@
 import { dateKeyInTimezone } from "@/lib/admin/gapfillLab";
+import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
 import {
   applySageActualDailyTruthToCompareRows,
   applySageActualDailyTruthToDisplayRows,
+  clampDailyRowsToCanonicalCoverageWindow,
   sageActualDailyKwhByDate,
   sageActualDailyKwhByDateFromRows,
   type SageActualDailyRow,
@@ -413,6 +415,7 @@ export function buildOnePathRunReadOnlyView(args: {
     fifteenMinuteAverages = viewModel.derived.fifteenCurve;
     fifteenMinuteCurveSourceOwner = "buildUserUsageDashboardViewModel(...).derived.fifteenCurve";
   } else {
+    const canonicalCoverageWindow = resolveCanonicalUsage365CoverageWindow();
     const smtPendingDateKeys = smtPendingIntervalDateKeysFromMeta(meta);
     const datasetDailyRows = buildDisplayDailyRows(dataset.daily, smtPendingDateKeys);
     const timezone = typeof meta?.timezone === "string" && meta.timezone.trim() ? meta.timezone : "America/Chicago";
@@ -421,8 +424,8 @@ export function buildOnePathRunReadOnlyView(args: {
       intervals15: asRecord(dataset.series)?.intervals15,
       timezone,
       timestampMode: intervalTimestampMode,
-      coverageStart: viewModel.coverage.start,
-      coverageEnd: viewModel.coverage.end,
+      coverageStart: canonicalCoverageWindow.startDate,
+      coverageEnd: canonicalCoverageWindow.endDate,
       existingRows: datasetDailyRows,
       simulatedSourceDetailByDate:
         meta?.simulatedSourceDetailByDate &&
@@ -471,10 +474,14 @@ export function buildOnePathRunReadOnlyView(args: {
     if (sageByDate.size > 0) {
       dailyRows = applySageActualDailyTruthToDisplayRows(dailyRows, sageByDate);
     }
+    dailyRows = clampDailyRowsToCanonicalCoverageWindow(dailyRows, canonicalCoverageWindow);
   }
   if (!isBaselinePassthrough && sageByDate.size > 0 && compareRows.length > 0) {
     compareRows = applySageActualDailyTruthToCompareRows(compareRows, sageByDate);
   }
+  const displayCoverageWindow = isBaselinePassthrough
+    ? { startDate: viewModel.coverage.start, endDate: viewModel.coverage.end }
+    : resolveCanonicalUsage365CoverageWindow();
   const compareMetrics =
     compareProjection.metrics && typeof compareProjection.metrics === "object"
       ? (compareProjection.metrics as Record<string, unknown>)
@@ -485,8 +492,8 @@ export function buildOnePathRunReadOnlyView(args: {
   return {
     summary: {
       source: viewModel.coverage.source,
-      coverageStart: viewModel.coverage.start,
-      coverageEnd: viewModel.coverage.end,
+      coverageStart: displayCoverageWindow.startDate,
+      coverageEnd: displayCoverageWindow.endDate,
       displayWindowNote:
         typeof meta?.manualDisplayWindowNote === "string" && meta.manualDisplayWindowNote.trim().length > 0
           ? meta.manualDisplayWindowNote

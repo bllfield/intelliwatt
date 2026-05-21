@@ -458,9 +458,15 @@ describe("buildOnePathRunReadOnlyView", () => {
       },
     });
 
-    expect(view?.summary.coverageEnd).toBe("2026-05-03");
-    expect(view?.dailyRows.map((row) => row.date)).toEqual(["2026-05-01", "2026-05-02", "2026-05-03"]);
-    expect(view?.dailyRows[2]).toMatchObject({
+    expect(view?.summary.coverageStart).toBe("2025-05-19");
+    expect(view?.summary.coverageEnd).toBe("2026-05-18");
+    expect(view?.dailyRows.map((row) => row.date)).toEqual([
+      "2026-04-30",
+      "2026-05-01",
+      "2026-05-02",
+      "2026-05-03",
+    ]);
+    expect(view?.dailyRows[3]).toMatchObject({
       date: "2026-05-03",
       source: "ACTUAL",
       sourceDetail: "ACTUAL",
@@ -740,6 +746,56 @@ describe("buildOnePathRunReadOnlyView", () => {
     ]);
   });
 
+  it("drops pre-window daily rows so Past Sim display stays at 365 canonical days", () => {
+    const view = buildOnePathRunReadOnlyView({
+      dataset: {
+        summary: {
+          source: "SMT with simulated fill for Travel/Vacant",
+          intervalsCount: 96 * 2,
+          start: "2025-05-18",
+          end: "2026-05-18",
+        },
+        daily: [
+          { date: "2025-05-18", kwh: 11.32, source: "ACTUAL" },
+          { date: "2026-05-18", kwh: 45.08, source: "ACTUAL" },
+        ],
+        monthly: [{ month: "2026-05", kwh: 45.08 }],
+        insights: {
+          fifteenMinuteAverages: [{ hhmm: "00:00", avgKw: 1.2 }],
+          weekdayVsWeekend: { weekday: 45.08, weekend: 0 },
+          timeOfDayBuckets: [],
+          peakDay: { date: "2026-05-18", kwh: 45.08 },
+          peakHour: { hour: 20, kw: 2.1 },
+          baseload: 0.2,
+        },
+        meta: {
+          datasetKind: "SIMULATED",
+          actualSource: "SMT",
+          timezone: "America/Chicago",
+          coverageStart: "2025-05-18",
+          coverageEnd: "2026-05-18",
+        },
+        series: {
+          intervals15: [
+            ...Array.from({ length: 96 }, (_, slot) => ({
+              timestamp: new Date(Date.UTC(2025, 4, 18, 0, slot * 15, 0, 0)).toISOString(),
+              kwh: 11.32 / 96,
+            })),
+            ...Array.from({ length: 96 }, (_, slot) => ({
+              timestamp: new Date(Date.UTC(2026, 4, 18, 0, slot * 15, 0, 0)).toISOString(),
+              kwh: 45.08 / 96,
+            })),
+          ],
+        },
+      },
+      sageActualDaily: [{ date: "2026-05-18", kwh: 51.47 }],
+    });
+
+    expect(view?.dailyRows.map((row) => row.date)).toEqual(["2026-05-18"]);
+    expect(view?.summary.coverageStart).toBe("2025-05-19");
+    expect(view?.summary.coverageEnd).toBe("2026-05-18");
+  });
+
   it("overlays sage actual daily kWh for Past Sim ACTUAL-labeled days instead of stitched interval re-sums", () => {
     const view = buildOnePathRunReadOnlyView({
       dataset: {
@@ -768,7 +824,7 @@ describe("buildOnePathRunReadOnlyView", () => {
         },
         series: {
           intervals15: Array.from({ length: 96 }, (_, slot) => ({
-            timestamp: new Date(Date.UTC(2026, 4, 18, 0, slot * 15, 0, 0)).toISOString(),
+            timestamp: new Date(Date.UTC(2026, 4, 18, 5, slot * 15, 0, 0)).toISOString(),
             kwh: 45.08 / 96,
           })),
         },
