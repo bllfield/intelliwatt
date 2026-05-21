@@ -856,7 +856,14 @@ async function getGreenButtonWindow(usageClient: any, houseId: string, rawId: st
   return { cutoff: range.startInclusive, end: range.endInclusive };
 }
 
-async function getSmtWindow(esiid: string) {
+type SmtFetchWindow = {
+  cutoff: Date;
+  end: Date;
+  startDate: string;
+  endDate: string;
+};
+
+async function getSmtWindow(esiid: string): Promise<SmtFetchWindow | null> {
   const { startDate, endDate } = resolveCanonicalUsage365CoverageWindow();
   const range = buildUtcRangeForChicagoLocalDateRange({
     startDateKey: startDate,
@@ -871,7 +878,25 @@ async function getSmtWindow(esiid: string) {
     select: { ts: true },
   });
   if (!hasRows?.ts) return null;
-  return { cutoff, end };
+  return { cutoff, end, startDate, endDate };
+}
+
+function applyCanonicalCoverageToUsageSummary(
+  summary: UsageSummary,
+  window: { startDate: string; endDate: string },
+): UsageSummary {
+  return {
+    ...summary,
+    start: window.startDate,
+    end: window.endDate,
+  };
+}
+
+function isHomeDateKeyInCoverageWindow(
+  dateKey: string,
+  window: { startDate: string; endDate: string },
+): boolean {
+  return dateKey >= window.startDate && dateKey <= window.endDate;
 }
 
 function chooseDataset(
@@ -915,21 +940,28 @@ async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult
   const importKwh = round2(Number(agg?.importkwh ?? 0));
   const exportKwh = round2(Number(agg?.exportkwh ?? 0));
   const totalKwh = round2(importKwh - exportKwh);
-  const start = agg?.start ?? null;
-  const end = agg?.end ?? null;
+  const latestTs = agg?.end ?? null;
   const intervalRows = await prisma.$queryRaw<Array<{ ts: Date; kwh: number }>>(Prisma.sql`
     SELECT DISTINCT ON ("ts") "ts", GREATEST("kwh", 0)::float AS kwh
     FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${window.cutoff} AND "ts" <= ${window.end}
     ORDER BY "ts" ASC, CASE WHEN "meter" = 'unknown' THEN 1 ELSE 0 END ASC, "updatedAt" DESC
   `);
+  const canonicalCoverage = { startDate: window.startDate, endDate: window.endDate };
   const smtConverted = convertSmtPersistedRowsToHome(
     intervalRows.map((row) => ({ ts: row.ts, kwh: decimalToNumber(row.kwh) })),
     SMT_TZ,
   );
-  const intervals15 = tailIntervals15(smtConverted.intervals, 192);
-  const dailyFromCalendar = homeDailyToUsageSeriesPoints(smtConverted).sort(
-    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+  const intervalsInWindow = smtConverted.intervals.filter((row) =>
+    isHomeDateKeyInCoverageWindow(row.homeDateKey, canonicalCoverage),
   );
+  const intervals15 = tailIntervals15(intervalsInWindow, 192);
+  const dailyFromCalendar = homeDailyToUsageSeriesPoints({
+    ...smtConverted,
+    daily: smtConverted.daily.filter((row) =>
+      isHomeDateKeyInCoverageWindow(row.homeDateKey, canonicalCoverage),
+    ),
+  }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  const intervalsCountInWindow = intervalsInWindow.length;
   const hourlyRows = await prisma.$queryRaw<Array<{ bucket: Date; kwh: number }>>(Prisma.sql`
     WITH iv AS (SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${window.cutoff} AND "ts" <= ${window.end} AND "ts" >= NOW() - INTERVAL '14 days' GROUP BY "ts")
     SELECT date_trunc('hour', "ts") AS bucket, COALESCE(SUM("kwh"), 0)::float AS kwh FROM iv GROUP BY bucket ORDER BY bucket ASC
@@ -947,11 +979,25 @@ async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult
     SELECT date_trunc('year', "ts") AS bucket, COALESCE(SUM("kwh"), 0)::float AS kwh FROM iv GROUP BY bucket ORDER BY bucket ASC
   `);
   return {
-    summary: { source: "SMT", intervalsCount: count, totalKwh, start: start ? chicagoDateKey(start) : null, end: end ? chicagoDateKey(end) : null, latest: end ? end.toISOString() : null },
+    summary: applyCanonicalCoverageToUsageSummary(
+      {
+        source: "SMT",
+        intervalsCount: intervalsCountInWindow,
+        totalKwh,
+        start: window.startDate,
+        end: window.endDate,
+        latest: latestTs ? latestTs.toISOString() : null,
+      },
+      canonicalCoverage,
+    ),
     series: {
       intervals15,
       hourly: toSeriesPoint(hourlyRows),
-      daily: fillDailyGaps(toSeriesPoint(dailyRows), start?.toISOString() ?? null, end?.toISOString() ?? null),
+      daily: fillDailyGaps(
+        toSeriesPoint(dailyRows),
+        `${window.startDate}T00:00:00.000Z`,
+        `${window.endDate}T00:00:00.000Z`,
+      ),
       monthly: toSeriesPoint(monthlyRows),
       annual: toSeriesPoint(annualRows),
     },
@@ -1200,13 +1246,13 @@ export async function getActualUsageDatasetForHouse(
       greenDataset = null;
     }
   }
-  const selected = chooseDataset(smtDataset, greenDataset, preferredSource);
   const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
   const canonicalUtcBounds = canonicalCoverageWindowUtcBounds(canonicalWindow);
   const canonicalCutoff = canonicalUtcBounds.rangeStart;
   const canonicalEnd = canonicalUtcBounds.rangeEndInclusive;
-  const selectedWindowStartDate = normalizeDateKey(selected?.summary?.start ?? null);
-  const selectedWindowEndDate = normalizeDateKey(selected?.summary?.end ?? null);
+  const selected = chooseDataset(smtDataset, greenDataset, preferredSource);
+  const selectedWindowStartDate = canonicalWindow.startDate;
+  const selectedWindowEndDate = canonicalWindow.endDate;
 
   const emptyInsights: ActualHouseInsights = {
     fifteenMinuteAverages: [] as Array<{ hhmm: string; avgKw: number }>,
@@ -1364,10 +1410,13 @@ export async function getActualUsageDatasetForHouse(
       stitchedMonth,
     });
     const dataset: ActualHouseDataset = {
-      summary: {
-        ...selected.summary,
-        totalKwh,
-      },
+      summary: applyCanonicalCoverageToUsageSummary(
+        {
+          ...selected.summary,
+          totalKwh,
+        },
+        canonicalWindow,
+      ),
       series: {
         ...selected.series,
         annual: selected.series?.annual?.length
@@ -1382,8 +1431,8 @@ export async function getActualUsageDatasetForHouse(
         datasetKind: "ACTUAL",
         actualSource: selected.summary.source,
         timezone: SMT_TZ,
-        coverageStart: selected.summary.start,
-        coverageEnd: selected.summary.end,
+        coverageStart: canonicalWindow.startDate,
+        coverageEnd: canonicalWindow.endDate,
         canonicalMonths,
         canonicalEndMonth: canonicalMonths.length > 0 ? canonicalMonths[canonicalMonths.length - 1] ?? null : null,
       },
@@ -1395,7 +1444,9 @@ export async function getActualUsageDatasetForHouse(
     return {
       dataset,
       alternatives: {
-        smt: smtDataset?.summary ?? null,
+        smt: smtDataset?.summary
+          ? applyCanonicalCoverageToUsageSummary(smtDataset.summary, canonicalWindow)
+          : null,
         greenButton: greenDataset?.summary ?? null,
       },
       skippedFullYearIntervalFetch: true,
@@ -1564,10 +1615,13 @@ export async function getActualUsageDatasetForHouse(
 
   const dataset: ActualHouseDataset | null = selected
     ? {
-        summary: {
-          ...selected.summary,
-          totalKwh: monthlyForDataset.length > 0 ? totalFromMonthly : selected.summary.totalKwh,
-        },
+        summary: applyCanonicalCoverageToUsageSummary(
+          {
+            ...selected.summary,
+            totalKwh: monthlyForDataset.length > 0 ? totalFromMonthly : selected.summary.totalKwh,
+          },
+          canonicalWindow,
+        ),
         series: {
           ...selected.series,
           annual: selected.series?.annual?.length
@@ -1582,8 +1636,8 @@ export async function getActualUsageDatasetForHouse(
           datasetKind: "ACTUAL",
           actualSource: selected.summary.source,
           timezone: SMT_TZ,
-          coverageStart: selected.summary.start,
-          coverageEnd: selected.summary.end,
+          coverageStart: canonicalWindow.startDate,
+          coverageEnd: canonicalWindow.endDate,
           canonicalMonths: canonicalMonthsForDataset,
           canonicalEndMonth:
             canonicalMonthsForDataset.length > 0 ? canonicalMonthsForDataset[canonicalMonthsForDataset.length - 1] ?? null : null,
@@ -1599,7 +1653,9 @@ export async function getActualUsageDatasetForHouse(
   return {
     dataset,
     alternatives: {
-      smt: smtDataset?.summary ?? null,
+      smt: smtDataset?.summary
+        ? applyCanonicalCoverageToUsageSummary(smtDataset.summary, canonicalWindow)
+        : null,
       greenButton: greenDataset?.summary ?? null,
     },
     ...(skippedFullYearIntervalFetch ? { skippedFullYearIntervalFetch: true } : {}),

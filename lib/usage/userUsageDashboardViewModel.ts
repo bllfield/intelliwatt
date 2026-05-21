@@ -185,9 +185,13 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
     !Array.isArray(meta.manualDisplayWindowStitch);
   const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
   const coverageStart =
-    asDateKey(meta.coverageStart) ?? canonicalWindow.startDate;
+    datasetKind === "ACTUAL"
+      ? canonicalWindow.startDate
+      : (asDateKey(meta.coverageStart) ?? canonicalWindow.startDate);
   const coverageEnd =
-    asDateKey(meta.coverageEnd) ?? canonicalWindow.endDate;
+    datasetKind === "ACTUAL"
+      ? canonicalWindow.endDate
+      : (asDateKey(meta.coverageEnd) ?? canonicalWindow.endDate);
   const provenance = meta.monthProvenanceByMonth as Record<string, string> | undefined;
   const actualSource = meta.actualSource as string | undefined;
   const timezone = typeof meta.timezone === "string" ? meta.timezone : "America/Chicago";
