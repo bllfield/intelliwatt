@@ -14,7 +14,7 @@ import {
 describe("smt day coverage ledger helpers", () => {
   it("maps ledger statuses to daily source details", () => {
     expect(sourceDetailForSmtLedgerStatus(SMT_DAY_LEDGER_STATUS.PENDING_SMT)).toBe(
-      SIMULATED_SMT_SOURCE_DETAIL.INTERVALS_NOT_AVAILABLE_YET
+      ACTUAL_SMT_SOURCE_DETAIL.INTERVALS_NOT_AVAILABLE_YET
     );
     expect(sourceDetailForSmtLedgerStatus(SMT_DAY_LEDGER_STATUS.INCOMPLETE_METER)).toBe(
       ACTUAL_SMT_SOURCE_DETAIL.INCOMPLETE_METER
@@ -70,6 +70,19 @@ describe("smt day coverage ledger helpers", () => {
     ).toBe(SMT_DAY_LEDGER_STATUS.INCOMPLETE_METER);
   });
 
+  it("annotates complete days as ACTUAL without a source detail", () => {
+    const annotated = annotateActualDailyWithSmtLedger(
+      [{ date: "2026-05-15", kwh: 20 }],
+      {
+        canonicalEndDate: "2026-05-17",
+        byDate: { "2026-05-15": SMT_DAY_LEDGER_STATUS.COMPLETE },
+        pendingDateKeys: [],
+        incompleteMeterDateKeys: [],
+      }
+    );
+    expect(annotated[0]).toEqual({ date: "2026-05-15", kwh: 20, source: "ACTUAL" });
+  });
+
   it("annotates daily rows from ledger snapshot", () => {
     const annotated = annotateActualDailyWithSmtLedger(
       [
@@ -93,8 +106,8 @@ describe("smt day coverage ledger helpers", () => {
     });
     expect(annotated[1]).toMatchObject({
       date: "2026-05-17",
-      source: "SIMULATED",
-      sourceDetail: SIMULATED_SMT_SOURCE_DETAIL.INTERVALS_NOT_AVAILABLE_YET,
+      source: "ACTUAL",
+      sourceDetail: ACTUAL_SMT_SOURCE_DETAIL.INTERVALS_NOT_AVAILABLE_YET,
     });
   });
 });

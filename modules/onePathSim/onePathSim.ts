@@ -441,6 +441,48 @@ function buildWeekdayWeekendFromDailyRows(rows: Array<{ date: string; kwh: numbe
   };
 }
 
+function hhmmInTimezone(timestamp: string, timezone: string): string | null {
+  try {
+    const ts = new Date(timestamp);
+    if (!Number.isFinite(ts.getTime())) return null;
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+      hourCycle: "h23",
+    }).formatToParts(ts);
+    const hour = parts.find((part) => part.type === "hour")?.value ?? "";
+    const minute = parts.find((part) => part.type === "minute")?.value ?? "";
+    const hhmm = `${hour.padStart(2, "0")}:${minute.padStart(2, "0")}`;
+    return /^\d{2}:\d{2}$/.test(hhmm) ? hhmm : null;
+  } catch {
+    return null;
+  }
+}
+
+function buildFifteenMinuteAveragesFromIntervals(
+  rows: Array<{ timestamp: string; kwh: number }>,
+  timezone: string
+): Array<{ hhmm: string; avgKw: number }> {
+  const buckets = new Map<string, { sumKw: number; count: number }>();
+  for (const row of rows) {
+    const hhmm = hhmmInTimezone(String(row.timestamp ?? ""), timezone);
+    if (!hhmm) continue;
+    const kwh = Number(row.kwh) || 0;
+    const current = buckets.get(hhmm) ?? { sumKw: 0, count: 0 };
+    current.sumKw += kwh * 4;
+    current.count += 1;
+    buckets.set(hhmm, current);
+  }
+  return Array.from(buckets.entries())
+    .map(([hhmm, bucket]) => ({
+      hhmm,
+      avgKw: bucket.count > 0 ? Number((bucket.sumKw / bucket.count).toFixed(2)) : 0,
+    }))
+    .sort((left, right) => (left.hhmm < right.hhmm ? -1 : left.hhmm > right.hhmm ? 1 : 0));
+}
+
 function buildTimeOfDayBucketsFromIntervals(
   rows: Array<{ timestamp: string; kwh: number }>,
   timezone: string
@@ -665,6 +707,19 @@ function buildIntervalBaselinePassthroughDataset(args: {
     boundedDaily.length > 0
       ? boundedDaily.reduce((current, row) => (row.kwh > current.kwh ? row : current))
       : null;
+  const sourceInsights = asRecord((sourceDataset as any).insights) ?? {};
+  const sourceFifteenMinuteAverages = Array.isArray(sourceInsights.fifteenMinuteAverages)
+    ? (sourceInsights.fifteenMinuteAverages as Array<{ hhmm?: unknown; avgKw?: unknown }>)
+        .map((row) => ({
+          hhmm: String(row?.hhmm ?? ""),
+          avgKw: Number(row?.avgKw ?? 0) || 0,
+        }))
+        .filter((row) => /^\d{2}:\d{2}$/.test(row.hhmm))
+    : [];
+  const rebuiltFifteenMinuteAverages =
+    sourceFifteenMinuteAverages.length > 0
+      ? sourceFifteenMinuteAverages
+      : buildFifteenMinuteAveragesFromIntervals(boundedIntervals15, timezone);
 
   return {
     ...sourceDataset,
@@ -704,6 +759,9 @@ function buildIntervalBaselinePassthroughDataset(args: {
       weekdayVsWeekend: boundedWeekdayWeekend,
       timeOfDayBuckets: boundedTimeOfDayBuckets,
       peakDay: peakDay ? { date: peakDay.date, kwh: peakDay.kwh } : null,
+      ...(rebuiltFifteenMinuteAverages.length > 0
+        ? { fifteenMinuteAverages: rebuiltFifteenMinuteAverages }
+        : {}),
     },
     meta: {
       ...meta,

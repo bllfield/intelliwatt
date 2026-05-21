@@ -169,7 +169,9 @@ describe("read-only interval baseline preview", () => {
     expect(preview.readModel.dataset.summary.totalKwh).toBe(13542.3);
     expect(preview.readModel.dataset.summary.start).toBe("2025-04-15");
     expect(preview.readModel.dataset.summary.end).toBe("2026-04-14");
-    expect(preview.readModel.dataset.daily).toEqual([{ date: "2026-04-14", kwh: 13542.3 }]);
+    expect(preview.readModel.dataset.daily).toEqual([
+      { date: "2026-04-14", kwh: 13542.3, source: "ACTUAL", sourceDetail: "ACTUAL" },
+    ]);
     expect(preview.readModel.dataset.monthly).toEqual([{ month: "2026-04", kwh: 13542.3 }]);
     expect(preview.readModel.dataset.series.intervals15).toEqual([
       { timestamp: "2026-04-14T23:45:00.000Z", kwh: 0.3 },

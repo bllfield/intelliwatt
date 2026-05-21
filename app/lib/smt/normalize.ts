@@ -1,8 +1,4 @@
 import { parseSmtCsvFlexible } from '@/lib/smt/parseCsv';
-import {
-  groupNormalize,
-  type SmtAdhocRow,
-} from '@/lib/analysis/normalizeSmt';
 
 export type NormalizeDefaults = {
   esiid?: string | null;
@@ -150,28 +146,85 @@ function parseCentralIso(raw?: string | null): string | null {
   return null;
 }
 
+function hasClockTime(value: string): boolean {
+  return /\b\d{1,2}:\d{2}\b/.test(value);
+}
+
+function minus15MinutesUtcIso(iso: string): string {
+  return new Date(new Date(iso).getTime() - 15 * 60 * 1000).toISOString();
+}
+
+function chicagoHourMinuteFromUtcIso(iso: string): { hour: number; minute: number } | null {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    hour: "numeric",
+    minute: "numeric",
+    hour12: false,
+  }).formatToParts(new Date(iso));
+  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? "");
+  const minute = Number(parts.find((p) => p.type === "minute")?.value ?? "");
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  return { hour, minute };
+}
+
+/**
+ * Many SMT CSVs label interval START (00:00 .. 23:45). Others label interval END
+ * (00:15 .. 00:00 next day). Stored SmtInterval.ts must always be interval START
+ * so chicagoSlot96FromTs(ts) matches slot 95 at 23:45 local.
+ */
+function classifyEndColumnTimestampRole(endLocals: string[]): "period_end" | "period_start" {
+  const parsed = endLocals
+    .map((raw) => ({ raw, iso: parseCentralIso(raw) }))
+    .filter((entry): entry is { raw: string; iso: string } => Boolean(entry.iso))
+    .sort((left, right) => (left.iso < right.iso ? -1 : left.iso > right.iso ? 1 : 0));
+  if (parsed.length === 0) return "period_end";
+  const first = chicagoHourMinuteFromUtcIso(parsed[0]!.iso);
+  if (!first) return "period_end";
+  return first.hour === 0 && first.minute === 0 ? "period_start" : "period_end";
+}
+
+function deriveIntervalStartIso(
+  entry: {
+    endLocal?: string | null;
+    dateTimeLocal?: string | null;
+    startLocal?: string | null;
+  },
+  endColumnRole: "period_end" | "period_start"
+): string | null {
+  const startLocal = String(entry.startLocal ?? "").trim();
+  if (startLocal && hasClockTime(startLocal)) {
+    return parseCentralIso(startLocal);
+  }
+
+  const endLocal = String(entry.endLocal ?? "").trim();
+  if (endLocal && hasClockTime(endLocal)) {
+    const endIso = parseCentralIso(endLocal);
+    if (!endIso) return null;
+    if (endColumnRole === "period_start") {
+      return endIso;
+    }
+    return minus15MinutesUtcIso(endIso);
+  }
+
+  const dateTimeLocal = String(entry.dateTimeLocal ?? "").trim();
+  if (dateTimeLocal && hasClockTime(dateTimeLocal)) {
+    return parseCentralIso(dateTimeLocal);
+  }
+
+  for (const candidate of [startLocal, endLocal, dateTimeLocal].filter(Boolean)) {
+    const iso = parseCentralIso(candidate);
+    if (iso) return iso;
+  }
+  return null;
+}
+
+/** @deprecated Use deriveIntervalStartIso; kept for any legacy callers. */
 function deriveTimestamp(entry: {
   endLocal?: string | null;
   dateTimeLocal?: string | null;
   startLocal?: string | null;
 }): string | null {
-  const rawCandidates = [entry.endLocal, entry.dateTimeLocal, entry.startLocal].filter(
-    (c): c is string => Boolean(c && String(c).trim().length > 0),
-  );
-
-  const hasTime = (s: string): boolean => /\b\d{1,2}:\d{2}\b/.test(s);
-
-  // Prefer candidates that include a time-of-day component.
-  // This avoids accidentally treating "Interval End Date" (date-only) as the timestamp
-  // when a separate start/end time column exists.
-  const candidates = rawCandidates.sort((a, b) => Number(hasTime(b)) - Number(hasTime(a)));
-
-  for (const candidate of candidates) {
-    const iso = parseCentralIso(candidate);
-    if (iso) return iso;
-  }
-
-  return null;
+  return deriveIntervalStartIso(entry, "period_end");
 }
 
 function parseKwh(value: unknown): number | null {
@@ -191,14 +244,20 @@ export function normalizeSmtIntervals(
 ): { intervals: NormalizedInterval[]; stats: NormalizeStats } {
   const parsed = parseSmtCsvFlexible(csvText);
 
-  const rows: SmtAdhocRow[] = [];
+  const endLocalsForRole = parsed
+    .map((entry) => String(entry.endLocal ?? "").trim())
+    .filter((value) => value.length > 0 && hasClockTime(value));
+  const endColumnRole =
+    endLocalsForRole.length > 0 ? classifyEndColumnTimestampRole(endLocalsForRole) : "period_end";
+
+  const slotMapByComposite = new Map<string, Map<string, number>>();
   let invalidEsiid = 0;
   let invalidTimestamp = 0;
   let invalidKwh = 0;
 
   for (const entry of parsed) {
-    const timestamp = deriveTimestamp(entry);
-    if (!timestamp) {
+    const startIso = deriveIntervalStartIso(entry, endColumnRole);
+    if (!startIso) {
       invalidTimestamp += 1;
       continue;
     }
@@ -217,27 +276,20 @@ export function normalizeSmtIntervals(
       continue;
     }
 
-    rows.push({
-      esiid,
-      meter,
-      timestamp,
-      kwh,
-    });
+    const composite = `${esiid}|${meter}`;
+    const slots = slotMapByComposite.get(composite) ?? new Map<string, number>();
+    slots.set(startIso, kwh);
+    slotMapByComposite.set(composite, slots);
   }
 
-  // Perf:
-  // At this point `rows[].timestamp` is already a UTC ISO string (`...Z`) produced by `parseCentralIso()`.
-  // Avoid re-parsing every row via Luxon (`parseInZoneToUTC`) inside groupNormalize; plain Date parsing
-  // of UTC ISO strings is sufficient and much faster.
-  const grouped = groupNormalize(rows, 'esiid_meter', { tz: 'America/Chicago', strictTz: false });
   const intervals: NormalizedInterval[] = [];
 
   let totalKwh = 0;
   let tsMin: string | null = null;
   let tsMax: string | null = null;
 
-  for (const [composite, { points }] of Object.entries(grouped.groups)) {
-    const [esiidKey, meterKey] = composite.split('|');
+  for (const [composite, slots] of slotMapByComposite.entries()) {
+    const [esiidKey, meterKey] = composite.split("|");
     const resolvedEsiid = normalizeEsiid(esiidKey, defaults.esiid);
     const resolvedMeter = normalizeMeter(meterKey, defaults.meter);
 
@@ -245,28 +297,29 @@ export function normalizeSmtIntervals(
       continue;
     }
 
-    for (const point of points) {
-      if (typeof point.kwh !== 'number' || !Number.isFinite(point.kwh)) continue;
-      const tsDate = new Date(point.ts);
+    const points = Array.from(slots.entries()).sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+    for (const [ts, kwh] of points) {
+      if (!Number.isFinite(kwh)) continue;
+      const tsDate = new Date(ts);
       if (Number.isNaN(tsDate.getTime())) continue;
 
       intervals.push({
         esiid: resolvedEsiid,
         meter: resolvedMeter,
         ts: tsDate,
-        kwh: point.kwh,
+        kwh,
         source: defaults.source ?? null,
       });
 
-      totalKwh += point.kwh;
-      if (!tsMin || point.ts < tsMin) tsMin = point.ts;
-      if (!tsMax || point.ts > tsMax) tsMax = point.ts;
+      totalKwh += kwh;
+      if (!tsMin || ts < tsMin) tsMin = ts;
+      if (!tsMax || ts > tsMax) tsMax = ts;
     }
   }
 
   const stats: NormalizeStats = {
     totalRows: parsed.length,
-    processedRows: rows.length,
+    processedRows: parsed.length - invalidTimestamp - invalidEsiid - invalidKwh,
     invalidEsiid,
     invalidTimestamp,
     invalidKwh,

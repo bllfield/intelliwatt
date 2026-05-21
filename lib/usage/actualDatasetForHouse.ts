@@ -1291,6 +1291,49 @@ export async function getActualUsageDatasetForHouse(
         // Fall back to series-derived monthly/daily rows when the lightweight aggregate read fails.
       }
     }
+    const shouldQuerySmtDbInsights =
+      selected.summary.source === "SMT" &&
+      Boolean(esiid) &&
+      YYYY_MM_DD.test(lightweightRangeStart) &&
+      YYYY_MM_DD.test(lightweightRangeEnd);
+    if (shouldQuerySmtDbInsights && esiid) {
+      try {
+        const lightweightRange =
+          buildUtcRangeForChicagoLocalDateRange({
+            startDateKey: lightweightRangeStart,
+            endDateKey: lightweightRangeEnd,
+          }) ?? null;
+        const computed = await computeInsightsFromDb({
+          source: "SMT",
+          esiid,
+          cutoff: lightweightRange?.startInclusive ?? new Date(`${lightweightRangeStart}T00:00:00.000Z`),
+          end: lightweightRange?.endInclusive ?? new Date(`${lightweightRangeEnd}T23:59:59.999Z`),
+          precomputedDailyTotals: dailyTotals.length > 0 ? dailyTotals : undefined,
+          precomputedMonthlyTotals: monthlyTotals.length > 0 ? monthlyTotals : undefined,
+        });
+        dailyTotals = computed.dailyTotals;
+        monthlyTotals = computed.monthlyTotals;
+        totalFromMonthly = round2(monthlyTotals.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0));
+        totalKwh = monthlyTotals.length > 0 ? totalFromMonthly : round2(Number(selected.summary.totalKwh) || 0);
+        peakDay = computed.peakDay;
+        weekdayVsWeekend = computed.weekdayVsWeekend;
+        insights = {
+          fifteenMinuteAverages: computed.fifteenMinuteAverages,
+          timeOfDayBuckets: computed.timeOfDayBuckets,
+          peakDay: computed.peakDay,
+          peakHour: computed.peakHour,
+          baseload: computed.baseload ?? null,
+          baseloadMethod: computed.baseloadMethod ?? "SQL_P10_V1",
+          baseloadFallbackUsed: computed.baseloadFallbackUsed ?? false,
+          baseloadDebugNote: computed.baseloadDebugNote ?? null,
+          baseloadDaily: computed.baseloadDaily,
+          baseloadMonthly: computed.baseloadMonthly,
+          weekdayVsWeekend: computed.weekdayVsWeekend,
+        };
+      } catch {
+        // Keep series-derived totals when the lightweight SMT insight read fails.
+      }
+    }
     const stitchedMonth = buildDisplayStitchedMonthMeta({
       monthlyTotals,
       coverageEndDateKey: selectedWindowEndDate,

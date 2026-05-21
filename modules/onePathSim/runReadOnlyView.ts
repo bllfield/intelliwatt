@@ -209,8 +209,8 @@ function applySmtPendingLabelsToDailyRows(
     return dailyRowFieldsFromSourceRow({
       date: row.date,
       kwh: row.kwh,
-      source: "SIMULATED",
-      sourceDetail: "SIMULATED_INTERVALS_NOT_AVAILABLE_YET",
+      source: "ACTUAL",
+      sourceDetail: "ACTUAL_INTERVALS_NOT_AVAILABLE_YET",
     });
   });
 }
@@ -276,8 +276,8 @@ function buildLocalDailyRowsFromIntervals15(args: {
         return dailyRowFieldsFromSourceRow({
           date,
           kwh: round2(kwh),
-          source: "SIMULATED",
-          sourceDetail: "SIMULATED_INTERVALS_NOT_AVAILABLE_YET",
+          source: "ACTUAL",
+          sourceDetail: "ACTUAL_INTERVALS_NOT_AVAILABLE_YET",
         });
       }
       return dailyRowFieldsFromSourceRow({
