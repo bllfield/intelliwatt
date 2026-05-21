@@ -60,6 +60,18 @@ export async function POST(req: NextRequest) {
     cookieValue: cookieStore.get(USER_USAGE_SESSION_COOKIE)?.value ?? null,
   });
 
+  const house = await prisma.houseAddress.findFirst({
+    where: { id: requestedHomeId, userId: user.id, archivedAt: null },
+    select: { id: true, esiid: true },
+  });
+
+  if (!house) {
+    return NextResponse.json(
+      { ok: false, error: "home_not_found", message: "Home not found for this user." },
+      { status: 404 }
+    );
+  }
+
   const ensure = await ensureSmtCoverageForHouse({
     userId: user.id,
     houseId: requestedHomeId,
@@ -67,6 +79,18 @@ export async function POST(req: NextRequest) {
     sessionKey,
     force: true,
   });
+
+  let greenButtonCleared = false;
+  if (house.esiid) {
+    const onePathLink = await getOnePathLabTestHomeLink().catch(() => null);
+    const isOnePathTestHome =
+      typeof onePathLink?.testHomeHouseId === "string" &&
+      onePathLink.testHomeHouseId.trim() === requestedHomeId;
+    if (!isOnePathTestHome && (await hasSmtIntervalsInCanonicalWindow(house.esiid))) {
+      await clearGreenButtonUsageForHouse(requestedHomeId);
+      greenButtonCleared = true;
+    }
+  }
 
   if (ensure.skippedReason === "no_esiid") {
     return NextResponse.json(
