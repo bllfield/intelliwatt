@@ -2068,40 +2068,23 @@ export async function POST(request: NextRequest) {
     lightweightActualUsage: true as const,
     skipLightweightInsightRecompute: true as const,
   };
-  const [userUsagePageBaselineContract, userUsageBaselineContract] = await Promise.all([
-    compactLookupBaselineResponse
-      ? Promise.resolve(null)
-      : buildUserUsageHouseContract({
-          userId: resolved.userId,
-          house: {
-            id: resolved.selectedHouse.id,
-            label: resolved.selectedHouse.label ?? null,
-            esiid: resolved.selectedHouse.esiid ?? null,
-          },
-          ...lookupContractOpts,
-          ...(sharedResolvedUsageLayer &&
-          resolved.selectedHouse.id === previewActualContextHouse.id
-            ? { resolvedUsage: sharedResolvedUsageLayer }
-            : {}),
-        }).catch(() => null),
-    buildUserUsageHouseContract({
-      userId: effectiveUserId,
-      house: {
-        id: effectiveHouseId,
-        label: onePathTestHomeState.testHomeHouse?.label ?? resolved.selectedHouse.label ?? null,
-        esiid: onePathTestHomeState.testHomeHouse?.esiid ?? resolved.selectedHouse.esiid ?? null,
-      },
-      resolvedUsage: sharedResolvedUsageLayer ?? {
-        dataset: null,
-        alternatives: { smt: null, greenButton: null },
-      },
-      homeProfile: homeProfile ?? null,
-      applianceProfileRecord: applianceProfileRecord ?? null,
-      manualUsageRecord: manualUsage ?? null,
-      weatherSensitivity: weatherEnvelope,
-      ...lookupContractOpts,
-    }).catch(() => null),
-  ]);
+  // User-site baseline contract: always score the source home's actual usage with the same
+  // buildUserUsageHouseContract path as /api/user/usage (no precomputed One Path weather override).
+  const userUsagePageBaselineContract = compactLookupBaselineResponse
+    ? null
+    : await buildUserUsageHouseContract({
+        userId: resolved.userId,
+        house: {
+          id: resolved.selectedHouse.id,
+          label: resolved.selectedHouse.label ?? null,
+          esiid: resolved.selectedHouse.esiid ?? null,
+        },
+        weatherHouseId: previewActualContextHouse.id,
+        homeProfile: homeProfile ?? null,
+        applianceProfileRecord: applianceProfileRecord ?? null,
+        ...lookupContractOpts,
+      }).catch(() => null);
+  const userUsageBaselineContract = userUsagePageBaselineContract;
   const baselineParityAudit = buildOnePathBaselineParityAudit({
     houseContract: userUsageBaselineContract,
   });

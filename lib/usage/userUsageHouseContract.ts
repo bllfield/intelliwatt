@@ -77,6 +77,8 @@ export async function buildUserUsageHouseContract(args: {
     score: WeatherSensitivityScore | null;
     derivedInput: WeatherEfficiencyDerivedInput | null;
   } | null;
+  /** Weather-day lookup house (defaults to `house.id`). Use source home when scoring test-home usage. */
+  weatherHouseId?: string | null;
 }): Promise<UserUsageHouseContract> {
   const resolvedUsage =
     args.resolvedUsage ??
@@ -100,6 +102,7 @@ export async function buildUserUsageHouseContract(args: {
       : getManualUsageInputForUserHouse({ userId: args.userId, houseId: args.house.id }).catch(() => ({ payload: null })),
   ]);
   const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRecord?.appliancesJson as any) ?? null);
+  const weatherHouseId = String(args.weatherHouseId ?? args.house.id ?? "").trim() || args.house.id;
   const weatherSensitivity =
     args.weatherSensitivity ??
     (await resolveSharedWeatherSensitivityEnvelope({
@@ -107,7 +110,7 @@ export async function buildUserUsageHouseContract(args: {
       manualUsagePayload: (manualUsageRecord?.payload as any) ?? null,
       homeProfile,
       applianceProfile,
-      weatherHouseId: args.house.id,
+      weatherHouseId,
     }).catch(() => ({ score: null, derivedInput: null })));
 
   return {

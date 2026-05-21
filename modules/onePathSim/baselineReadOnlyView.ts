@@ -1,7 +1,7 @@
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
 import type { UserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
 import type { OnePathBaselineParityAudit } from "@/modules/onePathSim/baselineParityAudit";
-import type { WeatherSensitivityScore } from "@/modules/onePathSim/weatherSensitivityShared";
+import type { WeatherSensitivityScore } from "@/modules/weatherSensitivity/shared";
 import type { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
 
 export type OnePathBaselineReadOnlyView = {
