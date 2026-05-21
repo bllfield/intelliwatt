@@ -340,6 +340,7 @@ export function buildOnePathRunReadOnlyView(args: {
   dataset?: Record<string, unknown> | null;
   engineInput?: Record<string, unknown> | null;
   readModel?: Record<string, unknown> | null;
+  weatherSensitivityScore?: WeatherSensitivityScore | null;
   /** Sage Usage truth daily rows (getActualUsageDatasetForHouse). Required for Past Sim ACTUAL day kWh parity. */
   sageActualDaily?: SageActualDailyRow[] | null;
   sageActualDataset?: Record<string, unknown> | null;
@@ -373,7 +374,10 @@ export function buildOnePathRunReadOnlyView(args: {
           },
         }
       : dataset;
-  const weatherScore = (meta?.weatherSensitivityScore as WeatherSensitivityScore | null | undefined) ?? null;
+  const weatherScore =
+    args.weatherSensitivityScore ??
+    (meta?.weatherSensitivityScore as WeatherSensitivityScore | null | undefined) ??
+    null;
   const isBaselinePassthrough = meta?.baselinePassthrough === true;
   const viewModel = buildUserUsageDashboardViewModel({
     dataset: datasetForDisplay,

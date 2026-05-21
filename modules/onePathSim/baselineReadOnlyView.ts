@@ -71,7 +71,11 @@ export function buildOnePathBaselineReadOnlyView(args: {
     dailyWeather: (viewModel.derived.dailyWeather as OnePathBaselineReadOnlyView["dailyWeather"]) ?? null,
     fifteenMinuteAverages: viewModel.derived.fifteenCurve,
     stitchedMonth: viewModel.derived.stitchedMonth,
-    weatherScore: (args.houseContract?.weatherSensitivityScore as WeatherSensitivityScore | null | undefined) ?? null,
+    weatherScore:
+      (args.houseContract?.weatherSensitivityScore as WeatherSensitivityScore | null | undefined) ??
+      ((args.houseContract?.dataset as { meta?: { weatherSensitivityScore?: WeatherSensitivityScore | null } } | null)
+        ?.meta?.weatherSensitivityScore ??
+        null),
     parityAudit: args.parityAudit ?? null,
   };
 }

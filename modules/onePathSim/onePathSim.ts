@@ -36,7 +36,10 @@ import {
   runOnePathSimulatorBuild,
 } from "@/modules/onePathSim/serviceBridge";
 import { getMemoryRssMb, logSimPipelineEvent } from "@/modules/onePathSim/usageSimulator/simObservability";
-import { type WeatherEfficiencyDerivedInput } from "@/modules/onePathSim/weatherSensitivityShared";
+import {
+  type WeatherEfficiencyDerivedInput,
+  type WeatherSensitivityScore,
+} from "@/modules/onePathSim/weatherSensitivityShared";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { hasUsableAnnualPayload, hasUsableMonthlyPayload } from "@/modules/onePathSim/manualPrefill";
@@ -107,6 +110,7 @@ export type CanonicalSimulationEngineInput = {
   sourceDerivedMode: string | null;
   manualTravelVacantDonorPoolMode: string | null;
   weatherEfficiencyDerivedInput: WeatherEfficiencyDerivedInput | null;
+  weatherSensitivityScore: WeatherSensitivityScore | null;
   upstreamUsageTruth: UpstreamUsageTruthSection | null;
   prefetchedBaselineUpstreamUsageTruth?: PrefetchedBaselineUpstreamUsageTruth | null;
   runtime: {
@@ -811,6 +815,10 @@ function buildIntervalBaselinePassthroughDataset(args: {
     },
     meta: {
       ...meta,
+      weatherSensitivityScore:
+        (meta.weatherSensitivityScore as WeatherSensitivityScore | null | undefined) ??
+        args.engineInput.weatherSensitivityScore ??
+        null,
       datasetKind: meta.datasetKind ?? "ACTUAL",
       scenarioKey: "BASELINE",
       scenarioId: null,
@@ -993,7 +1001,24 @@ function buildManualBaselinePassthroughDataset(args: {
       manualBillPeriodTotalsKwhById,
       manualStageOnePresentation: presentation,
       manualPayloadMode: args.manualUsagePayload?.mode ?? null,
+      weatherSensitivityScore: args.engineInput.weatherSensitivityScore ?? null,
       lockboxExecutionMode: "baseline_passthrough_only",
+    },
+  };
+}
+
+function attachBaselinePassthroughWeatherScore(
+  dataset: Record<string, unknown>,
+  weatherSensitivityScore: WeatherSensitivityScore | null | undefined
+): Record<string, unknown> {
+  if (!weatherSensitivityScore) return dataset;
+  const meta = asRecord(dataset.meta) ?? {};
+  if (meta.weatherSensitivityScore) return dataset;
+  return {
+    ...dataset,
+    meta: {
+      ...meta,
+      weatherSensitivityScore,
     },
   };
 }
@@ -1113,13 +1138,17 @@ async function buildBaselinePassthroughArtifactFromResolvedTruth(args: {
           upstreamUsageTruth,
           manualUsagePayload: args.manualUsagePayload,
         });
-  const finalizedDataset =
+  const finalizedDatasetRaw =
     args.engineInput.inputType === "GREEN_BUTTON"
       ? await enrichGreenButtonBaselinePassthroughDataset({
           engineInput: args.engineInput,
           dataset: dataset as Record<string, any>,
         })
       : dataset;
+  const finalizedDataset = attachBaselinePassthroughWeatherScore(
+    finalizedDatasetRaw as Record<string, unknown>,
+    args.engineInput.weatherSensitivityScore
+  );
 
   const compareProjection = buildOnePathValidationCompareProjectionSidecar(finalizedDataset);
   const manualReadResult =
@@ -1348,18 +1377,16 @@ async function loadSharedContext(args: {
   const applianceProfile = enrichmentSkipped
     ? null
     : normalizeStoredApplianceProfile((applianceProfileRecord as any)?.appliancesJson ?? null);
-  const weatherEnvelope = enrichmentSkipped
-    ? { score: null, derivedInput: null }
-    : await resolveOnePathWeatherSensitivityEnvelope({
-        actualDataset: args.weatherScoringMode === "manual" ? null : upstreamUsageTruth.dataset,
-        manualUsagePayload: manualUsageRecord.payload ?? null,
-        homeProfile,
-        applianceProfile,
-        weatherHouseId: upstreamUsageTruth.actualContextHouse.id,
-      }).catch(() => ({
-        score: null,
-        derivedInput: null,
-      }));
+  const weatherEnvelope = await resolveOnePathWeatherSensitivityEnvelope({
+    actualDataset: args.weatherScoringMode === "manual" ? null : upstreamUsageTruth.dataset,
+    manualUsagePayload: manualUsageRecord.payload ?? null,
+    homeProfile,
+    applianceProfile,
+    weatherHouseId: upstreamUsageTruth.actualContextHouse.id,
+  }).catch(() => ({
+    score: null,
+    derivedInput: null,
+  }));
   return {
     house: upstreamUsageTruth.selectedHouse,
     actualContextHouseId: upstreamUsageTruth.actualContextHouse.id,
@@ -1525,6 +1552,7 @@ function buildCanonicalEngineInput(args: {
     sourceDerivedMode: args.loaded.usageTruthSource,
     manualTravelVacantDonorPoolMode: null,
     weatherEfficiencyDerivedInput: derivedInput,
+    weatherSensitivityScore: args.loaded.weatherEnvelope.score ?? null,
     upstreamUsageTruth: args.loaded.upstreamUsageTruth,
     prefetchedBaselineUpstreamUsageTruth:
       args.scenarioId == null && isIntervalLikeInputType(args.inputType)

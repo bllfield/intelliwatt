@@ -1559,6 +1559,7 @@ export async function POST(request: NextRequest) {
                   dataset: baselineDataset,
                   engineInput: asRecord(engineInput),
                   readModel: null,
+                  weatherSensitivityScore: engineInput.weatherSensitivityScore ?? null,
                 }) ?? null
               ),
             })
@@ -1606,6 +1607,7 @@ export async function POST(request: NextRequest) {
                     manualStageOneView: artifact.manualStageOneView,
                   }
                 : null,
+            weatherSensitivityScore: engineInput.weatherSensitivityScore ?? null,
           }) ?? null;
         const compactReadModel =
           compactRunDisplayView || artifactDataset
@@ -1744,6 +1746,7 @@ export async function POST(request: NextRequest) {
               dataset: asRecord(manualPastReadResult.displayDataset),
               engineInput: asRecord(engineInput),
               readModel: { compareProjection: manualPastReadResult.compareProjection },
+              weatherSensitivityScore: engineInput.weatherSensitivityScore ?? null,
               ...manualSageDisplayArgs,
             })
           : null;
@@ -1753,6 +1756,7 @@ export async function POST(request: NextRequest) {
           dataset: asRecord(readModel.dataset),
           engineInput: asRecord(engineInput),
           readModel: asRecord(readModel),
+          weatherSensitivityScore: engineInput.weatherSensitivityScore ?? null,
           ...sageDisplayArgsForPast,
         }) ??
         null;
@@ -2099,7 +2103,7 @@ export async function POST(request: NextRequest) {
         onePathBaselineContract: userUsageBaselineContract,
       });
   const userUsageBaselineView = buildOnePathBaselineReadOnlyView({
-    houseContract: userUsageBaselineContract,
+    houseContract: userUsagePageBaselineContract ?? userUsageBaselineContract,
     parityAudit: baselineParityAudit,
   });
   const readOnlyAudit = buildKnownHouseScenarioPrereqStatus({

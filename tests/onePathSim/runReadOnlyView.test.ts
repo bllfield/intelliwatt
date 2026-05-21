@@ -839,4 +839,59 @@ describe("buildOnePathRunReadOnlyView", () => {
       { date: "2026-05-18", kwh: 51.47, source: "ACTUAL", sourceDetail: undefined },
     ]);
   });
+
+  it("shows Weather Efficiency Score on baseline passthrough when score is on engine input but not dataset meta", () => {
+    const view = buildOnePathRunReadOnlyView({
+      dataset: {
+        summary: {
+          source: "SMT",
+          intervalsCount: 96,
+          totalKwh: 14435,
+          start: "2025-05-20",
+          end: "2026-05-19",
+        },
+        totals: { importKwh: 14435, exportKwh: 0, netKwh: 14435 },
+        monthly: [{ month: "2026-05", kwh: 14435 }],
+        daily: [{ date: "2026-05-19", kwh: 39.5, source: "ACTUAL", sourceDetail: "ACTUAL" }],
+        insights: {
+          fifteenMinuteAverages: [{ hhmm: "20:00", avgKw: 2.3 }],
+          weekdayVsWeekend: { weekday: 10000, weekend: 4435 },
+          timeOfDayBuckets: [{ key: "evening", label: "Evening", kwh: 4000 }],
+          peakDay: { date: "2026-01-25", kwh: 79.5 },
+          peakHour: { hour: 20, kw: 2.3 },
+          baseload: 0.41,
+          baseloadDaily: 15.09,
+          baseloadMonthly: 679,
+        },
+        meta: {
+          datasetKind: "ACTUAL",
+          baselinePassthrough: true,
+          weatherSourceSummary: "actual_only",
+        },
+        series: { intervals15: [] },
+      },
+      weatherSensitivityScore: {
+        scoringMode: "INTERVAL_BASED",
+        weatherEfficiencyScore0to100: 49,
+        coolingSensitivityScore0to100: 100,
+        heatingSensitivityScore0to100: 64,
+        confidenceScore0to100: 100,
+        explanationSummary: "Moderate weather response.",
+        recommendationFlags: { appearsWeatherSensitive: true },
+        nextDetailPromptType: null,
+        requiredInputAdjustmentsApplied: [],
+        poolAdjustmentApplied: false,
+        hvacAdjustmentApplied: false,
+        occupancyAdjustmentApplied: false,
+        thermostatAdjustmentApplied: false,
+        scoreVersion: "v1",
+        calculationVersion: "v1",
+      },
+    });
+
+    expect(view?.weatherScore?.weatherEfficiencyScore0to100).toBe(49);
+    expect(view?.weatherScore?.coolingSensitivityScore0to100).toBe(100);
+    expect(view?.weatherScore?.heatingSensitivityScore0to100).toBe(64);
+    expect(view?.weatherScore?.confidenceScore0to100).toBe(100);
+  });
 });

@@ -10,6 +10,7 @@ import type { OnePathKnownScenario } from "@/modules/onePathSim/knownHouseScenar
 import { buildOnePathOwnershipAudit } from "@/modules/onePathSim/onePathOwnershipAudit";
 import { buildOnePathTuningCycleSummary } from "@/modules/onePathSim/tuningCycleSummary";
 import { buildUsageDisplayTotalsAudit } from "@/modules/onePathSim/usageDisplayTotalsAudit";
+import type { WeatherSensitivityScore } from "@/modules/weatherSensitivity/shared";
 
 export type SimulationVariablePolicyResponseShape = {
   familyMeta: Record<string, { title: string; description: string }>;
@@ -625,6 +626,10 @@ export function buildSimulationVariableCopyPayload(args: {
           dataset: readModelDataset,
           engineInput: asNullableRecord(args.engineInput),
           readModel,
+          weatherSensitivityScore:
+            (asRecord(dashboardContract).weatherSensitivityScore as WeatherSensitivityScore | null | undefined) ??
+            (loadedSourceContext.weatherScore as WeatherSensitivityScore | null | undefined) ??
+            null,
           sageActualDataset: sageBaselineDataset,
           sageActualDaily: sageBaselineDaily,
         })
