@@ -647,8 +647,53 @@ describe("buildOnePathRunReadOnlyView", () => {
       { hhmm: "00:00", avgKw: 0.2 },
       { hhmm: "12:00", avgKw: 1.5 },
     ]);
-    expect(view?.fifteenMinuteCurveSourceOwner).toBe("buildUserUsageDashboardViewModel(...).derived.fifteenCurve");
+    expect(view?.fifteenMinuteCurveSourceOwner).toBe(
+      "buildOnePathRunReadOnlyView(...).dataset.insights.fifteenMinuteAverages"
+    );
     expect(view?.summary.baseload).toBe(0.2);
+  });
+
+  it("rebuilds the baseline passthrough 15-minute curve from intervals when chart insights are missing", () => {
+    const view = buildOnePathRunReadOnlyView({
+      dataset: {
+        summary: {
+          source: "GREEN_BUTTON",
+          intervalsCount: 34562,
+          totalKwh: 14082,
+          start: "2025-05-14",
+          end: "2026-05-13",
+        },
+        daily: [{ date: "2026-05-13", kwh: 45.04, source: "ACTUAL" }],
+        monthly: [{ month: "2026-05", kwh: 900 }],
+        insights: {
+          baseload: 0.34,
+          weekdayVsWeekend: { weekday: 9799.3, weekend: 4272.8 },
+          timeOfDayBuckets: [],
+          peakDay: { date: "2026-01-25", kwh: 189.31 },
+          peakHour: null,
+        },
+        totals: { importKwh: 14082, exportKwh: 0, netKwh: 14082 },
+        meta: {
+          datasetKind: "ACTUAL",
+          actualSource: "GREEN_BUTTON",
+          baselinePassthrough: true,
+          coverageStart: "2025-05-14",
+          coverageEnd: "2026-05-13",
+          timezone: "America/Chicago",
+        },
+        series: {
+          intervals15: [
+            { timestamp: "2026-05-13T12:00:00.000Z", kwh: 0.25 },
+            { timestamp: "2026-05-13T12:15:00.000Z", kwh: 0.5 },
+            { timestamp: "2026-05-14T12:00:00.000Z", kwh: 0.75 },
+            { timestamp: "2026-05-14T12:15:00.000Z", kwh: 1.0 },
+          ],
+        },
+      },
+    });
+
+    expect(view?.fifteenMinuteAverages.length).toBeGreaterThan(0);
+    expect(view?.fifteenMinuteCurveSourceOwner).toBe("buildOnePathRunReadOnlyView(...).dataset.series.intervals15");
   });
 
   it("binds validation compare rows and metrics from the persisted read model", () => {

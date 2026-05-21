@@ -1145,13 +1145,10 @@ describe("admin one path sim route", () => {
     );
     expect(adaptIntervalRawInput).not.toHaveBeenCalled();
     expect(buildIntervalLikeBaselinePassthroughDataset).toHaveBeenCalledWith(
-      {
+      expect.objectContaining({
         sharedProducerPathUsed: true,
         inputType: "GREEN_BUTTON",
-      },
-      {
-        skipGreenButtonInsightHydration: true,
-      }
+      })
     );
     expect(runSharedSimulation).not.toHaveBeenCalled();
     expect(json.debugDiagnosticsIncluded).toBe(false);

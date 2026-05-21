@@ -416,8 +416,34 @@ export function buildOnePathRunReadOnlyView(args: {
 
   if (isBaselinePassthrough) {
     dailyRows = viewModel.derived.daily;
-    fifteenMinuteAverages = viewModel.derived.fifteenCurve;
-    fifteenMinuteCurveSourceOwner = "buildUserUsageDashboardViewModel(...).derived.fifteenCurve";
+    const timezone = typeof meta?.timezone === "string" && meta.timezone.trim() ? meta.timezone : "America/Chicago";
+    const intervalTimestampMode = resolveIntervalTimestampMode(meta);
+    const passthroughInsightsFifteen = asArray<Record<string, unknown>>(datasetInsights.fifteenMinuteAverages)
+      .map((row) => ({
+        hhmm: String(row?.hhmm ?? ""),
+        avgKw: Number(row?.avgKw ?? 0) || 0,
+      }))
+      .filter((row) => /^\d{2}:\d{2}$/.test(row.hhmm));
+    const shouldIgnoreGreenButtonGridZeroSamples =
+      intervalTimestampMode === "utcDayGrid" &&
+      Number(meta?.greenButtonPaddedIntervalCount ?? 0) > 0 &&
+      Number(meta?.greenButtonZeroRedistributedIntervalCount ?? 0) <= 0;
+    const rebuiltFifteenMinuteAverages = buildFifteenMinuteAveragesFromIntervals15(
+      asRecord(dataset.series)?.intervals15,
+      timezone,
+      intervalTimestampMode,
+      { redistributeZeroKwhSamples: shouldIgnoreGreenButtonGridZeroSamples }
+    );
+    fifteenMinuteAverages = passthroughInsightsFifteen.length
+      ? passthroughInsightsFifteen
+      : rebuiltFifteenMinuteAverages.length
+        ? rebuiltFifteenMinuteAverages
+        : viewModel.derived.fifteenCurve;
+    fifteenMinuteCurveSourceOwner = passthroughInsightsFifteen.length
+      ? "buildOnePathRunReadOnlyView(...).dataset.insights.fifteenMinuteAverages"
+      : rebuiltFifteenMinuteAverages.length
+        ? "buildOnePathRunReadOnlyView(...).dataset.series.intervals15"
+        : "buildUserUsageDashboardViewModel(...).derived.fifteenCurve";
   } else {
     const canonicalCoverageWindow = resolveCanonicalUsage365CoverageWindow();
     const smtPendingDateKeys = smtPendingIntervalDateKeysFromMeta(meta);
