@@ -1,5 +1,6 @@
 import { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
-import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
+import { enumerateDateKeysInclusive } from "@/lib/time/chicago";
+import { fillCanonicalDailyTotals, resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
 import { buildDisplayedMonthlyRows } from "@/modules/usageSimulator/monthlyCompareRows";
 import type { UserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
 
@@ -99,6 +100,43 @@ function asDateKey(value: unknown): string | null {
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
 }
 
+function isGreenButtonActualDataset(
+  datasetKind: unknown,
+  summarySource: unknown,
+  meta: Record<string, unknown>
+): boolean {
+  if (datasetKind !== "ACTUAL") return false;
+  const source = String(summarySource ?? meta.actualSource ?? "")
+    .trim()
+    .toUpperCase();
+  return source === "GREEN_BUTTON";
+}
+
+function resolveDashboardCoverageWindow(args: {
+  datasetKind: unknown;
+  meta: Record<string, unknown>;
+  summary: { start?: unknown; end?: unknown; source?: unknown };
+  canonicalWindow: { startDate: string; endDate: string };
+}): { startDate: string; endDate: string } {
+  const summaryStart = asDateKey(args.summary?.start);
+  const summaryEnd = asDateKey(args.summary?.end);
+  const metaStart = asDateKey(args.meta.coverageStart);
+  const metaEnd = asDateKey(args.meta.coverageEnd);
+  if (isGreenButtonActualDataset(args.datasetKind, args.summary?.source, args.meta)) {
+    return {
+      startDate: metaStart ?? summaryStart ?? args.canonicalWindow.startDate,
+      endDate: metaEnd ?? summaryEnd ?? args.canonicalWindow.endDate,
+    };
+  }
+  if (args.datasetKind === "ACTUAL") {
+    return args.canonicalWindow;
+  }
+  return {
+    startDate: metaStart ?? args.canonicalWindow.startDate,
+    endDate: metaEnd ?? args.canonicalWindow.endDate,
+  };
+}
+
 function chicagoHour(timestamp: string, timezone: string): number | null {
   try {
     const ts = new Date(timestamp);
@@ -184,14 +222,17 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
     typeof meta.manualDisplayWindowStitch === "object" &&
     !Array.isArray(meta.manualDisplayWindowStitch);
   const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
-  const coverageStart =
-    datasetKind === "ACTUAL"
-      ? canonicalWindow.startDate
-      : (asDateKey(meta.coverageStart) ?? canonicalWindow.startDate);
-  const coverageEnd =
-    datasetKind === "ACTUAL"
-      ? canonicalWindow.endDate
-      : (asDateKey(meta.coverageEnd) ?? canonicalWindow.endDate);
+  const { startDate: coverageStart, endDate: coverageEnd } = resolveDashboardCoverageWindow({
+    datasetKind,
+    meta,
+    summary: {
+      start: dataset?.summary?.start,
+      end: dataset?.summary?.end,
+      source: dataset?.summary?.source,
+    },
+    canonicalWindow,
+  });
+  const greenButtonActual = isGreenButtonActualDataset(datasetKind, dataset?.summary?.source, meta);
   const provenance = meta.monthProvenanceByMonth as Record<string, string> | undefined;
   const actualSource = meta.actualSource as string | undefined;
   const timezone = typeof meta.timezone === "string" ? meta.timezone : "America/Chicago";
@@ -249,6 +290,24 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
         })
     )
     .sort((left: DailyRow, right: DailyRow) => (left.date < right.date ? -1 : 1));
+  const displayDaily =
+    greenButtonActual && coverageStart && coverageEnd
+      ? (() => {
+          const dailyByDate = new Map(fallbackDaily.map((row) => [row.date, row]));
+          return fillCanonicalDailyTotals(
+            fallbackDaily.map((row) => ({ date: row.date, kwh: row.kwh })),
+            { startDate: coverageStart, endDate: coverageEnd }
+          ).map((row) => {
+            const existing = dailyByDate.get(row.date);
+            return dailyRowFieldsFromSourceRow({
+              date: row.date,
+              kwh: row.kwh,
+              source: existing?.source ?? "ACTUAL",
+              sourceDetail: existing?.sourceDetail,
+            });
+          });
+        })()
+      : fallbackDaily;
 
   const intervals = dataset?.intervals ?? [];
   const fifteenCurve = (dataset?.insights?.fifteenMinuteAverages ?? []).slice().sort((left: any, right: any) => {
@@ -275,9 +334,13 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
         : totalsFromApi
       : totalsFromMonthly ?? totalsFromSeries;
   const totalKwh = totals.netKwh;
-  const recentDaily = fallbackDaily
+  const recentDaily = displayDaily
     .slice()
     .sort((left: DailyRow, right: DailyRow) => (left.date < right.date ? -1 : 1));
+  const coverageDayCount =
+    coverageStart && coverageEnd
+      ? enumerateDateKeysInclusive(coverageStart, coverageEnd).length
+      : recentDaily.length;
   const monthlySorted = buildDisplayedMonthlyRows(dataset);
   const weekdayWeekend = hasManualDisplayWindowStitch ? deriveWeekdayWeekendFromDaily(recentDaily) : null;
   const timeOfDayBuckets = hasManualDisplayWindowStitch
@@ -305,7 +368,10 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
       fifteenCurve,
       totalKwh,
       totals,
-      avgDailyKwh: fallbackDaily.length ? totalKwh / fallbackDaily.length : 0,
+      avgDailyKwh:
+        (greenButtonActual ? coverageDayCount : recentDaily.length) > 0
+          ? totalKwh / (greenButtonActual ? coverageDayCount : recentDaily.length)
+          : 0,
       weekdayKwh: weekdayWeekend?.weekday ?? dataset?.insights?.weekdayVsWeekend?.weekday ?? 0,
       weekendKwh: weekdayWeekend?.weekend ?? dataset?.insights?.weekdayVsWeekend?.weekend ?? 0,
       timeOfDayBuckets: timeOfDayBuckets && timeOfDayBuckets.length

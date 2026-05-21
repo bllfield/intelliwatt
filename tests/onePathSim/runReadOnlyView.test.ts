@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
 import { buildOnePathRunReadOnlyView } from "@/modules/onePathSim/runReadOnlyView";
 
 describe("buildOnePathRunReadOnlyView", () => {
@@ -420,6 +421,7 @@ describe("buildOnePathRunReadOnlyView", () => {
   });
 
   it("prefers Chicago-local daily rows from intervals when stored UTC daily rows stop before the coverage end", () => {
+    const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
     const intervals15: Array<{ timestamp: string; kwh: number }> = [];
     const start = new Date("2026-05-01T00:00:00.000Z").getTime();
     const end = new Date("2026-05-03T23:45:00.000Z").getTime();
@@ -458,8 +460,8 @@ describe("buildOnePathRunReadOnlyView", () => {
       },
     });
 
-    expect(view?.summary.coverageStart).toBe("2025-05-19");
-    expect(view?.summary.coverageEnd).toBe("2026-05-18");
+    expect(view?.summary.coverageStart).toBe(canonicalWindow.startDate);
+    expect(view?.summary.coverageEnd).toBe(canonicalWindow.endDate);
     expect(view?.dailyRows.map((row) => row.date)).toEqual([
       "2026-04-30",
       "2026-05-01",
@@ -747,6 +749,7 @@ describe("buildOnePathRunReadOnlyView", () => {
   });
 
   it("drops pre-window daily rows so Past Sim display stays at 365 canonical days", () => {
+    const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
     const view = buildOnePathRunReadOnlyView({
       dataset: {
         summary: {
@@ -792,8 +795,8 @@ describe("buildOnePathRunReadOnlyView", () => {
     });
 
     expect(view?.dailyRows.map((row) => row.date)).toEqual(["2026-05-18"]);
-    expect(view?.summary.coverageStart).toBe("2025-05-19");
-    expect(view?.summary.coverageEnd).toBe("2026-05-18");
+    expect(view?.summary.coverageStart).toBe(canonicalWindow.startDate);
+    expect(view?.summary.coverageEnd).toBe(canonicalWindow.endDate);
   });
 
   it("overlays sage actual daily kWh for Past Sim ACTUAL-labeled days instead of stitched interval re-sums", () => {

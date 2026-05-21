@@ -170,6 +170,7 @@ describe("user usage dashboard view model", () => {
   });
 
   it("merges the donor Green Button month into the current display month", () => {
+    const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
     const viewModel = buildUserUsageDashboardViewModel({
       dataset: {
         summary: {
@@ -229,10 +230,55 @@ describe("user usage dashboard view model", () => {
       datasetError: null,
     });
 
+    expect(viewModel?.coverage).toMatchObject({
+      source: "GREEN_BUTTON",
+      start: "2025-04-15",
+      end: "2026-04-14",
+    });
+    expect(viewModel?.coverage.start).not.toBe(canonicalWindow.startDate);
     expect(viewModel?.derived.monthly).toEqual([
       { month: "2025-05", kwh: 1286.66 },
       { month: "2026-04", kwh: 1656.48 },
     ]);
+  });
+
+  it("uses Green Button file-anchored coverage and zero-fills daily rows for baseline display", () => {
+    const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
+    const viewModel = buildUserUsageDashboardViewModel({
+      dataset: {
+        summary: {
+          source: "GREEN_BUTTON",
+          intervalsCount: 28326,
+          totalKwh: 12198,
+          start: "2025-05-15",
+          end: "2026-05-14",
+        },
+        totals: { importKwh: 12198, exportKwh: 0, netKwh: 12198 },
+        monthly: [],
+        daily: [
+          { date: "2025-05-20", kwh: 84.04, source: "ACTUAL" },
+          { date: "2026-03-08", kwh: 20.58, source: "ACTUAL" },
+        ],
+        meta: {
+          datasetKind: "ACTUAL",
+          actualSource: "GREEN_BUTTON",
+          coverageStart: "2025-05-15",
+          coverageEnd: "2026-05-14",
+        },
+      },
+      datasetError: null,
+    });
+
+    expect(viewModel?.coverage.start).toBe("2025-05-15");
+    expect(viewModel?.coverage.end).toBe("2026-05-14");
+    expect(viewModel?.coverage.start).not.toBe(canonicalWindow.startDate);
+    expect(viewModel?.coverage.end).not.toBe(canonicalWindow.endDate);
+    expect(viewModel?.derived.daily).toHaveLength(365);
+    expect(viewModel?.derived.daily[0]?.date).toBe("2025-05-15");
+    expect(viewModel?.derived.daily[viewModel!.derived.daily.length - 1]?.date).toBe("2026-05-14");
+    expect(viewModel?.derived.daily.find((row) => row.date === "2025-05-15")?.kwh).toBe(0);
+    expect(viewModel?.derived.daily.find((row) => row.date === "2026-03-09")?.kwh).toBe(0);
+    expect(viewModel?.derived.avgDailyKwh).toBeCloseTo(12198 / 365, 2);
   });
 
   it("discloses shifted Green Button source-date intervals and weather", () => {
