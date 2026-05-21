@@ -1,9 +1,13 @@
 import { DateTime } from "luxon";
-import { expectedIntervalsForDateISO } from "@/lib/analysis/dst";
+
 import { getLatestGreenButtonFullDayDateKey } from "@/modules/realUsageAdapter/greenButton";
 import { dateTimePartsInTimezone, enumerateDateKeysInclusive, prevCalendarDayDateKey } from "@/lib/time/chicago";
 import { coverageWindowEndingOnDateKey, type CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
 import { CANONICAL_COVERAGE_TOTAL_DAYS } from "@/lib/usage/canonicalCoverageConfig";
+import {
+  countDistinctLocalSlotsByDateKey,
+  resolveLatestCompleteGreenButtonDateKeyFromSlotCounts,
+} from "@/lib/usage/greenButtonLocalSlot";
 
 const GREEN_BUTTON_TIMEZONE = "America/Chicago";
 
@@ -31,21 +35,9 @@ export function buildUtcRangeForChicagoLocalDateRange(args: {
 export function resolveLatestCompleteOrAvailableGreenButtonDateKey<T extends GreenButtonTimestampedInterval>(
   intervals: T[]
 ): string | null {
-  const countsByDateKey = new Map<string, number>();
-  for (const interval of intervals) {
-    const dateKey = getChicagoDateKeyForTimestamp(interval.timestamp);
-    if (!dateKey) continue;
-    countsByDateKey.set(dateKey, (countsByDateKey.get(dateKey) ?? 0) + 1);
-  }
-  const sortedDateKeys = Array.from(countsByDateKey.keys()).sort();
-  if (sortedDateKeys.length === 0) return null;
-  for (let i = sortedDateKeys.length - 1; i >= 0; i -= 1) {
-    const dateKey = sortedDateKeys[i]!;
-    if ((countsByDateKey.get(dateKey) ?? 0) >= expectedIntervalsForDateISO(dateKey)) {
-      return dateKey;
-    }
-  }
-  return sortedDateKeys[sortedDateKeys.length - 1] ?? null;
+  return resolveLatestCompleteGreenButtonDateKeyFromSlotCounts(
+    countDistinctLocalSlotsByDateKey(intervals),
+  );
 }
 
 /**

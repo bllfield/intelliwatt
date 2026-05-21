@@ -1,5 +1,17 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import {
+  createHomeIntervalCalendar,
+  localDateKey,
+  localDayBoundsUtc,
+  localSlotIndex,
+  resolveIntervalInstant,
+  type HomeIntervalCalendar,
+  type IntervalDelivery,
+} from "@/lib/time/homeIntervalCalendar";
+
+const GREEN_BUTTON_HOME = createHomeIntervalCalendar("America/Chicago");
+
 export type GreenButtonRawReading = {
   /**
    * Timestamp for the reading:
@@ -56,7 +68,7 @@ export type GreenButton15MinInterval = {
 /**
  * Normalize a list of raw Green Button readings into 15-minute kWh buckets.
  *
- * - Converts timestamps to UTC Date.
+ * - Resolves timestamps to UTC instants, then buckets on the home (Chicago) 15-minute grid.
  * - Infers units (Wh vs kWh) and converts to kWh.
  * - Splits long intervals (e.g., 1-hour readings) across multiple 15-min buckets.
  * - Aggregates multiple readings that map to the same 15-min bucket.
@@ -80,12 +92,9 @@ export function normalizeGreenButtonReadingsTo15Min(
   const treatAsEnd = options?.treatTimestampAsEnd ?? false;
   const maxKwh = options?.maxKwhPerInterval ?? null;
 
-  const buckets = new Map<number, number>(); // key = ms since epoch (UTC), value = kWh sum
+  const buckets = new Map<number, number>(); // key = home-local slot start (UTC ms), value = kWh sum
 
   for (const reading of rawReadings) {
-    const ts = ensureUtcDate(reading.timestamp);
-    if (!ts) continue;
-
     const durSecRaw = reading.durationSeconds ?? 900;
     const durationSeconds = durSecRaw > 0 ? durSecRaw : 900;
 
@@ -94,23 +103,29 @@ export function normalizeGreenButtonReadingsTo15Min(
       continue; // drop invalid or negative values
     }
 
-    // Determine interval start based on whether the timestamp is start or end.
-    const base = new Date(ts.getTime());
-    if (treatAsEnd) {
-      // If timestamp is interval END, subtract the duration to get START.
-      base.setSeconds(base.getSeconds() - durationSeconds);
-    }
-
-    // Round down to 15-min bucket for the starting interval.
-    const start = roundDownTo15Minutes(base);
+    const delivery = greenButtonDeliveryForRawTimestamp(reading.timestamp, durationSeconds, treatAsEnd);
+    const resolved = resolveIntervalInstant(
+      {
+        timestamp: reading.timestamp,
+        durationSeconds,
+        kwh: valueKwh,
+        unit: reading.unit ?? "kWh",
+      },
+      delivery,
+    );
+    if (!resolved) continue;
 
     const intervals = Math.max(1, Math.round(durationSeconds / 900));
     const perIntervalKwh = valueKwh / intervals;
+    let cursor = new Date(resolved.tsUtc);
 
-    for (let i = 0; i < intervals; i++) {
-      const bucketStartMs = start.getTime() + i * 15 * 60 * 1000;
-      const existing = buckets.get(bucketStartMs) ?? 0;
-      buckets.set(bucketStartMs, existing + perIntervalKwh);
+    for (let i = 0; i < intervals; i += 1) {
+      const bucketStartMs = homeLocalSlotStartMs(cursor, GREEN_BUTTON_HOME);
+      if (bucketStartMs != null) {
+        const existing = buckets.get(bucketStartMs) ?? 0;
+        buckets.set(bucketStartMs, existing + perIntervalKwh);
+      }
+      cursor = new Date(cursor.getTime() + 15 * 60 * 1000);
     }
   }
 
@@ -219,19 +234,43 @@ function ensureKwh(value: number | string, unit?: string | null): number {
   return numeric;
 }
 
-/**
- * Round a Date down to the nearest 15-minute boundary (UTC).
- * Example:
- *  - 12:07 → 12:00
- *  - 12:14 → 12:00
- *  - 12:15 → 12:15
- *  - 12:29 → 12:15
- */
-function roundDownTo15Minutes(d: Date): Date {
-  const ms = d.getTime();
-  const FIFTEEN_MIN_MS = 15 * 60 * 1000;
-  const bucketMs = Math.floor(ms / FIFTEEN_MIN_MS) * FIFTEEN_MIN_MS;
-  return new Date(bucketMs);
+function greenButtonDeliveryForRawTimestamp(
+  timestamp: string | number | Date,
+  durationSeconds: number,
+  treatTimestampAsEnd: boolean,
+): IntervalDelivery {
+  const intervalEdge = treatTimestampAsEnd ? "end" : "start";
+  if (timestamp instanceof Date) {
+    return {
+      encoding: "instant_iso",
+      sourceTimezone: GREEN_BUTTON_HOME.timezone,
+      intervalEdge,
+      durationSeconds,
+    };
+  }
+  const text = String(timestamp).trim();
+  if (/^\d+$/.test(text)) {
+    return {
+      encoding: "unix_seconds_utc",
+      sourceTimezone: GREEN_BUTTON_HOME.timezone,
+      intervalEdge,
+      durationSeconds,
+    };
+  }
+  return {
+    encoding: "instant_iso",
+    sourceTimezone: GREEN_BUTTON_HOME.timezone,
+    intervalEdge,
+    durationSeconds,
+  };
+}
+
+function homeLocalSlotStartMs(instant: Date, home: HomeIntervalCalendar): number | null {
+  const iso = instant.toISOString();
+  const dateKey = localDateKey(iso, home);
+  const slot = localSlotIndex(iso, home);
+  const bounds = localDayBoundsUtc(dateKey, home);
+  return bounds.startUtc.getTime() + slot * 15 * 60 * 1000;
 }
 
 /**

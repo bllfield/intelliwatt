@@ -3,6 +3,10 @@ import { expectedIntervalsForDateISO } from "@/lib/analysis/dst";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { dateTimePartsInTimezone, enumerateDateKeysInclusive } from "@/lib/time/chicago";
 import {
+  GREEN_BUTTON_CHICAGO_LOCAL_SLOT_SQL,
+  greenButtonAnchorDayCompleteThreshold,
+} from "@/lib/usage/greenButtonLocalSlot";
+import {
   greenButtonHomeIntervalCalendar,
   greenButtonTrustedIntervalThreshold,
 } from "@/lib/time/greenButtonPersistedIntervalConvert";
@@ -251,10 +255,7 @@ export async function getLatestGreenButtonFullDayDateKey(args: { houseId: string
     const rows = (await usageClient.$queryRaw(Prisma.sql`
       SELECT
         to_char(("timestamp" AT TIME ZONE 'America/Chicago')::timestamp, 'YYYY-MM-DD') AS date_key,
-        COUNT(DISTINCT (
-          (EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago'))::int * 4)
-          + (FLOOR(EXTRACT(MINUTE FROM ("timestamp" AT TIME ZONE 'America/Chicago')) / 15)::int)
-        ))::int AS intervalscount
+        COUNT(DISTINCT ${GREEN_BUTTON_CHICAGO_LOCAL_SLOT_SQL})::int AS intervalscount
       FROM "GreenButtonInterval"
       WHERE "homeId" = ${args.houseId}
         AND "rawId" = ${rawId}
@@ -265,8 +266,8 @@ export async function getLatestGreenButtonFullDayDateKey(args: { houseId: string
     for (const row of rows) {
       const dateKey = normalizeDateKey(row.date_key);
       if (!dateKey) continue;
-      const expectedIntervals = expectedIntervalsForDateISO(dateKey);
-      if ((Number(row.intervalscount) || 0) >= expectedIntervals) return dateKey;
+      const minimumSlots = greenButtonAnchorDayCompleteThreshold(dateKey);
+      if ((Number(row.intervalscount) || 0) >= minimumSlots) return dateKey;
     }
     return null;
   } catch {
