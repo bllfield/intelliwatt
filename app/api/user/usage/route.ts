@@ -22,6 +22,7 @@ import { resolveUserUsageSessionKey } from "@/lib/usage/userUsageSessionKey";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 import { IntervalSeriesKind } from '@/modules/usageSimulator/kinds';
 import { toPublicHouseLabel } from "@/modules/usageSimulator/houseLabel";
+import { mergeGreenButtonChartInsightsOntoPassthroughDataset } from "@/lib/usage/greenButtonChartInsights";
 import { adaptGreenButtonRawInput, runSharedSimulation } from "@/modules/onePathSim/onePathSim";
 import {
   classifySimulationFailure,
@@ -63,7 +64,10 @@ async function applyUserSiteGreenButtonBaselinePassthrough(args: {
   });
   const artifact = await runSharedSimulation(engineInput);
   return {
-    dataset: artifact.dataset,
+    dataset: mergeGreenButtonChartInsightsOntoPassthroughDataset({
+      passthroughDataset: artifact.dataset,
+      resolvedDataset: args.resolvedUsage.dataset,
+    }),
     alternatives: args.resolvedUsage.alternatives,
   };
 }

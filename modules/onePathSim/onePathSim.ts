@@ -841,17 +841,9 @@ function buildIntervalBaselinePassthroughDataset(args: {
   };
 }
 
-function hasUsableGreenButtonBaselineInsights(dataset: Record<string, any>): boolean {
+function greenButtonBaselineFifteenMinuteCurveReady(dataset: Record<string, any>): boolean {
   const insights = asRecord(dataset.insights) ?? {};
-  return (
-    Array.isArray(insights.fifteenMinuteAverages) &&
-    insights.fifteenMinuteAverages.length > 0 &&
-    Array.isArray(insights.timeOfDayBuckets) &&
-    insights.timeOfDayBuckets.length > 0 &&
-    insights.peakHour != null &&
-    typeof insights.baseload === "number" &&
-    Number.isFinite(insights.baseload)
-  );
+  return Array.isArray(insights.fifteenMinuteAverages) && insights.fifteenMinuteAverages.length > 0;
 }
 
 async function enrichGreenButtonBaselinePassthroughDataset(args: {
@@ -859,7 +851,7 @@ async function enrichGreenButtonBaselinePassthroughDataset(args: {
   dataset: Record<string, any>;
 }): Promise<Record<string, any>> {
   if (args.engineInput.inputType !== "GREEN_BUTTON") return args.dataset;
-  if (hasUsableGreenButtonBaselineInsights(args.dataset)) return args.dataset;
+  if (greenButtonBaselineFifteenMinuteCurveReady(args.dataset)) return args.dataset;
 
   const hydratedInsights = await hydrateGreenButtonInsightsForCoverageWindow({
     houseId: args.engineInput.actualContextHouseId,

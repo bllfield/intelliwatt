@@ -18,6 +18,7 @@ import {
   buildWeatherEfficiencyDerivedInput,
   resolveSharedWeatherSensitivityEnvelope,
 } from "@/modules/weatherSensitivity/shared";
+import { mergeGreenButtonChartInsightsOntoPassthroughDataset } from "@/lib/usage/greenButtonChartInsights";
 import { adaptGreenButtonRawInput, runSharedSimulation } from "@/modules/onePathSim/onePathSim";
 
 export const dynamic = "force-dynamic";
@@ -75,7 +76,10 @@ async function applyUserSiteGreenButtonBaselinePassthrough(args: {
   });
   const artifact = await runSharedSimulation(engineInput);
   return {
-    dataset: artifact.dataset,
+    dataset: mergeGreenButtonChartInsightsOntoPassthroughDataset({
+      passthroughDataset: artifact.dataset,
+      resolvedDataset: args.resolvedUsage.dataset,
+    }),
     alternatives: args.resolvedUsage.alternatives,
   };
 }
