@@ -276,6 +276,24 @@ export async function loadSmtWindowDayStatus(args: {
   };
 }
 
+/**
+ * Ledger INCOMPLETE_METER can lag after a day becomes slot-complete (e.g. DST fall-back at 96 SMT rows).
+ * Past Sim and other consumers should use the same `isComplete` rule as Usage, not stale ledger alone.
+ */
+export function filterLedgerIncompleteMeterDateKeysToSlotIncomplete(args: {
+  incompleteMeterDateKeys: Iterable<string>;
+  byDate: Readonly<Record<string, SmtWindowDayStatus>>;
+}): string[] {
+  const out: string[] = [];
+  for (const dateKey of args.incompleteMeterDateKeys) {
+    const dk = String(dateKey ?? "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
+    if (args.byDate[dk]?.isComplete === true) continue;
+    out.push(dk);
+  }
+  return out;
+}
+
 /** Completeness ratio for user-facing SMT messaging (0..1), DST-aware per day. */
 export function smtWindowCompletenessRatio(status: Pick<SmtWindowStatusSnapshot, "dateKeys" | "completeDateKeys">): number {
   if (status.dateKeys.length === 0) return 0;

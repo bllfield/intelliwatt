@@ -8,6 +8,10 @@ import { prisma } from "@/lib/db";
 import { dateKeyInTimezone } from "@/lib/admin/gapfillLab";
 import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
 import { buildSmtDayLedgerMeta, resolveSmtLedgerDateKeysForPastSim } from "@/lib/usage/smtDayCoverageLedger";
+import {
+  filterLedgerIncompleteMeterDateKeysToSlotIncomplete,
+  loadSmtWindowDayStatus,
+} from "@/lib/usage/smtWindowStatus";
 import { buildUniformMonthlyTotalsFromAnnualWindow, travelRangesToExcludeDateKeys } from "@/modules/onePathSim/usageSimulator/build";
 import { boundDateKeysToCoverageWindow } from "@/modules/onePathSim/usageSimulator/metadataWindow";
 import {
@@ -1838,9 +1842,23 @@ export async function simulatePastUsageDataset(
     const pendingSmtIntervalDateKeys = new Set<string>(
       Array.from(smtLedgerForSim?.pendingDateKeys ?? []).filter((dk) => canonicalDateKeys.includes(dk))
     );
-    const ledgerIncompleteMeterDateKeys = new Set<string>(
+    let ledgerIncompleteMeterDateKeys = new Set<string>(
       Array.from(smtLedgerForSim?.incompleteMeterDateKeys ?? []).filter((dk) => canonicalDateKeys.includes(dk))
     );
+    if (esiid && ledgerIncompleteMeterDateKeys.size > 0) {
+      const slotStatus = await loadSmtWindowDayStatus({
+        esiid,
+        dateKeys: Array.from(ledgerIncompleteMeterDateKeys),
+      }).catch(() => null);
+      if (slotStatus) {
+        ledgerIncompleteMeterDateKeys = new Set(
+          filterLedgerIncompleteMeterDateKeysToSlotIncomplete({
+            incompleteMeterDateKeys: ledgerIncompleteMeterDateKeys,
+            byDate: slotStatus.byDate,
+          })
+        );
+      }
+    }
 
     const mergedKeepRefLocalDateKeys = new Set<string>(forceModeledOutputKeepReferencePoolDateKeysLocalSet);
     logSimPipelineEvent("day_simulation_input_prep_success", {

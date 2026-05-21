@@ -1466,12 +1466,10 @@ describe("getSimulatedUsageForHouseScenario artifact_only", () => {
     expect(simulatePastUsageDataset).toHaveBeenCalledTimes(1);
     const producerArgs = simulatePastUsageDataset.mock.calls[0]?.[0] as {
       buildPathKind?: string;
-      forceModeledOutputKeepReferencePoolDateKeysLocal?: Set<string>;
+      forceSimulateDateKeysLocal?: Set<string>;
     };
     expect(producerArgs?.buildPathKind).toBe("recalc");
-    expect(
-      Array.from(producerArgs?.forceModeledOutputKeepReferencePoolDateKeysLocal ?? []).sort()
-    ).toEqual(["2026-01-01"]);
+    expect(Array.from(producerArgs?.forceSimulateDateKeysLocal ?? []).sort()).toEqual(["2026-01-01"]);
   });
 
   it("allow_rebuild ignores cached artifacts written during legacy weather-efficiency activation and rebuilds", async () => {
@@ -1951,20 +1949,16 @@ describe("rebuildGapfillSharedPastArtifact exact handoff", () => {
     expect(simulatePastUsageDataset).toHaveBeenCalledTimes(2);
     const userProducerArgs = simulatePastUsageDataset.mock.calls[0]?.[0] as {
       buildPathKind?: string;
-      forceModeledOutputKeepReferencePoolDateKeysLocal?: Set<string>;
+      forceSimulateDateKeysLocal?: Set<string>;
     };
     const gapfillProducerArgs = simulatePastUsageDataset.mock.calls[1]?.[0] as {
       buildPathKind?: string;
-      forceModeledOutputKeepReferencePoolDateKeysLocal?: Set<string>;
+      forceSimulateDateKeysLocal?: Set<string>;
     };
     expect(userProducerArgs?.buildPathKind).toBe("recalc");
     expect(gapfillProducerArgs?.buildPathKind).toBe("recalc");
-    expect(
-      Array.from(userProducerArgs?.forceModeledOutputKeepReferencePoolDateKeysLocal ?? []).sort()
-    ).toEqual(["2026-01-01"]);
-    expect(
-      Array.from(gapfillProducerArgs?.forceModeledOutputKeepReferencePoolDateKeysLocal ?? []).sort()
-    ).toEqual(["2026-01-01"]);
+    expect(Array.from(userProducerArgs?.forceSimulateDateKeysLocal ?? []).sort()).toEqual(["2026-01-01"]);
+    expect(Array.from(gapfillProducerArgs?.forceSimulateDateKeysLocal ?? []).sort()).toEqual(["2026-01-01"]);
 
     expect(saveCachedPastDataset).toHaveBeenCalledTimes(2);
     const userSavedMeta = ((saveCachedPastDataset.mock.calls[0]?.[0] as any)?.datasetJson?.meta ?? {}) as Record<string, unknown>;
@@ -4656,11 +4650,9 @@ describe("buildGapfillCompareSimShared scoring interval sourcing", () => {
       ).sort();
       expect(sharedCallDateKeys).toEqual(["2026-01-01", "2026-01-03", "2026-01-04"]);
       const firstSelectedArgs = (selectedDaysCalls[0] ?? [])[0] as {
-        forceModeledOutputKeepReferencePoolDateKeysLocal?: Set<string>;
+        forceSimulateDateKeysLocal?: Set<string>;
       };
-      expect(firstSelectedArgs?.forceModeledOutputKeepReferencePoolDateKeysLocal).toEqual(
-        new Set<string>(["2026-01-01"])
-      );
+      expect(firstSelectedArgs?.forceSimulateDateKeysLocal).toEqual(new Set<string>(["2026-01-01"]));
       expect(out.gapfillScoringDiagnostics?.run?.scoringMode).toBe("modeled_scored_days");
       expect(out.gapfillScoringDiagnostics?.run?.oneUnionRunUsed).toBe(true);
       expect(out.gapfillScoringDiagnostics?.scoredDays?.[0]?.compareOutputSource).toBe("MISSING_SIM");

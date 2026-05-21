@@ -30,6 +30,7 @@ import {
   smtHomeIntervalCalendar,
 } from "@/lib/time/homeIntervalCalendar";
 import {
+  filterLedgerIncompleteMeterDateKeysToSlotIncomplete,
   loadSmtWindowDayStatus,
   missingChicagoSlotsFromFilledSlots,
   resolveSmtCanonicalWindow,
@@ -94,6 +95,36 @@ describe("smtWindowStatus", () => {
     expect(status.byDate[dateKey]?.intervalCount).toBe(92);
     expect(status.byDate[dateKey]?.isComplete).toBe(true);
     expect(status.incompleteMeterDateKeys).not.toContain(dateKey);
+  });
+
+  it("drops slot-complete days from ledger incomplete-meter lists (DST fall-back)", () => {
+    const dateKey = "2025-11-02";
+    const filtered = filterLedgerIncompleteMeterDateKeysToSlotIncomplete({
+      incompleteMeterDateKeys: [dateKey, "2025-11-03"],
+      byDate: {
+        [dateKey]: {
+          dateKey,
+          intervalCount: 96,
+          distinctSlotCount: 96,
+          slotCount: 96,
+          requiredSlots: 100,
+          missingSlots: [],
+          ledgerStatus: SMT_DAY_LEDGER_STATUS.INCOMPLETE_METER,
+          isComplete: true,
+        },
+        "2025-11-03": {
+          dateKey: "2025-11-03",
+          intervalCount: 80,
+          distinctSlotCount: 80,
+          slotCount: 80,
+          requiredSlots: 96,
+          missingSlots: [0],
+          ledgerStatus: SMT_DAY_LEDGER_STATUS.INCOMPLETE_METER,
+          isComplete: false,
+        },
+      },
+    });
+    expect(filtered).toEqual(["2025-11-03"]);
   });
 
   it("marks fall-back day complete at 96 SMT intervals when Luxon expects 100 periods", async () => {
