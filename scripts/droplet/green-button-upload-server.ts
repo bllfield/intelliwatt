@@ -913,10 +913,6 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
         where: { houseId: previousRawHomeId, storageKey },
       });
     }
-    if (house.esiid) {
-      await prisma.smtInterval.deleteMany({ where: { esiid: house.esiid } });
-    }
-
     const intervalData = trimmed.map((interval) => ({
       rawId: rawRecordId!,
       homeId: house.id,

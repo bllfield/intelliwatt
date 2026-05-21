@@ -26,7 +26,12 @@ import {
 import { listOnePathScenarioEvents, readOnePathSimulatedUsageScenario } from "@/modules/onePathSim/serviceBridge";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
-import { gateOnePathSimAdmin, resolveOnePathSimOwnerUserId, resolveOnePathSimUserSelection } from "./_helpers";
+import {
+  gateOnePathSimAdmin,
+  requireOnePathWritableContext,
+  resolveOnePathSimOwnerUserId,
+  resolveOnePathSimUserSelection,
+} from "./_helpers";
 import {
   ensureGlobalOnePathLabTestHomeHouse,
   getOnePathLabTestHomeLink,
@@ -654,7 +659,7 @@ async function buildPastSimRunReadbackResponse(args: {
   if (healingCtx?.mode === "INTERVAL" && String(healingCtx.sourceEsiid ?? "").trim()) {
     const postEnsure = await ensureSmtCoverageForHouse({
       userId: healingCtx.sourceUserId,
-      houseId: healingCtx.sourceHouseId,
+      houseId: healingCtx.effectiveHouseId,
       profile: "admin_sim",
       sessionKey: `post:${args.correlationId ?? ""}`,
       extraBackfillDateKeys: extractIncompleteMeterDateKeysFromDataset(readback.dataset),
@@ -1194,7 +1199,11 @@ export async function POST(request: NextRequest) {
   const smtSourceEsiid = resolved.selectedHouse.esiid ? String(resolved.selectedHouse.esiid) : null;
   const effectiveUserId = onePathTestHomeState.isPinned ? ownerUserId : resolved.userId;
   const effectiveHouseId = onePathTestHomeState.isPinned ? onePathTestHomeState.testHomeHouseId : resolved.selectedHouse.id;
-  const defaultActualContextHouseId = onePathTestHomeState.isPinned ? effectiveHouseId : resolved.selectedHouse.id;
+  const onePathUsageTruthHouseId =
+    onePathTestHomeState.isPinned && onePathTestHomeState.testHomeHouseId
+      ? onePathTestHomeState.testHomeHouseId
+      : null;
+  const defaultActualContextHouseId = onePathUsageTruthHouseId ?? resolved.selectedHouse.id;
   const effectiveScenarios =
     onePathTestHomeState.isPinned && effectiveHouseId
       ? (
@@ -1252,9 +1261,11 @@ export async function POST(request: NextRequest) {
   }
 
   if (action === "full_window_smt_reingest") {
+    const writable = requireOnePathWritableContext({ testHomeState: onePathTestHomeState });
+    if (!writable.ok) return writable.response;
     const reingest = await runFullWindowSmtReingestForHouse({
-      userId: resolved.userId,
-      houseId: resolved.selectedHouse.id,
+      userId: ownerUserId,
+      houseId: writable.testHomeHouseId,
     });
     const userUsagePageBaselineContract = await buildUserUsageHouseContract({
       userId: resolved.userId,
@@ -1446,8 +1457,8 @@ export async function POST(request: NextRequest) {
       String(smtSourceEsiid ?? "").trim()
         ? buildOnePathSmtRefreshCheckFromEnsure(
             await ensureSmtCoverageForHouse({
-              userId: resolved.userId,
-              houseId: resolved.selectedHouse.id,
+              userId: effectiveUserId,
+              houseId: effectiveHouseId,
               profile: "admin_sim",
               sessionKey: `run:${correlationId}`,
             }),
@@ -1476,8 +1487,8 @@ export async function POST(request: NextRequest) {
               ? {
                   mode,
                   preferredActualSource: effectiveRawInputBase.preferredActualSource,
-                  sourceUserId: resolved.userId,
-                  sourceHouseId: resolved.selectedHouse.id,
+                  sourceUserId: effectiveUserId,
+                  sourceHouseId: effectiveHouseId,
                   sourceEsiid: smtSourceEsiid,
                   effectiveHouseId,
                   actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
@@ -1640,8 +1651,8 @@ export async function POST(request: NextRequest) {
         String(smtSourceEsiid ?? "").trim()
       ) {
         const postEnsure = await ensureSmtCoverageForHouse({
-          userId: resolved.userId,
-          houseId: resolved.selectedHouse.id,
+          userId: effectiveUserId,
+          houseId: effectiveHouseId,
           profile: "admin_sim",
           sessionKey: `post:${correlationId}`,
           extraBackfillDateKeys: extractIncompleteMeterDateKeysFromDataset(artifactDataset),

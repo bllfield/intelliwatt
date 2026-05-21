@@ -1228,7 +1228,20 @@ describe("admin one path sim route", () => {
     expect(json.ok).toBe(true);
     expect(adaptIntervalRawInput).toHaveBeenCalledTimes(1);
     expect(runSharedSimulation).toHaveBeenCalledTimes(1);
-    expect(resolveUpstreamUsageTruthForSimulation).not.toHaveBeenCalled();
+    expect(resolveUpstreamUsageTruthForSimulation).toHaveBeenCalledTimes(1);
+    expect(resolveUpstreamUsageTruthForSimulation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        houseId: "house-1",
+        seedIfMissing: false,
+      })
+    );
+    expect(ensureSmtCoverageForHouse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        houseId: "house-1",
+      })
+    );
     expect(resolveSharedWeatherSensitivityEnvelope).not.toHaveBeenCalled();
     expect(getHomeProfileReadOnlyByUserHouse).not.toHaveBeenCalled();
     expect(getApplianceProfileSimulatedByUserHouse).not.toHaveBeenCalled();

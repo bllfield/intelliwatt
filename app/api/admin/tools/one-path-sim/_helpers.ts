@@ -121,3 +121,37 @@ export async function resolveOnePathWriteTarget(args: {
     sourceUserId: link?.sourceUserId ? String(link.sourceUserId) : null,
   };
 }
+
+/** One Path admin writes (GB upload, SMT heal, sim persist) must target the lab test home only. */
+export function requireOnePathWritableContext(args: {
+  testHomeState: {
+    isPinned: boolean;
+    testHomeHouseId: string | null;
+    needsReplace?: boolean;
+  };
+}):
+  | {
+      ok: true;
+      testHomeHouseId: string;
+    }
+  | { ok: false; response: NextResponse } {
+  const testHomeHouseId =
+    typeof args.testHomeState.testHomeHouseId === "string" && args.testHomeState.testHomeHouseId.trim()
+      ? args.testHomeState.testHomeHouseId.trim()
+      : null;
+  if (!args.testHomeState.isPinned || !testHomeHouseId) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        {
+          ok: false,
+          error: "test_home_not_ready",
+          message:
+            "Replace the One Path test home from the selected source before writing usage or running simulations. Source houses stay read-only.",
+        },
+        { status: 409 }
+      ),
+    };
+  }
+  return { ok: true, testHomeHouseId };
+}

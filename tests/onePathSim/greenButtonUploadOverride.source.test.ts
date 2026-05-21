@@ -27,6 +27,8 @@ describe("one path green button preset wiring", () => {
 
     expect(adminSource).toContain("uploadGreenButtonThroughUsage");
     expect(adminSource).toContain("/api/admin/tools/one-path-sim/green-button/upload-ticket");
+    expect(adminSource).not.toContain("resolvedSelection.actualContextHouseId");
+    expect(adminSource).not.toContain("resolvedSelection.selectedHouseId");
     expect(adminSource).toContain("selectedKnownScenario.scenarioType === \"GREEN_BUTTON_TRUTH\"");
     expect(adminSource).toContain("greenButtonSelectedFile");
     expect(adminSource).toContain("The selected file will be uploaded through the usage Green Button pipeline when you load this preset.");
@@ -99,5 +101,19 @@ describe("one path green button preset wiring", () => {
     expect(onePathReplacement).not.toContain("await Promise.all([\n      (usagePrisma as any).pastSimulatedDatasetCache");
     expect(onePathReplacement).toContain("(usagePrisma as any).pastSimulatedDatasetCache");
     expect(onePathReplacement).toContain("(usagePrisma as any).gapfillCompareRunSnapshot");
+  });
+
+  it("does not wipe shared SMT intervals when Green Button upload completes", () => {
+    const dropletSource = readRepoFile("scripts/droplet/green-button-upload-server.ts");
+    expect(dropletSource).not.toContain("smtInterval.deleteMany");
+  });
+
+  it("routes admin SMT heal through the pinned test home, not the selected source house", () => {
+    const routeSource = readRepoFile("app/api/admin/tools/one-path-sim/route.ts");
+    expect(routeSource).toContain("requireOnePathWritableContext");
+    expect(routeSource).toContain("houseId: effectiveHouseId");
+    expect(routeSource).not.toMatch(
+      /ensureSmtCoverageForHouse\(\{[\s\S]*?houseId:\s*resolved\.selectedHouse\.id/
+    );
   });
 });

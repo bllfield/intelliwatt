@@ -1060,25 +1060,33 @@ export function OnePathSimAdmin() {
     if (!ensuredLookup) return;
     json = ensuredLookup;
 
-    let resolvedSelection = resolveKnownHouseScenarioSelection({
+    const resolvedSelection = resolveKnownHouseScenarioSelection({
       scenario: scenarioForSelection,
       lookup: json,
     });
+    const {
+      selectedHouseId: presetSelectedHouseId,
+      selectedScenarioId: presetScenarioId,
+      actualContextHouseId: presetActualContextHouseId,
+    } = resolvedSelection;
+    const onePathTestHomeHouseId = String(asRecord(json.sourceContext?.onePathTestHome)?.houseId ?? "").trim();
 
     if (selectedKnownScenario.scenarioType === "GREEN_BUTTON_TRUTH") {
-      const targetActualContextHouseId =
-        (typeof asRecord(json.sourceContext?.onePathTestHome)?.houseId === "string"
-          ? String(asRecord(json.sourceContext?.onePathTestHome)?.houseId ?? "")
-          : "") ||
-        resolvedSelection.actualContextHouseId ||
-        resolvedSelection.selectedHouseId;
+      const targetActualContextHouseId = onePathTestHomeHouseId;
+      if (!targetActualContextHouseId) {
+        setGreenButtonUploadStatus(null);
+        setGreenButtonUploadError(
+          "One Path test home is not ready. Replace the test home from the selected source before uploading Green Button data."
+        );
+        return;
+      }
       const hasExistingGreenButtonUsage = hasUsableGreenButtonCoverage(asRecord(json.sourceContext?.greenButtonUpload));
       if (greenButtonSelectedFile) {
         const uploaded = await uploadGreenButtonThroughUsage(targetActualContextHouseId);
         if (!uploaded) return;
         json = await requestLookup({
           ...lookupArgs,
-          houseId: resolvedSelection.selectedHouseId || lookupArgs.houseId,
+          houseId: presetSelectedHouseId || lookupArgs.houseId,
           actualContextHouseId: targetActualContextHouseId,
           freshSelection: false,
           includeDebugDiagnostics: includeSimRunAuditEnabled,
@@ -1087,7 +1095,7 @@ export function OnePathSimAdmin() {
         if (!json) return;
         const reEnsuredLookup = await ensureOnePathTestHomeReady(
           json,
-          resolvedSelection.selectedHouseId || lookupArgs.houseId || json.selectedHouse?.id || "",
+          presetSelectedHouseId || lookupArgs.houseId || json.selectedHouse?.id || "",
           resolvedEmail,
           {
             includeDebugDiagnostics: includeSimRunAuditEnabled,
@@ -1096,10 +1104,6 @@ export function OnePathSimAdmin() {
         );
         if (!reEnsuredLookup) return;
         json = reEnsuredLookup;
-        resolvedSelection = resolveKnownHouseScenarioSelection({
-          scenario: scenarioForSelection,
-          lookup: json,
-        });
       } else if (!hasExistingGreenButtonUsage) {
         setGreenButtonUploadStatus(null);
         setGreenButtonUploadError(
@@ -1110,9 +1114,14 @@ export function OnePathSimAdmin() {
     }
 
     applyLookupResponse(json, {
-      selectedHouseId: resolvedSelection.selectedHouseId,
-      actualContextHouseId: resolvedSelection.actualContextHouseId,
-      selectedScenarioId: resolvedSelection.selectedScenarioId,
+      selectedHouseId: presetSelectedHouseId,
+      actualContextHouseId:
+        selectedKnownScenario.scenarioType === "GREEN_BUTTON_TRUTH"
+          ? onePathTestHomeHouseId || effectiveActualContextHouseId
+          : onePathTestHomePinned
+            ? effectiveActualContextHouseId
+            : presetActualContextHouseId,
+      selectedScenarioId: presetScenarioId,
       travelRanges: selectedKnownScenario.travelRanges.length
         ? selectedKnownScenario.travelRanges
         : Array.isArray((json.sourceContext?.travelRangesFromDb as any[]))

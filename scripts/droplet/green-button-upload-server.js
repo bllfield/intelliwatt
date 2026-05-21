@@ -837,9 +837,6 @@ app.post("/upload", upload.single("file"), async (req, res) => {
     await usagePrisma.greenButtonInterval.deleteMany({ where: { homeId: house.id } });
     await usagePrisma.rawGreenButton.deleteMany({ where: { homeId: house.id } });
     await prisma.greenButtonUpload.deleteMany({ where: { houseId: house.id } });
-    if (house.esiid) {
-      await prisma.smtInterval.deleteMany({ where: { esiid: house.esiid } });
-    }
 
     const buffer = file.buffer;
     const sha256 = createHash("sha256").update(buffer).digest("hex");
@@ -1045,9 +1042,6 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       await prisma.greenButtonUpload.deleteMany({
         where: { houseId: previousRawHomeId, storageKey },
       });
-    }
-    if (house.esiid) {
-      await prisma.smtInterval.deleteMany({ where: { esiid: house.esiid } });
     }
 
     // Protect DB/CPU: cap interval inserts to ~60k (15-min for ~2.5 years); reject larger files.
