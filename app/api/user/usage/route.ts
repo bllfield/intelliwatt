@@ -14,8 +14,10 @@ import {
   buildUsageIngestionStatusFromEnsure,
   isGreenButtonPrimaryDataset,
   isResolvedDatasetTailDisplayReady,
+  isSmtHealScopeReady,
   reconcileUsageIngestionWithDataset,
 } from "@/lib/usage/smtTailCoverage";
+import { loadSmtWindowDayStatus, resolveSmtPersistedCoverageSpan } from "@/lib/usage/smtWindowStatus";
 import { resolveUserUsageSessionKey } from "@/lib/usage/userUsageSessionKey";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 import { IntervalSeriesKind } from '@/modules/usageSimulator/kinds';
@@ -190,7 +192,18 @@ export async function GET(request: NextRequest) {
       const resolvedDataset = contract.dataset;
       if (esiid && resolvedDataset && !isGreenButtonPrimaryDataset(resolvedDataset)) {
         const ledgerFromDataset = smtLedgerFieldsFromDatasetMeta(resolvedDataset);
-        if (isResolvedDatasetTailDisplayReady(resolvedDataset, canonicalCoverage.endDate)) {
+        const [persistedSpan, smtWindowStatus] = await Promise.all([
+          resolveSmtPersistedCoverageSpan(esiid).catch(() => null),
+          loadSmtWindowDayStatus({ esiid }).catch(() => null),
+        ]);
+        const healScopeReady = smtWindowStatus
+          ? isSmtHealScopeReady(smtWindowStatus, persistedSpan)
+          : true;
+        const tailDisplayReady = isResolvedDatasetTailDisplayReady(
+          resolvedDataset,
+          canonicalCoverage.endDate
+        );
+        if (healScopeReady && tailDisplayReady) {
           usageIngestion = {
             ...(reconcileUsageIngestionWithDataset({
               ingestion: null,
@@ -208,7 +221,7 @@ export async function GET(request: NextRequest) {
             smtPendingIntervalDateKeys: ledgerFromDataset.pendingDateKeys,
             smtIncompleteMeterDateKeys: ledgerFromDataset.incompleteMeterDateKeys,
           };
-        } else {
+        } else if (persistedSpan) {
           const ensure = await ensureSmtCoverageForHouse({
             userId: user.id,
             houseId: house.id,

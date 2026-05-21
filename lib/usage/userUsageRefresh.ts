@@ -10,7 +10,8 @@ import {
   finalizeDeferredPendingRepairsAfterPull,
   reconcileSmtLedgerAfterPersist,
 } from "@/lib/usage/smtDayCoverageLedger";
-import { loadSmtWindowDayStatus } from "@/lib/usage/smtWindowStatus";
+import { loadSmtWindowDayStatus, resolveSmtPersistedCoverageSpan } from "@/lib/usage/smtWindowStatus";
+import { isSmtHealScopeReady } from "@/lib/usage/smtTailCoverage";
 import {
   USER_USAGE_DEFERRED_REPAIR_WAIT_MS,
   USER_USAGE_PULL_FETCH_TIMEOUT_MS,
@@ -239,7 +240,8 @@ export async function requestUsageRefreshForUserHouse(args: {
         coverageDays =
           coverageStart && coverageEnd ? daysBetweenInclusive(coverageStart, coverageEnd) : 0;
         rawCount = rawFileCount;
-        historyReady = Boolean(windowStatus.ready && rawCount === 0);
+        const persistedSpan = await resolveSmtPersistedCoverageSpan(esiid);
+        historyReady = Boolean(isSmtHealScopeReady(windowStatus, persistedSpan) && rawCount === 0);
       }
 
       const gapsInCanonicalWindow = Boolean(auth?.esiid) && !historyReady;
@@ -256,12 +258,20 @@ export async function requestUsageRefreshForUserHouse(args: {
       const allowRetry = Boolean(requestedAt && !historyReady && isStale);
 
       if (auth?.id && auth.esiid && isActive && (!requestedAt || allowRetry)) {
+        let wideBackfillStart = backfillRange.startDate;
+        const persistedSpanForBackfill = await resolveSmtPersistedCoverageSpan(auth.esiid).catch(() => null);
+        if (persistedSpanForBackfill?.startDate) {
+          const persistedStart = new Date(`${persistedSpanForBackfill.startDate}T00:00:00.000Z`);
+          if (persistedStart.getTime() > wideBackfillStart.getTime()) {
+            wideBackfillStart = persistedStart;
+          }
+        }
         const res = await withTimeout(
           requestSmtBackfillForAuthorization({
             authorizationId: auth.id,
             esiid: auth.esiid,
             meterNumber: auth.meterNumber,
-            startDate: backfillRange.startDate,
+            startDate: wideBackfillStart,
             endDate: backfillRange.endDate,
           }),
           2500,

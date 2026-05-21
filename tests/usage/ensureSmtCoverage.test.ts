@@ -6,6 +6,7 @@ const {
   runDeferredPendingSmtDayRepairsMock,
   reconcileSmtIntervalDayLedgerMock,
   loadSmtWindowDayStatusMock,
+  resolveSmtPersistedCoverageSpanMock,
   waitForSmtDateCoverageMock,
   waitForSmtTailCoverageMock,
 } = vi.hoisted(() => ({
@@ -14,6 +15,7 @@ const {
   runDeferredPendingSmtDayRepairsMock: vi.fn(),
   reconcileSmtIntervalDayLedgerMock: vi.fn(),
   loadSmtWindowDayStatusMock: vi.fn(),
+  resolveSmtPersistedCoverageSpanMock: vi.fn(),
   waitForSmtDateCoverageMock: vi.fn(),
   waitForSmtTailCoverageMock: vi.fn(),
 }));
@@ -44,6 +46,7 @@ vi.mock("@/lib/usage/smtWindowStatus", async (importOriginal) => {
   return {
     ...actual,
     loadSmtWindowDayStatus: loadSmtWindowDayStatusMock,
+    resolveSmtPersistedCoverageSpan: resolveSmtPersistedCoverageSpanMock,
   };
 });
 
@@ -97,6 +100,10 @@ function windowStatus(overrides?: Partial<ReturnType<typeof loadSmtWindowDayStat
 beforeEach(() => {
   clearEnsureSmtCoverageSessionThrottleForTests();
   findHouseMock.mockResolvedValue({ esiid: "esiid-1" } as never);
+  resolveSmtPersistedCoverageSpanMock.mockResolvedValue({
+    startDate: "2025-04-16",
+    endDate: "2026-04-14",
+  });
   loadSmtWindowDayStatusMock.mockResolvedValue(windowStatus());
   requestUsageRefreshForUserHouseMock.mockResolvedValue({ ok: true, homes: [], backfill: [] });
   requestTargetedSmtIntervalBackfillForHouseMock.mockResolvedValue({
@@ -188,7 +195,7 @@ describe("ensureSmtCoverageForHouse", () => {
     expect(requestUsageRefreshForUserHouseMock).toHaveBeenCalledTimes(4);
   });
 
-  it("targeted backfills all incomplete days within the canonical window", async () => {
+  it("targeted backfills incomplete days within persisted SMT span only", async () => {
     loadSmtWindowDayStatusMock.mockResolvedValue(
       windowStatus({
         incompleteDateKeys: ["2026-04-10", "2026-04-12"],
@@ -211,6 +218,31 @@ describe("ensureSmtCoverageForHouse", () => {
     expect(runDeferredPendingSmtDayRepairsMock).toHaveBeenCalled();
     expect(waitForSmtDateCoverageMock).toHaveBeenCalled();
     expect(waitForSmtTailCoverageMock).toHaveBeenCalled();
+  });
+
+  it("skips heal when only pre-span canonical days are incomplete", async () => {
+    resolveSmtPersistedCoverageSpanMock.mockResolvedValue({
+      startDate: "2026-04-12",
+      endDate: "2026-04-14",
+    });
+    loadSmtWindowDayStatusMock.mockResolvedValue(
+      windowStatus({
+        incompleteDateKeys: ["2026-04-10"],
+        completeDateKeys: ["2026-04-14"],
+        ready: false,
+      })
+    );
+
+    const result = await ensureSmtCoverageForHouse({
+      userId: "user-1",
+      houseId: "house-1",
+      profile: "user_session",
+      sessionKey: "pre-span-ready",
+    });
+
+    expect(result.healed).toBe(false);
+    expect(result.skippedReason).toBe("window_ready");
+    expect(requestTargetedSmtIntervalBackfillForHouseMock).not.toHaveBeenCalled();
   });
 
   it("uses short waits for user_session profile", async () => {

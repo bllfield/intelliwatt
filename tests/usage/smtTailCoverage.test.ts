@@ -5,6 +5,9 @@ import { missingChicagoSlotsFromFilledSlots } from "@/lib/usage/smtWindowStatus"
 import {
   filterDateKeysNearTargetEnd,
   filterDateKeysWithinCanonicalWindow,
+  filterDateKeysWithinPersistedSpan,
+  isSmtHealScopeReady,
+  resolveSmtHealBackfillDateKeys,
   isGreenButtonPrimaryDataset,
   isResolvedDatasetTailDisplayReady,
   ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS,
@@ -139,6 +142,49 @@ describe("smt tail coverage helpers", () => {
         3
       )
     ).toEqual(["2026-05-16", "2026-05-17"]);
+  });
+
+  it("clips heal targets to persisted first/last SMT day", () => {
+    expect(
+      filterDateKeysWithinPersistedSpan(
+        ["2025-01-01", "2026-03-25", "2026-05-16"],
+        { startDate: "2026-03-01", endDate: "2026-05-17" }
+      )
+    ).toEqual(["2026-03-25", "2026-05-16"]);
+  });
+
+  it("treats heal scope ready when only pre-span canonical days are incomplete", () => {
+    const healKeys = resolveSmtHealBackfillDateKeys({
+      dayStatus: {
+        window: { startDate: "2025-05-19", endDate: "2026-05-17" },
+        dateKeys: [],
+        byDate: {},
+        completeDateKeys: ["2026-05-17"],
+        incompleteDateKeys: ["2025-07-09", "2026-05-17"],
+        pendingDateKeys: [],
+        incompleteMeterDateKeys: [],
+        canonicalEndDayComplete: true,
+        ready: false,
+      },
+      persistedSpan: { startDate: "2026-03-01", endDate: "2026-05-17" },
+    });
+    expect(healKeys).toEqual(["2026-05-17"]);
+    expect(
+      isSmtHealScopeReady(
+        {
+          window: { startDate: "2025-05-19", endDate: "2026-05-17" },
+          dateKeys: [],
+          byDate: {},
+          completeDateKeys: ["2026-05-17"],
+          incompleteDateKeys: ["2025-07-09"],
+          pendingDateKeys: [],
+          incompleteMeterDateKeys: [],
+          canonicalEndDayComplete: true,
+          ready: false,
+        },
+        { startDate: "2026-03-01", endDate: "2026-05-17" }
+      )
+    ).toBe(true);
   });
 
   it("keeps all incomplete heal days inside the canonical window", () => {

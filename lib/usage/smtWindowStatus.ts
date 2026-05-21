@@ -14,6 +14,12 @@ export type SmtCanonicalWindow = {
   endDate: string;
 };
 
+/** First/last Chicago calendar day with any persisted SmtInterval row for the ESIID. */
+export type SmtPersistedCoverageSpan = {
+  startDate: string;
+  endDate: string;
+};
+
 export type SmtWindowDayStatus = {
   dateKey: string;
   slotCount: number;
@@ -204,4 +210,21 @@ export async function loadSmtWindowDayStatus(args: {
 export function smtWindowCompletenessRatio(status: Pick<SmtWindowStatusSnapshot, "dateKeys" | "completeDateKeys">): number {
   if (status.dateKeys.length === 0) return 0;
   return status.completeDateKeys.length / status.dateKeys.length;
+}
+
+/** Persisted interval min/max mapped to Chicago coverage date keys (null when no rows). */
+export async function resolveSmtPersistedCoverageSpan(esiid: string): Promise<SmtPersistedCoverageSpan | null> {
+  const normalizedEsiid = String(esiid ?? "").trim();
+  if (!normalizedEsiid) return null;
+  const coverage = await prisma.smtInterval
+    .aggregate({
+      where: { esiid: normalizedEsiid },
+      _min: { ts: true },
+      _max: { ts: true },
+    })
+    .catch(() => null);
+  const startDate = smtCoverageDateKey(coverage?._min?.ts ?? null);
+  const endDate = smtCoverageDateKey(coverage?._max?.ts ?? null);
+  if (!startDate || !endDate) return null;
+  return { startDate, endDate };
 }

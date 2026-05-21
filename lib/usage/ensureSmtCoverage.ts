@@ -12,13 +12,14 @@ import {
 import {
   loadSmtWindowDayStatus,
   resolveSmtCanonicalWindow,
+  resolveSmtPersistedCoverageSpan,
   type SmtCanonicalWindow,
   type SmtWindowStatusSnapshot,
 } from "@/lib/usage/smtWindowStatus";
 import {
-  filterDateKeysWithinCanonicalWindow,
-  normalizeDateKeys,
+  isSmtHealScopeReady,
   ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS,
+  resolveSmtHealBackfillDateKeys,
   ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS,
   SMT_POST_BACKFILL_SETTLE_DELAY_MS,
   SMT_TAIL_WAIT_INTERVAL_MS,
@@ -144,8 +145,10 @@ export async function ensureSmtCoverageForHouse(args: {
   }
 
   let dayStatus = await loadSmtWindowDayStatus({ esiid });
+  const persistedSpan = await resolveSmtPersistedCoverageSpan(esiid);
   const sessionKey = String(args.sessionKey ?? args.profile).trim() || args.profile;
   const throttleKey = sessionThrottleKey(args.userId, args.houseId, sessionKey);
+  const healScopeReady = isSmtHealScopeReady(dayStatus, persistedSpan);
 
   if (!args.force) {
     if (healedSessionKeys.has(throttleKey)) {
@@ -156,7 +159,7 @@ export async function ensureSmtCoverageForHouse(args: {
         window,
       };
     }
-    if (dayStatus.ready) {
+    if (healScopeReady) {
       healedSessionKeys.add(throttleKey);
       return {
         healed: false,
@@ -168,15 +171,11 @@ export async function ensureSmtCoverageForHouse(args: {
   }
 
   const waits = waitBudgetForProfile(args.profile);
-  const backfillDateKeys = filterDateKeysWithinCanonicalWindow(
-    normalizeDateKeys([
-      ...dayStatus.incompleteDateKeys,
-      ...dayStatus.incompleteMeterDateKeys,
-      ...dayStatus.pendingDateKeys,
-      ...(args.extraBackfillDateKeys ?? []),
-    ]),
-    dayStatus.window
-  );
+  const backfillDateKeys = resolveSmtHealBackfillDateKeys({
+    dayStatus,
+    persistedSpan,
+    extraDateKeys: args.extraBackfillDateKeys,
+  });
 
   let refreshResult: UsageRefreshResult | undefined;
   let targetedBackfill: TargetedSmtIntervalBackfillResult | undefined;

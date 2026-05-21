@@ -61,6 +61,6 @@ Raw row counts, distinct Chicago slot counts, coverage loader, and ledger reconc
 
 1. **Single owners** — extend behavior only in the modules in the table above; routes orchestrate, they do not rederive completeness or coverage end dates.
 2. **96/96** — SMT readiness, ledger, orchestrate/status, and INTERVAL Past Sim trusted pool; never reintroduce 99% span or 90-slot SMT trusted thresholds.
-3. **Heal** — `ensureSmtCoverage.ts` only; targeted backfill via `smtIncompleteMeterBackfill.ts` only from ensure. Incomplete days anywhere in the canonical window are eligible (`filterDateKeysWithinCanonicalWindow`); refresh wide-backfill retries sooner (30m) while per-day gaps remain.
+3. **Heal** — `ensureSmtCoverage.ts` only; targeted backfill via `smtIncompleteMeterBackfill.ts` only from ensure. Heal targets incomplete days between first/last persisted SMT interval only (`resolveSmtHealBackfillDateKeys`); wide backfill does not request dates before persisted start; refresh wide-backfill retries sooner (30m) while heal-scope gaps remain.
 4. **Green Button** — do not edit `greenButton.ts` for SMT coverage fixes unless scope is explicitly expanded.
 5. **Docs** — update this file and `docs/PROJECT_PLAN.md` PC-2026-05 in the same pass when owners or semantics change.

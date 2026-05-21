@@ -14,6 +14,8 @@ import {
   missingChicagoSlotsFromFilledSlots,
   resolveSmtCanonicalWindow,
   SMT_REQUIRED_SLOTS_PER_DAY,
+  type SmtPersistedCoverageSpan,
+  type SmtWindowStatusSnapshot,
 } from "@/lib/usage/smtWindowStatus";
 
 export { chicagoSlot96FromTs, smtCoverageDateKey } from "@/lib/time/chicago";
@@ -247,6 +249,45 @@ export function filterDateKeysWithinCanonicalWindow(
   return normalizeDateKeys(dateKeys).filter(
     (dateKey) => dateKey >= window.startDate && dateKey <= window.endDate
   );
+}
+
+/** Bounds heal targets to days between first and last persisted SMT interval (inclusive). */
+export function filterDateKeysWithinPersistedSpan(
+  dateKeys: string[],
+  span: SmtPersistedCoverageSpan
+): string[] {
+  return normalizeDateKeys(dateKeys).filter(
+    (dateKey) => dateKey >= span.startDate && dateKey <= span.endDate
+  );
+}
+
+/** Incomplete days to heal: inside canonical window and within persisted SMT span only. */
+export function resolveSmtHealBackfillDateKeys(args: {
+  dayStatus: SmtWindowStatusSnapshot;
+  persistedSpan: SmtPersistedCoverageSpan | null;
+  extraDateKeys?: string[];
+}): string[] {
+  if (!args.persistedSpan) return [];
+  return filterDateKeysWithinCanonicalWindow(
+    filterDateKeysWithinPersistedSpan(
+      normalizeDateKeys([
+        ...args.dayStatus.incompleteDateKeys,
+        ...args.dayStatus.incompleteMeterDateKeys,
+        ...args.dayStatus.pendingDateKeys,
+        ...(args.extraDateKeys ?? []),
+      ]),
+      args.persistedSpan
+    ),
+    args.dayStatus.window
+  );
+}
+
+/** True when every incomplete day in the persisted span is complete (ignores pre-span canonical gaps). */
+export function isSmtHealScopeReady(
+  dayStatus: SmtWindowStatusSnapshot,
+  persistedSpan: SmtPersistedCoverageSpan | null
+): boolean {
+  return resolveSmtHealBackfillDateKeys({ dayStatus, persistedSpan }).length === 0;
 }
 
 function coverageProgressFingerprint(
