@@ -288,7 +288,7 @@ export function normalizeSmtIntervals(
   let tsMin: string | null = null;
   let tsMax: string | null = null;
 
-  for (const [composite, slots] of slotMapByComposite.entries()) {
+  for (const [composite, slots] of Array.from(slotMapByComposite.entries())) {
     const [esiidKey, meterKey] = composite.split("|");
     const resolvedEsiid = normalizeEsiid(esiidKey, defaults.esiid);
     const resolvedMeter = normalizeMeter(meterKey, defaults.meter);
