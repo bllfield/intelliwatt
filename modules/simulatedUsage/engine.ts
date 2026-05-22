@@ -3,7 +3,7 @@ import { ManualUsagePayload, SimulatedCurve, TravelRange } from "./types";
 import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
 import { anchorEndDateUtc } from "@/modules/manualUsage/anchor";
 import {
-  countPresentSlotsForIntervalDay,
+  countPresentUnitsForIntervalDay,
   dateKeyFromIntervalPoint,
   trustedIntervalThresholdForDateKey,
 } from "@/lib/time/actualIntervalCalendar";
@@ -811,10 +811,15 @@ export function generateSimulatedCurve(args: {
 const SLOT_MS = INTERVAL_MINUTES * 60 * 1000;
 
 function countPresentSlotsForDay(
-  intervals: Array<{ timestamp: string; kwh: number; homeSlot?: number | null }>,
+  intervals: Array<{ timestamp: string; kwh: number; homeSlot?: number | null; homeDateKey?: string | null }>,
+  trustedSource: "SMT" | "GREEN_BUTTON" = "SMT",
+  dateKey?: string,
 ): number {
+  if (trustedSource === "SMT") {
+    return countPresentUnitsForIntervalDay({ intervals, dateKey, source: "SMT" });
+  }
   if (intervals.some((row) => typeof row.homeSlot === "number")) {
-    return countPresentSlotsForIntervalDay(intervals);
+    return countPresentUnitsForIntervalDay({ intervals, dateKey, source: "GREEN_BUTTON" });
   }
   const slots = new Set<number>();
   for (const p of intervals) {
@@ -868,7 +873,7 @@ export function completeActualIntervalsV1(args: {
   for (const [dk, list] of Array.from(dayIntervals.entries())) {
     if (
       !excludedDateKeys.has(dk) &&
-      countPresentSlotsForDay(list) >= trustedIntervalThresholdForDateKey(dk, trustedSource)
+      countPresentSlotsForDay(list, trustedSource, dk) >= trustedIntervalThresholdForDateKey(dk, trustedSource)
     ) {
       usableDays.add(dk);
     }
@@ -991,10 +996,11 @@ export function completeActualIntervalsV1(args: {
     const ym = dk.slice(0, 7);
     const dow = day.getUTCDay();
     const list = dayIntervals.get(dk) ?? [];
-    const presentSlotCount = countPresentSlotsForDay(list);
+    const presentSlotCount = countPresentSlotsForDay(list, trustedSource, dk);
+    const trustedDayThreshold = trustedIntervalThresholdForDateKey(dk, trustedSource);
     const needSimulate =
       excludedDateKeys.has(dk) ||
-      (simulateIncompleteDays && presentSlotCount > 0 && presentSlotCount < MIN_TRUSTED_ACTUAL_INTERVALS_PER_DAY) ||
+      (simulateIncompleteDays && presentSlotCount > 0 && presentSlotCount < trustedDayThreshold) ||
       (simulateIncompleteDays && presentSlotCount === 0);
     const gridTs = getDayGridTimestamps(day.getTime(), homeTimezone);
 
@@ -1754,10 +1760,11 @@ export function buildPastSimulatedBaselineV1(args: {
         : args.dateKeyFromTimestamp(String(p?.timestamp ?? ""));
       return Boolean(dateKey) && dk === dateKey;
     });
-    const presentSlotCount = countPresentSlotsForDay(dayIntervalList);
+    const intervalTrustedSource = args.intervalTrustedSource ?? "SMT";
+    const presentSlotCount = countPresentSlotsForDay(dayIntervalList, intervalTrustedSource, dateKey);
     const trustedThreshold =
       dateKey && /^\d{4}-\d{2}-\d{2}$/.test(dateKey)
-        ? trustedIntervalThresholdForDateKey(dateKey, args.intervalTrustedSource ?? "SMT")
+        ? trustedIntervalThresholdForDateKey(dateKey, intervalTrustedSource)
         : MIN_TRUSTED_ACTUAL_INTERVALS_PER_DAY;
     const dayIsExcluded = Boolean(dateKey) && args.excludedDateKeys.has(dateKey);
     const dayIsForcedSimulate = Boolean(dateKey) && forcedDateKeys.has(dateKey);

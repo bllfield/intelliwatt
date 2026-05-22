@@ -15,7 +15,7 @@
 | Per-day 96/96 status | `lib/usage/smtWindowStatus.ts` |
 | Heal (pull, backfill, wait, targeted days) | `lib/usage/ensureSmtCoverage.ts` |
 | 365-day window metadata | `lib/usage/canonicalMetadataWindow.ts` (`canonicalCoverageWindowUtcBounds` for Chicago-local DB range scans) |
-| Home-local 15m calendar (all sources) | `lib/time/homeIntervalCalendar.ts` + `lib/time/actualIntervalCalendar.ts` |
+| Home-local 15m calendar (all sources) | `lib/time/homeIntervalCalendar.ts` + `lib/time/actualIntervalCalendar.ts` (`countPresentUnitsForIntervalDay`: SMT uses interval-row count, same as `smtWindowStatus`) |
 | Per-home IANA timezone | `lib/time/resolveHomeTimezone.ts` (`addressState` / explicit override; TX → `America/Chicago`) |
 | Past interval grid (no UTC slice) | `lib/time/pastIntervalGrid.ts`; `modules/usageSimulator/pastStitchedCurve.ts` requires `homeTimezone` |
 | Baseload (Usage / baseline / Past) | `lib/usage/computeHomeBaseloadKw.ts` — full-interval `FILTERED_NORMAL_LIFE_V1`; lightweight paths overlay interval baseload (no SQL P10 as primary) |

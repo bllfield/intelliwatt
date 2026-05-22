@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
 import {
   buildHomeDayGridContext,
+  countPresentSlotsForIntervalDay,
+  countPresentUnitsForIntervalDay,
   dayMeetsTrustedIntervalThreshold,
   trustedIntervalThresholdForDateKey,
 } from "@/lib/time/actualIntervalCalendar";
@@ -33,6 +35,30 @@ describe("actualIntervalCalendar", () => {
     expect(grid.canonicalDayStartsMs).toHaveLength(1);
     const timestamps = grid.getDayGridTimestamps(grid.canonicalDayStartsMs[0]!);
     expect(timestamps).toHaveLength(92);
+  });
+
+  test("SMT trusted-day check uses interval-row count (DST fall-back), not distinct slot indices only", () => {
+    const dateKey = "2025-11-02";
+    const home = smtHomeIntervalCalendar();
+    const intervals: Array<{ timestamp: string; homeDateKey: string; homeSlot: number }> = [];
+    for (let i = 0; i < 96; i += 1) {
+      intervals.push({
+        timestamp: `2025-11-02T06:${String(i).padStart(2, "0")}:00.000Z`,
+        homeDateKey: dateKey,
+        homeSlot: i % 92,
+      });
+    }
+    expect(intervals).toHaveLength(96);
+    expect(countPresentSlotsForIntervalDay(intervals, dateKey)).toBe(92);
+    expect(countPresentUnitsForIntervalDay({ intervals, dateKey, source: "SMT" })).toBe(96);
+    expect(
+      dayMeetsTrustedIntervalThreshold({
+        intervals,
+        dateKey,
+        source: "SMT",
+        home,
+      }),
+    ).toBe(true);
   });
 
   test("dayMeetsTrustedIntervalThreshold uses homeSlot projection", () => {

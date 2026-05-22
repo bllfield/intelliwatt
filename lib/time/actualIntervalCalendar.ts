@@ -76,14 +76,43 @@ export function countPresentSlotsForIntervalDay(
   return slots.size;
 }
 
+/**
+ * Trusted-day completeness units aligned with `smtWindowStatus` for SMT (interval-row count)
+ * and home-local distinct slots for Green Button.
+ */
+export function countPresentUnitsForIntervalDay(args: {
+  intervals: ReadonlyArray<{ timestamp: string; homeSlot?: number | null; homeDateKey?: string | null }>;
+  dateKey?: string;
+  source: "SMT" | "GREEN_BUTTON";
+}): number {
+  const filtered = args.dateKey
+    ? args.intervals.filter((row) => dateKeyFromIntervalPoint(row) === args.dateKey)
+    : args.intervals;
+  if (args.source === "SMT") {
+    const seen = new Set<string>();
+    let count = 0;
+    for (const row of filtered) {
+      const ts = String(row.timestamp ?? "").trim();
+      if (!ts || seen.has(ts)) continue;
+      seen.add(ts);
+      count += 1;
+    }
+    return count;
+  }
+  return countPresentSlotsForIntervalDay(filtered, args.dateKey);
+}
+
 export function dayMeetsTrustedIntervalThreshold(args: {
   intervals: ReadonlyArray<{ timestamp: string; homeSlot?: number | null; homeDateKey?: string | null }>;
   dateKey: string;
   source: "SMT" | "GREEN_BUTTON";
   home?: HomeIntervalCalendar;
 }): boolean {
-  const dayIntervals = args.intervals.filter((row) => dateKeyFromIntervalPoint(row) === args.dateKey);
-  const present = countPresentSlotsForIntervalDay(dayIntervals, args.dateKey);
+  const present = countPresentUnitsForIntervalDay({
+    intervals: args.intervals,
+    dateKey: args.dateKey,
+    source: args.source,
+  });
   return present >= trustedIntervalThresholdForDateKey(args.dateKey, args.source, args.home);
 }
 
