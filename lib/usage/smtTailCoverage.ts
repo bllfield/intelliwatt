@@ -297,6 +297,42 @@ export function resolveSmtHealBackfillDateKeys(args: {
   );
 }
 
+/**
+ * Canonical tail days after the last persisted interval (span end < window end).
+ * Targeted backfill can request these from SMT even before rows land in `SmtInterval`.
+ */
+export function resolveSmtTailExtensionHealDateKeys(args: {
+  dayStatus: SmtWindowStatusSnapshot;
+  persistedSpan: SmtPersistedCoverageSpan;
+}): string[] {
+  if (args.persistedSpan.endDate >= args.dayStatus.window.endDate) return [];
+  return filterDateKeysWithinCanonicalWindow(
+    normalizeDateKeys([
+      ...args.dayStatus.incompleteDateKeys,
+      ...args.dayStatus.incompleteMeterDateKeys,
+      ...args.dayStatus.pendingDateKeys,
+    ]).filter((dateKey) => dateKey > args.persistedSpan.endDate),
+    args.dayStatus.window
+  );
+}
+
+/** In-span incomplete days plus tail-extension days after persisted coverage end. */
+export function resolveSmtHealBackfillDateKeysWithTailExtension(args: {
+  dayStatus: SmtWindowStatusSnapshot;
+  persistedSpan: SmtPersistedCoverageSpan | null;
+  extraDateKeys?: string[];
+}): string[] {
+  const inSpan = resolveSmtHealBackfillDateKeys(args);
+  if (!args.persistedSpan) return inSpan;
+  return normalizeDateKeys([
+    ...inSpan,
+    ...resolveSmtTailExtensionHealDateKeys({
+      dayStatus: args.dayStatus,
+      persistedSpan: args.persistedSpan,
+    }),
+  ]);
+}
+
 /** True when persisted SMT data has reached and completed the canonical window end day. */
 export function isSmtHealScopeReady(
   dayStatus: SmtWindowStatusSnapshot,
@@ -305,7 +341,7 @@ export function isSmtHealScopeReady(
   if (!persistedSpan) return false;
   if (persistedSpan.endDate < dayStatus.window.endDate) return false;
   if (!dayStatus.canonicalEndDayComplete) return false;
-  return resolveSmtHealBackfillDateKeys({ dayStatus, persistedSpan }).length === 0;
+  return resolveSmtHealBackfillDateKeysWithTailExtension({ dayStatus, persistedSpan }).length === 0;
 }
 
 function coverageProgressFingerprint(

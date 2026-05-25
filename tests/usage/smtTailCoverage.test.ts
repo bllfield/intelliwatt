@@ -8,6 +8,7 @@ import {
   filterDateKeysWithinPersistedSpan,
   isSmtHealScopeReady,
   resolveSmtHealBackfillDateKeys,
+  resolveSmtHealBackfillDateKeysWithTailExtension,
   isGreenButtonPrimaryDataset,
   isResolvedDatasetTailDisplayReady,
   ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS,
@@ -223,8 +224,27 @@ describe("smt tail coverage helpers", () => {
     ).toEqual(["2026-03-25", "2026-05-16", "2026-05-17"]);
   });
 
-  it("allows a longer admin wait after targeted incomplete-meter backfill", () => {
-    expect(ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS).toBeGreaterThan(
+  it("includes tail-extension incomplete days after persisted span end", () => {
+    const keys = resolveSmtHealBackfillDateKeysWithTailExtension({
+      dayStatus: {
+        window: { startDate: "2025-05-24", endDate: "2026-05-23" },
+        dateKeys: [],
+        byDate: {},
+        completeDateKeys: [],
+        incompleteDateKeys: ["2026-05-20", "2026-05-21", "2026-05-22", "2026-05-23"],
+        pendingDateKeys: [],
+        incompleteMeterDateKeys: [],
+        canonicalEndDayComplete: false,
+        ready: false,
+      },
+      persistedSpan: { startDate: "2025-05-24", endDate: "2026-05-19" },
+    });
+    expect(keys).toEqual(["2026-05-20", "2026-05-21", "2026-05-22", "2026-05-23"]);
+  });
+
+  it("uses a long admin tail wait budget for FTP ingest", () => {
+    expect(ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS).toBeGreaterThanOrEqual(90_000);
+    expect(ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS).toBeGreaterThanOrEqual(
       ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS
     );
   });

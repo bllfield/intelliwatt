@@ -19,7 +19,7 @@ import {
 import {
   isSmtHealScopeReady,
   ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS,
-  resolveSmtHealBackfillDateKeys,
+  resolveSmtHealBackfillDateKeysWithTailExtension,
   ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS,
   SMT_POST_BACKFILL_SETTLE_DELAY_MS,
   SMT_TAIL_WAIT_INTERVAL_MS,
@@ -189,7 +189,7 @@ export async function ensureSmtCoverageForHouse(args: {
     args.profile === "admin_sim" && spanBehindCanonicalEnd
       ? ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS
       : waits.tailWaitMs;
-  const backfillDateKeys = resolveSmtHealBackfillDateKeys({
+  const backfillDateKeys = resolveSmtHealBackfillDateKeysWithTailExtension({
     dayStatus,
     persistedSpan,
     extraDateKeys: args.extraBackfillDateKeys,
