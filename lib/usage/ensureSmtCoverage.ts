@@ -131,13 +131,16 @@ export async function ensureSmtCoverageForHouse(args: {
   profile: EnsureSmtCoverageProfile;
   force?: boolean;
   sessionKey?: string;
+  /** When the house row has no ESIID (e.g. isolated lab test home), pass the linked source meter id. */
+  esiid?: string | null;
   /** Optional sim/UI incomplete-day hints merged before near-end filtering. */
   extraBackfillDateKeys?: string[];
   /** When true, skip pull/authorization refresh (caller already ran requestUsageRefreshForUserHouse). */
   skipUsageRefresh?: boolean;
 }): Promise<EnsureSmtCoverageResult> {
   const window = resolveSmtCanonicalWindow();
-  const esiid = await resolveEsiidForHouse(args.houseId);
+  const esiidOverride = String(args.esiid ?? "").trim();
+  const esiid = esiidOverride || (await resolveEsiidForHouse(args.houseId));
   if (!esiid) {
     return {
       healed: false,

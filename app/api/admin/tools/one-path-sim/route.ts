@@ -569,6 +569,11 @@ type PastSimReadbackSmtHealingArgs = {
   sourceEsiid: string | null;
   effectiveHouseId: string;
   actualContextHouseId: string;
+  onePathTestHomeState: {
+    isPinned: boolean;
+    linkedSourceHouseId: string | null;
+    linkedSourceUserId: string | null;
+  };
 };
 
 async function resolveSageActualTruthForRunDisplay(args: {
@@ -659,9 +664,16 @@ async function buildPastSimRunReadbackResponse(args: {
   let smtIncompleteMeterRetry: OnePathIncompleteMeterBackfillRetry | null = null;
   const healingCtx = args.smtPostSimHealing;
   if (healingCtx?.mode === "INTERVAL" && String(healingCtx.sourceEsiid ?? "").trim()) {
+    const smtHeal = resolveOnePathAdminSmtHealTarget({
+      effectiveUserId: healingCtx.sourceUserId,
+      effectiveHouseId: healingCtx.effectiveHouseId,
+      smtSourceEsiid: String(healingCtx.sourceEsiid).trim(),
+      onePathTestHomeState: healingCtx.onePathTestHomeState,
+    });
     const postEnsure = await ensureSmtCoverageForHouse({
-      userId: healingCtx.sourceUserId,
-      houseId: healingCtx.effectiveHouseId,
+      userId: smtHeal.userId,
+      houseId: smtHeal.houseId,
+      esiid: smtHeal.esiid,
       profile: "admin_sim",
       sessionKey: `post:${args.correlationId ?? ""}`,
       extraBackfillDateKeys: extractIncompleteMeterDateKeysFromDataset(readback.dataset),
@@ -1104,6 +1116,36 @@ type OnePathIncompleteMeterBackfillRetry = OnePathSmtPostSimHealingResult & {
   postRetryIncompleteDateKeys?: string[];
 };
 
+/** SMT pull/backfill must run on a house with ESIID + authorization; pinned lab homes keep esiid null by design. */
+function resolveOnePathAdminSmtHealTarget(args: {
+  effectiveUserId: string;
+  effectiveHouseId: string;
+  smtSourceEsiid: string | null;
+  onePathTestHomeState: {
+    isPinned: boolean;
+    linkedSourceHouseId: string | null;
+    linkedSourceUserId: string | null;
+  };
+}): { userId: string; houseId: string; esiid: string | null } {
+  const esiid = String(args.smtSourceEsiid ?? "").trim() || null;
+  if (
+    args.onePathTestHomeState.isPinned &&
+    args.onePathTestHomeState.linkedSourceHouseId &&
+    args.onePathTestHomeState.linkedSourceUserId
+  ) {
+    return {
+      userId: args.onePathTestHomeState.linkedSourceUserId,
+      houseId: args.onePathTestHomeState.linkedSourceHouseId,
+      esiid,
+    };
+  }
+  return {
+    userId: args.effectiveUserId,
+    houseId: args.effectiveHouseId,
+    esiid,
+  };
+}
+
 async function resolveOnePathTestHomeState(args: {
   ownerUserId: string;
   selectedSourceHouseId: string;
@@ -1453,14 +1495,24 @@ export async function POST(request: NextRequest) {
         { status: 409 }
       );
     }
-    const smtRefreshCheck =
+    const onePathSmtHeal =
       mode === "INTERVAL" &&
       effectiveRawInputBase.preferredActualSource !== "GREEN_BUTTON" &&
       String(smtSourceEsiid ?? "").trim()
+        ? resolveOnePathAdminSmtHealTarget({
+            effectiveUserId,
+            effectiveHouseId,
+            smtSourceEsiid,
+            onePathTestHomeState,
+          })
+        : null;
+    const smtRefreshCheck =
+      onePathSmtHeal
         ? buildOnePathSmtRefreshCheckFromEnsure(
             await ensureSmtCoverageForHouse({
-              userId: effectiveUserId,
-              houseId: effectiveHouseId,
+              userId: onePathSmtHeal.userId,
+              houseId: onePathSmtHeal.houseId,
+              esiid: onePathSmtHeal.esiid,
               profile: "admin_sim",
               sessionKey: `run:${correlationId}`,
             }),
@@ -1485,7 +1537,7 @@ export async function POST(request: NextRequest) {
           preferredActualSource: effectiveRawInputBase.preferredActualSource,
           smtSourceEsiid,
           smtPostSimHealing:
-            mode === "INTERVAL"
+            mode === "INTERVAL" && onePathSmtHeal
               ? {
                   mode,
                   preferredActualSource: effectiveRawInputBase.preferredActualSource,
@@ -1494,6 +1546,7 @@ export async function POST(request: NextRequest) {
                   sourceEsiid: smtSourceEsiid,
                   effectiveHouseId,
                   actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
+                  onePathTestHomeState,
                 }
               : null,
         });
@@ -1645,14 +1698,11 @@ export async function POST(request: NextRequest) {
       }
       const shouldReturnCompactPastResponse = Boolean(effectiveRawInputBase.scenarioId && !isManualMode);
       let smtIncompleteMeterRetry: OnePathIncompleteMeterBackfillRetry | null = null;
-      if (
-        mode === "INTERVAL" &&
-        effectiveRawInputBase.preferredActualSource !== "GREEN_BUTTON" &&
-        String(smtSourceEsiid ?? "").trim()
-      ) {
+      if (onePathSmtHeal) {
         const postEnsure = await ensureSmtCoverageForHouse({
-          userId: effectiveUserId,
-          houseId: effectiveHouseId,
+          userId: onePathSmtHeal.userId,
+          houseId: onePathSmtHeal.houseId,
+          esiid: onePathSmtHeal.esiid,
           profile: "admin_sim",
           sessionKey: `post:${correlationId}`,
           extraBackfillDateKeys: extractIncompleteMeterDateKeysFromDataset(artifactDataset),

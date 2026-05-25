@@ -247,6 +247,24 @@ describe("ensureSmtCoverageForHouse", () => {
     expect(waitForSmtTailCoverageMock).toHaveBeenCalled();
   });
 
+  it("honors an explicit esiid when the house row has no meter id", async () => {
+    findHouseMock.mockResolvedValue({ esiid: null } as never);
+    const result = await ensureSmtCoverageForHouse({
+      userId: "user-1",
+      houseId: "lab-home-1",
+      esiid: "esiid-from-source",
+      profile: "admin_sim",
+      sessionKey: "explicit-esiid",
+      force: true,
+    });
+
+    expect(result.skippedReason).toBeUndefined();
+    expect(result.healed).toBe(true);
+    expect(loadSmtWindowDayStatusMock).toHaveBeenCalledWith(
+      expect.objectContaining({ esiid: "esiid-from-source" })
+    );
+  });
+
   it("uses short waits for user_session profile", async () => {
     await ensureSmtCoverageForHouse({
       userId: "user-1",

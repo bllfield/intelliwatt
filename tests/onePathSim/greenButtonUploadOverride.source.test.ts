@@ -108,12 +108,11 @@ describe("one path green button preset wiring", () => {
     expect(dropletSource).not.toContain("smtInterval.deleteMany");
   });
 
-  it("routes admin SMT heal through the pinned test home, not the selected source house", () => {
+  it("routes admin SMT heal through linked source meter context when the lab test home is pinned", () => {
     const routeSource = readRepoFile("app/api/admin/tools/one-path-sim/route.ts");
     expect(routeSource).toContain("requireOnePathWritableContext");
-    expect(routeSource).toContain("houseId: effectiveHouseId");
-    expect(routeSource).not.toMatch(
-      /ensureSmtCoverageForHouse\(\{[\s\S]*?houseId:\s*resolved\.selectedHouse\.id/
-    );
+    expect(routeSource).toContain("resolveOnePathAdminSmtHealTarget");
+    expect(routeSource).toContain("linkedSourceHouseId");
+    expect(routeSource).toContain("onePathSmtHeal.houseId");
   });
 });
