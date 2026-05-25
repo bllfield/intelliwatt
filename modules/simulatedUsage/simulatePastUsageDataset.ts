@@ -21,6 +21,7 @@ import {
   resolveHomeCalendarForActualSource,
 } from "@/lib/time/actualIntervalCalendar";
 import { convertGreenButtonPersistedRowsToHome } from "@/lib/time/greenButtonPersistedIntervalConvert";
+import { enumerateLocalDateKeys, localDayBoundsUtc } from "@/lib/time/homeIntervalCalendar";
 import type { PastIntervalGrid } from "@/lib/time/pastIntervalGrid";
 import { dateKeyFromTimestamp, getDayGridTimestamps } from "@/modules/usageSimulator/pastStitchedCurve";
 import { buildPastSimulatedBaselineV1 } from "@/modules/simulatedUsage/engine";
@@ -1582,6 +1583,10 @@ export async function simulatePastUsageDataset(
       return homeDayGrid.dateKeyFromTimestamp(ts);
     };
     const canonicalDateKeys = dateKeysFromCanonicalDayStarts(canonicalDayStartsMs, homeDayGrid);
+    const canonicalDateKeyByDayStartMs = new Map<number, string>();
+    for (const dateKey of enumerateLocalDateKeys(startDate, endDate, homeCalendar)) {
+      canonicalDateKeyByDayStartMs.set(localDayBoundsUtc(dateKey, homeCalendar).startUtc.getTime(), dateKey);
+    }
     const forcedSimulateDateKeysLocal = new Set<string>(
       Array.from(forceSimulateDateKeysLocal ?? [])
         .map((dk) => String(dk ?? "").slice(0, 10))
@@ -1960,6 +1965,7 @@ export async function simulatePastUsageDataset(
       const baselineBuild = buildPastSimulatedBaselineV1({
         actualIntervals,
         canonicalDayStartsMs,
+        canonicalDateKeyByDayStartMs,
         excludedDateKeys,
         dateKeyFromTimestamp: dateKeyFromTimestampForPast,
         getDayGridTimestamps: homeDayGrid.getDayGridTimestamps,

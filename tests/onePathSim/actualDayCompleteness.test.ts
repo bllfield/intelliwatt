@@ -105,12 +105,15 @@ describe("One Path actual day completeness", () => {
       endDateKey: dateKey,
       home,
     });
+    const canonicalDateKeyByDayStartMs = new Map<number, string>();
+    canonicalDateKeyByDayStartMs.set(homeDayGrid.canonicalDayStartsMs[0]!, dateKey);
     const debugOut: { dayDiagnostics?: Array<{ dateKey?: string; dayType?: string; simulatedReason?: string | null }> } =
       {};
 
     buildPastSimulatedBaselineV1({
       actualIntervals,
       canonicalDayStartsMs: homeDayGrid.canonicalDayStartsMs,
+      canonicalDateKeyByDayStartMs,
       excludedDateKeys: new Set(),
       dateKeyFromTimestamp: homeDayGrid.dateKeyFromTimestamp,
       getDayGridTimestamps: homeDayGrid.getDayGridTimestamps,

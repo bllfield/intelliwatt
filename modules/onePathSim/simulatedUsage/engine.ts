@@ -5,6 +5,8 @@ import { anchorEndDateUtc } from "@/modules/onePathSim/manualAnchor";
 import {
   countPresentUnitsForIntervalDay,
   dateKeyFromIntervalPoint,
+  dayMeetsTrustedIntervalThreshold,
+  resolveHomeCalendarForActualSource,
   trustedIntervalThresholdForDateKey,
 } from "@/lib/time/actualIntervalCalendar";
 import { dateKeyFromTimestamp, getDayGridTimestamps } from "@/modules/onePathSim/usageSimulator/pastStitchedCurve";
@@ -1594,6 +1596,8 @@ function applyLowDataWeatherEvidenceToProfile(args: {
 export function buildPastSimulatedBaselineV1(args: {
   actualIntervals: Array<{ timestamp: string; kwh: number; homeDateKey?: string; homeSlot?: number }>;
   canonicalDayStartsMs: number[];
+  /** Home-local date key per canonical day start (DST-safe; preferred over gridTs[0] inference). */
+  canonicalDateKeyByDayStartMs?: ReadonlyMap<number, string>;
   excludedDateKeys: Set<string>;
   trustedActualDateKeys?: Set<string>;
   dateKeyFromTimestamp: (ts: string) => string;
@@ -1751,21 +1755,35 @@ export function buildPastSimulatedBaselineV1(args: {
     actualByTs.set(ts, (actualByTs.get(ts) ?? 0) + (Number(p?.kwh) || 0));
   }
 
+  const intervalTrustedSource = args.intervalTrustedSource ?? "SMT";
+  const homeIntervalCalendar = resolveHomeCalendarForActualSource(
+    intervalTrustedSource,
+    args.timezoneForProfile ?? undefined,
+  );
+
   const analyzeDay = (dayStartMs: number) => {
     const gridTs = args.getDayGridTimestamps(dayStartMs);
-    const dateKey = gridTs.length > 0 ? args.dateKeyFromTimestamp(gridTs[0]) : "";
+    const dateKey =
+      args.canonicalDateKeyByDayStartMs?.get(dayStartMs) ??
+      (gridTs.length > 0 ? args.dateKeyFromTimestamp(gridTs[0]) : "");
     const dayIntervalList = actualIntervals.filter((p) => {
-      const dk = p.homeDateKey
-        ? dateKeyFromIntervalPoint(p)
-        : args.dateKeyFromTimestamp(String(p?.timestamp ?? ""));
+      const dk = dateKeyFromIntervalPoint(p);
       return Boolean(dateKey) && dk === dateKey;
     });
-    const intervalTrustedSource = args.intervalTrustedSource ?? "SMT";
     const presentSlotCount = countPresentSlotsForDay(dayIntervalList, intervalTrustedSource, dateKey);
     const trustedThreshold =
       dateKey && /^\d{4}-\d{2}-\d{2}$/.test(dateKey)
         ? trustedIntervalThresholdForDateKey(dateKey, intervalTrustedSource)
         : MIN_TRUSTED_ACTUAL_INTERVALS_PER_DAY;
+    const dayMeetsTrustedCompleteness =
+      Boolean(dateKey) &&
+      /^\d{4}-\d{2}-\d{2}$/.test(dateKey) &&
+      dayMeetsTrustedIntervalThreshold({
+        intervals: actualIntervals,
+        dateKey,
+        source: intervalTrustedSource,
+        home: homeIntervalCalendar,
+      });
     const dayIsExcluded = Boolean(dateKey) && args.excludedDateKeys.has(dateKey);
     const dayIsForcedSimulate = Boolean(dateKey) && forcedDateKeys.has(dateKey);
     const dayIsPendingSmtIntervals = Boolean(dateKey) && pendingSmtIntervalDateKeys.has(dateKey);
@@ -1773,7 +1791,7 @@ export function buildPastSimulatedBaselineV1(args: {
     const dayIsLedgerIncompleteMeter =
       Boolean(dateKey) &&
       ledgerIncompleteMeterDateKeys.has(dateKey) &&
-      presentSlotCount < trustedThreshold;
+      !dayMeetsTrustedCompleteness;
     const dayIsForceModeledKeepRef = Boolean(dateKey) && keepRefModeledKeys.has(dateKey);
     const dayIsTrustedActual =
       Boolean(dateKey) &&
@@ -1801,6 +1819,7 @@ export function buildPastSimulatedBaselineV1(args: {
       !dayIsLeadingMissing &&
       !dayIsTrustedActual &&
       !dayIsLedgerIncompleteMeter &&
+      !dayMeetsTrustedCompleteness &&
       presentSlotCount > 0 &&
       presentSlotCount < trustedThreshold;
     const shouldSimulateDay =
