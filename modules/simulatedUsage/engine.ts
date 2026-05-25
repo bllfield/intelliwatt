@@ -1769,7 +1769,11 @@ export function buildPastSimulatedBaselineV1(args: {
     const dayIsExcluded = Boolean(dateKey) && args.excludedDateKeys.has(dateKey);
     const dayIsForcedSimulate = Boolean(dateKey) && forcedDateKeys.has(dateKey);
     const dayIsPendingSmtIntervals = Boolean(dateKey) && pendingSmtIntervalDateKeys.has(dateKey);
-    const dayIsLedgerIncompleteMeter = Boolean(dateKey) && ledgerIncompleteMeterDateKeys.has(dateKey);
+    // Ledger INCOMPLETE_METER can lag after DST fall-back days reach 96 SMT rows; match Usage/smtWindowStatus.
+    const dayIsLedgerIncompleteMeter =
+      Boolean(dateKey) &&
+      ledgerIncompleteMeterDateKeys.has(dateKey) &&
+      presentSlotCount < trustedThreshold;
     const dayIsForceModeledKeepRef = Boolean(dateKey) && keepRefModeledKeys.has(dateKey);
     const dayIsTrustedActual =
       Boolean(dateKey) &&
