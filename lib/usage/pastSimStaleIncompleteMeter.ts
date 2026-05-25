@@ -65,7 +65,7 @@ export function pruneStaleIncompleteMeterFromPastDatasetMeta(
 
   const byDetail = meta.simulatedSourceDetailByDate;
   if (byDetail && typeof byDetail === "object" && !Array.isArray(byDetail)) {
-    for (const dk of slotCompleteDateKeys) {
+    for (const dk of Array.from(slotCompleteDateKeys)) {
       if (String((byDetail as Record<string, unknown>)[dk] ?? "").trim() === INCOMPLETE_METER_DETAIL) {
         delete (byDetail as Record<string, unknown>)[dk];
       }
@@ -75,7 +75,7 @@ export function pruneStaleIncompleteMeterFromPastDatasetMeta(
   const canonicalKey = "canonicalArtifactSimulatedDayTotalsByDate";
   const canonical = meta[canonicalKey];
   if (canonical && typeof canonical === "object" && !Array.isArray(canonical)) {
-    for (const dk of slotCompleteDateKeys) {
+    for (const dk of Array.from(slotCompleteDateKeys)) {
       delete (canonical as Record<string, unknown>)[dk];
     }
   }
@@ -89,7 +89,7 @@ export function filterSimulatedDateKeysWithoutStaleIncompleteMeter(args: {
 }): Set<string> {
   const out = new Set(args.simulatedDateKeys);
   if (!args.slotCompleteDateKeys.size || !args.staleIncompleteMeterDateKeys.size) return out;
-  for (const dk of args.staleIncompleteMeterDateKeys) {
+  for (const dk of Array.from(args.staleIncompleteMeterDateKeys)) {
     if (args.slotCompleteDateKeys.has(dk)) out.delete(dk);
   }
   return out;

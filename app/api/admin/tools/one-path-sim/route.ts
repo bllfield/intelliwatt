@@ -597,25 +597,31 @@ async function resolveSageActualTruthForRunDisplay(args: {
   }).catch(() => null);
 }
 
-function sageRunDisplayViewArgsFromTruth(
-  truth: Awaited<ReturnType<typeof resolveSageActualTruthForRunDisplay>>
-): {
+function sageDisplayViewArgsFromDataset(dataset: unknown): {
   sageActualDataset: Record<string, unknown> | null;
   sageActualDaily: ReturnType<typeof sageActualDailyRowsFromDataset>;
 } {
-  const dataset = truth?.dataset;
   return {
     sageActualDataset: dataset && typeof dataset === "object" ? (dataset as Record<string, unknown>) : null,
     sageActualDaily: sageActualDailyRowsFromDataset(dataset),
   };
 }
 
+function sageRunDisplayViewArgsFromTruth(
+  truth: Awaited<ReturnType<typeof resolveSageActualTruthForRunDisplay>>
+): {
+  sageActualDataset: Record<string, unknown> | null;
+  sageActualDaily: ReturnType<typeof sageActualDailyRowsFromDataset>;
+} {
+  return sageDisplayViewArgsFromDataset(truth?.dataset);
+}
+
 async function sageAndStaleIncompleteDisplayArgs(args: {
-  sageTruth: Awaited<ReturnType<typeof resolveSageActualTruthForRunDisplay>>;
+  sageDataset: unknown;
   datasetForMeta: Record<string, unknown> | null | undefined;
   smtSourceEsiid: string | null | undefined;
 }) {
-  const sageDisplayArgs = sageRunDisplayViewArgsFromTruth(args.sageTruth);
+  const sageDisplayArgs = sageDisplayViewArgsFromDataset(args.sageDataset);
   const smtSlotCompleteDateKeys = await resolveStaleIncompleteMeterSlotCompleteDateKeys({
     esiid: args.smtSourceEsiid,
     meta: asRecord(args.datasetForMeta)?.meta ?? args.datasetForMeta,
@@ -725,7 +731,7 @@ async function buildPastSimRunReadbackResponse(args: {
       args.preferredActualSource ?? args.smtPostSimHealing?.preferredActualSource ?? null,
   });
   const sageDisplayArgs = await sageAndStaleIncompleteDisplayArgs({
-    sageTruth,
+    sageDataset: sageTruth?.dataset,
     datasetForMeta: asRecord(readback.dataset),
     smtSourceEsiid: args.smtSourceEsiid ?? args.smtPostSimHealing?.sourceEsiid ?? null,
   });
@@ -1688,7 +1694,7 @@ export async function POST(request: NextRequest) {
         preferredActualSource: effectiveRawInputBase.preferredActualSource,
       });
       const sageDisplayArgsForPast = await sageAndStaleIncompleteDisplayArgs({
-        sageTruth: sageTruthForPastDisplay,
+        sageDataset: sageTruthForPastDisplay?.dataset,
         datasetForMeta: artifactDataset,
         smtSourceEsiid,
       });
@@ -1753,8 +1759,10 @@ export async function POST(request: NextRequest) {
           : null;
       const manualSageDisplayArgs = actualDatasetForManualRun
         ? await sageAndStaleIncompleteDisplayArgs({
-            sageTruth: { dataset: actualDatasetForManualRun },
-            datasetForMeta: asRecord(manualPastReadResult?.displayDataset) ?? artifactDataset,
+            sageDataset: actualDatasetForManualRun,
+            datasetForMeta:
+              (manualPastReadResult?.ok === true ? asRecord(manualPastReadResult.displayDataset) : null) ??
+              artifactDataset,
             smtSourceEsiid,
           })
         : sageDisplayArgsForPast;

@@ -43,7 +43,7 @@ describe("pastSimStaleIncompleteMeter", () => {
       staleIncompleteMeterDateKeys: new Set(["2025-11-02"]),
       slotCompleteDateKeys: new Set(["2025-11-02"]),
     });
-    expect([...filtered].sort()).toEqual(["2025-11-03"]);
+    expect(Array.from(filtered).sort()).toEqual(["2025-11-03"]);
   });
 
   it("relabels stale incomplete-meter rows and applies sage kWh", () => {
