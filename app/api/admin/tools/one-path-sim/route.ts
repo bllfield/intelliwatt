@@ -86,6 +86,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 const GREEN_BUTTON_ROUTE_STAGE_TIMEOUT_MS = 120_000;
+/** Same heal profile as POST /api/user/usage/refresh. */
+const ONE_PATH_SMT_HEAL_PROFILE = "user_session" as const;
 
 class AdminRouteStageTimeoutError extends Error {
   code = "one_path_admin_timeout" as const;
@@ -662,42 +664,6 @@ async function buildPastSimRunReadbackResponse(args: {
     };
   }
 
-  let smtIncompleteMeterRetry: OnePathIncompleteMeterBackfillRetry | null = null;
-  const healingCtx = args.smtPostSimHealing;
-  if (healingCtx?.mode === "INTERVAL" && String(healingCtx.sourceEsiid ?? "").trim()) {
-    const smtHeal = resolveOnePathAdminSmtHealTarget({
-      effectiveUserId: healingCtx.sourceUserId,
-      effectiveHouseId: healingCtx.effectiveHouseId,
-      smtSourceEsiid: String(healingCtx.sourceEsiid).trim(),
-      onePathTestHomeState: healingCtx.onePathTestHomeState,
-    });
-    const postEnsure = await ensureSmtCoverageForHouse({
-      userId: smtHeal.userId,
-      houseId: smtHeal.houseId,
-      esiid: smtHeal.esiid,
-      profile: "admin_sim",
-      sessionKey: `post:${args.correlationId ?? ""}`,
-      extraBackfillDateKeys: extractIncompleteMeterDateKeysFromDataset(readback.dataset),
-    });
-    smtIncompleteMeterRetry = buildOnePathPostSimHealFromEnsure(postEnsure, {
-      correlationId: args.correlationId ?? "",
-      effectiveHouseId: healingCtx.effectiveHouseId,
-      actualContextHouseId: healingCtx.actualContextHouseId,
-      sourceUserId: healingCtx.sourceUserId,
-      sourceEsiid: String(healingCtx.sourceEsiid).trim(),
-    });
-    if (smtIncompleteMeterRetry?.attempted) {
-      const reread = await readScenarioDataset(true);
-      if (reread.ok) {
-        readback = reread;
-        smtIncompleteMeterRetry = {
-          ...smtIncompleteMeterRetry,
-          postRetryIncompleteDateKeys: extractIncompleteMeterDateKeysFromDataset(reread.dataset),
-        };
-      }
-    }
-  }
-
   logSimPipelineEvent("one_path_admin_past_readback_success", {
     correlationId: args.correlationId ?? null,
     houseId: args.houseId,
@@ -790,7 +756,6 @@ async function buildPastSimRunReadbackResponse(args: {
     readbackPending: false,
     runType: "PAST_SIM" as const,
     correlationId: args.correlationId ?? null,
-    smtIncompleteMeterRetry,
     manualStageOneView: null,
     runDisplayView: compactRunDisplayView,
     artifact: null,
@@ -1151,6 +1116,47 @@ function resolveOnePathAdminSmtHealTarget(args: {
   };
 }
 
+async function ensureOnePathSmtOnLookup(args: {
+  previewMode: CanonicalSimulationInputType;
+  smtSourceEsiid: string | null;
+  effectiveUserId: string;
+  effectiveHouseId: string;
+  sourceUserId: string;
+  actualContextHouseId: string;
+  onePathTestHomeState: {
+    isPinned: boolean;
+    linkedSourceHouseId: string | null;
+    linkedSourceUserId: string | null;
+  };
+}) {
+  if (args.previewMode === "GREEN_BUTTON") return null;
+  const esiid = String(args.smtSourceEsiid ?? "").trim();
+  if (!esiid) return null;
+
+  const smtHeal = resolveOnePathAdminSmtHealTarget({
+    effectiveUserId: args.effectiveUserId,
+    effectiveHouseId: args.effectiveHouseId,
+    smtSourceEsiid: esiid,
+    onePathTestHomeState: args.onePathTestHomeState,
+  });
+  const correlationId = createSimCorrelationId();
+  const ensure = await ensureSmtCoverageForHouse({
+    userId: smtHeal.userId,
+    houseId: smtHeal.houseId,
+    esiid: smtHeal.esiid,
+    profile: ONE_PATH_SMT_HEAL_PROFILE,
+    force: true,
+    sessionKey: `load:${smtHeal.houseId}`,
+  });
+  return buildOnePathSmtRefreshCheckFromEnsure(ensure, {
+    correlationId,
+    effectiveHouseId: args.effectiveHouseId,
+    actualContextHouseId: args.actualContextHouseId,
+    sourceUserId: args.sourceUserId,
+    sourceEsiid: esiid,
+  });
+}
+
 async function resolveOnePathTestHomeState(args: {
   ownerUserId: string;
   selectedSourceHouseId: string;
@@ -1500,36 +1506,6 @@ export async function POST(request: NextRequest) {
         { status: 409 }
       );
     }
-    const onePathSmtHeal =
-      mode === "INTERVAL" &&
-      effectiveRawInputBase.preferredActualSource !== "GREEN_BUTTON" &&
-      String(smtSourceEsiid ?? "").trim()
-        ? resolveOnePathAdminSmtHealTarget({
-            effectiveUserId,
-            effectiveHouseId,
-            smtSourceEsiid,
-            onePathTestHomeState,
-          })
-        : null;
-    const smtRefreshCheck =
-      onePathSmtHeal
-        ? await buildOnePathSmtRefreshCheckFromEnsure(
-            await ensureSmtCoverageForHouse({
-              userId: onePathSmtHeal.userId,
-              houseId: onePathSmtHeal.houseId,
-              esiid: onePathSmtHeal.esiid,
-              profile: "admin_sim",
-              sessionKey: `run:${correlationId}`,
-            }),
-            {
-              correlationId,
-              effectiveHouseId,
-              actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
-              sourceUserId: resolved.userId,
-              sourceEsiid: String(smtSourceEsiid).trim(),
-            }
-          )
-        : null;
     try {
       if (!includeDebugDiagnostics && effectiveRawInputBase.scenarioId && !isManualMode) {
         const readback = await buildPastSimRunReadbackResponse({
@@ -1541,19 +1517,6 @@ export async function POST(request: NextRequest) {
           actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
           preferredActualSource: effectiveRawInputBase.preferredActualSource,
           smtSourceEsiid,
-          smtPostSimHealing:
-            mode === "INTERVAL" && onePathSmtHeal
-              ? {
-                  mode,
-                  preferredActualSource: effectiveRawInputBase.preferredActualSource,
-                  sourceUserId: effectiveUserId,
-                  sourceHouseId: effectiveHouseId,
-                  sourceEsiid: smtSourceEsiid,
-                  effectiveHouseId,
-                  actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
-                  onePathTestHomeState,
-                }
-              : null,
         });
         if (!readback.ok) {
           const status =
@@ -1573,7 +1536,6 @@ export async function POST(request: NextRequest) {
         }
         return NextResponse.json({
           ...readback,
-          smtRefreshCheck,
         });
       }
       let engineInput =
@@ -1649,7 +1611,6 @@ export async function POST(request: NextRequest) {
           debugDiagnosticsIncluded: false,
           runType: "BASELINE_PASSTHROUGH",
           correlationId,
-          smtRefreshCheck,
           engineInput: slimEngineInput,
           manualStageOneView: null,
           runDisplayView: compactRunDisplayView,
@@ -1693,7 +1654,6 @@ export async function POST(request: NextRequest) {
           ok: true,
           debugDiagnosticsIncluded: false,
           runType: "BASELINE_PASSTHROUGH",
-          smtRefreshCheck,
           engineInput: slimEngineInput,
           manualStageOneView: artifact.manualStageOneView ?? null,
           runDisplayView: compactRunDisplayView,
@@ -1702,35 +1662,6 @@ export async function POST(request: NextRequest) {
         });
       }
       const shouldReturnCompactPastResponse = Boolean(effectiveRawInputBase.scenarioId && !isManualMode);
-      let smtIncompleteMeterRetry: OnePathIncompleteMeterBackfillRetry | null = null;
-      if (onePathSmtHeal) {
-        const postEnsure = await ensureSmtCoverageForHouse({
-          userId: onePathSmtHeal.userId,
-          houseId: onePathSmtHeal.houseId,
-          esiid: onePathSmtHeal.esiid,
-          profile: "admin_sim",
-          sessionKey: `post:${correlationId}`,
-          extraBackfillDateKeys: extractIncompleteMeterDateKeysFromDataset(artifactDataset),
-        });
-        smtIncompleteMeterRetry = buildOnePathPostSimHealFromEnsure(postEnsure, {
-          correlationId,
-          effectiveHouseId,
-          actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
-          sourceUserId: resolved.userId,
-          sourceEsiid: String(smtSourceEsiid).trim(),
-        });
-      }
-      if (smtIncompleteMeterRetry?.attempted) {
-        engineInput = await adaptIntervalRawInput(effectiveRawInputBase);
-        slimEngineInput = buildSlimAdminEngineInput(engineInput);
-        artifact = await runSharedSimulation(engineInput);
-        artifactDataset = asRecord(artifact.dataset);
-        artifactDatasetMeta = asRecord(artifactDataset?.meta);
-        smtIncompleteMeterRetry = {
-          ...smtIncompleteMeterRetry,
-          postRetryIncompleteDateKeys: extractIncompleteMeterDateKeysFromDataset(artifactDataset),
-        };
-      }
       const sageTruthForPastDisplay = await resolveSageActualTruthForRunDisplay({
         userId: effectiveUserId,
         houseId: effectiveHouseId,
@@ -1760,8 +1691,6 @@ export async function POST(request: NextRequest) {
           debugDiagnosticsSuppressedReason: "past_sim_compact_response",
           runType: "PAST_SIM",
           engineInput: slimEngineInput,
-          smtRefreshCheck,
-          smtIncompleteMeterRetry,
           manualStageOneView: artifact.manualStageOneView ?? null,
           runDisplayView: compactRunDisplayView,
           artifact: null,
@@ -1845,8 +1774,6 @@ export async function POST(request: NextRequest) {
                 ? "BASELINE_PASSTHROUGH"
                 : "BASELINE_OR_UNSET",
           engineInput: slimEngineInput,
-          smtRefreshCheck,
-          smtIncompleteMeterRetry,
           manualStageOneView: readModel.manualStageOneView ?? null,
           runDisplayView,
           artifact: null,
@@ -1863,8 +1790,6 @@ export async function POST(request: NextRequest) {
               ? "BASELINE_PASSTHROUGH"
               : "BASELINE_OR_UNSET",
         engineInput: slimEngineInput,
-        smtRefreshCheck,
-        smtIncompleteMeterRetry,
         artifact,
         readModel,
         manualStageOneView: readModel.manualStageOneView ?? null,
@@ -1993,6 +1918,15 @@ export async function POST(request: NextRequest) {
       previewMode === "MANUAL_MONTHLY" || previewMode === "MANUAL_ANNUAL"
         ? adminManualSeeds?.payloadForMode[previewMode] ?? manualUsage.payload ?? null
         : null;
+    const smtRefreshCheck = await ensureOnePathSmtOnLookup({
+      previewMode,
+      smtSourceEsiid,
+      effectiveUserId,
+      effectiveHouseId,
+      sourceUserId: resolved.userId,
+      actualContextHouseId: previewActualContextHouseId,
+      onePathTestHomeState,
+    });
     return NextResponse.json({
       ok: true,
       email: resolved.email,
@@ -2003,6 +1937,7 @@ export async function POST(request: NextRequest) {
       sourceContext: {
         debugDiagnosticsIncluded: false,
         onePathTestHome: onePathTestHomeSummary,
+        smtRefreshCheck,
         travelRangesFromDb,
         homeProfile: lightweightHomeProfile ?? lightweightFallbackHomeProfile ?? null,
         applianceProfile: lightweightApplianceProfile,
@@ -2042,6 +1977,16 @@ export async function POST(request: NextRequest) {
   } catch {
     previewSimulationVariablePolicy = null;
   }
+
+  const smtRefreshCheck = await ensureOnePathSmtOnLookup({
+    previewMode,
+    smtSourceEsiid,
+    effectiveUserId,
+    effectiveHouseId,
+    sourceUserId: resolved.userId,
+    actualContextHouseId: previewActualContextHouse.id,
+    onePathTestHomeState,
+  });
 
   const [usageTruth, manualUsage, fetchedHomeProfile, fetchedApplianceProfileRecord, travelRangesFromDb] = await Promise.all([
     resolveOnePathUpstreamUsageTruthForSimulation({
@@ -2101,6 +2046,7 @@ export async function POST(request: NextRequest) {
     usageTruthSource: usageTruth?.usageTruthSource ?? "missing_usage_truth",
     usageTruthSeedResult: usageTruth?.seedResult ?? null,
     upstreamUsageTruth: usageTruth?.summary ?? null,
+    smtRefreshCheck,
     onePathTestHome: onePathTestHomeSummary,
     greenButtonUpload: actualContextGreenButtonUpload,
     manualUsagePayload: manualUsage.payload ?? null,

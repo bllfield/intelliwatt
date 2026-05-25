@@ -1233,12 +1233,7 @@ describe("admin one path sim route", () => {
         seedIfMissing: false,
       })
     );
-    expect(ensureSmtCoverageForHouse).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: "user-1",
-        houseId: "house-1",
-      })
-    );
+    expect(ensureSmtCoverageForHouse).not.toHaveBeenCalled();
     expect(resolveSharedWeatherSensitivityEnvelope).not.toHaveBeenCalled();
     expect(getHomeProfileReadOnlyByUserHouse).not.toHaveBeenCalled();
     expect(getApplianceProfileSimulatedByUserHouse).not.toHaveBeenCalled();
@@ -1247,14 +1242,7 @@ describe("admin one path sim route", () => {
     expect(buildUserUsageHouseContract).not.toHaveBeenCalled();
   });
 
-  it("waits for stale SMT tail coverage but still shows results when backfill is still pending", async () => {
-    prismaSmtIntervalAggregate.mockResolvedValue({
-      _count: { _all: 960 },
-      _min: { ts: new Date("2026-04-01T00:00:00.000Z") },
-      _max: { ts: new Date("2026-04-10T23:45:00.000Z") },
-    });
-    prismaSmtIntervalFindMany.mockResolvedValue(buildSmtIntervalRows("2026-04-01", "2026-04-10"));
-
+  it("does not run SMT backfill on interval sim run (heal runs on lookup/load instead)", async () => {
     const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
     const pending = POST(
       buildRequest({
@@ -1267,30 +1255,43 @@ describe("admin one path sim route", () => {
       })
     );
 
-    await vi.advanceTimersByTimeAsync(62_000);
+    await vi.advanceTimersByTimeAsync(25_000);
     const res = await pending;
     const json = await res.json();
 
     expect(res.status).toBe(200);
-    expect(json).toEqual(
-      expect.objectContaining({
-        ok: true,
-        smtRefreshCheck: expect.objectContaining({
-          attempted: true,
-          wait: expect.objectContaining({
-            timedOut: true,
-          }),
-        }),
-      })
-    );
-    expect(ensureSmtCoverageForHouse).toHaveBeenCalledWith(
-      expect.objectContaining({ profile: "admin_sim", sessionKey: expect.stringMatching(/^run:/) })
-    );
+    expect(json.ok).toBe(true);
+    expect(ensureSmtCoverageForHouse).not.toHaveBeenCalled();
     expect(adaptIntervalRawInput).toHaveBeenCalledTimes(1);
     expect(runSharedSimulation).toHaveBeenCalledTimes(1);
   });
 
-  it("requests a targeted SMT refresh and reruns once when the first result has incomplete meter days", async () => {
+  it("runs SMT backfill on INTERVAL lookup with the same user_session profile as usage refresh", async () => {
+    enablePostSimEnsureHeal();
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const res = await POST(
+      buildRequest({
+        action: "lookup",
+        email: "customer@example.com",
+        houseId: "house-1",
+        mode: "INTERVAL",
+        includeDebugDiagnostics: true,
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.sourceContext?.smtRefreshCheck).toBeTruthy();
+    expect(ensureSmtCoverageForHouse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profile: "user_session",
+        force: true,
+        sessionKey: expect.stringMatching(/^load:/),
+      })
+    );
+  });
+
+  it("runs interval sim once without post-sim SMT heal (heal runs on lookup/load)", async () => {
     enablePostSimEnsureHeal();
     runSharedSimulation
       .mockResolvedValueOnce({
@@ -1349,34 +1350,19 @@ describe("admin one path sim route", () => {
     const json = await res.json();
 
     expect(res.status).toBe(200);
-    expect(ensureSmtCoverageForHouse).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: "user-1",
-        houseId: "house-1",
-        profile: "admin_sim",
-        sessionKey: expect.stringMatching(/^post:/),
-      })
-    );
-    expect(adaptIntervalRawInput).toHaveBeenCalledTimes(2);
-    expect(runSharedSimulation).toHaveBeenCalledTimes(2);
+    expect(ensureSmtCoverageForHouse).not.toHaveBeenCalled();
+    expect(adaptIntervalRawInput).toHaveBeenCalledTimes(1);
+    expect(runSharedSimulation).toHaveBeenCalledTimes(1);
     expect(buildSharedSimulationReadModel).not.toHaveBeenCalled();
-    expect(json.smtIncompleteMeterRetry).toEqual(
-      expect.objectContaining({
-        attempted: true,
-        repairKind: "ensure_smt_coverage",
-        requestedDateKeys: ["2026-04-12"],
-        postRetryIncompleteDateKeys: [],
-        targetedIntervalBackfill: expect.objectContaining({ ok: true }),
-      })
-    );
+    expect(json.smtIncompleteMeterRetry).toBeUndefined();
     expect(json.debugDiagnosticsIncluded).toBe(false);
     expect(json.debugDiagnosticsSuppressedReason).toBe("past_sim_compact_response");
     expect(json.readModel).toEqual(
       expect.objectContaining({
         compactResponseReadModel: true,
         compactArtifactSummary: expect.objectContaining({
-          artifactId: "artifact-2",
-          artifactInputHash: "artifact-hash-2",
+          artifactId: "artifact-1",
+          artifactInputHash: "artifact-hash-1",
         }),
       })
     );
@@ -1384,7 +1370,7 @@ describe("admin one path sim route", () => {
     expect(json.runDisplayView).toBeTruthy();
   });
 
-  it("runs incomplete-meter backfill even when deferred pending repair also runs", async () => {
+  it("does not post-sim heal incomplete meter days on interval run", async () => {
     enablePostSimEnsureHeal();
     prismaSmtIntervalDayLedgerFindMany.mockImplementation(async (args: any) => {
       const status = args?.where?.status;
@@ -1451,17 +1437,10 @@ describe("admin one path sim route", () => {
     const json = await res.json();
 
     expect(res.status).toBe(200);
-    expect(json.smtIncompleteMeterRetry).toEqual(
-      expect.objectContaining({
-        attempted: true,
-        repairKind: "ensure_smt_coverage",
-        requestedDateKeys: ["2026-04-12"],
-        targetedIntervalBackfill: expect.objectContaining({ ok: true }),
-      })
-    );
-    expect(ensureSmtCoverageForHouse).toHaveBeenCalled();
-    expect(adaptIntervalRawInput).toHaveBeenCalledTimes(2);
-    expect(runSharedSimulation).toHaveBeenCalledTimes(2);
+    expect(json.smtIncompleteMeterRetry).toBeUndefined();
+    expect(ensureSmtCoverageForHouse).not.toHaveBeenCalled();
+    expect(adaptIntervalRawInput).toHaveBeenCalledTimes(1);
+    expect(runSharedSimulation).toHaveBeenCalledTimes(1);
   });
 
   it("defaults lookup requests to lean debug-off source context when debug is not requested", async () => {
@@ -1607,29 +1586,9 @@ describe("admin one path sim route", () => {
     expect(res.status).toBe(200);
     expect(json.ok).toBe(true);
     expect(json.executionMode).toBe("artifact_readback");
-    expect(ensureSmtCoverageForHouse).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: "user-1",
-        houseId: "house-1",
-        profile: "admin_sim",
-        sessionKey: expect.stringMatching(/^post:/),
-      })
-    );
-    expect(readOnePathSimulatedUsageScenario).toHaveBeenCalledTimes(2);
-    expect(readOnePathSimulatedUsageScenario.mock.calls[1]?.[0]).toEqual(
-      expect.objectContaining({
-        forceRebuildArtifact: true,
-      })
-    );
-    expect(json.smtIncompleteMeterRetry).toEqual(
-      expect.objectContaining({
-        attempted: true,
-        repairKind: "ensure_smt_coverage",
-        requestedDateKeys: ["2026-04-12"],
-        postRetryIncompleteDateKeys: [],
-        targetedIntervalBackfill: expect.objectContaining({ ok: true }),
-      })
-    );
+    expect(ensureSmtCoverageForHouse).not.toHaveBeenCalled();
+    expect(readOnePathSimulatedUsageScenario).toHaveBeenCalledTimes(1);
+    expect(json.smtIncompleteMeterRetry).toBeUndefined();
     expect(runSharedSimulation).not.toHaveBeenCalled();
   });
 
@@ -1683,22 +1642,8 @@ describe("admin one path sim route", () => {
     const json = await res.json();
 
     expect(res.status).toBe(200);
-    expect(json.smtIncompleteMeterRetry).toEqual(
-      expect.objectContaining({
-        attempted: true,
-        repairKind: "ensure_smt_coverage",
-        requestedDateKeys: ["2026-04-12"],
-        targetedIntervalBackfill: expect.objectContaining({ ok: true }),
-      })
-    );
-    expect(ensureSmtCoverageForHouse).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: "user-1",
-        houseId: "house-1",
-        profile: "admin_sim",
-        sessionKey: expect.stringMatching(/^post:/),
-      })
-    );
+    expect(json.smtIncompleteMeterRetry).toBeUndefined();
+    expect(ensureSmtCoverageForHouse).not.toHaveBeenCalled();
   });
 
   it("returns a lean manual Stage 1 preview on manual lookup without falling back to the user manual page path", async () => {
