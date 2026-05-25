@@ -16,6 +16,7 @@ import {
   getIntervalDataFingerprint,
 } from "@/lib/usage/actualDatasetForHouse";
 import { redistributeGreenButtonGridZeroSamples } from "@/modules/onePathSim/greenButtonIntervalCorrections";
+import { resolveStaleIncompleteMeterSlotCompleteDateKeys } from "@/lib/usage/pastSimStaleIncompleteMeter";
 import { upsertSimulatedUsageBuckets } from "@/lib/usage/simulatedUsageBuckets";
 import { usagePrisma } from "@/lib/db/usageClient";
 import {
@@ -903,10 +904,15 @@ export async function rebuildGapfillSharedPastArtifact(args: {
     if (!persisted || persisted.intervalsCodec !== INTERVAL_CODEC_V1) {
       return { ok: false, dataset: null };
     }
+    const smtSlotCompleteDateKeys = await resolveStaleIncompleteMeterSlotCompleteDateKeys({
+      esiid: houseResolved.esiid,
+      meta: persisted.datasetJson,
+    });
     const restored = restoreCachedArtifactDataset({
       cached: persisted,
       useSelectedDaysLightweightArtifactRead: false,
       fallbackEndDate: canonicalCoverage.endDate,
+      smtSlotCompleteDateKeys,
     }).dataset;
     const hasIntervals15 = Array.isArray(restored?.series?.intervals15);
     const hasCanonicalCoverage =
@@ -1575,6 +1581,7 @@ function restoreCachedArtifactDataset(args: {
   useSelectedDaysLightweightArtifactRead: boolean;
   fallbackEndDate: string;
   skipAggregateRecompute?: boolean;
+  smtSlotCompleteDateKeys?: ReadonlySet<string>;
 }): {
   dataset: any;
   restoredCanonicalDailyRows: Array<{ date?: string; kwh?: number; source?: string }> | null;
@@ -1614,6 +1621,7 @@ function restoreCachedArtifactDataset(args: {
       dataset,
       decodedIntervals: dataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>,
       fallbackEndDate,
+      smtSlotCompleteDateKeys: args.smtSlotCompleteDateKeys,
     });
   }
   return {
@@ -2049,12 +2057,17 @@ export async function buildGapfillCompareSimShared(args: {
         },
       };
     }
+    const smtSlotCompleteDateKeys = await resolveStaleIncompleteMeterSlotCompleteDateKeys({
+      esiid: houseResolved.esiid,
+      meta: persistedExactArtifact.datasetJson,
+    });
     return {
       ok: true,
       dataset: restoreCachedArtifactDataset({
         cached: persistedExactArtifact,
         useSelectedDaysLightweightArtifactRead,
         fallbackEndDate: identityWindowResolved.endDate,
+        smtSlotCompleteDateKeys,
       }).dataset,
     };
   }
@@ -2099,6 +2112,10 @@ export async function buildGapfillCompareSimShared(args: {
     };
   }
   if (cached && cached.intervalsCodec === INTERVAL_CODEC_V1) {
+    const smtSlotCompleteDateKeys = await resolveStaleIncompleteMeterSlotCompleteDateKeys({
+      esiid: houseResolved.esiid,
+      meta: cached.datasetJson,
+    });
     const restored = restoreCachedArtifactDataset({
       cached,
       useSelectedDaysLightweightArtifactRead,
@@ -2106,6 +2123,7 @@ export async function buildGapfillCompareSimShared(args: {
       // Compact selected-days compare already reads canonical daily/monthly truth from stored
       // artifact rows, so exact-parity interval decode does not need to rebuild aggregates first.
       skipAggregateRecompute: compareCoreMemoryReducedPath,
+      smtSlotCompleteDateKeys,
     });
     restoredCanonicalDailyRows = restored.restoredCanonicalDailyRows;
     restoredCanonicalMonthlyRows = restored.restoredCanonicalMonthlyRows;
@@ -6931,10 +6949,15 @@ export async function getSimulatedUsageForHouseScenario(args: {
             intervals15: decoded,
           },
         };
+        const smtSlotCompleteDateKeysGapfill = await resolveStaleIncompleteMeterSlotCompleteDateKeys({
+          esiid: house.esiid,
+          meta: exactCached.datasetJson,
+        });
         reconcileRestoredPastDatasetFromDecodedIntervals({
           dataset: restored,
           decodedIntervals: decoded,
           fallbackEndDate: String((exactCached.datasetJson as any)?.summary?.end ?? "").slice(0, 10),
+          smtSlotCompleteDateKeys: smtSlotCompleteDateKeysGapfill,
         });
         const restoredAny = restored as any;
         if (!restoredAny.meta || typeof restoredAny.meta !== "object") restoredAny.meta = {};
@@ -7116,10 +7139,15 @@ export async function getSimulatedUsageForHouseScenario(args: {
           intervals15: decoded,
         },
       };
+      const smtSlotCompleteDateKeysArtifactOnly = await resolveStaleIncompleteMeterSlotCompleteDateKeys({
+        esiid: house.esiid,
+        meta: exactCached.datasetJson,
+      });
       reconcileRestoredPastDatasetFromDecodedIntervals({
         dataset: restored,
         decodedIntervals: decoded,
         fallbackEndDate: window.endDate,
+        smtSlotCompleteDateKeys: smtSlotCompleteDateKeysArtifactOnly,
       });
       const restoredAny = restored as any;
       if (!restoredAny.meta || typeof restoredAny.meta !== "object") restoredAny.meta = {};
@@ -7603,10 +7631,15 @@ export async function getSimulatedUsageForHouseScenario(args: {
               },
             };
             dataset = restored;
+            const smtSlotCompleteDateKeysCache = await resolveStaleIncompleteMeterSlotCompleteDateKeys({
+              esiid: house.esiid,
+              meta: usableCached.datasetJson,
+            });
             reconcileRestoredPastDatasetFromDecodedIntervals({
               dataset,
               decodedIntervals: decoded,
               fallbackEndDate: endDate,
+              smtSlotCompleteDateKeys: smtSlotCompleteDateKeysCache,
             });
             // Keep cache restore on the saved stitched artifact only; no second overlay pass.
             if (!dataset.meta || typeof dataset.meta !== "object") (dataset as any).meta = {};

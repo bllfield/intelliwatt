@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { resolveStaleIncompleteMeterSlotCompleteDateKeys } from "@/lib/usage/pastSimStaleIncompleteMeter";
 import { sageActualDailyRowsFromDataset } from "@/lib/usage/sageActualDailyTruth";
 import { buildUserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
 import { resolveIntervalsLayer } from "@/lib/usage/resolveIntervalsLayer";
@@ -609,6 +610,19 @@ function sageRunDisplayViewArgsFromTruth(
   };
 }
 
+async function sageAndStaleIncompleteDisplayArgs(args: {
+  sageTruth: Awaited<ReturnType<typeof resolveSageActualTruthForRunDisplay>>;
+  datasetForMeta: Record<string, unknown> | null | undefined;
+  smtSourceEsiid: string | null | undefined;
+}) {
+  const sageDisplayArgs = sageRunDisplayViewArgsFromTruth(args.sageTruth);
+  const smtSlotCompleteDateKeys = await resolveStaleIncompleteMeterSlotCompleteDateKeys({
+    esiid: args.smtSourceEsiid,
+    meta: asRecord(args.datasetForMeta)?.meta ?? args.datasetForMeta,
+  });
+  return { ...sageDisplayArgs, smtSlotCompleteDateKeys };
+}
+
 async function buildPastSimRunReadbackResponse(args: {
   userId: string;
   houseId: string;
@@ -710,7 +724,11 @@ async function buildPastSimRunReadbackResponse(args: {
     preferredActualSource:
       args.preferredActualSource ?? args.smtPostSimHealing?.preferredActualSource ?? null,
   });
-  const sageDisplayArgs = sageRunDisplayViewArgsFromTruth(sageTruth);
+  const sageDisplayArgs = await sageAndStaleIncompleteDisplayArgs({
+    sageTruth,
+    datasetForMeta: asRecord(readback.dataset),
+    smtSourceEsiid: args.smtSourceEsiid ?? args.smtPostSimHealing?.sourceEsiid ?? null,
+  });
   const runDisplayViewBase =
     buildOnePathRunReadOnlyView({
       dataset: asRecord(readback.dataset),
@@ -1669,7 +1687,11 @@ export async function POST(request: NextRequest) {
         smtSourceEsiid,
         preferredActualSource: effectiveRawInputBase.preferredActualSource,
       });
-      const sageDisplayArgsForPast = sageRunDisplayViewArgsFromTruth(sageTruthForPastDisplay);
+      const sageDisplayArgsForPast = await sageAndStaleIncompleteDisplayArgs({
+        sageTruth: sageTruthForPastDisplay,
+        datasetForMeta: artifactDataset,
+        smtSourceEsiid,
+      });
       if (shouldReturnCompactPastResponse) {
         const compactRunDisplayView =
           buildOnePathRunReadOnlyView({
@@ -1730,10 +1752,11 @@ export async function POST(request: NextRequest) {
             })
           : null;
       const manualSageDisplayArgs = actualDatasetForManualRun
-        ? {
-            sageActualDataset: actualDatasetForManualRun as Record<string, unknown>,
-            sageActualDaily: sageActualDailyRowsFromDataset(actualDatasetForManualRun),
-          }
+        ? await sageAndStaleIncompleteDisplayArgs({
+            sageTruth: { dataset: actualDatasetForManualRun },
+            datasetForMeta: asRecord(manualPastReadResult?.displayDataset) ?? artifactDataset,
+            smtSourceEsiid,
+          })
         : sageDisplayArgsForPast;
       const manualRunDisplayView =
         manualPastReadResult && manualPastReadResult.ok

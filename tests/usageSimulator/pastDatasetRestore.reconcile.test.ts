@@ -234,4 +234,40 @@ describe("reconcileRestoredPastDatasetFromDecodedIntervals", () => {
     );
     expect(rows[0].sourceDetail).toBe("SIMULATED_OTHER");
   });
+
+  it("drops stale SIMULATED_INCOMPLETE_METER when live SMT marks the day slot-complete", () => {
+    const intervals = [
+      { timestamp: "2020-06-01T00:00:00.000Z", kwh: 10 },
+      { timestamp: "2020-06-02T00:00:00.000Z", kwh: 20 },
+      { timestamp: "2020-06-03T00:00:00.000Z", kwh: 33.48 },
+    ];
+    const dataset: any = {
+      summary: { end: "2020-06-03" },
+      meta: {
+        simulatedSourceDetailByDate: {
+          "2020-06-03": "SIMULATED_INCOMPLETE_METER",
+        },
+        canonicalArtifactSimulatedDayTotalsByDate: {
+          "2020-06-03": 33.48,
+        },
+      },
+      daily: [],
+      monthly: [],
+      series: { daily: [], monthly: [], annual: [] },
+      insights: {},
+      totals: {},
+    };
+
+    reconcileRestoredPastDatasetFromDecodedIntervals({
+      dataset,
+      decodedIntervals: intervals,
+      fallbackEndDate: "2020-06-03",
+      smtSlotCompleteDateKeys: new Set(["2020-06-03"]),
+    });
+
+    const byDate = Object.fromEntries(dataset.daily.map((d: any) => [d.date, d]));
+    expect(byDate["2020-06-03"].source).toBe("ACTUAL");
+    expect(byDate["2020-06-03"].sourceDetail).toBe("ACTUAL");
+    expect(dataset.meta.simulatedSourceDetailByDate["2020-06-03"]).toBeUndefined();
+  });
 });

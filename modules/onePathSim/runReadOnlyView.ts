@@ -1,8 +1,8 @@
 import { dateKeyInTimezone } from "@/lib/admin/gapfillLab";
 import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
+import { applyPastSimDisplayTruthOverlay } from "@/lib/usage/pastSimStaleIncompleteMeter";
 import {
   applySageActualDailyTruthToCompareRows,
-  applySageActualDailyTruthToDisplayRows,
   clampDailyRowsToCanonicalCoverageWindow,
   sageActualDailyKwhByDate,
   sageActualDailyKwhByDateFromRows,
@@ -344,6 +344,8 @@ export function buildOnePathRunReadOnlyView(args: {
   /** Sage Usage truth daily rows (getActualUsageDatasetForHouse). Required for Past Sim ACTUAL day kWh parity. */
   sageActualDaily?: SageActualDailyRow[] | null;
   sageActualDataset?: Record<string, unknown> | null;
+  /** Live SMT slot-complete days for stale SIMULATED_INCOMPLETE_METER relabel (DST fall-back). */
+  smtSlotCompleteDateKeys?: ReadonlySet<string>;
 }): OnePathRunReadOnlyView | null {
   const dataset = asRecord(args.dataset);
   if (!dataset) return null;
@@ -501,8 +503,11 @@ export function buildOnePathRunReadOnlyView(args: {
     fifteenMinuteCurveSourceOwner = rebuiltFifteenMinuteAverages.length
       ? "buildOnePathRunReadOnlyView(...).dataset.series.intervals15"
       : "buildUserUsageDashboardViewModel(...).derived.fifteenCurve";
-    if (sageByDate.size > 0) {
-      dailyRows = applySageActualDailyTruthToDisplayRows(dailyRows, sageByDate);
+    if (sageByDate.size > 0 || (args.smtSlotCompleteDateKeys?.size ?? 0) > 0) {
+      dailyRows = applyPastSimDisplayTruthOverlay(dailyRows, {
+        sageByDate,
+        smtSlotCompleteDateKeys: args.smtSlotCompleteDateKeys,
+      });
     }
     dailyRows = clampDailyRowsToCanonicalCoverageWindow(dailyRows, canonicalCoverageWindow);
   }

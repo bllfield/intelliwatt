@@ -2,6 +2,11 @@ import { dateKeyInTimezone } from "@/lib/admin/gapfillLab";
 import { chicagoDateKey } from "@/lib/time/chicago";
 import { resolveHomeTimezone } from "@/lib/time/resolveHomeTimezone";
 import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
+import {
+  filterSimulatedDateKeysWithoutStaleIncompleteMeter,
+  incompleteMeterDateKeysFromPastMeta,
+  pruneStaleIncompleteMeterFromPastDatasetMeta,
+} from "@/lib/usage/pastSimStaleIncompleteMeter";
 import { computeHomeBaseloadKw } from "@/lib/usage/computeHomeBaseloadKw";
 import { getMemoryRssMb, logSimPipelineEvent } from "@/modules/onePathSim/usageSimulator/simObservability";
 import { generateSimulatedCurve } from "@/modules/onePathSim/simulatedUsage/engine";
@@ -660,6 +665,8 @@ export function reconcileRestoredPastDatasetFromDecodedIntervals(args: {
   dataset: any;
   decodedIntervals: Array<{ timestamp: string; kwh?: number; consumption_kwh?: number }>;
   fallbackEndDate: string;
+  /** Live SMT slot-complete days — drop stale SIMULATED_INCOMPLETE_METER ownership on cache restore. */
+  smtSlotCompleteDateKeys?: ReadonlySet<string>;
 }): void {
   const { dataset, decodedIntervals, fallbackEndDate } = args;
   if (!dataset || typeof dataset !== "object" || !Array.isArray(decodedIntervals) || decodedIntervals.length === 0) {
@@ -670,13 +677,24 @@ export function reconcileRestoredPastDatasetFromDecodedIntervals(args: {
   const curveEnd = maxDateKey(lastDecodedTs ? String(lastDecodedTs).slice(0, 10) : "", summaryEnd, fallbackEndDate);
 
   const meta = (dataset as any)?.meta;
+  const staleIncompleteMeterDateKeys = incompleteMeterDateKeysFromPastMeta(meta);
+  if (args.smtSlotCompleteDateKeys?.size && meta && typeof meta === "object") {
+    pruneStaleIncompleteMeterFromPastDatasetMeta(meta as Record<string, unknown>, args.smtSlotCompleteDateKeys);
+  }
   const canonicalSimKeys = readCanonicalSimulatedDateKeysFromDataset(dataset);
-  const simDateKeys =
+  let simDateKeys =
     canonicalSimKeys.size > 0
       ? canonicalSimKeys
       : pastMetaHasExplicitSimulatedDayFields(meta)
         ? simulatedDateKeysUnionFromPastDatasetMeta(meta)
         : simulatedDateKeysFromPastDatasetDaily((dataset as any)?.daily);
+  if (args.smtSlotCompleteDateKeys?.size && staleIncompleteMeterDateKeys.length > 0) {
+    simDateKeys = filterSimulatedDateKeysWithoutStaleIncompleteMeter({
+      simulatedDateKeys: simDateKeys,
+      staleIncompleteMeterDateKeys: new Set(staleIncompleteMeterDateKeys),
+      slotCompleteDateKeys: args.smtSlotCompleteDateKeys,
+    });
+  }
 
   const recomputed = recomputePastAggregatesFromIntervals({
     intervals: decodedIntervals,
