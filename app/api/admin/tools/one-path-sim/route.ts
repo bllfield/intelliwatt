@@ -78,6 +78,7 @@ import {
   SMT_TAIL_WAIT_INTERVAL_MS,
   waitForSmtTailCoverage,
 } from "@/lib/usage/smtTailCoverage";
+import { resolveSmtPersistedCoverageSpan } from "@/lib/usage/smtWindowStatus";
 import { buildRuntimeEnvParityTrace } from "@/modules/onePathSim/runtimeEnvParityTrace";
 import { listScenarios } from "@/modules/usageSimulator/service";
 
@@ -971,7 +972,7 @@ async function waitForOnePathSmtTailCoverage(args: {
   };
 }
 
-function buildOnePathSmtRefreshCheckFromEnsure(
+async function buildOnePathSmtRefreshCheckFromEnsure(
   ensure: EnsureSmtCoverageResult,
   args: {
     correlationId: string;
@@ -981,6 +982,7 @@ function buildOnePathSmtRefreshCheckFromEnsure(
     sourceEsiid: string;
   }
 ) {
+  const persistedSpan = await resolveSmtPersistedCoverageSpan(args.sourceEsiid).catch(() => null);
   logSimPipelineEvent("one_path_smt_tail_backfill_check", {
     correlationId: args.correlationId,
     houseId: args.effectiveHouseId,
@@ -988,7 +990,10 @@ function buildOnePathSmtRefreshCheckFromEnsure(
     sourceUserId: args.sourceUserId,
     sourceEsiid: args.sourceEsiid,
     targetEndDate: ensure.window.endDate,
+    persistedSpanEndDate: persistedSpan?.endDate ?? null,
     incompleteDateKeys: ensure.dayStatus.incompleteDateKeys.join(","),
+    backfillDateKeys: (ensure.backfillDateKeys ?? []).join(","),
+    tailWaitTimedOut: Boolean(ensure.tailWaitTimedOut),
     healed: ensure.healed,
     skippedReason: ensure.skippedReason ?? null,
     source: "one-path-admin",
@@ -1508,7 +1513,7 @@ export async function POST(request: NextRequest) {
         : null;
     const smtRefreshCheck =
       onePathSmtHeal
-        ? buildOnePathSmtRefreshCheckFromEnsure(
+        ? await buildOnePathSmtRefreshCheckFromEnsure(
             await ensureSmtCoverageForHouse({
               userId: onePathSmtHeal.userId,
               houseId: onePathSmtHeal.houseId,

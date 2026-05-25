@@ -182,6 +182,13 @@ export async function ensureSmtCoverageForHouse(args: {
   }
 
   const waits = waitBudgetForProfile(args.profile);
+  const spanBehindCanonicalEnd = Boolean(
+    persistedSpan && persistedSpan.endDate < window.endDate
+  );
+  const tailWaitMs =
+    args.profile === "admin_sim" && spanBehindCanonicalEnd
+      ? ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS
+      : waits.tailWaitMs;
   const backfillDateKeys = resolveSmtHealBackfillDateKeys({
     dayStatus,
     persistedSpan,
@@ -259,7 +266,7 @@ export async function ensureSmtCoverageForHouse(args: {
   const tailWait = await waitForSmtTailCoverage({
     esiid,
     targetEndDate: window.endDate,
-    timeoutMs: waits.tailWaitMs,
+    timeoutMs: tailWaitMs,
     intervalMs: SMT_TAIL_WAIT_INTERVAL_MS,
     exitEarlyWhenStalled: waits.tailExitEarlyWhenStalled,
   });

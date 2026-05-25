@@ -33,8 +33,11 @@ export const USER_USAGE_SMT_TAIL_WAIT_TIMEOUT_MS = 8_000;
 export const USER_USAGE_PULL_FETCH_TIMEOUT_MS = 18_000;
 /** After a pull from user refresh, bounded deferred PENDING_SMT repair wait. */
 export const USER_USAGE_DEFERRED_REPAIR_WAIT_MS = 6_000;
-/** One Path admin run: short poll; exit early when SMT counts stop changing. */
-export const ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS = 20_000;
+/**
+ * One Path admin pre/post sim heal: poll after pull/backfill until tail slot counts settle.
+ * Use 90s so FTP delivery can extend persisted span through canonical end (20s was too short).
+ */
+export const ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS = 90_000;
 /** After targeted incomplete-meter backfill: allow FTP delivery + ingest before giving up. */
 export const ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS = 90_000;
 /** Second pass when a day is one or two intervals short after the first wait times out. */
