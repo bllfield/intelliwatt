@@ -22,7 +22,7 @@ export async function resolveUserSiteActualSourceForHouse(args: {
   const { getActualUsageDatasetForHouse } = await import("@/lib/usage/actualDatasetForHouse");
   const result = await getActualUsageDatasetForHouse(args.houseId, null, {
     skipFullYearIntervalFetch: true,
-    preferredActualSource: null,
+    preferredSource: null,
   }).catch(() => null);
   const src = String(result?.dataset?.summary?.source ?? "").trim().toUpperCase();
   if (src === "SMT" || src === "GREEN_BUTTON") return src;
