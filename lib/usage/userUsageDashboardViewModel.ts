@@ -1,6 +1,7 @@
 import { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
 import { enumerateDateKeysInclusive } from "@/lib/time/chicago";
 import { fillCanonicalDailyTotals, resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
+import { readPastValidationPolicyRevisionFromMeta } from "@/lib/usage/pastSimulationCoreLabel";
 import { buildDisplayedMonthlyRows } from "@/modules/usageSimulator/monthlyCompareRows";
 import type { UserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
 
@@ -296,6 +297,7 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
     dailyUsageDisclosureNote:
       buildSmtPendingIntervalsDisclosure(meta) ?? buildGreenButtonShiftDisclosure(meta),
     sourceOfDaySimulationCore: (meta.sourceOfDaySimulationCore as string) || null,
+    pastValidationPolicyRevision: readPastValidationPolicyRevisionFromMeta(meta),
   };
 
   const monthly = dataset?.monthly ?? dataset?.insights?.monthlyTotals ?? [];

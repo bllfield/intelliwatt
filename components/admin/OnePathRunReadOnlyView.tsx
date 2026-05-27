@@ -205,6 +205,12 @@ export function OnePathRunReadOnlyView(props: {
               <div className="mt-2 text-xs text-brand-navy/80" aria-live="polite">
                 WAPE {Number(view.compare.metrics?.wape ?? 0).toFixed(2)}% · MAE{" "}
                 {Number(view.compare.metrics?.mae ?? 0).toFixed(2)} · RMSE {Number(view.compare.metrics?.rmse ?? 0).toFixed(2)}
+                {view.summary.pastValidationPolicyRevision ? (
+                  <>
+                    {" "}
+                    · Validation policy {view.summary.pastValidationPolicyRevision}
+                  </>
+                ) : null}
               </div>
             ) : null}
           </div>

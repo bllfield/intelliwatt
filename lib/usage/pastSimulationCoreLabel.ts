@@ -14,3 +14,9 @@ export function stampSharedPastSimulationCoreMeta(meta: Record<string, unknown>)
   meta.sourceOfDaySimulationCore = formatSharedPastSimulationCoreLabel();
   meta.pastValidationPolicyRevision = PAST_VALIDATION_POLICY_REVISION;
 }
+
+export function readPastValidationPolicyRevisionFromMeta(meta: unknown): string | null {
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
+  const value = (meta as Record<string, unknown>).pastValidationPolicyRevision;
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}

@@ -58,6 +58,8 @@ describe("OnePathRunReadOnlyView source contract", () => {
     expect(source).toContain("WAPE");
     expect(source).toContain("MAE");
     expect(source).toContain("RMSE");
+    expect(source).toContain("Validation policy");
+    expect(source).toContain("pastValidationPolicyRevision");
     expect(source).toContain("Show details");
     expect(source).toContain("Hide details");
     expect(compareSource).toContain("Day Type");
