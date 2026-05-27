@@ -305,6 +305,6 @@ export type PastDayApplianceProfile = {
 };
 
 /** Lightweight metadata to prove both paths use the same core. */
-export const PAST_DAY_SIMULATOR_VERSION = "1.0.0";
+export const PAST_DAY_SIMULATOR_VERSION = "1.1.0";
 export const SOURCE_OF_DAY_SIMULATION_CORE = "shared_past_day_simulator";
 

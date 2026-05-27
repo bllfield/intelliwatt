@@ -29,7 +29,11 @@ import { buildPastSimulatedBaselineV1 } from "@/modules/onePathSim/simulatedUsag
 import { getHouseWeatherDays } from "@/modules/weather/repo";
 import { WEATHER_STUB_SOURCE } from "@/modules/weather/types";
 import { ensureHouseWeatherBackfill, ensureHouseWeatherNormalAvgBackfill } from "@/modules/weather/backfill";
-import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/onePathSim/simulatedUsage/pastDaySimulator";
+import {
+  formatSharedPastSimulationCoreLabel,
+  stampSharedPastSimulationCoreMeta,
+} from "@/lib/usage/pastSimulationCoreLabel";
+import { PAST_VALIDATION_POLICY_REVISION } from "@/lib/usage/pastValidationPolicy";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
@@ -2678,7 +2682,8 @@ export async function simulatePastUsageDataset(
           lowDataShapeAdapterUsed: lowDataShapeAdapterUsed ? true : undefined,
           /** Low-data modes can still score explicit keep-ref days, but no longer auto-expand the entire window. */
           lowDataKeepRefModeledDays: keepRefUtcDateKeys.size > 0 ? true : undefined,
-          sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
+          sourceOfDaySimulationCore: formatSharedPastSimulationCoreLabel(),
+          pastValidationPolicyRevision: PAST_VALIDATION_POLICY_REVISION,
           derivationVersion: PAST_ENGINE_VERSION,
           simVersion: PAST_ENGINE_VERSION,
           weekdayWeekendSplitUsed: !!usageShapeProfileSnap,

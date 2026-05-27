@@ -14,6 +14,9 @@ export const CANONICAL_PAST_SMT_VALIDATION_SELECTION_MODE: ValidationDaySelectio
 /** Canonical Past SMT validation-day count when callers do not override. */
 export const CANONICAL_PAST_SMT_VALIDATION_DAY_COUNT = 14;
 
+/** Bumped when shared user/One Path validation selection policy changes. */
+export const PAST_VALIDATION_POLICY_REVISION = "unified_stratified_14_v1";
+
 export type ResolvedPastSmtValidationPolicy = {
   owner: ValidationPolicyOwner;
   selectionMode: ValidationDaySelectionMode;

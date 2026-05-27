@@ -15,7 +15,8 @@ import {
   markGapfillCompareRunFailed,
   markGapfillCompareRunRunning,
 } from "@/modules/onePathSim/usageSimulator/compareRunSnapshot";
-import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/onePathSim/simulatedUsage/pastDaySimulator";
+import { formatSharedPastSimulationCoreLabel } from "@/lib/usage/pastSimulationCoreLabel";
+import { PAST_VALIDATION_POLICY_REVISION } from "@/lib/usage/pastValidationPolicy";
 import { attachFailureContract } from "@/lib/api/usageSimulationApiContract";
 import {
   shiftIsoDateUtc,
@@ -535,7 +536,8 @@ export async function runGapfillCompareCorePipeline(
   const compareTruth = {
     compareSharedCalcPath:
       "getSimulatedUsageForHouseScenario(/api/user/usage/simulated/house artifact_only)->persisted_artifact_compare_read",
-    sourceOfDaySimulationCore: SOURCE_OF_DAY_SIMULATION_CORE,
+    sourceOfDaySimulationCore: formatSharedPastSimulationCoreLabel(),
+    pastValidationPolicyRevision: PAST_VALIDATION_POLICY_REVISION,
     validationDaysTruthSource: "canonical_saved_artifact_family",
     userPipelineParitySource,
   };

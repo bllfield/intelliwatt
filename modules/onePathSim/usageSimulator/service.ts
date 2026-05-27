@@ -76,7 +76,7 @@ import {
 import { normalizeMonthlyTotals, WEATHER_NORMALIZER_VERSION, type WeatherPreference } from "@/modules/weatherNormalization/normalizer";
 import { getHouseWeatherDays } from "@/modules/weather/repo";
 import { ensureHouseWeatherBackfill, ensureHouseWeatherNormalAvgBackfill } from "@/modules/weather/backfill";
-import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/onePathSim/simulatedUsage/pastDaySimulator";
+import { stampSharedPastSimulationCoreMeta } from "@/lib/usage/pastSimulationCoreLabel";
 import type { SimulatedDayResult } from "@/modules/onePathSim/simulatedUsage/pastDaySimulatorTypes";
 import { resolveOnePathWeatherGuardDecision, summarizeOnePathWeatherAvailability } from "@/modules/onePathSim/weatherAvailability";
 import {
@@ -5841,6 +5841,7 @@ async function recalcSimulatorBuildImpl(args: {
     lockboxRunContext: runContext,
     lockboxPerDayTrace: perDayTrace,
   };
+  stampSharedPastSimulationCoreMeta((dataset as any).meta as Record<string, unknown>);
   const releasedSimulatedDayBuffers = releaseSimulatedDayResultBuffers(pastSimulatedDayResults);
   pastSimulatedDayResults = undefined;
   logSimPipelineEvent("recalc_simulated_day_buffer_release", {
@@ -7715,7 +7716,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
             (dataset.meta as any).pastWindowDiag = pastWindowDiag;
             (dataset.meta as any).pastBuildIntervalsFetchCount = 0;
             (dataset.meta as any).cacheKeyDiag = cacheKeyDiag;
-            (dataset.meta as any).sourceOfDaySimulationCore = SOURCE_OF_DAY_SIMULATION_CORE;
+            stampSharedPastSimulationCoreMeta(dataset.meta as Record<string, unknown>);
             (dataset.meta as any).buildPathKind = "cache_restore";
             (dataset.meta as any).artifactReadMode = "allow_rebuild";
             (dataset.meta as any).artifactSource = "past_cache";
@@ -7794,7 +7795,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
               (dataset.meta as any).pastWindowDiag = pastWindowDiag;
               (dataset.meta as any).pastBuildIntervalsFetchCount = 1;
               (dataset.meta as any).cacheKeyDiag = cacheKeyDiag;
-              (dataset.meta as any).sourceOfDaySimulationCore = SOURCE_OF_DAY_SIMULATION_CORE;
+              stampSharedPastSimulationCoreMeta(dataset.meta as Record<string, unknown>);
               (dataset.meta as any).dailyRowCount = Array.isArray(dataset.daily) ? dataset.daily.length : 0;
               (dataset.meta as any).intervalCount = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15.length : 0;
               if (scenarioKey !== "BASELINE") {

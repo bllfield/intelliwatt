@@ -1524,6 +1524,13 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                   WAPE {Number(scenarioCompareProjection.metrics?.wape ?? 0).toFixed(2)}% · MAE{" "}
                   {Number(scenarioCompareProjection.metrics?.mae ?? 0).toFixed(2)} · RMSE{" "}
                   {Number(scenarioCompareProjection.metrics?.rmse ?? 0).toFixed(2)}
+                  {typeof scenarioSimHouseOverride?.[0]?.dataset?.meta?.pastValidationPolicyRevision === "string" ? (
+                    <>
+                      {" "}
+                      · Validation policy{" "}
+                      {String(scenarioSimHouseOverride?.[0]?.dataset?.meta?.pastValidationPolicyRevision)}
+                    </>
+                  ) : null}
                 </div>
               ) : null}
             </div>
