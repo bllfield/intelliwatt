@@ -20,6 +20,7 @@ import {
   resolveCanonicalPastValidationDayCount,
   resolveCanonicalPastValidationSelectionMode,
   resolvePastSmtValidationPolicy,
+  shouldReconcilePastSmtValidationSelection,
 } from "@/lib/usage/pastValidationPolicy";
 import { upsertSimulatedUsageBuckets } from "@/lib/usage/simulatedUsageBuckets";
 import { usagePrisma } from "@/lib/db/usageClient";
@@ -7039,11 +7040,18 @@ export async function getSimulatedUsageForHouseScenario(args: {
           .map((v) => String(v ?? "").slice(0, 10))
           .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
       : [];
+    const storedValidationSelectionMode =
+      (buildInputs as any)?.effectiveValidationSelectionMode ??
+      (buildInputs as any)?.validationSelectionMode ??
+      null;
     const isPastScenarioForValidationBackfill =
       Boolean(scenarioId) &&
       scenarioRow?.name === WORKSPACE_PAST_NAME &&
       String((buildInputs as any)?.mode ?? "") === "SMT_BASELINE" &&
-      buildValidationKeys.length === 0;
+      shouldReconcilePastSmtValidationSelection({
+        storedSelectionMode: storedValidationSelectionMode,
+        storedValidationKeyCount: buildValidationKeys.length,
+      });
     if (isPastScenarioForValidationBackfill) {
       const weatherPreferenceRaw = String((buildInputs as any)?.weatherPreference ?? "NONE");
       const weatherPreference: WeatherPreference =
@@ -7064,7 +7072,8 @@ export async function getSimulatedUsageForHouseScenario(args: {
         validationDaySelectionMode: validationBackfillPolicy.selectionMode,
         validationDayCount: validationBackfillPolicy.validationDayCount,
         runContext: {
-          callerLabel: "validation_backfill",
+          callerLabel:
+            buildValidationKeys.length === 0 ? "validation_backfill" : "validation_policy_reconcile",
           buildPathKind: "recalc",
           persistRequested: true,
         },

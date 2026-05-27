@@ -6,6 +6,7 @@ import {
   resolvePastValidationEngineInput,
   resolveUserValidationPolicy,
   resolveAdminValidationPolicy,
+  shouldReconcilePastSmtValidationSelection,
 } from "@/lib/usage/pastValidationPolicy";
 
 describe("pastValidationPolicy", () => {
@@ -51,5 +52,32 @@ describe("pastValidationPolicy", () => {
         validationDayCount: 21,
       }).selectionMode
     ).toBe("random_simple");
+  });
+
+  it("reconciles legacy random_simple and count drift but preserves manual picks", () => {
+    expect(
+      shouldReconcilePastSmtValidationSelection({
+        storedSelectionMode: "random_simple",
+        storedValidationKeyCount: 4,
+      })
+    ).toBe(true);
+    expect(
+      shouldReconcilePastSmtValidationSelection({
+        storedSelectionMode: "stratified_weather_balanced",
+        storedValidationKeyCount: 4,
+      })
+    ).toBe(true);
+    expect(
+      shouldReconcilePastSmtValidationSelection({
+        storedSelectionMode: "stratified_weather_balanced",
+        storedValidationKeyCount: CANONICAL_PAST_SMT_VALIDATION_DAY_COUNT,
+      })
+    ).toBe(false);
+    expect(
+      shouldReconcilePastSmtValidationSelection({
+        storedSelectionMode: "manual",
+        storedValidationKeyCount: 4,
+      })
+    ).toBe(false);
   });
 });

@@ -101,3 +101,24 @@ export function resolveAdminValidationPolicy(args: {
     validationDayCount: args.validationDayCount,
   });
 }
+
+/**
+ * True when a persisted Past SMT build should re-run auto validation-day selection
+ * (missing keys, legacy random_simple picks, or drift from canonical mode/count).
+ * Manual date picks are left untouched.
+ */
+export function shouldReconcilePastSmtValidationSelection(args: {
+  storedSelectionMode?: string | null;
+  storedValidationKeyCount: number;
+}): boolean {
+  const canonical = resolvePastSmtValidationPolicy({ surface: "user_site" });
+  const storedMode = normalizeValidationSelectionMode(args.storedSelectionMode);
+  const keyCount = Math.max(0, Math.floor(Number(args.storedValidationKeyCount) || 0));
+
+  if (keyCount === 0) return true;
+  if (storedMode === "manual") return false;
+  if (storedMode === "random_simple") return true;
+  if (storedMode !== canonical.selectionMode) return true;
+  if (keyCount !== canonical.validationDayCount) return true;
+  return false;
+}

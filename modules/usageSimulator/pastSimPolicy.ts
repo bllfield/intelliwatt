@@ -16,6 +16,7 @@ export {
   resolvePastSmtValidationPolicy,
   resolvePastValidationEngineInput,
   resolveUserValidationPolicy,
+  shouldReconcilePastSmtValidationSelection,
 } from "@/lib/usage/pastValidationPolicy";
 
 export type TestHomeUsageInputMode =
