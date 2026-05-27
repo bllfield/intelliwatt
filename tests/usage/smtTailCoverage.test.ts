@@ -7,6 +7,7 @@ import {
   filterDateKeysWithinCanonicalWindow,
   filterDateKeysWithinPersistedSpan,
   isSmtHealScopeReady,
+  isTailOnlySmtHealRequest,
   resolveSmtHealBackfillDateKeys,
   resolveSmtHealBackfillDateKeysWithTailExtension,
   isGreenButtonPrimaryDataset,
@@ -240,6 +241,36 @@ describe("smt tail coverage helpers", () => {
       persistedSpan: { startDate: "2025-05-24", endDate: "2026-05-19" },
     });
     expect(keys).toEqual(["2026-05-20", "2026-05-21", "2026-05-22", "2026-05-23"]);
+  });
+
+  it("detects tail-only heal when gaps are after persisted span end", () => {
+    const dayStatus = {
+      window: { startDate: "2025-05-24", endDate: "2026-05-23" },
+      dateKeys: [],
+      byDate: {},
+      completeDateKeys: [],
+      incompleteDateKeys: ["2026-05-22", "2026-05-23"],
+      pendingDateKeys: [],
+      incompleteMeterDateKeys: [],
+      canonicalEndDayComplete: false,
+      ready: false,
+    };
+    const persistedSpan = { startDate: "2025-05-24", endDate: "2026-05-21" };
+    const backfillDateKeys = resolveSmtHealBackfillDateKeysWithTailExtension({
+      dayStatus,
+      persistedSpan,
+    });
+    expect(isTailOnlySmtHealRequest({ dayStatus, persistedSpan, backfillDateKeys })).toBe(true);
+    expect(
+      isTailOnlySmtHealRequest({
+        dayStatus: {
+          ...dayStatus,
+          incompleteDateKeys: ["2026-05-20", "2026-05-22", "2026-05-23"],
+        },
+        persistedSpan,
+        backfillDateKeys: ["2026-05-20", "2026-05-22", "2026-05-23"],
+      })
+    ).toBe(false);
   });
 
   it("uses a long admin tail wait budget for FTP ingest", () => {

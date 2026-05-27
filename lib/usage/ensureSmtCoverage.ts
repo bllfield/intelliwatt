@@ -18,6 +18,7 @@ import {
 } from "@/lib/usage/smtWindowStatus";
 import {
   isSmtHealScopeReady,
+  isTailOnlySmtHealRequest,
   ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS,
   resolveSmtHealBackfillDateKeysWithTailExtension,
   ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS,
@@ -194,6 +195,9 @@ export async function ensureSmtCoverageForHouse(args: {
     persistedSpan,
     extraDateKeys: args.extraBackfillDateKeys,
   });
+  const tailOnlyUserHeal =
+    args.profile === "user_session" &&
+    isTailOnlySmtHealRequest({ dayStatus, persistedSpan, backfillDateKeys });
 
   let refreshResult: UsageRefreshResult | undefined;
   let targetedBackfill: TargetedSmtIntervalBackfillResult | undefined;
@@ -203,7 +207,7 @@ export async function ensureSmtCoverageForHouse(args: {
   let tailWaitTimedOut = false;
   let incompleteMeterWaitTimedOut = false;
 
-  if (!args.skipUsageRefresh) {
+  if (!args.skipUsageRefresh && !tailOnlyUserHeal) {
     refreshResult = await tryUsageRefreshForHouse({
       userId: args.userId,
       houseId: args.houseId,
@@ -222,14 +226,16 @@ export async function ensureSmtCoverageForHouse(args: {
       message: error instanceof Error ? error.message : String(error),
     }));
 
-    postTargetedBackfillRefreshResult = await tryUsageRefreshForHouse({
-      userId: args.userId,
-      houseId: args.houseId,
-      skipGapFill: true,
-      sessionKey,
-    });
-    if (postTargetedBackfillRefreshResult && postTargetedBackfillRefreshResult.ok !== false) {
-      refreshResult = postTargetedBackfillRefreshResult;
+    if (!tailOnlyUserHeal) {
+      postTargetedBackfillRefreshResult = await tryUsageRefreshForHouse({
+        userId: args.userId,
+        houseId: args.houseId,
+        skipGapFill: true,
+        sessionKey,
+      });
+      if (postTargetedBackfillRefreshResult && postTargetedBackfillRefreshResult.ok !== false) {
+        refreshResult = postTargetedBackfillRefreshResult;
+      }
     }
 
     const incompleteWait = await waitForSmtDateCoverage({
@@ -243,34 +249,42 @@ export async function ensureSmtCoverageForHouse(args: {
     incompleteMeterWaitTimedOut = incompleteWait.timedOut;
   }
 
-  deferredRepair = await runDeferredPendingSmtDayRepairs({
-    esiid,
-    userId: args.userId,
-    houseId: args.houseId,
-    waitTimeoutMs: waits.deferredWaitMs,
-  }).catch(() => ({
-    attempted: false,
-    eligibleDateKeys: [],
-    pullDateKey: "",
-  }));
-
-  reconcile =
-    deferredRepair.reconcile ??
-    (await reconcileSmtIntervalDayLedger({
+  if (tailOnlyUserHeal) {
+    reconcile = await reconcileSmtIntervalDayLedger({
       esiid,
       canonicalStartDate: window.startDate,
       canonicalEndDate: window.endDate,
-    }).catch(() => null)) ??
-    undefined;
+    }).catch(() => null) ?? undefined;
+  } else {
+    deferredRepair = await runDeferredPendingSmtDayRepairs({
+      esiid,
+      userId: args.userId,
+      houseId: args.houseId,
+      waitTimeoutMs: waits.deferredWaitMs,
+    }).catch(() => ({
+      attempted: false,
+      eligibleDateKeys: [],
+      pullDateKey: "",
+    }));
 
-  const tailWait = await waitForSmtTailCoverage({
-    esiid,
-    targetEndDate: window.endDate,
-    timeoutMs: tailWaitMs,
-    intervalMs: SMT_TAIL_WAIT_INTERVAL_MS,
-    exitEarlyWhenStalled: waits.tailExitEarlyWhenStalled,
-  });
-  tailWaitTimedOut = tailWait.timedOut;
+    reconcile =
+      deferredRepair.reconcile ??
+      (await reconcileSmtIntervalDayLedger({
+        esiid,
+        canonicalStartDate: window.startDate,
+        canonicalEndDate: window.endDate,
+      }).catch(() => null)) ??
+      undefined;
+
+    const tailWait = await waitForSmtTailCoverage({
+      esiid,
+      targetEndDate: window.endDate,
+      timeoutMs: tailWaitMs,
+      intervalMs: SMT_TAIL_WAIT_INTERVAL_MS,
+      exitEarlyWhenStalled: waits.tailExitEarlyWhenStalled,
+    });
+    tailWaitTimedOut = tailWait.timedOut;
+  }
 
   dayStatus = await loadSmtWindowDayStatus({ esiid });
   healedSessionKeys.add(throttleKey);

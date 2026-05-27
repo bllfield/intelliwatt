@@ -333,6 +333,21 @@ export function resolveSmtHealBackfillDateKeysWithTailExtension(args: {
   ]);
 }
 
+/** True when heal only needs calendar days after persisted span end (typical 1–2 day SMT lag). */
+export function isTailOnlySmtHealRequest(args: {
+  dayStatus: SmtWindowStatusSnapshot;
+  persistedSpan: SmtPersistedCoverageSpan | null;
+  backfillDateKeys: string[];
+}): boolean {
+  if (!args.persistedSpan || args.backfillDateKeys.length === 0) return false;
+  const inSpanKeys = resolveSmtHealBackfillDateKeys({
+    dayStatus: args.dayStatus,
+    persistedSpan: args.persistedSpan,
+  });
+  if (inSpanKeys.length > 0) return false;
+  return args.backfillDateKeys.every((dateKey) => dateKey > args.persistedSpan!.endDate);
+}
+
 /** True when persisted SMT data has reached and completed the canonical window end day. */
 export function isSmtHealScopeReady(
   dayStatus: SmtWindowStatusSnapshot,
