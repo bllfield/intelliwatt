@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyPastSimDisplayTruthOverlay,
+  applyPastSimDisplayTruthToDataset,
   filterSimulatedDateKeysWithoutStaleIncompleteMeter,
   incompleteMeterDateKeysFromPastMeta,
   pruneStaleIncompleteMeterFromPastDatasetMeta,
@@ -77,5 +78,29 @@ describe("pastSimStaleIncompleteMeter", () => {
       sourceDetail: "ACTUAL",
     });
     expect(rows[1]?.kwh).toBe(11.2);
+  });
+
+  it("applyPastSimDisplayTruthToDataset updates daily and series.daily", () => {
+    const dataset: Record<string, unknown> = {
+      daily: [
+        {
+          date: "2025-11-02",
+          kwh: 33.48,
+          source: "SIMULATED",
+          sourceDetail: "SIMULATED_INCOMPLETE_METER",
+        },
+      ],
+      series: {
+        daily: [{ timestamp: "2025-11-02T00:00:00.000Z", kwh: 33.48, source: "SIMULATED" }],
+      },
+    };
+    applyPastSimDisplayTruthToDataset(dataset, {
+      sageByDate: new Map([["2025-11-02", 34.9]]),
+      smtSlotCompleteDateKeys: new Set(["2025-11-02"]),
+    });
+    expect((dataset.daily as Array<{ source: string; kwh: number }>)[0]).toMatchObject({
+      source: "ACTUAL",
+      kwh: 34.9,
+    });
   });
 });

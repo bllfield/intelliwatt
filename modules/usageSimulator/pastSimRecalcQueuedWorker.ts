@@ -1,4 +1,4 @@
-import { recalcSimulatorBuild } from "@/modules/usageSimulator/service";
+import { runOnePathSimulatorBuild } from "@/modules/onePathSim/serviceBridge";
 import {
   markPastSimRecalcJobFailed,
   markPastSimRecalcJobRunning,
@@ -24,7 +24,7 @@ async function loadPayload(jobId: string): Promise<PastSimRecalcQueuedPayloadV1 
 }
 
 /**
- * Droplet entry: run canonical `recalcSimulatorBuild` (same module as Vercel) for a queued job.
+ * Droplet entry: run One Path `recalcSimulatorBuild` (same as Vercel inline recalc) for a queued job.
  */
 export async function runPastSimRecalcQueuedWorker(jobId: string): Promise<void> {
   const payload = await loadPayload(jobId);
@@ -33,7 +33,7 @@ export async function runPastSimRecalcQueuedWorker(jobId: string): Promise<void>
     return;
   }
   await markPastSimRecalcJobRunning(jobId);
-  const out = await recalcSimulatorBuild({
+  const out = await runOnePathSimulatorBuild({
     userId: payload.userId,
     houseId: payload.houseId,
     esiid: payload.esiid,

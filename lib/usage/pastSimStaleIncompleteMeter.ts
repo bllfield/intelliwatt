@@ -111,6 +111,38 @@ export async function resolveStaleIncompleteMeterSlotCompleteDateKeys(args: {
  * Display: relabel stale SIMULATED_INCOMPLETE_METER rows to ACTUAL when live SMT says slot-complete.
  * Applies sage daily kWh when provided (Usage/baseline truth).
  */
+/** Apply sage + stale incomplete-meter truth to persisted Past dataset daily rows (user/admin read). */
+export function applyPastSimDisplayTruthToDataset(
+  dataset: Record<string, unknown> | null | undefined,
+  args: {
+    sageByDate?: Map<string, number>;
+    smtSlotCompleteDateKeys?: ReadonlySet<string>;
+  }
+): void {
+  if (!dataset || typeof dataset !== "object") return;
+  const daily = Array.isArray(dataset.daily) ? (dataset.daily as DailyRowWithSource[]) : [];
+  if (!daily.length) return;
+  const enriched = applyPastSimDisplayTruthOverlay(daily, args);
+  dataset.daily = enriched;
+  const series = dataset.series;
+  if (series && typeof series === "object" && !Array.isArray(series) && Array.isArray((series as { daily?: unknown }).daily)) {
+    const byDate = new Map(enriched.map((row) => [String(row.date ?? "").slice(0, 10), row]));
+    (series as { daily: Array<Record<string, unknown>> }).daily = (
+      series as { daily: Array<Record<string, unknown>> }
+    ).daily.map((row) => {
+      const dk = String(row?.date ?? row?.timestamp ?? "").slice(0, 10);
+      const truth = byDate.get(dk);
+      if (!truth) return row;
+      return {
+        ...row,
+        kwh: truth.kwh,
+        source: truth.source,
+        sourceDetail: truth.sourceDetail,
+      };
+    });
+  }
+}
+
 export function applyPastSimDisplayTruthOverlay<T extends DailyRowWithSource>(
   rows: T[],
   args: {

@@ -3,11 +3,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { buildUserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
-import { getSimulatedUsageForHouseScenario } from "@/modules/usageSimulator/service";
+import { readOnePathSimulatedUsageScenario } from "@/modules/onePathSim/serviceBridge";
+import { resolveOnePathUpstreamUsageTruthForSimulation } from "@/modules/onePathSim/runtime";
 import { resolveIntervalsLayer } from "@/lib/usage/resolveIntervalsLayer";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import { ensureUsageShapeProfileForUserHouse } from "@/modules/usageShapeProfile/autoBuild";
-import { createSimCorrelationId } from "@/modules/usageSimulator/simObservability";
+import { createSimCorrelationId } from "@/modules/onePathSim/usageSimulator/simObservability";
+import {
+  applyPastSimDisplayTruthToDataset,
+  resolveStaleIncompleteMeterSlotCompleteDateKeys,
+} from "@/lib/usage/pastSimStaleIncompleteMeter";
+import { sageActualDailyKwhByDate } from "@/lib/usage/sageActualDailyTruth";
 import { attachFailureContract, correlationHeaders } from "@/lib/api/usageSimulationApiContract";
 import { buildManualUsageReadDecorations } from "@/modules/manualUsage/pastSimReadResult";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
@@ -132,15 +138,29 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    let out = await getSimulatedUsageForHouseScenario({
+    const scenarioRow = await prisma.usageSimulatorScenario.findFirst({
+      where: { id: scenarioId, userId: u.user.id, houseId, archivedAt: null },
+      select: { name: true },
+    });
+    const readModeParam = String(searchParams.get("readMode") ?? "").trim();
+    const readMode =
+      readModeParam === "allow_rebuild"
+        ? "allow_rebuild"
+        : readModeParam === "artifact_only"
+          ? "artifact_only"
+          : scenarioRow?.name === "Future (What-if)"
+            ? "allow_rebuild"
+            : "artifact_only";
+
+    let out = await readOnePathSimulatedUsageScenario({
       userId: u.user.id,
       houseId,
       scenarioId,
       correlationId,
-      readMode: "allow_rebuild",
+      readMode,
       projectionMode: "baseline",
       readContext: {
-        artifactReadMode: "allow_rebuild",
+        artifactReadMode: readMode,
         projectionMode: "baseline",
         compareSidecarRequest: true,
       },
@@ -157,15 +177,15 @@ export async function GET(request: NextRequest) {
         timezone: "America/Chicago",
       });
       if (rebuilt.ok) {
-        out = await getSimulatedUsageForHouseScenario({
+        out = await readOnePathSimulatedUsageScenario({
           userId: u.user.id,
           houseId,
           scenarioId,
           correlationId,
-          readMode: "allow_rebuild",
+          readMode,
           projectionMode: "baseline",
           readContext: {
-            artifactReadMode: "allow_rebuild",
+            artifactReadMode: readMode,
             projectionMode: "baseline",
             compareSidecarRequest: true,
           },
@@ -188,19 +208,35 @@ export async function GET(request: NextRequest) {
         dataset: datasetAny,
         callerType: "user_past",
         correlationId,
-        readMode: "allow_rebuild",
+        readMode,
       });
       const okHeaders = new Headers({ "Cache-Control": cacheControl });
       okHeaders.set("X-Correlation-Id", correlationId);
-      const [homeProfile, applianceProfileRec, manualUsageRec, house] = await Promise.all([
+      const house = await prisma.houseAddress.findFirst({
+        where: { id: houseId, userId: u.user.id, archivedAt: null },
+        select: { id: true, esiid: true },
+      });
+      const [homeProfile, applianceProfileRec, manualUsageRec, sageTruth, smtSlotCompleteDateKeys] = await Promise.all([
         getHomeProfileSimulatedByUserHouse({ userId: u.user.id, houseId }),
         getApplianceProfileSimulatedByUserHouse({ userId: u.user.id, houseId }),
         getManualUsageInputForUserHouse({ userId: u.user.id, houseId }).catch(() => ({ payload: null })),
-        prisma.houseAddress.findFirst({
-          where: { id: houseId, userId: u.user.id, archivedAt: null },
-          select: { id: true, esiid: true },
+        resolveOnePathUpstreamUsageTruthForSimulation({
+          userId: u.user.id,
+          houseId,
+          actualContextHouseId: houseId,
+          smtSourceEsiid: house?.esiid ?? null,
+          seedIfMissing: false,
+          preferredActualSource: null,
+        }).catch(() => null),
+        resolveStaleIncompleteMeterSlotCompleteDateKeys({
+          esiid: house?.esiid ?? null,
+          meta: datasetAny?.meta,
         }),
       ]);
+      applyPastSimDisplayTruthToDataset(datasetAny, {
+        sageByDate: sageActualDailyKwhByDate(sageTruth?.dataset),
+        smtSlotCompleteDateKeys,
+      });
       const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRec?.appliancesJson as any) ?? null);
       const persistedScore = (datasetAny?.meta as any)?.weatherSensitivityScore ?? null;
       const persistedDerivedInput = (datasetAny?.meta as any)?.weatherEfficiencyDerivedInput ?? null;
@@ -240,6 +276,8 @@ export async function GET(request: NextRequest) {
         weatherSensitivityScore: weatherSensitivity.score,
         weatherEfficiencyDerivedInput: weatherSensitivity.derivedInput,
         correlationId,
+        simulationProducer: "one_path",
+        readModeUsed: readMode,
       };
       return NextResponse.json(successBody, { headers: okHeaders });
     }

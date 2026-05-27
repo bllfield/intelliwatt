@@ -1,4 +1,4 @@
-import { recalcSimulatorBuild } from "@/modules/usageSimulator/service";
+import { runOnePathSimulatorBuild } from "@/modules/onePathSim/serviceBridge";
 import type { SimulatorMode } from "@/modules/usageSimulator/requirements";
 import type { WeatherPreference } from "@/modules/weatherNormalization/normalizer";
 import type { ValidationDaySelectionMode } from "@/modules/usageSimulator/validationSelection";
@@ -28,12 +28,12 @@ export type PastSimRecalcDispatchResult =
     }
   | {
       executionMode: "inline";
-      result: Awaited<ReturnType<typeof recalcSimulatorBuild>>;
+      result: Awaited<ReturnType<typeof runOnePathSimulatorBuild>>;
       correlationId: string;
     };
 
 /**
- * Canonical Past sim recalc entry: same `recalcSimulatorBuild` as always; optionally enqueues for droplet.
+ * Canonical Past sim recalc entry: One Path `recalcSimulatorBuild` via serviceBridge; optionally enqueues for droplet.
  */
 export async function dispatchPastSimRecalc(args: {
   userId: string;
@@ -80,10 +80,10 @@ export async function dispatchPastSimRecalc(args: {
       return { executionMode: "droplet_async", jobId: enq.jobId, correlationId };
     }
   }
-  let result: Awaited<ReturnType<typeof recalcSimulatorBuild>>;
+  let result: Awaited<ReturnType<typeof runOnePathSimulatorBuild>>;
   try {
     result = await raceWithTimeout(
-      recalcSimulatorBuild({
+      runOnePathSimulatorBuild({
         userId: args.userId,
         houseId: args.houseId,
         esiid: args.esiid,

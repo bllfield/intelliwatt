@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const recalcSimulatorBuild = vi.fn();
+const runOnePathSimulatorBuild = vi.fn();
 
-vi.mock("@/modules/usageSimulator/service", () => ({
-  recalcSimulatorBuild: (...args: unknown[]) => recalcSimulatorBuild(...args),
+vi.mock("@/modules/onePathSim/serviceBridge", () => ({
+  runOnePathSimulatorBuild: (...args: unknown[]) => runOnePathSimulatorBuild(...args),
 }));
 
 const findUnique = vi.fn();
@@ -22,17 +22,17 @@ vi.mock("@/lib/db/usageClient", () => ({
 import { runPastSimRecalcQueuedWorker } from "@/modules/usageSimulator/pastSimRecalcQueuedWorker";
 
 /**
- * Slice 12 / plan §4: droplet worker must call the same `recalcSimulatorBuild` as inline execution
+ * Slice 12 / plan §4: droplet worker must call the same One Path build as inline execution
  * (no alternate simulator module). correlationId must flow from queued payload (plan §6).
  */
 describe("runPastSimRecalcQueuedWorker", () => {
   beforeEach(() => {
-    recalcSimulatorBuild.mockReset();
+    runOnePathSimulatorBuild.mockReset();
     findUnique.mockReset();
     update.mockClear();
   });
 
-  it("invokes recalcSimulatorBuild with payload fields including correlationId (canonical single path)", async () => {
+  it("invokes runOnePathSimulatorBuild with payload fields including correlationId (canonical single path)", async () => {
     const cid = "aaaaaaaa-bbbb-4ccc-dddd-eeeeeeeeeeee";
     findUnique.mockResolvedValue({
       jobKind: "past_sim_recalc",
@@ -47,7 +47,7 @@ describe("runPastSimRecalcQueuedWorker", () => {
         correlationId: cid,
       },
     });
-    recalcSimulatorBuild.mockResolvedValue({
+    runOnePathSimulatorBuild.mockResolvedValue({
       ok: true,
       houseId: "h1",
       buildInputsHash: "hash",
@@ -56,8 +56,8 @@ describe("runPastSimRecalcQueuedWorker", () => {
 
     await runPastSimRecalcQueuedWorker("job-1");
 
-    expect(recalcSimulatorBuild).toHaveBeenCalledTimes(1);
-    expect(recalcSimulatorBuild.mock.calls[0][0]).toMatchObject({
+    expect(runOnePathSimulatorBuild).toHaveBeenCalledTimes(1);
+    expect(runOnePathSimulatorBuild.mock.calls[0][0]).toMatchObject({
       userId: "u1",
       houseId: "h1",
       mode: "SMT_BASELINE",
@@ -65,12 +65,12 @@ describe("runPastSimRecalcQueuedWorker", () => {
     });
   });
 
-  it("marks job failed and does not call recalcSimulatorBuild when payload is missing", async () => {
+  it("marks job failed and does not call runOnePathSimulatorBuild when payload is missing", async () => {
     findUnique.mockResolvedValue(null);
 
     await runPastSimRecalcQueuedWorker("missing");
 
-    expect(recalcSimulatorBuild).not.toHaveBeenCalled();
+    expect(runOnePathSimulatorBuild).not.toHaveBeenCalled();
     expect(update).toHaveBeenCalled();
     const failedCall = update.mock.calls.find(
       (c) => c[0]?.data?.status === "failed" || c[0]?.data?.failureMessage != null
