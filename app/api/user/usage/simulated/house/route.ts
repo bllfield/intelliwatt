@@ -152,19 +152,29 @@ export async function GET(request: NextRequest) {
             ? "allow_rebuild"
             : "artifact_only";
 
-    let out = await readOnePathSimulatedUsageScenario({
-      userId: u.user.id,
-      houseId,
-      scenarioId,
-      correlationId,
-      readMode,
-      projectionMode: "baseline",
-      readContext: {
-        artifactReadMode: readMode,
+    const readPastScenario = (mode: "artifact_only" | "allow_rebuild") =>
+      readOnePathSimulatedUsageScenario({
+        userId: u.user.id,
+        houseId,
+        scenarioId,
+        correlationId,
+        readMode: mode,
         projectionMode: "baseline",
-        compareSidecarRequest: true,
-      },
-    });
+        readContext: {
+          artifactReadMode: mode,
+          projectionMode: "baseline",
+          compareSidecarRequest: true,
+        },
+      });
+
+    let readModeUsed: "artifact_only" | "allow_rebuild" = readMode;
+    let out = await readPastScenario(readMode);
+    // Usage/baseline show live SMT; Past still needs a persisted sim artifact. Prefer artifact read, but
+    // self-heal when cache is missing (e.g. engine v11 bump) instead of failing the tab.
+    if (!out.ok && out.code === "ARTIFACT_MISSING" && readMode === "artifact_only") {
+      readModeUsed = "allow_rebuild";
+      out = await readPastScenario("allow_rebuild");
+    }
     const message = String((out as any)?.message ?? "");
     const shouldAutoBuildProfile =
       !out.ok &&
@@ -177,19 +187,7 @@ export async function GET(request: NextRequest) {
         timezone: "America/Chicago",
       });
       if (rebuilt.ok) {
-        out = await readOnePathSimulatedUsageScenario({
-          userId: u.user.id,
-          houseId,
-          scenarioId,
-          correlationId,
-          readMode,
-          projectionMode: "baseline",
-          readContext: {
-            artifactReadMode: readMode,
-            projectionMode: "baseline",
-            compareSidecarRequest: true,
-          },
-        });
+        out = await readPastScenario(readModeUsed);
       }
     }
     // Past/Future: never cache so each open uses latest state (e.g. Future always sees latest Past).
@@ -208,7 +206,7 @@ export async function GET(request: NextRequest) {
         dataset: datasetAny,
         callerType: "user_past",
         correlationId,
-        readMode,
+        readMode: readModeUsed,
       });
       const okHeaders = new Headers({ "Cache-Control": cacheControl });
       okHeaders.set("X-Correlation-Id", correlationId);
@@ -277,7 +275,8 @@ export async function GET(request: NextRequest) {
         weatherEfficiencyDerivedInput: weatherSensitivity.derivedInput,
         correlationId,
         simulationProducer: "one_path",
-        readModeUsed: readMode,
+        readModeUsed,
+        artifactRebuildFallback: readMode === "artifact_only" && readModeUsed === "allow_rebuild",
       };
       return NextResponse.json(successBody, { headers: okHeaders });
     }
