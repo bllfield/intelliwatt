@@ -2,12 +2,8 @@ import { prisma } from "@/lib/db";
 import { getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
 import { buildValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
 import { loadDisplayProfilesForHouse } from "@/modules/usageSimulator/profileDisplay";
-import {
-  getSharedPastCoverageWindowForHouse,
-  getSimulatedUsageForHouseScenario,
-  getUserDefaultValidationSelectionMode,
-} from "@/modules/usageSimulator/service";
-import { resolveUserValidationPolicy } from "@/modules/usageSimulator/pastSimPolicy";
+import { resolvePastSmtValidationPolicy } from "@/lib/usage/pastValidationPolicy";
+import { getSharedPastCoverageWindowForHouse, getSimulatedUsageForHouseScenario } from "@/modules/usageSimulator/service";
 import { buildSharedPastSimDiagnostics } from "@/modules/usageSimulator/sharedDiagnostics";
 import { boundDateKeysToCoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 import { travelRangesToExcludeDateKeys } from "@/modules/usageSimulator/build";
@@ -143,7 +139,6 @@ export async function buildSourceHomePastSimSnapshot(args: {
     sourceTravelRangesFromDb,
     sourceBuildRow,
     sourceProfiles,
-    defaultValidationSelectionMode,
     sourceActualUsageResult,
   ] =
     await Promise.all([
@@ -168,16 +163,12 @@ export async function buildSourceHomePastSimSnapshot(args: {
         userId: args.userId,
         houseId: args.sourceHouse.id,
       }).catch(() => ({ homeProfile: null, applianceProfile: null })),
-      getUserDefaultValidationSelectionMode(),
       getActualUsageDatasetForHouse(args.sourceHouse.id, args.sourceHouse.esiid ? String(args.sourceHouse.esiid) : null, {
         skipFullYearIntervalFetch: true,
       }).catch(() => ({ dataset: null })),
     ]);
 
-  const userValidationPolicy = resolveUserValidationPolicy({
-    defaultSelectionMode: defaultValidationSelectionMode,
-    validationDayCount: 21,
-  });
+  const userValidationPolicy = resolvePastSmtValidationPolicy({ surface: "user_site" });
 
   const baselineRead = await readUserPastBaseline({
     userId: args.userId,

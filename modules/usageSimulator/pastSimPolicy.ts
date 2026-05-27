@@ -1,8 +1,22 @@
 import type { AdminLabTreatmentMode } from "@/modules/usageSimulator/adminLabTreatment";
 import type { SimulatorMode } from "@/modules/usageSimulator/requirements";
-import type { ValidationDaySelectionMode } from "@/modules/usageSimulator/validationSelection";
 
-export type ValidationPolicyOwner = "userValidationPolicy" | "adminValidationPolicy";
+export type {
+  PastValidationPolicySurface,
+  ResolvedPastSmtValidationPolicy,
+  ValidationPolicyOwner,
+} from "@/lib/usage/pastValidationPolicy";
+export {
+  CANONICAL_PAST_SMT_VALIDATION_DAY_COUNT,
+  CANONICAL_PAST_SMT_VALIDATION_SELECTION_MODE,
+  normalizePastValidationDayCount,
+  resolveAdminValidationPolicy,
+  resolveCanonicalPastValidationDayCount,
+  resolveCanonicalPastValidationSelectionMode,
+  resolvePastSmtValidationPolicy,
+  resolvePastValidationEngineInput,
+  resolveUserValidationPolicy,
+} from "@/lib/usage/pastValidationPolicy";
 
 export type TestHomeUsageInputMode =
   | "EXACT_INTERVALS"
@@ -10,34 +24,6 @@ export type TestHomeUsageInputMode =
   | "MONTHLY_FROM_SOURCE_INTERVALS"
   | "ANNUAL_FROM_SOURCE_INTERVALS"
   | "PROFILE_ONLY_NEW_BUILD";
-
-export type ResolvedValidationPolicy = {
-  owner: ValidationPolicyOwner;
-  selectionMode: ValidationDaySelectionMode;
-  validationDayCount: number;
-};
-
-export function resolveUserValidationPolicy(args: {
-  defaultSelectionMode: ValidationDaySelectionMode;
-  validationDayCount?: number | null;
-}): ResolvedValidationPolicy {
-  return {
-    owner: "userValidationPolicy",
-    selectionMode: args.defaultSelectionMode,
-    validationDayCount: normalizeValidationDayCount(args.validationDayCount),
-  };
-}
-
-export function resolveAdminValidationPolicy(args: {
-  selectionMode: ValidationDaySelectionMode;
-  validationDayCount?: number | null;
-}): ResolvedValidationPolicy {
-  return {
-    owner: "adminValidationPolicy",
-    selectionMode: args.selectionMode,
-    validationDayCount: normalizeValidationDayCount(args.validationDayCount),
-  };
-}
 
 export function resolveTestHomeUsageInputMode(raw: unknown): TestHomeUsageInputMode {
   const value = String(raw ?? "").trim();
@@ -91,9 +77,4 @@ export function resolveTestHomeUsageModeRecalcConfig(
         simulatorMode: "SMT_BASELINE",
       };
   }
-}
-
-function normalizeValidationDayCount(value: number | null | undefined): number {
-  const normalized = Math.floor(Number(value) || 21);
-  return Math.max(1, Math.min(365, normalized));
 }

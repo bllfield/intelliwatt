@@ -18,12 +18,9 @@ import {
 } from "@/modules/usageSimulator/labTestHome";
 import { getTravelRangesFromDb } from "@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers";
 import { dispatchPastSimRecalc } from "@/modules/onePathSim/usageSimulator/pastSimRecalcDispatch";
-import { resolveUserValidationPolicy } from "@/modules/usageSimulator/pastSimPolicy";
+import { resolvePastSmtValidationPolicy } from "@/lib/usage/pastValidationPolicy";
 import { resolveUserWeatherLogicSetting } from "@/modules/usageSimulator/pastSimWeatherPolicy";
 import { classifySimulationFailure } from "@/modules/usageSimulator/simulationDataAlerts";
-import {
-  getUserDefaultValidationSelectionMode,
-} from "@/modules/usageSimulator/service";
 import { getMemoryRssMb, logSimPipelineEvent } from "@/modules/usageSimulator/simObservability";
 import type { WeatherPreference } from "@/modules/weatherNormalization/normalizer";
 
@@ -336,10 +333,7 @@ async function buildLabPrefill(args: {
 
 async function resolveManualMonthlyLabPolicies(weatherPreference: WeatherPreference = "LAST_YEAR_WEATHER") {
   const userWeatherLogic = resolveUserWeatherLogicSetting(weatherPreference);
-  const userValidationPolicy = resolveUserValidationPolicy({
-    defaultSelectionMode: await getUserDefaultValidationSelectionMode(),
-    validationDayCount: 21,
-  });
+  const userValidationPolicy = resolvePastSmtValidationPolicy({ surface: "user_site" });
   return { userWeatherLogic, userValidationPolicy };
 }
 

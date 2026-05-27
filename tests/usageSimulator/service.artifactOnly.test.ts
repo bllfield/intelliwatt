@@ -282,10 +282,18 @@ describe("monthly/manual constrained trusted interval fingerprint foundation", (
 });
 
 describe("pastSimPolicy split helpers", () => {
-  it("keeps user Past and GapFill Actual Home on userValidationPolicy", () => {
+  it("uses canonical Past validation policy for user site when mode is omitted", () => {
+    expect(resolveUserValidationPolicy({})).toEqual({
+      owner: "userValidationPolicy",
+      selectionMode: "stratified_weather_balanced",
+      validationDayCount: 14,
+    });
+  });
+
+  it("honors explicit user-site validation overrides", () => {
     expect(
       resolveUserValidationPolicy({
-        defaultSelectionMode: "random_simple",
+        validationSelectionMode: "random_simple",
         validationDayCount: 21,
       })
     ).toEqual({

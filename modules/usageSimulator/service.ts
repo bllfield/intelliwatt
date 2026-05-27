@@ -16,6 +16,11 @@ import {
   getIntervalDataFingerprint,
 } from "@/lib/usage/actualDatasetForHouse";
 import { resolveStaleIncompleteMeterSlotCompleteDateKeys } from "@/lib/usage/pastSimStaleIncompleteMeter";
+import {
+  resolveCanonicalPastValidationDayCount,
+  resolveCanonicalPastValidationSelectionMode,
+  resolvePastSmtValidationPolicy,
+} from "@/lib/usage/pastValidationPolicy";
 import { upsertSimulatedUsageBuckets } from "@/lib/usage/simulatedUsageBuckets";
 import { usagePrisma } from "@/lib/db/usageClient";
 import {
@@ -230,7 +235,6 @@ function cleanupStalePastCacheVariants(args: { houseId: string; scenarioId: stri
 const WORKSPACE_PAST_NAME = "Past (Corrected)";
 const WORKSPACE_FUTURE_NAME = "Future (What-if)";
 const DEFAULT_SYSTEM_VALIDATION_SELECTION_MODE: ValidationDaySelectionMode = "random_simple";
-const DEFAULT_ADMIN_LAB_VALIDATION_SELECTION_MODE: ValidationDaySelectionMode = "stratified_weather_balanced";
 
 export async function getUserDefaultValidationSelectionMode(): Promise<ValidationDaySelectionMode> {
   try {
@@ -270,7 +274,7 @@ export async function setUserDefaultValidationSelectionMode(
 }
 
 export function getAdminLabDefaultValidationSelectionMode(): ValidationDaySelectionMode {
-  return DEFAULT_ADMIN_LAB_VALIDATION_SELECTION_MODE;
+  return resolveCanonicalPastValidationSelectionMode();
 }
 async function reportSimulationDataIssue(args: {
   source: "GAPFILL_LAB" | "USER_SIMULATION" | "USAGE_DASHBOARD";
@@ -4927,10 +4931,10 @@ async function recalcSimulatorBuildImpl(args: {
     scenario?.name === WORKSPACE_PAST_NAME
   ) {
     const autoMode =
-      effectiveValidationSelectionMode ?? (await getUserDefaultValidationSelectionMode());
+      effectiveValidationSelectionMode ?? resolveCanonicalPastValidationSelectionMode();
     const selectionStart = sharedPastRecalcWindow?.startDate ?? resolveCanonicalUsage365CoverageWindow().startDate;
     const selectionEnd = sharedPastRecalcWindow?.endDate ?? resolveCanonicalUsage365CoverageWindow().endDate;
-    const targetCount = Math.max(1, Math.min(365, Math.floor(Number(args.validationDayCount) || 21)));
+    const targetCount = resolveCanonicalPastValidationDayCount(args.validationDayCount);
     const travelDateKeysLocal = new Set<string>(
       (allTravelRanges ?? []).flatMap((r) => localDateKeysInRange(r.startDate, r.endDate, timezoneForStoredBuild))
     );
@@ -7048,7 +7052,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
         weatherPreferenceRaw === "LONG_TERM_AVERAGE"
           ? (weatherPreferenceRaw as WeatherPreference)
           : "NONE";
-      const defaultValidationMode = await getUserDefaultValidationSelectionMode();
+      const validationBackfillPolicy = resolvePastSmtValidationPolicy({ surface: "user_site" });
       const backfillRecalc = await recalcSimulatorBuild({
         userId: args.userId,
         houseId: args.houseId,
@@ -7057,8 +7061,8 @@ export async function getSimulatedUsageForHouseScenario(args: {
         scenarioId,
         weatherPreference,
         persistPastSimBaseline: true,
-        validationDaySelectionMode: defaultValidationMode,
-        validationDayCount: 21,
+        validationDaySelectionMode: validationBackfillPolicy.selectionMode,
+        validationDayCount: validationBackfillPolicy.validationDayCount,
         runContext: {
           callerLabel: "validation_backfill",
           buildPathKind: "recalc",

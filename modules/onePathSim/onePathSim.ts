@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { monthsEndingAt } from "@/lib/time/chicago";
 import { hydrateGreenButtonInsightsForCoverageWindow } from "@/lib/usage/actualDatasetForHouse";
 import { fillCanonicalDailyTotals } from "@/lib/usage/canonicalMetadataWindow";
+import { resolvePastValidationEngineInput } from "@/lib/usage/pastValidationPolicy";
 import { resolveGreenButtonBaselineCoverageWindow } from "@/lib/usage/greenButtonCoverage";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import {
@@ -217,6 +218,19 @@ export type ManualAnnualRawInput = IntervalRawInput & {
 };
 
 export type NewBuildRawInput = IntervalRawInput;
+
+function resolveAdminLabPastValidationInput(raw: {
+  validationSelectionMode?: string | null;
+  validationDayCount?: number | null;
+  validationOnlyDateKeysLocal?: string[];
+}) {
+  return resolvePastValidationEngineInput({
+    surface: "admin_lab",
+    validationSelectionMode: raw.validationSelectionMode,
+    validationDayCount: raw.validationDayCount,
+    validationOnlyDateKeysLocal: raw.validationOnlyDateKeysLocal ?? [],
+  });
+}
 
 type LoadedSharedContext = {
   house: { id: string; esiid: string | null };
@@ -1599,12 +1613,13 @@ export async function adaptIntervalRawInput(raw: IntervalRawInput): Promise<Cano
     weatherScoringMode: "interval",
     preferredActualSource: raw.preferredActualSource ?? null,
   });
+  const validationInput = resolveAdminLabPastValidationInput(raw);
   return buildCanonicalEngineInput({
     inputType: "INTERVAL",
     scenarioId: raw.scenarioId ?? null,
     weatherPreference: normalizeWeatherPreference(raw.weatherPreference),
-    validationSelectionMode: raw.validationSelectionMode ?? null,
-    validationDayCount: raw.validationDayCount ?? null,
+    validationSelectionMode: validationInput.validationSelectionMode,
+    validationDayCount: validationInput.validationDayCount,
     validationOnlyDateKeysLocal: raw.validationOnlyDateKeysLocal ?? [],
     travelRanges: raw.travelRanges ?? [],
     persistRequested: raw.persistRequested,
@@ -1673,12 +1688,13 @@ export async function adaptGreenButtonRawInput(raw: IntervalRawInput): Promise<C
       }
     }
   }
+  const validationInput = resolveAdminLabPastValidationInput(raw);
   return buildCanonicalEngineInput({
     inputType: "GREEN_BUTTON",
     scenarioId: raw.scenarioId ?? null,
     weatherPreference: normalizeWeatherPreference(raw.weatherPreference),
-    validationSelectionMode: raw.validationSelectionMode ?? null,
-    validationDayCount: raw.validationDayCount ?? null,
+    validationSelectionMode: validationInput.validationSelectionMode,
+    validationDayCount: validationInput.validationDayCount,
     validationOnlyDateKeysLocal: raw.validationOnlyDateKeysLocal ?? [],
     travelRanges: raw.travelRanges ?? [],
     persistRequested: raw.persistRequested,
@@ -1759,12 +1775,13 @@ export async function adaptManualMonthlyRawInput(raw: ManualMonthlyRawInput): Pr
     weatherScoringMode: "manual",
     preferredActualSource: raw.preferredActualSource ?? null,
   });
+  const validationInput = resolveAdminLabPastValidationInput(raw);
   return buildCanonicalEngineInput({
     inputType: "MANUAL_MONTHLY",
     scenarioId: raw.scenarioId ?? null,
     weatherPreference: normalizeWeatherPreference(raw.weatherPreference),
-    validationSelectionMode: raw.validationSelectionMode ?? null,
-    validationDayCount: raw.validationDayCount ?? null,
+    validationSelectionMode: validationInput.validationSelectionMode,
+    validationDayCount: validationInput.validationDayCount,
     validationOnlyDateKeysLocal: raw.validationOnlyDateKeysLocal ?? [],
     travelRanges: raw.travelRanges ?? [],
     persistRequested: raw.persistRequested,
@@ -1789,12 +1806,13 @@ export async function adaptManualAnnualRawInput(raw: ManualAnnualRawInput): Prom
     weatherScoringMode: "manual",
     preferredActualSource: raw.preferredActualSource ?? null,
   });
+  const validationInput = resolveAdminLabPastValidationInput(raw);
   return buildCanonicalEngineInput({
     inputType: "MANUAL_ANNUAL",
     scenarioId: raw.scenarioId ?? null,
     weatherPreference: normalizeWeatherPreference(raw.weatherPreference),
-    validationSelectionMode: raw.validationSelectionMode ?? null,
-    validationDayCount: raw.validationDayCount ?? null,
+    validationSelectionMode: validationInput.validationSelectionMode,
+    validationDayCount: validationInput.validationDayCount,
     validationOnlyDateKeysLocal: raw.validationOnlyDateKeysLocal ?? [],
     travelRanges: raw.travelRanges ?? [],
     persistRequested: raw.persistRequested,
@@ -1813,12 +1831,13 @@ export async function adaptNewBuildRawInput(raw: NewBuildRawInput): Promise<Cano
     weatherScoringMode: "interval",
     preferredActualSource: raw.preferredActualSource ?? null,
   });
+  const validationInput = resolveAdminLabPastValidationInput(raw);
   return buildCanonicalEngineInput({
     inputType: "NEW_BUILD",
     scenarioId: raw.scenarioId ?? null,
     weatherPreference: normalizeWeatherPreference(raw.weatherPreference),
-    validationSelectionMode: raw.validationSelectionMode ?? null,
-    validationDayCount: raw.validationDayCount ?? null,
+    validationSelectionMode: validationInput.validationSelectionMode,
+    validationDayCount: validationInput.validationDayCount,
     validationOnlyDateKeysLocal: raw.validationOnlyDateKeysLocal ?? [],
     travelRanges: raw.travelRanges ?? [],
     persistRequested: raw.persistRequested,

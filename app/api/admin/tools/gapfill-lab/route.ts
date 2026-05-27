@@ -70,11 +70,11 @@ import {
   ADMIN_LAB_TREATMENT_MODES,
   isAdminLabTreatmentMode,
 } from "@/modules/usageSimulator/adminLabTreatment";
+import { resolvePastSmtValidationPolicy } from "@/lib/usage/pastValidationPolicy";
 import {
   resolveAdminValidationPolicy,
   resolveTestHomeUsageInputMode,
   resolveTestHomeUsageModeRecalcConfig,
-  resolveUserValidationPolicy,
   type TestHomeUsageInputMode,
   type ValidationPolicyOwner,
 } from "@/modules/usageSimulator/pastSimPolicy";
@@ -1791,9 +1791,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const userValidationPolicy = resolveUserValidationPolicy({
-      defaultSelectionMode: await getUserDefaultValidationSelectionMode(),
-      validationDayCount: testDaysRequested != null ? testDaysRequested : 21,
+    const userValidationPolicy = resolvePastSmtValidationPolicy({
+      surface: "user_site",
+      validationDayCount: testDaysRequested ?? undefined,
     });
     const travelRangesFromDb = await getTravelRangesFromDb(labOwnerUser.id, testHomeHouse.id);
     const sourceTravelRangesFromDb = await getTravelRangesFromDb(
@@ -2989,9 +2989,9 @@ export async function POST(req: NextRequest) {
         };
       }
     }
-    const userValidationPolicy = resolveUserValidationPolicy({
-      defaultSelectionMode: await getUserDefaultValidationSelectionMode(),
-      validationDayCount: testDaysRequested != null ? testDaysRequested : 21,
+    const userValidationPolicy = resolvePastSmtValidationPolicy({
+      surface: "user_site",
+      validationDayCount: testDaysRequested ?? undefined,
     });
     const travelRangesFromDb = await getTravelRangesFromDb(labOwnerUser.id, testHomeHouse.id);
     const sourceTravelRangesFromDb = await getTravelRangesFromDb(
