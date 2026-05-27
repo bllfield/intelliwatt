@@ -22,11 +22,11 @@
       "memory": 1024
     },
     "app/api/user/usage/refresh/route.ts": {
-      "maxDuration": 60,
+      "maxDuration": 120,
       "memory": 1024
     },
     "app/api/user/smt/orchestrate/route.ts": {
-      "maxDuration": 60,
+      "maxDuration": 30,
       "memory": 1024
     },
     "app/api/user/usage/simulated/route.ts": {

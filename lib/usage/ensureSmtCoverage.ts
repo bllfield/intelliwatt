@@ -35,7 +35,7 @@ import {
   type UsageRefreshResult,
 } from "@/lib/usage/userUsageRefresh";
 
-export type EnsureSmtCoverageProfile = "user_session" | "sim_run" | "admin_sim";
+export type EnsureSmtCoverageProfile = "user_session" | "user_refresh" | "sim_run" | "admin_sim";
 
 export type EnsureSmtCoverageSkippedReason = "session_throttle" | "no_esiid" | "window_ready";
 
@@ -72,7 +72,7 @@ function waitBudgetForProfile(profile: EnsureSmtCoverageProfile): {
   deferredWaitMs: number;
   tailExitEarlyWhenStalled: boolean;
 } {
-  if (profile === "user_session") {
+  if (profile === "user_session" || profile === "user_refresh") {
     return {
       tailWaitMs: USER_USAGE_SMT_TAIL_WAIT_TIMEOUT_MS,
       incompleteMeterWaitMs: USER_USAGE_SMT_TAIL_WAIT_TIMEOUT_MS,
@@ -226,7 +226,7 @@ export async function ensureSmtCoverageForHouse(args: {
       message: error instanceof Error ? error.message : String(error),
     }));
 
-    if (!tailOnlyUserHeal) {
+    if (!tailOnlyUserHeal && args.profile !== "user_refresh") {
       postTargetedBackfillRefreshResult = await tryUsageRefreshForHouse({
         userId: args.userId,
         houseId: args.houseId,

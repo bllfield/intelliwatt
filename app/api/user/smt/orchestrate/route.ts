@@ -6,25 +6,22 @@ import { normalizeEmail } from "@/lib/utils/email";
 import { pickBestSmtAuthorization } from "@/lib/smt/authorizationSelection";
 import { getRollingBackfillRange, refreshSmtAuthorizationStatus } from "@/lib/smt/agreements";
 import { chicagoDateKey } from "@/lib/time/chicago";
-import { ensureSmtCoverageForHouse } from "@/lib/usage/ensureSmtCoverage";
+import { kickSmtUserDelivery } from "@/lib/usage/smtUserOrchestrateKick";
 import {
   loadSmtWindowDayStatus,
   SMT_REQUIRED_SLOTS_PER_DAY,
   smtWindowCompletenessRatio,
+  type SmtWindowStatusSnapshot,
 } from "@/lib/usage/smtWindowStatus";
 import {
   resolveSmtUserProcessingStage,
   type SmtUserProcessingStage,
 } from "@/lib/usage/smtUserProcessingStage";
-import {
-  resolveUserUsageSessionKey,
-  USER_USAGE_SESSION_COOKIE,
-} from "@/lib/usage/userUsageSessionKey";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-/** Poll + ensureSmtCoverage; bounded pull via userUsageRefresh (vercel.json also sets 60). */
-export const maxDuration = 60;
+/** Status poll + lightweight delivery kick only; full heal runs on POST /api/user/usage/refresh. */
+export const maxDuration = 30;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SMT_PULL_COOLDOWN_MS = 30 * DAY_MS;
@@ -103,7 +100,9 @@ type UsageCoverage = {
   message: string | null;
 };
 
-async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverage> {
+async function computeUsageCoverageForEsiid(
+  esiid: string,
+): Promise<UsageCoverage & { windowStatus: SmtWindowStatusSnapshot }> {
   // Target 12-month window drives pull eligibility and gap messaging only.
   // Readiness matches usage/status: every canonical window day 96/96 and no pending raw files.
   const target = getRollingBackfillRange(12);
@@ -267,6 +266,7 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
     ready,
     phase,
     message,
+    windowStatus,
   };
 }
 
@@ -275,8 +275,8 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
  *
  * Orchestrates:
  * - SMT status refresh (rate-limited via refreshSmtAuthorizationStatus cooldown)
- * - Once ACTIVE: requests interval backfill (rate-limited via smtBackfillRequestedAt)
- * - Once ACTIVE: triggers SMT pull on droplet periodically (rate-limited via smtLastSyncAt)
+ * - Lightweight delivery kick (backfill request + fire-and-forget pull when no rows yet)
+ * - Status polling only — full heal runs on POST /api/user/usage/refresh
  *
  * Body: { homeId?: string }
  */
@@ -426,11 +426,10 @@ export async function POST(req: NextRequest) {
 
   // Always compute current usage coverage for visibility (cheap DB-only).
   const usage = await computeUsageCoverageForEsiid(effectiveEsiid);
-  let windowStatus = await loadSmtWindowDayStatus({ esiid: effectiveEsiid });
+  let windowStatus = usage.windowStatus;
 
-  // Throttle only automatic polling: avoid running backfill + pull on every poll (e.g. every 5–30s).
-  // Without this, the dashboard would trigger dozens of backfill/pull requests per minute and hammer SMT/droplet.
-  // User-initiated refresh bypasses this (force=true) and the "Refresh SMT Data" button also calls /api/user/usage/refresh so backfill + pull always run on click.
+  // Throttle automatic delivery kicks (backfill request / dispatch pull). Full heal runs on
+  // POST /api/user/usage/refresh (explicit Refresh SMT Data). Poll calls stay status-only.
   const ORCHESTRATOR_COOLDOWN_MS = (() => {
     const raw = (process.env.SMT_ORCHESTRATOR_COOLDOWN_MS ?? "").trim();
     const n = Number.parseInt(raw, 10);
@@ -455,18 +454,12 @@ export async function POST(req: NextRequest) {
   const backfillEnvRaw = (process.env.SMT_INTERVAL_BACKFILL_ENABLED ?? "").toString().trim().toLowerCase();
   const backfillEnvEnabled = backfillEnvRaw === "true" || backfillEnvRaw === "1" || backfillEnvRaw === "yes";
 
-  const usageSessionKey = resolveUserUsageSessionKey({
-    userId: user.id,
-    request: req,
-    cookieValue: cookieStore.get(USER_USAGE_SESSION_COOKIE)?.value ?? null,
-  });
-
   const actions: Record<string, any> = {
     forced: force,
     statusRefreshed: false,
     statusThrottled: false,
-    ensureHealed: false,
-    ensureSkippedReason: null as string | null,
+    deliveryKicked: false,
+    deliveryKickReason: null as string | null,
     orchestratorThrottled: recentlySynced,
     pullEligibleNow: usage.pullEligibleNow,
     pullEligibleAt: usage.pullEligibleAt,
@@ -516,17 +509,21 @@ export async function POST(req: NextRequest) {
     (!usage.ready || (force && usage.pullEligibleNow));
 
   if (shouldWork && (!recentlySynced || force)) {
-    const ensure = await ensureSmtCoverageForHouse({
+    const kick = await kickSmtUserDelivery({
       userId: user.id,
       houseId: house.id,
-      profile: "user_session",
-      sessionKey: usageSessionKey,
-      force,
+      authorizationId: effectiveAuthorizationId,
+      esiid: effectiveEsiid,
+      authorizationStatus: effectiveStatus,
+      usageReady: usage.ready,
+      intervalCount: usage.intervalCount,
+      smtBackfillRequestedAt: effectiveBackfillRequestedAt,
+      meterNumber: effectiveMeterNumber,
     });
-    actions.ensureHealed = ensure.healed;
-    actions.ensureSkippedReason = ensure.skippedReason ?? null;
-    windowStatus = ensure.dayStatus;
-    if (ensure.healed || force) {
+    actions.deliveryKicked = kick.kicked;
+    actions.deliveryKickReason = kick.reason;
+    if (kick.message) actions.deliveryKickMessage = kick.message;
+    if (kick.kicked) {
       await prisma.smtAuthorization
         .update({
           where: { id: effectiveAuthorizationId },

@@ -6,6 +6,7 @@ import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 import { WeatherSensitivityCard } from "@/components/usage/WeatherSensitivityCard";
 import { formatDateLong, formatDateShort } from "@/components/usage/usageFormatting";
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
+import { ensureDashboardSmtOrchestrate } from "@/components/smt/ensureDashboardSmtOrchestrate";
 import type { UserUsageIngestionStatus } from "@/lib/usage/userUsageHouseContract";
 import {
   type ManualAnnualStageOneSummary,
@@ -419,6 +420,12 @@ export const UsageDashboard: React.FC<Props> = ({
           setLoading(false);
         } else {
           setLoading(true);
+        }
+
+        if (effectiveFetchMode === "REAL") {
+          await ensureDashboardSmtOrchestrate(
+            preferredHouseId ? { homeId: preferredHouseId } : {},
+          );
         }
 
         // Single source: Usage/baseline always fetches /api/user/usage (REAL). Past/Future use /api/user/usage/simulated.

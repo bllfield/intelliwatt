@@ -13,7 +13,8 @@
 | Lag (calendar days) | `lib/usage/canonicalCoverageConfig.ts` |
 | Chicago date / slot | `lib/time/chicago.ts` |
 | Per-day 96/96 status | `lib/usage/smtWindowStatus.ts` |
-| Heal (pull, backfill, wait, targeted days) | `lib/usage/ensureSmtCoverage.ts` |
+| Heal (pull, backfill, wait, targeted days) | `lib/usage/ensureSmtCoverage.ts` — **only** from `POST /api/user/usage/refresh`, admin tools, and sim runs (not orchestrate poll) |
+| Dashboard / orchestrate delivery kick | `lib/usage/smtUserOrchestrateKick.ts` — backfill request + fire-and-forget pull; status poll only |
 | 365-day window metadata | `lib/usage/canonicalMetadataWindow.ts` (`canonicalCoverageWindowUtcBounds` for Chicago-local DB range scans) |
 | Home-local 15m calendar (all sources) | `lib/time/homeIntervalCalendar.ts` + `lib/time/actualIntervalCalendar.ts` (`countPresentUnitsForIntervalDay`: SMT uses interval-row count, same as `smtWindowStatus`) |
 | Per-home IANA timezone | `lib/time/resolveHomeTimezone.ts` (`addressState` / explicit override; TX → `America/Chicago`) |

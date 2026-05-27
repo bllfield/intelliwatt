@@ -11,8 +11,8 @@ import {
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs"; // ensure Node runtime for longer executions
-/** User refresh runs ensure + bounded pull; keep under Vercel cap (vercel.json also sets 60). */
-export const maxDuration = 60;
+/** User refresh runs full ensureSmtCoverage; keep under usage route budget (vercel.json also sets 120). */
+export const maxDuration = 120;
 
 export async function POST(req: NextRequest) {
   const cookieStore = cookies();
@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
   const ensure = await ensureSmtCoverageForHouse({
     userId: user.id,
     houseId: requestedHomeId,
-    profile: "user_session",
+    profile: "user_refresh",
     sessionKey,
     force: true,
   });
