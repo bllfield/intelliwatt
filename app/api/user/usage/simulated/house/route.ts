@@ -14,6 +14,7 @@ import {
   resolveStaleIncompleteMeterSlotCompleteDateKeys,
 } from "@/lib/usage/pastSimStaleIncompleteMeter";
 import { sageActualDailyKwhByDate } from "@/lib/usage/sageActualDailyTruth";
+import { isPersistedAdminLabTestHomeLabel } from "@/lib/usage/userSiteSimulationIsolation";
 import { attachFailureContract, correlationHeaders } from "@/lib/api/usageSimulationApiContract";
 import { buildManualUsageReadDecorations } from "@/modules/manualUsage/pastSimReadResult";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
@@ -164,6 +165,7 @@ export async function GET(request: NextRequest) {
           artifactReadMode: mode,
           projectionMode: "baseline",
           compareSidecarRequest: true,
+          userSiteIsolation: true,
         },
       });
 

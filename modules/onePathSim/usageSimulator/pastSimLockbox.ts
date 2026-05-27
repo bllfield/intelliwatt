@@ -66,6 +66,8 @@ export type PastSimReadContext = {
   artifactReadMode: "artifact_only" | "allow_rebuild";
   projectionMode: "baseline" | "raw";
   compareSidecarRequest: boolean;
+  /** When true, strip admin lab cross-house identity from persisted buildInputs before Past read/build. */
+  userSiteIsolation?: boolean;
   displayFormattingFlags?: Record<string, unknown>;
 };
 
@@ -183,12 +185,14 @@ export function buildPastSimReadContext(args: {
   artifactReadMode?: "artifact_only" | "allow_rebuild";
   projectionMode?: "baseline" | "raw";
   compareSidecarRequest?: boolean;
+  userSiteIsolation?: boolean;
   displayFormattingFlags?: Record<string, unknown>;
 }): PastSimReadContext {
   return {
     artifactReadMode: args.artifactReadMode ?? "allow_rebuild",
     projectionMode: args.projectionMode ?? "baseline",
     compareSidecarRequest: args.compareSidecarRequest !== false,
+    ...(args.userSiteIsolation === true ? { userSiteIsolation: true } : {}),
     ...(args.displayFormattingFlags ? { displayFormattingFlags: args.displayFormattingFlags } : {}),
   };
 }

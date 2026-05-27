@@ -17,6 +17,11 @@ import {
 } from "@/lib/usage/actualDatasetForHouse";
 import { redistributeGreenButtonGridZeroSamples } from "@/modules/onePathSim/greenButtonIntervalCorrections";
 import { resolveStaleIncompleteMeterSlotCompleteDateKeys } from "@/lib/usage/pastSimStaleIncompleteMeter";
+import {
+  isolateBuildInputsForUserSite,
+  isUserSiteSimulationCaller,
+  resolveUserSiteActualSourceForHouse,
+} from "@/lib/usage/userSiteSimulationIsolation";
 import { upsertSimulatedUsageBuckets } from "@/lib/usage/simulatedUsageBuckets";
 import { usagePrisma } from "@/lib/db/usageClient";
 import {
@@ -4287,7 +4292,8 @@ async function recalcSimulatorBuildImpl(args: {
   runContext?: Partial<PastSimRunContext>;
 }): Promise<SimulatorRecalcOk | SimulatorRecalcErr> {
   const { userId, houseId, esiid, mode } = args;
-  const actualContextHouseId = String(args.actualContextHouseId ?? houseId);
+  const isUserSiteCaller = isUserSiteSimulationCaller(args.runContext?.callerLabel);
+  const actualContextHouseId = isUserSiteCaller ? houseId : String(args.actualContextHouseId ?? houseId);
   const scenarioKey = normalizeScenarioKey(args.scenarioId);
   const scenarioId = scenarioKey === "BASELINE" ? null : scenarioKey;
   const isBaselineSyntheticInvariantMode =
@@ -6820,6 +6826,38 @@ export async function getSimulatedUsageForUser(args: {
   }
 }
 
+async function applyUserSiteBuildInputsIsolationIfNeeded(args: {
+  userSiteIsolation?: boolean;
+  userId: string;
+  houseId: string;
+  esiid: string | null;
+  buildInputs: SimulatorBuildInputsV1;
+  correlationId?: string;
+}): Promise<SimulatorBuildInputsV1> {
+  if (args.userSiteIsolation !== true) return args.buildInputs;
+  const actualSource = await resolveUserSiteActualSourceForHouse({
+    userId: args.userId,
+    houseId: args.houseId,
+    esiid: args.esiid,
+  });
+  const isolated = isolateBuildInputsForUserSite({
+    buildInputs: args.buildInputs as Record<string, unknown>,
+    requestHouseId: args.houseId,
+    actualSource,
+  });
+  if (isolated.changed) {
+    logSimPipelineEvent("user_site_build_inputs_isolated", {
+      correlationId: args.correlationId,
+      houseId: args.houseId,
+      actualSource,
+      isolationReasons: isolated.reasons.join(","),
+      source: "getSimulatedUsageForHouseScenario",
+      memoryRssMb: getMemoryRssMb(),
+    });
+  }
+  return isolated.buildInputs as SimulatorBuildInputsV1;
+}
+
 export async function getSimulatedUsageForHouseScenario(args: {
   userId: string;
   houseId: string;
@@ -6901,8 +6939,10 @@ export async function getSimulatedUsageForHouseScenario(args: {
       artifactReadMode: args.readContext?.artifactReadMode ?? readMode,
       projectionMode: args.readContext?.projectionMode ?? projectionMode,
       compareSidecarRequest: args.readContext?.compareSidecarRequest ?? true,
+      userSiteIsolation: args.readContext?.userSiteIsolation,
       displayFormattingFlags: args.readContext?.displayFormattingFlags,
     });
+    const userSiteIsolation = readContext.userSiteIsolation === true;
 
     const house = await getHouseAddressForUserHouse({ userId: args.userId, houseId: args.houseId });
     if (!house) return { ok: false, code: "HOUSE_NOT_FOUND", message: "House not found for user" };
@@ -7022,9 +7062,17 @@ export async function getSimulatedUsageForHouseScenario(args: {
         };
       }
 
-      const buildInputs = normalizeLegacyWeatherEfficiencyBuildInputs(
+      let buildInputs = normalizeLegacyWeatherEfficiencyBuildInputs(
         buildRec.buildInputs as Record<string, unknown>
       );
+      buildInputs = await applyUserSiteBuildInputsIsolationIfNeeded({
+        userSiteIsolation,
+        userId: args.userId,
+        houseId: args.houseId,
+        esiid: house.esiid ?? null,
+        buildInputs: buildInputs as SimulatorBuildInputsV1,
+        correlationId,
+      });
       const window = resolveWindowFromBuildInputsForPastIdentity(buildInputs);
       if (!window) {
         return {
@@ -7280,6 +7328,14 @@ export async function getSimulatedUsageForHouseScenario(args: {
     let buildInputs = normalizeLegacyWeatherEfficiencyBuildInputs(
       buildRec.buildInputs as SimulatorBuildInputsV1 & Record<string, unknown>
     ) as SimulatorBuildInputsV1;
+    buildInputs = await applyUserSiteBuildInputsIsolationIfNeeded({
+      userSiteIsolation,
+      userId: args.userId,
+      houseId: args.houseId,
+      esiid: house.esiid ?? null,
+      buildInputs,
+      correlationId,
+    });
     let effectiveBuildInputsHash = String(buildRec.buildInputsHash ?? "");
     // Backfill validation-day compare support on first read for older Past builds
     // that predate validation-key persistence.
