@@ -42,6 +42,27 @@ interface UserInsightRow {
   commissionLifetimeEarnedDollars?: number;
   commissionPendingDollars?: number;
   houseAddressId: string | null;
+  addressLine1?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip5?: string | null;
+  esiid?: string | null;
+  utilityName?: string | null;
+}
+
+function formatPrimaryHouseAddressLines(row: {
+  addressLine1?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip5?: string | null;
+}): { line1: string | null; cityStateZip: string | null } {
+  const line1 = String(row.addressLine1 ?? "").trim() || null;
+  const city = String(row.city ?? "").trim();
+  const state = String(row.state ?? "").trim();
+  const zip5 = String(row.zip5 ?? "").trim();
+  const locality = [city, state].filter(Boolean).join(", ");
+  const cityStateZip = [locality, zip5].filter(Boolean).join(" ").trim() || null;
+  return { line1, cityStateZip };
 }
 
 interface UserInsightsResponse {
@@ -1874,8 +1895,31 @@ export default function AdminDashboard() {
                         </a>
                         <div className="mt-1 text-[11px] text-brand-navy/60">
                           Joined {new Date(row.joinedAt).toLocaleDateString()}
-                          {row.houseAddressId ? ` · House ${row.houseAddressId}` : ""}
                         </div>
+                        {(() => {
+                          const { line1, cityStateZip } = formatPrimaryHouseAddressLines(row);
+                          if (!line1 && !cityStateZip) {
+                            return row.houseAddressId ? (
+                              <div className="mt-0.5 font-mono text-[10px] text-brand-navy/50" title="House ID">
+                                House {row.houseAddressId}
+                              </div>
+                            ) : null;
+                          }
+                          return (
+                            <div className="mt-0.5 text-[11px] leading-snug text-brand-navy/75">
+                              {row.utilityName ? (
+                                <div className="text-brand-navy/60">{row.utilityName}</div>
+                              ) : null}
+                              {line1 ? <div>{line1}</div> : null}
+                              {cityStateZip ? <div>{cityStateZip}</div> : null}
+                              {row.houseAddressId ? (
+                                <div className="font-mono text-[10px] text-brand-navy/50" title="House ID">
+                                  {row.houseAddressId}
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td className="py-3 px-4 text-brand-navy">
                         {row.contractEndDate ? new Date(row.contractEndDate).toLocaleDateString() : "—"}
