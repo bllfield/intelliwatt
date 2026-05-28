@@ -79,7 +79,7 @@ async function dedupeNonStackableEntries(userId: string): Promise<void> {
     where: { userId },
     select: { id: true, label: true, addressLine1: true },
   });
-  const labHouseIds = new Set(
+  const labHouseIds = new Set<string>(
     houseRows
       .filter((house: { id: string; label?: string | null; addressLine1?: string | null }) =>
         isAdminLabTestHomeForUserSite({ label: house.label, addressLine1: house.addressLine1 }),

@@ -128,7 +128,7 @@ export async function GET(request: NextRequest) {
             select: { houseAddressId: true, houseId: true, authorizationEndDate: true },
           })
         : [];
-    const smtAuthorizedVisibleHouseIds = smtAuthsOnVisibleHomes
+    const smtAuthorizedVisibleHouseIds: string[] = smtAuthsOnVisibleHomes
       .filter((row: { authorizationEndDate?: Date | null }) => {
         if (!row.authorizationEndDate) return true;
         return new Date(row.authorizationEndDate).getTime() > now.getTime();
@@ -136,10 +136,10 @@ export async function GET(request: NextRequest) {
       .flatMap((row: { houseAddressId?: string | null; houseId?: string | null }) => {
         const ids = [row.houseAddressId, row.houseId]
           .map((id) => String(id ?? "").trim())
-          .filter((id) => visibleHouseIds.has(id));
+          .filter((id): id is string => Boolean(id) && visibleHouseIds.has(id));
         return ids;
       });
-    const smtAuthorizedVisibleHouseIdSet = new Set(smtAuthorizedVisibleHouseIds);
+    const smtAuthorizedVisibleHouseIdSet = new Set<string>(smtAuthorizedVisibleHouseIds);
     const hasVisibleSmtAuth = smtAuthorizedVisibleHouseIdSet.size > 0;
 
     let hasActiveUsage =
