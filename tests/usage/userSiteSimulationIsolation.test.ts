@@ -10,6 +10,7 @@ import {
   ONE_PATH_LAB_TEST_HOME_LABEL,
 } from "@/modules/usageSimulator/labTestHome";
 import {
+  buildVisibleHouseEntryCounts,
   isAdminLabTestHomeForUserSite,
   pickCanonicalNonStackableEntryId,
   pickVisibleHouseIdForSmtEntrySync,
@@ -29,6 +30,30 @@ describe("userSiteSimulationIsolation", () => {
     expect(isPersistedAdminLabTestHomeLabel("Brian Home")).toBe(false);
     expect(isAdminLabTestHomeForUserSite({ label: ONE_PATH_LAB_TEST_HOME_LABEL })).toBe(true);
     expect(isAdminLabTestHomeForUserSite({ addressLine1: "One Path Lab Test Home" })).toBe(true);
+  });
+
+  it("prefers house-assigned row over null houseId when deduping", () => {
+    const keepId = pickCanonicalNonStackableEntryId(
+      [
+        { id: "global-new", houseId: null, createdAt: "2026-05-01T00:00:00.000Z" },
+        { id: "real-old", houseId: "real-home", createdAt: "2026-01-01T00:00:00.000Z" },
+      ],
+      new Set(),
+    );
+    expect(keepId).toBe("real-old");
+  });
+
+  it("rolls account-level entries into primary home display counts", () => {
+    const { total, byHouseId } = buildVisibleHouseEntryCounts({
+      entries: [
+        { amount: 1, status: "ACTIVE", houseId: "real-home" },
+        { amount: 1, status: "ACTIVE", houseId: null },
+      ],
+      visibleHouses: [{ id: "real-home", isPrimary: true }],
+      visibleHouseIds: new Set(["real-home"]),
+    });
+    expect(total).toBe(2);
+    expect(byHouseId.get("real-home")).toBe(2);
   });
 
   it("prefers non-lab house when deduping non-stackable entries", () => {

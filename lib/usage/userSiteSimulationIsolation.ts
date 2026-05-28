@@ -100,9 +100,46 @@ export function pickCanonicalNonStackableEntryId<T extends { id: string; houseId
     const leftLab = left.houseId && labHouseIds.has(left.houseId) ? 1 : 0;
     const rightLab = right.houseId && labHouseIds.has(right.houseId) ? 1 : 0;
     if (leftLab !== rightLab) return leftLab - rightLab;
+    const leftUnassigned = left.houseId ? 0 : 1;
+    const rightUnassigned = right.houseId ? 0 : 1;
+    if (leftUnassigned !== rightUnassigned) return leftUnassigned - rightUnassigned;
     return entryCreatedAtMs(right.createdAt) - entryCreatedAtMs(left.createdAt);
   });
   return sorted[0]?.id ?? null;
+}
+
+/** Per-home jackpot counts; account-level rows (null houseId) roll into the primary visible home. */
+export function buildVisibleHouseEntryCounts(args: {
+  entries: Array<{ amount: number; status: string; houseId?: string | null }>;
+  visibleHouses: Array<{ id: string; isPrimary?: boolean | null }>;
+  visibleHouseIds: Set<string>;
+}): { total: number; byHouseId: Map<string, number> } {
+  const primaryHouseId =
+    args.visibleHouses.find((house) => house.isPrimary)?.id ?? args.visibleHouses[0]?.id ?? null;
+
+  const byHouseId = new Map<string, number>();
+  for (const house of args.visibleHouses) {
+    byHouseId.set(house.id, 0);
+  }
+
+  let unattributed = 0;
+  for (const entry of args.entries) {
+    if (!isEligibleJackpotEntryStatus(entry.status)) continue;
+    const houseId = entry.houseId ?? null;
+    if (houseId && !args.visibleHouseIds.has(houseId)) continue;
+    if (houseId && byHouseId.has(houseId)) {
+      byHouseId.set(houseId, (byHouseId.get(houseId) ?? 0) + entry.amount);
+      continue;
+    }
+    unattributed += entry.amount;
+  }
+
+  if (unattributed > 0 && primaryHouseId) {
+    byHouseId.set(primaryHouseId, (byHouseId.get(primaryHouseId) ?? 0) + unattributed);
+  }
+
+  const total = sumEligibleUserVisibleEntryAmount(args.entries, args.visibleHouseIds);
+  return { total, byHouseId };
 }
 
 export function pickVisibleHouseIdForSmtEntrySync(args: {
