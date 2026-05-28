@@ -15,6 +15,7 @@ import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator
 import { IntervalSeriesKind } from '@/modules/usageSimulator/kinds';
 import { toPublicHouseLabel } from "@/modules/usageSimulator/houseLabel";
 import { prepareUserSiteGreenButtonDisplayUsage } from "@/lib/usage/greenButtonChartInsights";
+import { filterUserVisibleHouses } from "@/lib/usage/userSiteSimulationIsolation";
 import {
   classifySimulationFailure,
   recordSimulationDataAlert,
@@ -59,17 +60,19 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'User not found' }, { status: 404 });
     }
 
-    const houses = await prisma.houseAddress.findMany({
-      where: { userId: user.id, archivedAt: null },
-      select: {
-        id: true,
-        label: true,
-        addressLine1: true,
-        addressCity: true,
-        addressState: true,
-        esiid: true,
-      },
-    });
+    const houses = filterUserVisibleHouses(
+      await prisma.houseAddress.findMany({
+        where: { userId: user.id, archivedAt: null },
+        select: {
+          id: true,
+          label: true,
+          addressLine1: true,
+          addressCity: true,
+          addressState: true,
+          esiid: true,
+        },
+      }),
+    );
 
     const results = [];
     const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();

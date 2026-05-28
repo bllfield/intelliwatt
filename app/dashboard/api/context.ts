@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { pickBestSmtAuthorization } from "@/lib/smt/authorizationSelection";
 import { normalizeEmail } from "@/lib/utils/email";
+import { filterUserVisibleHouses } from "@/lib/usage/userSiteSimulationIsolation";
 
 type UserSummary = { id: string; email: string };
 
@@ -19,6 +20,7 @@ type HouseSummary = {
   utilityName: string | null;
   isPrimary: boolean;
   archivedAt: Date | null;
+  label?: string | null;
 };
 
 export type UsageEntryContext = {
@@ -94,19 +96,15 @@ export async function loadUsageEntryContext(): Promise<UsageEntryContext> {
         utilityName: true,
         isPrimary: true,
         archivedAt: true,
+        label: true,
       } satisfies Record<string, boolean>;
 
-      houseAddress =
-        (await prismaAny.houseAddress.findFirst({
-          where: { userId: user.id, archivedAt: null, isPrimary: true },
-          orderBy: { createdAt: "desc" },
-          select,
-        })) ??
-        (await prismaAny.houseAddress.findFirst({
-          where: { userId: user.id, archivedAt: null },
-          orderBy: { createdAt: "desc" },
-          select,
-        }));
+      const houseCandidates = await prismaAny.houseAddress.findMany({
+        where: { userId: user.id, archivedAt: null },
+        orderBy: [{ isPrimary: "desc" }, { createdAt: "desc" }],
+        select,
+      });
+      houseAddress = filterUserVisibleHouses(houseCandidates)[0] ?? null;
     }
 
     let existingAuthorization: UsageEntryContext["existingAuthorization"] = null;

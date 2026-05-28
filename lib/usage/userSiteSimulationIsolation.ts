@@ -1,15 +1,44 @@
 import {
   GAPFILL_LAB_TEST_HOME_LABEL,
   MANUAL_MONTHLY_LAB_TEST_HOME_LABEL,
-} from "@/modules/onePathSim/usageSimulator/labTestHome";
+  ONE_PATH_LAB_TEST_HOME_LABEL,
+} from "@/modules/usageSimulator/labTestHome";
 
 export function isUserSiteSimulationCaller(callerLabel: string | null | undefined): boolean {
   return /^user_/i.test(String(callerLabel ?? "").trim());
 }
 
+/** Admin-only lab houses (Gapfill / Manual Monthly / One Path) must not appear on user-site UI. */
+export function isAdminLabTestHomeForUserSite(args: {
+  label?: string | null;
+  addressLine1?: string | null;
+}): boolean {
+  const normalized = String(args.label ?? "").trim();
+  if (
+    normalized === GAPFILL_LAB_TEST_HOME_LABEL ||
+    normalized === MANUAL_MONTHLY_LAB_TEST_HOME_LABEL ||
+    normalized === ONE_PATH_LAB_TEST_HOME_LABEL
+  ) {
+    return true;
+  }
+  const addressLine1 = String(args.addressLine1 ?? "").trim().toLowerCase();
+  return (
+    addressLine1 === "gap-fill canonical lab test home" ||
+    addressLine1 === "manual monthly lab test home" ||
+    addressLine1 === "one path lab test home"
+  );
+}
+
 export function isPersistedAdminLabTestHomeLabel(label: string | null | undefined): boolean {
-  const normalized = String(label ?? "").trim();
-  return normalized === GAPFILL_LAB_TEST_HOME_LABEL || normalized === MANUAL_MONTHLY_LAB_TEST_HOME_LABEL;
+  return isAdminLabTestHomeForUserSite({ label });
+}
+
+export function filterUserVisibleHouses<T extends { label?: string | null; addressLine1?: string | null; archivedAt?: Date | null }>(
+  houses: T[],
+): T[] {
+  return houses.filter(
+    (house) => house.archivedAt == null && !isAdminLabTestHomeForUserSite({ label: house.label, addressLine1: house.addressLine1 }),
+  );
 }
 
 /** User-site truth: request house only; never admin lab cross-house or stale snapshot source. */

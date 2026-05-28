@@ -4,7 +4,12 @@ import {
   isPersistedAdminLabTestHomeLabel,
   isUserSiteSimulationCaller,
 } from "@/lib/usage/userSiteSimulationIsolation";
-import { GAPFILL_LAB_TEST_HOME_LABEL } from "@/modules/onePathSim/usageSimulator/labTestHome";
+import {
+  GAPFILL_LAB_TEST_HOME_LABEL,
+  MANUAL_MONTHLY_LAB_TEST_HOME_LABEL,
+  ONE_PATH_LAB_TEST_HOME_LABEL,
+} from "@/modules/usageSimulator/labTestHome";
+import { isAdminLabTestHomeForUserSite } from "@/lib/usage/userSiteSimulationIsolation";
 
 describe("userSiteSimulationIsolation", () => {
   it("detects user-site callers", () => {
@@ -14,7 +19,11 @@ describe("userSiteSimulationIsolation", () => {
 
   it("detects admin lab test home labels", () => {
     expect(isPersistedAdminLabTestHomeLabel(GAPFILL_LAB_TEST_HOME_LABEL)).toBe(true);
+    expect(isPersistedAdminLabTestHomeLabel(MANUAL_MONTHLY_LAB_TEST_HOME_LABEL)).toBe(true);
+    expect(isPersistedAdminLabTestHomeLabel(ONE_PATH_LAB_TEST_HOME_LABEL)).toBe(true);
     expect(isPersistedAdminLabTestHomeLabel("Brian Home")).toBe(false);
+    expect(isAdminLabTestHomeForUserSite({ label: ONE_PATH_LAB_TEST_HOME_LABEL })).toBe(true);
+    expect(isAdminLabTestHomeForUserSite({ addressLine1: "One Path Lab Test Home" })).toBe(true);
   });
 
   it("resets cross-house actualContext and GREEN_BUTTON snapshot on user site", () => {

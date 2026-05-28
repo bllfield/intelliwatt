@@ -10,6 +10,7 @@ import { prisma } from '@/lib/db';
 import { pickBestSmtAuthorization } from '@/lib/smt/authorizationSelection';
 import { refreshSmtAuthorizationStatus } from '@/lib/smt/agreements';
 import { normalizeEmail } from '@/lib/utils/email';
+import { filterUserVisibleHouses } from '@/lib/usage/userSiteSimulationIsolation';
 
 async function isSmtConfirmationRequired(): Promise<boolean> {
   try {
@@ -30,19 +31,12 @@ async function isSmtConfirmationRequired(): Promise<boolean> {
       return false;
     }
 
-    let house = await prisma.houseAddress.findFirst({
-      where: { userId: user.id, archivedAt: null, isPrimary: true } as any,
-      orderBy: { createdAt: 'desc' },
-      select: { id: true },
+    const houseCandidates = await prisma.houseAddress.findMany({
+      where: { userId: user.id, archivedAt: null } as any,
+      orderBy: [{ isPrimary: 'desc' }, { createdAt: 'desc' }],
+      select: { id: true, label: true, addressLine1: true, archivedAt: true },
     });
-
-    if (!house) {
-      house = await prisma.houseAddress.findFirst({
-        where: { userId: user.id } as any,
-        orderBy: { createdAt: 'desc' },
-        select: { id: true },
-      });
-    }
+    const house = filterUserVisibleHouses(houseCandidates)[0] ?? null;
 
     const targetHouseId = house?.id;
 

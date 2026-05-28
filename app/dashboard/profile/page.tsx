@@ -9,6 +9,7 @@ import { SmtTerminateButton } from "@/components/smt/SmtTerminateButton";
 import DashboardHero from "@/components/dashboard/DashboardHero";
 import { SmtStatusBanner } from "@/components/account/SmtStatusBanner";
 import { ProfileInlineAddressChange } from "@/components/profile/ProfileInlineAddressChange";
+import { filterUserVisibleHouses } from "@/lib/usage/userSiteSimulationIsolation";
 const COMMISSION_STATUS_ALLOWLIST = ["pending", "submitted", "approved", "completed", "paid"];
 
 function isTestimonialTableMissing(error: unknown) {
@@ -154,14 +155,19 @@ export default async function ProfilePage() {
     select: { id: true, type: true, amount: true, houseId: true },
   })) as EntryRow[];
 
+  const activeHouses = filterUserVisibleHouses(housesRaw);
+  const visibleHouseIds = new Set(activeHouses.map((house) => house.id));
+
   const entriesByHouse = new Map<string, number>();
   for (const entry of entries) {
+    if (entry.houseId && !visibleHouseIds.has(entry.houseId)) continue;
     const bucket = entry.houseId ?? "global";
     entriesByHouse.set(bucket, (entriesByHouse.get(bucket) ?? 0) + entry.amount);
   }
-  const cumulativeEntries = entries.reduce((sum, entry) => sum + entry.amount, 0);
-
-  const activeHouses = housesRaw.filter((house) => house.archivedAt === null);
+  const cumulativeEntries = entries.reduce((sum, entry) => {
+    if (entry.houseId && !visibleHouseIds.has(entry.houseId)) return sum;
+    return sum + entry.amount;
+  }, 0);
 
   const houseSummaries: HouseSummary[] = activeHouses.map((house) => {
     const formatted = formatAddress([
