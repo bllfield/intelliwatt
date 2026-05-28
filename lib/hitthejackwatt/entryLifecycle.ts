@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db';
+import { isAdminLabTestHomeForUserSite, pickCanonicalNonStackableEntryId } from '@/lib/usage/userSiteSimulationIsolation';
 // Intentionally using loose typings via `as any` to work across environments.
 
 const USAGE_DEPENDENT_TYPES = new Set([
@@ -74,17 +75,30 @@ async function dedupeNonStackableEntries(userId: string): Promise<void> {
   const now = new Date();
   const client = prisma as any;
 
+  const houseRows = await client.houseAddress.findMany({
+    where: { userId },
+    select: { id: true, label: true, addressLine1: true },
+  });
+  const labHouseIds = new Set(
+    houseRows
+      .filter((house: { id: string; label?: string | null; addressLine1?: string | null }) =>
+        isAdminLabTestHomeForUserSite({ label: house.label, addressLine1: house.addressLine1 }),
+      )
+      .map((house: { id: string }) => house.id),
+  );
+
   const types = Array.from(NON_STACKABLE_ENTRY_TYPES);
   for (let i = 0; i < types.length; i++) {
     const t = types[i];
     const rows = await client.entry.findMany({
       where: { userId, type: t },
-      orderBy: { createdAt: 'desc' },
-      select: { id: true },
+      select: { id: true, houseId: true, createdAt: true },
     });
     if (!Array.isArray(rows) || rows.length <= 1) continue;
 
-    const expireIds = rows.slice(1).map((r: any) => r.id);
+    const keepId = pickCanonicalNonStackableEntryId(rows, labHouseIds);
+    if (!keepId) continue;
+    const expireIds = rows.filter((r: { id: string }) => r.id !== keepId).map((r: { id: string }) => r.id);
     if (expireIds.length <= 0) continue;
 
     await client.entry.updateMany({

@@ -11,6 +11,7 @@ import {
 } from "@/modules/usageSimulator/labTestHome";
 import {
   isAdminLabTestHomeForUserSite,
+  pickCanonicalNonStackableEntryId,
   pickVisibleHouseIdForSmtEntrySync,
   sumEligibleUserVisibleEntryAmount,
 } from "@/lib/usage/userSiteSimulationIsolation";
@@ -28,6 +29,17 @@ describe("userSiteSimulationIsolation", () => {
     expect(isPersistedAdminLabTestHomeLabel("Brian Home")).toBe(false);
     expect(isAdminLabTestHomeForUserSite({ label: ONE_PATH_LAB_TEST_HOME_LABEL })).toBe(true);
     expect(isAdminLabTestHomeForUserSite({ addressLine1: "One Path Lab Test Home" })).toBe(true);
+  });
+
+  it("prefers non-lab house when deduping non-stackable entries", () => {
+    const keepId = pickCanonicalNonStackableEntryId(
+      [
+        { id: "lab-new", houseId: "lab-home", createdAt: "2026-05-01T00:00:00.000Z" },
+        { id: "real-old", houseId: "real-home", createdAt: "2026-01-01T00:00:00.000Z" },
+      ],
+      new Set(["lab-home"]),
+    );
+    expect(keepId).toBe("real-old");
   });
 
   it("prefers primary visible home for SMT entry sync", () => {

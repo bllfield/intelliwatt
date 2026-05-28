@@ -120,23 +120,34 @@ export async function GET(request: NextRequest) {
             where: {
               userId: user.id,
               archivedAt: null,
-              houseAddressId: { in: visibleHouseIdList },
-              authorizationEndDate: { gt: now },
+              OR: [
+                { houseAddressId: { in: visibleHouseIdList } },
+                { houseId: { in: visibleHouseIdList } },
+              ],
             },
-            select: { houseAddressId: true },
+            select: { houseAddressId: true, houseId: true, authorizationEndDate: true },
           })
         : [];
     const smtAuthorizedVisibleHouseIds = smtAuthsOnVisibleHomes
-      .map((row: { houseAddressId?: string | null }) => String(row.houseAddressId ?? "").trim())
-      .filter(Boolean);
-    const hasVisibleSmtAuth = smtAuthorizedVisibleHouseIds.length > 0;
+      .filter((row: { authorizationEndDate?: Date | null }) => {
+        if (!row.authorizationEndDate) return true;
+        return new Date(row.authorizationEndDate).getTime() > now.getTime();
+      })
+      .flatMap((row: { houseAddressId?: string | null; houseId?: string | null }) => {
+        const ids = [row.houseAddressId, row.houseId]
+          .map((id) => String(id ?? "").trim())
+          .filter((id) => visibleHouseIds.has(id));
+        return ids;
+      });
+    const smtAuthorizedVisibleHouseIdSet = new Set(smtAuthorizedVisibleHouseIds);
+    const hasVisibleSmtAuth = smtAuthorizedVisibleHouseIdSet.size > 0;
 
     let hasActiveUsage =
       hasEligibleSmartMeterEntryOnVisibleHomes(entries, visibleHouseIds) || hasVisibleSmtAuth;
 
     const syncHouseId = pickVisibleHouseIdForSmtEntrySync({
       visibleHouses,
-      smtAuthorizedVisibleHouseIds,
+      smtAuthorizedVisibleHouseIds: Array.from(smtAuthorizedVisibleHouseIdSet),
     });
     const needsUsageEntryOnVisibleHome =
       hasVisibleSmtAuth &&

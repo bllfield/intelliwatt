@@ -83,6 +83,28 @@ export function hasEligibleSmartMeterEntryOnVisibleHomes(
 }
 
 /** Prefer primary visible home, then any visible home with unexpired SMT auth. */
+function entryCreatedAtMs(value: Date | string | null | undefined): number {
+  if (!value) return 0;
+  const d = value instanceof Date ? value : new Date(value);
+  const t = d.getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
+/** When duplicate non-stackable entries exist, keep the user-visible home row over admin lab homes. */
+export function pickCanonicalNonStackableEntryId<T extends { id: string; houseId?: string | null; createdAt?: Date | string | null }>(
+  rows: T[],
+  labHouseIds: Set<string>,
+): string | null {
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  const sorted = [...rows].sort((left, right) => {
+    const leftLab = left.houseId && labHouseIds.has(left.houseId) ? 1 : 0;
+    const rightLab = right.houseId && labHouseIds.has(right.houseId) ? 1 : 0;
+    if (leftLab !== rightLab) return leftLab - rightLab;
+    return entryCreatedAtMs(right.createdAt) - entryCreatedAtMs(left.createdAt);
+  });
+  return sorted[0]?.id ?? null;
+}
+
 export function pickVisibleHouseIdForSmtEntrySync(args: {
   visibleHouses: Array<{ id: string; isPrimary?: boolean | null }>;
   smtAuthorizedVisibleHouseIds: string[];
