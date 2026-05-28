@@ -9,6 +9,7 @@ type InsightsRow = {
   joinedAt: string;
   houseAddressId: string | null;
   addressLine1: string | null;
+  addressLine2: string | null;
   city: string | null;
   state: string | null;
   zip5: string | null;
@@ -413,9 +414,17 @@ export default function AdminUsersPage() {
                           <a className="font-semibold hover:underline" href={`/admin/helpdesk/impersonate?email=${encodeURIComponent(r.email)}`}>
                             {r.email}
                           </a>
-                          <div className="text-xs text-brand-navy/60">
-                            {r.utilityName ? `${r.utilityName} · ` : ""}
-                            {r.addressLine1 ? r.addressLine1 : "—"}
+                          <div className="text-xs leading-snug text-brand-navy/60">
+                            {r.utilityName ? <div>{r.utilityName}</div> : null}
+                            {r.addressLine1 ? <div>{r.addressLine1}</div> : null}
+                            {r.addressLine2 ? <div>{r.addressLine2}</div> : null}
+                            {r.city || r.state || r.zip5 ? (
+                              <div>
+                                {[r.city, r.state].filter(Boolean).join(", ")}
+                                {r.zip5 ? ` ${r.zip5}` : ""}
+                              </div>
+                            ) : null}
+                            {!r.addressLine1 && !r.addressLine2 && !r.city && !r.state && !r.zip5 ? <div>—</div> : null}
                           </div>
                         </div>
                       </td>

@@ -43,6 +43,7 @@ interface UserInsightRow {
   commissionPendingDollars?: number;
   houseAddressId: string | null;
   addressLine1?: string | null;
+  addressLine2?: string | null;
   city?: string | null;
   state?: string | null;
   zip5?: string | null;
@@ -52,17 +53,19 @@ interface UserInsightRow {
 
 function formatPrimaryHouseAddressLines(row: {
   addressLine1?: string | null;
+  addressLine2?: string | null;
   city?: string | null;
   state?: string | null;
   zip5?: string | null;
-}): { line1: string | null; cityStateZip: string | null } {
+}): { line1: string | null; line2: string | null; cityStateZip: string | null } {
   const line1 = String(row.addressLine1 ?? "").trim() || null;
+  const line2 = String(row.addressLine2 ?? "").trim() || null;
   const city = String(row.city ?? "").trim();
   const state = String(row.state ?? "").trim();
   const zip5 = String(row.zip5 ?? "").trim();
   const locality = [city, state].filter(Boolean).join(", ");
   const cityStateZip = [locality, zip5].filter(Boolean).join(" ").trim() || null;
-  return { line1, cityStateZip };
+  return { line1, line2, cityStateZip };
 }
 
 interface UserInsightsResponse {
@@ -1897,8 +1900,8 @@ export default function AdminDashboard() {
                           Joined {new Date(row.joinedAt).toLocaleDateString()}
                         </div>
                         {(() => {
-                          const { line1, cityStateZip } = formatPrimaryHouseAddressLines(row);
-                          if (!line1 && !cityStateZip) {
+                          const { line1, line2, cityStateZip } = formatPrimaryHouseAddressLines(row);
+                          if (!line1 && !line2 && !cityStateZip) {
                             return row.houseAddressId ? (
                               <div className="mt-0.5 font-mono text-[10px] text-brand-navy/50" title="House ID">
                                 House {row.houseAddressId}
@@ -1911,6 +1914,7 @@ export default function AdminDashboard() {
                                 <div className="text-brand-navy/60">{row.utilityName}</div>
                               ) : null}
                               {line1 ? <div>{line1}</div> : null}
+                              {line2 ? <div>{line2}</div> : null}
                               {cityStateZip ? <div>{cityStateZip}</div> : null}
                               {row.houseAddressId ? (
                                 <div className="font-mono text-[10px] text-brand-navy/50" title="House ID">

@@ -149,6 +149,7 @@ export async function GET(request: NextRequest) {
             createdAt: true,
             archivedAt: true,
             addressLine1: true,
+            addressLine2: true,
             addressCity: true,
             addressState: true,
             addressZip5: true,
@@ -334,6 +335,7 @@ export async function GET(request: NextRequest) {
       joinedAt: string;
       houseAddressId: string | null;
       addressLine1: string | null;
+      addressLine2: string | null;
       city: string | null;
       state: string | null;
       zip5: string | null;
@@ -458,6 +460,7 @@ export async function GET(request: NextRequest) {
         joinedAt: u.createdAt.toISOString(),
         houseAddressId: hid,
         addressLine1: h?.addressLine1 ?? null,
+        addressLine2: h?.addressLine2 ?? null,
         city: h?.addressCity ?? null,
         state: h?.addressState ?? null,
         zip5: h?.addressZip5 ?? null,
