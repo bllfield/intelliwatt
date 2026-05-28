@@ -11,6 +11,7 @@ import {
 } from "@/modules/usageSimulator/labTestHome";
 import {
   isAdminLabTestHomeForUserSite,
+  pickVisibleHouseIdForSmtEntrySync,
   sumEligibleUserVisibleEntryAmount,
 } from "@/lib/usage/userSiteSimulationIsolation";
 
@@ -27,6 +28,17 @@ describe("userSiteSimulationIsolation", () => {
     expect(isPersistedAdminLabTestHomeLabel("Brian Home")).toBe(false);
     expect(isAdminLabTestHomeForUserSite({ label: ONE_PATH_LAB_TEST_HOME_LABEL })).toBe(true);
     expect(isAdminLabTestHomeForUserSite({ addressLine1: "One Path Lab Test Home" })).toBe(true);
+  });
+
+  it("prefers primary visible home for SMT entry sync", () => {
+    const picked = pickVisibleHouseIdForSmtEntrySync({
+      visibleHouses: [
+        { id: "lab", isPrimary: false },
+        { id: "real", isPrimary: true },
+      ],
+      smtAuthorizedVisibleHouseIds: ["lab", "real"],
+    });
+    expect(picked).toBe("real");
   });
 
   it("excludes admin lab-home entries from user-visible jackpot totals", () => {

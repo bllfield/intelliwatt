@@ -7,8 +7,10 @@ import { qualifyReferralsForUser } from '@/lib/referral/qualify';
 import { ensureSmartMeterEntry } from '@/lib/smt/ensureSmartMeterEntry';
 import {
   filterUserVisibleEntries,
+  filterUserVisibleHouses,
+  hasEligibleSmartMeterEntryOnVisibleHomes,
+  pickVisibleHouseIdForSmtEntrySync,
   sumEligibleUserVisibleEntryAmount,
-  visibleUserHouseIdSet,
 } from '@/lib/usage/userSiteSimulationIsolation';
 
 const COMMISSION_STATUS_ALLOWLIST = ['pending', 'submitted', 'approved', 'completed', 'paid'];
@@ -103,58 +105,66 @@ export async function GET(request: NextRequest) {
       lastValidated: entry.lastValidated,
     }));
 
-    const visibleHouseIds = visibleUserHouseIdSet(
-      await db.houseAddress.findMany({
-        where: { userId: user.id, archivedAt: null },
-        select: { id: true, label: true, addressLine1: true, archivedAt: true },
-      }),
-    );
+    const now = new Date();
+    const houseRows = await db.houseAddress.findMany({
+      where: { userId: user.id, archivedAt: null },
+      select: { id: true, label: true, addressLine1: true, archivedAt: true, isPrimary: true },
+    });
+    const visibleHouses = filterUserVisibleHouses(houseRows);
+    const visibleHouseIds = new Set(visibleHouses.map((house) => house.id));
+    const visibleHouseIdList = Array.from(visibleHouseIds);
 
-    let hasActiveUsage = filterUserVisibleEntries(entries, visibleHouseIds).some(
-      (entry) =>
-        entry.type === 'smart_meter_connect' &&
-        (entry.status === 'ACTIVE' || entry.status === 'EXPIRING_SOON'),
-    );
+    const smtAuthsOnVisibleHomes =
+      visibleHouseIdList.length > 0
+        ? await (db as any).smtAuthorization.findMany({
+            where: {
+              userId: user.id,
+              archivedAt: null,
+              houseAddressId: { in: visibleHouseIdList },
+              authorizationEndDate: { gt: now },
+            },
+            select: { houseAddressId: true },
+          })
+        : [];
+    const smtAuthorizedVisibleHouseIds = smtAuthsOnVisibleHomes
+      .map((row: { houseAddressId?: string | null }) => String(row.houseAddressId ?? "").trim())
+      .filter(Boolean);
+    const hasVisibleSmtAuth = smtAuthorizedVisibleHouseIds.length > 0;
 
-    if (!hasActiveUsage) {
-      const now = new Date();
-      const activeSmt = await (db as any).smtAuthorization.findFirst({
-        where: {
-          userId: user.id,
-          archivedAt: null,
-        },
-        orderBy: { createdAt: 'desc' },
-        select: { houseAddressId: true, authorizationEndDate: true },
-      });
-      const smtActive =
-        activeSmt &&
-        (activeSmt.authorizationEndDate == null || new Date(activeSmt.authorizationEndDate) > now);
-      if (smtActive && activeSmt.houseAddressId) {
-        try {
-          await ensureSmartMeterEntry(user.id, activeSmt.houseAddressId, now);
-          await refreshUserEntryStatuses(user.id);
-          const second = await fetchEntriesAndCommission();
-          rawEntries = second.rawEntries;
-          qualifyingCommission = second.qualifyingCommission;
-          entries = (rawEntries as any[]).map((entry: any) => ({
-            id: entry.id,
-            type: entry.type,
-            amount: entry.amount,
-            houseId: entry.houseId,
-            createdAt: entry.createdAt,
-            status: entry.status as EntryRow['status'],
-            expiresAt: entry.expiresAt,
-            manualUsageId: entry.manualUsageId,
-            lastValidated: entry.lastValidated,
-          }));
-          hasActiveUsage = filterUserVisibleEntries(entries, visibleHouseIds).some(
-            (e) =>
-              e.type === 'smart_meter_connect' &&
-              (e.status === 'ACTIVE' || e.status === 'EXPIRING_SOON'),
-          );
-        } catch (syncErr) {
-          console.error('[user/entries] ensureSmartMeterEntry sync failed', syncErr);
-        }
+    let hasActiveUsage =
+      hasEligibleSmartMeterEntryOnVisibleHomes(entries, visibleHouseIds) || hasVisibleSmtAuth;
+
+    const syncHouseId = pickVisibleHouseIdForSmtEntrySync({
+      visibleHouses,
+      smtAuthorizedVisibleHouseIds,
+    });
+    const needsUsageEntryOnVisibleHome =
+      hasVisibleSmtAuth &&
+      syncHouseId &&
+      !hasEligibleSmartMeterEntryOnVisibleHomes(entries, visibleHouseIds);
+
+    if (needsUsageEntryOnVisibleHome) {
+      try {
+        await ensureSmartMeterEntry(user.id, syncHouseId, now);
+        await refreshUserEntryStatuses(user.id);
+        const second = await fetchEntriesAndCommission();
+        rawEntries = second.rawEntries;
+        qualifyingCommission = second.qualifyingCommission;
+        entries = (rawEntries as any[]).map((entry: any) => ({
+          id: entry.id,
+          type: entry.type,
+          amount: entry.amount,
+          houseId: entry.houseId,
+          createdAt: entry.createdAt,
+          status: entry.status as EntryRow['status'],
+          expiresAt: entry.expiresAt,
+          manualUsageId: entry.manualUsageId,
+          lastValidated: entry.lastValidated,
+        }));
+        hasActiveUsage =
+          hasEligibleSmartMeterEntryOnVisibleHomes(entries, visibleHouseIds) || hasVisibleSmtAuth;
+      } catch (syncErr) {
+        console.error('[user/entries] ensureSmartMeterEntry sync failed', syncErr);
       }
     }
 

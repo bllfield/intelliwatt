@@ -72,6 +72,28 @@ export function sumEligibleUserVisibleEntryAmount(
     .reduce((sum, entry) => sum + entry.amount, 0);
 }
 
+export function hasEligibleSmartMeterEntryOnVisibleHomes(
+  entries: Array<{ type: string; status: string; houseId?: string | null }>,
+  visibleHouseIds: Set<string>,
+): boolean {
+  return filterUserVisibleEntries(entries, visibleHouseIds).some(
+    (entry) =>
+      entry.type === "smart_meter_connect" && isEligibleJackpotEntryStatus(entry.status),
+  );
+}
+
+/** Prefer primary visible home, then any visible home with unexpired SMT auth. */
+export function pickVisibleHouseIdForSmtEntrySync(args: {
+  visibleHouses: Array<{ id: string; isPrimary?: boolean | null }>;
+  smtAuthorizedVisibleHouseIds: string[];
+}): string | null {
+  const authorized = new Set(args.smtAuthorizedVisibleHouseIds.map((id) => String(id).trim()).filter(Boolean));
+  if (authorized.size === 0) return null;
+  const primary = args.visibleHouses.find((house) => house.isPrimary && authorized.has(house.id));
+  if (primary) return primary.id;
+  return args.visibleHouses.find((house) => authorized.has(house.id))?.id ?? null;
+}
+
 /** User-site truth: request house only; never admin lab cross-house or stale snapshot source. */
 export async function resolveUserSiteActualSourceForHouse(args: {
   userId: string;
