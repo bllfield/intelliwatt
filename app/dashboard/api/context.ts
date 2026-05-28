@@ -99,11 +99,11 @@ export async function loadUsageEntryContext(): Promise<UsageEntryContext> {
         label: true,
       } satisfies Record<string, boolean>;
 
-      const houseCandidates = await prismaAny.houseAddress.findMany({
+      const houseCandidates = (await prismaAny.houseAddress.findMany({
         where: { userId: user.id, archivedAt: null },
         orderBy: [{ isPrimary: "desc" }, { createdAt: "desc" }],
         select,
-      });
+      })) as HouseSummary[];
       houseAddress = filterUserVisibleHouses(houseCandidates)[0] ?? null;
     }
 
