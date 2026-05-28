@@ -41,6 +41,37 @@ export function filterUserVisibleHouses<T extends { label?: string | null; addre
   );
 }
 
+export function visibleUserHouseIdSet(
+  houses: Array<{ id: string; label?: string | null; addressLine1?: string | null; archivedAt?: Date | null }>,
+): Set<string> {
+  return new Set(filterUserVisibleHouses(houses).map((house) => house.id));
+}
+
+export function isEligibleJackpotEntryStatus(status: string | null | undefined): boolean {
+  const normalized = String(status ?? "").trim().toUpperCase();
+  return normalized === "ACTIVE" || normalized === "EXPIRING_SOON";
+}
+
+/** Drop admin lab-home rows; keep user-global rows (null houseId). */
+export function filterUserVisibleEntries<T extends { houseId?: string | null }>(
+  entries: T[],
+  visibleHouseIds: Set<string>,
+): T[] {
+  return entries.filter((entry) => {
+    if (entry.houseId && !visibleHouseIds.has(entry.houseId)) return false;
+    return true;
+  });
+}
+
+export function sumEligibleUserVisibleEntryAmount(
+  entries: Array<{ amount: number; status: string; houseId?: string | null }>,
+  visibleHouseIds: Set<string>,
+): number {
+  return filterUserVisibleEntries(entries, visibleHouseIds)
+    .filter((entry) => isEligibleJackpotEntryStatus(entry.status))
+    .reduce((sum, entry) => sum + entry.amount, 0);
+}
+
 /** User-site truth: request house only; never admin lab cross-house or stale snapshot source. */
 export async function resolveUserSiteActualSourceForHouse(args: {
   userId: string;

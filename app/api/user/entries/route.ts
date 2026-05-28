@@ -5,6 +5,11 @@ import { normalizeEmail } from '@/lib/utils/email';
 import { refreshUserEntryStatuses } from '@/lib/hitthejackwatt/entryLifecycle';
 import { qualifyReferralsForUser } from '@/lib/referral/qualify';
 import { ensureSmartMeterEntry } from '@/lib/smt/ensureSmartMeterEntry';
+import {
+  filterUserVisibleEntries,
+  sumEligibleUserVisibleEntryAmount,
+  visibleUserHouseIdSet,
+} from '@/lib/usage/userSiteSimulationIsolation';
 
 const COMMISSION_STATUS_ALLOWLIST = ['pending', 'submitted', 'approved', 'completed', 'paid'];
 
@@ -98,7 +103,14 @@ export async function GET(request: NextRequest) {
       lastValidated: entry.lastValidated,
     }));
 
-    let hasActiveUsage = entries.some(
+    const visibleHouseIds = visibleUserHouseIdSet(
+      await db.houseAddress.findMany({
+        where: { userId: user.id, archivedAt: null },
+        select: { id: true, label: true, addressLine1: true, archivedAt: true },
+      }),
+    );
+
+    let hasActiveUsage = filterUserVisibleEntries(entries, visibleHouseIds).some(
       (entry) =>
         entry.type === 'smart_meter_connect' &&
         (entry.status === 'ACTIVE' || entry.status === 'EXPIRING_SOON'),
@@ -135,7 +147,7 @@ export async function GET(request: NextRequest) {
             manualUsageId: entry.manualUsageId,
             lastValidated: entry.lastValidated,
           }));
-          hasActiveUsage = entries.some(
+          hasActiveUsage = filterUserVisibleEntries(entries, visibleHouseIds).some(
             (e) =>
               e.type === 'smart_meter_connect' &&
               (e.status === 'ACTIVE' || e.status === 'EXPIRING_SOON'),
@@ -146,13 +158,11 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const countedEntries = entries.filter(
-      (entry) => entry.status === 'ACTIVE' || entry.status === 'EXPIRING_SOON',
-    );
-    const total = countedEntries.reduce((sum, entry) => sum + entry.amount, 0);
+    const userVisibleEntries = filterUserVisibleEntries(entries, visibleHouseIds);
+    const total = sumEligibleUserVisibleEntryAmount(userVisibleEntries, visibleHouseIds);
 
     return NextResponse.json({
-      entries: entries.map((e) => ({
+      entries: userVisibleEntries.map((e) => ({
         id: e.id,
         type: e.type,
         amount: e.amount,

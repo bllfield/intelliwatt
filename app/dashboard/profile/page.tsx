@@ -9,7 +9,12 @@ import { SmtTerminateButton } from "@/components/smt/SmtTerminateButton";
 import DashboardHero from "@/components/dashboard/DashboardHero";
 import { SmtStatusBanner } from "@/components/account/SmtStatusBanner";
 import { ProfileInlineAddressChange } from "@/components/profile/ProfileInlineAddressChange";
-import { filterUserVisibleHouses } from "@/lib/usage/userSiteSimulationIsolation";
+import {
+  filterUserVisibleHouses,
+  isEligibleJackpotEntryStatus,
+  sumEligibleUserVisibleEntryAmount,
+  visibleUserHouseIdSet,
+} from "@/lib/usage/userSiteSimulationIsolation";
 const COMMISSION_STATUS_ALLOWLIST = ["pending", "submitted", "approved", "completed", "paid"];
 
 function isTestimonialTableMissing(error: unknown) {
@@ -62,6 +67,7 @@ type EntryRow = {
   type: string;
   amount: number;
   houseId: string | null;
+  status: string;
 };
 
 type HouseSummary = {
@@ -152,22 +158,20 @@ export default async function ProfilePage() {
 
   const entries = (await prismaAny.entry.findMany({
     where: { userId: user.id },
-    select: { id: true, type: true, amount: true, houseId: true },
+    select: { id: true, type: true, amount: true, houseId: true, status: true },
   })) as EntryRow[];
 
   const activeHouses = filterUserVisibleHouses(housesRaw);
-  const visibleHouseIds = new Set(activeHouses.map((house) => house.id));
+  const visibleHouseIds = visibleUserHouseIdSet(housesRaw);
 
   const entriesByHouse = new Map<string, number>();
   for (const entry of entries) {
+    if (!isEligibleJackpotEntryStatus(entry.status)) continue;
     if (entry.houseId && !visibleHouseIds.has(entry.houseId)) continue;
     const bucket = entry.houseId ?? "global";
     entriesByHouse.set(bucket, (entriesByHouse.get(bucket) ?? 0) + entry.amount);
   }
-  const cumulativeEntries = entries.reduce((sum, entry) => {
-    if (entry.houseId && !visibleHouseIds.has(entry.houseId)) return sum;
-    return sum + entry.amount;
-  }, 0);
+  const cumulativeEntries = sumEligibleUserVisibleEntryAmount(entries, visibleHouseIds);
 
   const houseSummaries: HouseSummary[] = activeHouses.map((house) => {
     const formatted = formatAddress([

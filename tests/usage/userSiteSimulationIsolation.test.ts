@@ -9,7 +9,10 @@ import {
   MANUAL_MONTHLY_LAB_TEST_HOME_LABEL,
   ONE_PATH_LAB_TEST_HOME_LABEL,
 } from "@/modules/usageSimulator/labTestHome";
-import { isAdminLabTestHomeForUserSite } from "@/lib/usage/userSiteSimulationIsolation";
+import {
+  isAdminLabTestHomeForUserSite,
+  sumEligibleUserVisibleEntryAmount,
+} from "@/lib/usage/userSiteSimulationIsolation";
 
 describe("userSiteSimulationIsolation", () => {
   it("detects user-site callers", () => {
@@ -24,6 +27,19 @@ describe("userSiteSimulationIsolation", () => {
     expect(isPersistedAdminLabTestHomeLabel("Brian Home")).toBe(false);
     expect(isAdminLabTestHomeForUserSite({ label: ONE_PATH_LAB_TEST_HOME_LABEL })).toBe(true);
     expect(isAdminLabTestHomeForUserSite({ addressLine1: "One Path Lab Test Home" })).toBe(true);
+  });
+
+  it("excludes admin lab-home entries from user-visible jackpot totals", () => {
+    const visibleHouseIds = new Set(["real-home"]);
+    const total = sumEligibleUserVisibleEntryAmount(
+      [
+        { amount: 1, status: "ACTIVE", houseId: "real-home" },
+        { amount: 1, status: "ACTIVE", houseId: "lab-home" },
+        { amount: 1, status: "EXPIRED", houseId: "real-home" },
+      ],
+      visibleHouseIds,
+    );
+    expect(total).toBe(1);
   });
 
   it("resets cross-house actualContext and GREEN_BUTTON snapshot on user site", () => {
