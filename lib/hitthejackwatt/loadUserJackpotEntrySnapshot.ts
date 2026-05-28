@@ -17,6 +17,14 @@ export type UserJackpotEntryRow = {
   status: string;
 };
 
+type JackpotHouseRow = {
+  id: string;
+  label: string | null;
+  addressLine1: string | null;
+  archivedAt: Date | null;
+  isPrimary: boolean;
+};
+
 export async function loadUserJackpotEntrySnapshot(userId: string): Promise<{
   entries: UserJackpotEntryRow[];
   total: number;
@@ -27,10 +35,10 @@ export async function loadUserJackpotEntrySnapshot(userId: string): Promise<{
   const now = new Date();
   const prismaAny = prisma as any;
 
-  const housesRaw = await prismaAny.houseAddress.findMany({
+  const housesRaw = (await prismaAny.houseAddress.findMany({
     where: { userId },
     select: { id: true, label: true, addressLine1: true, archivedAt: true, isPrimary: true },
-  });
+  })) as JackpotHouseRow[];
   const visibleHouses = filterUserVisibleHouses(housesRaw);
   const visibleHouseIds = visibleUserHouseIdSet(housesRaw);
   const visibleHouseIdList = Array.from(visibleHouseIds);
