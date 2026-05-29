@@ -21,6 +21,7 @@ import {
   resolveHomeCalendarForActualSource,
 } from "@/lib/time/actualIntervalCalendar";
 import { convertGreenButtonPersistedRowsToHome } from "@/lib/time/greenButtonPersistedIntervalConvert";
+import { mapGreenButtonUtcTrustedDateKeysToHome } from "@/lib/time/greenButtonUtcTrustedDateKeys";
 import { enumerateLocalDateKeys, localDayBoundsUtc } from "@/lib/time/homeIntervalCalendar";
 import type { PastIntervalGrid } from "@/lib/time/pastIntervalGrid";
 import { dateKeyFromTimestamp, getDayGridTimestamps } from "@/modules/usageSimulator/pastStitchedCurve";
@@ -1612,13 +1613,19 @@ export async function simulatePastUsageDataset(
     const {
       pendingSmtIntervalDateKeys,
       ledgerIncompleteMeterDateKeys,
-    } = await preparePastSimSmtLedgerDateKeys({
-      esiid,
-      coverageStartDate: startDate,
-      coverageEndDate: endDate,
-      canonicalDateKeys,
-      reconcile: true,
-    });
+    } =
+      intervalActualSource === "GREEN_BUTTON"
+        ? {
+            pendingSmtIntervalDateKeys: new Set<string>(),
+            ledgerIncompleteMeterDateKeys: new Set<string>(),
+          }
+        : await preparePastSimSmtLedgerDateKeys({
+            esiid,
+            coverageStartDate: startDate,
+            coverageEndDate: endDate,
+            canonicalDateKeys,
+            reconcile: true,
+          });
 
     const mergedKeepRefLocalDateKeys = new Set<string>(forceModeledOutputKeepReferencePoolDateKeysLocalSet);
     logSimPipelineEvent("day_simulation_input_prep_success", {
@@ -1978,9 +1985,17 @@ export async function simulatePastUsageDataset(
           pendingSmtIntervalDateKeys.size > 0 ? pendingSmtIntervalDateKeys : undefined,
         ledgerIncompleteMeterDateKeys:
           ledgerIncompleteMeterDateKeys.size > 0 ? ledgerIncompleteMeterDateKeys : undefined,
-        trustedActualDateKeys: greenButtonCoverageIntervals?.trustedActualDateKeys
-          ? new Set(greenButtonCoverageIntervals.trustedActualDateKeys)
-          : undefined,
+        trustedActualDateKeys:
+          greenButtonCoverageIntervals?.trustedActualDateKeys &&
+          intervalActualSource === "GREEN_BUTTON" &&
+          sourceActualIntervals.length > 0
+            ? mapGreenButtonUtcTrustedDateKeysToHome(
+                greenButtonCoverageIntervals.trustedActualDateKeys,
+                sourceActualIntervals
+              )
+            : greenButtonCoverageIntervals?.trustedActualDateKeys
+              ? new Set(greenButtonCoverageIntervals.trustedActualDateKeys)
+              : undefined,
         actualWxByDateKey: weatherByDateKeyForSimulation,
         _normalWxByDateKey: normalWxByDateKey,
         collectSimulatedDayResults: collectSimulatedDayResultsForDiagnostics,

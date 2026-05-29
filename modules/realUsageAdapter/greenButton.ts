@@ -559,6 +559,18 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
         }
         if (paddedThisDate > 0) paddedDateCount += 1;
       }
+
+      // Past Sim labels home-local days; trust every UTC-grid target day that is complete
+      // after shift/pad/repair, not only year-shifted backfill days.
+      for (const [targetDateKey, slots] of Array.from(targetSlotsByDate.entries())) {
+        if (slots.size < minimumTrustedGreenButtonSlotCount(targetDateKey)) continue;
+        if (!trustedShiftedSourceDateByTargetDate.has(targetDateKey)) {
+          trustedShiftedSourceDateByTargetDate.set(
+            targetDateKey,
+            sourceDateByTargetDate.get(targetDateKey) ?? targetDateKey
+          );
+        }
+      }
     }
 
     const intervals = Array.from(byTimestamp.entries())

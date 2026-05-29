@@ -1,4 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  buildHomeDayGridContext,
+  homeProjectedIntervalFromRecord,
+  resolveHomeCalendarForActualSource,
+} from "@/lib/time/actualIntervalCalendar";
+import { convertGreenButtonPersistedRowsToHome } from "@/lib/time/greenButtonPersistedIntervalConvert";
+import { localDayBoundsUtc } from "@/lib/time/homeIntervalCalendar";
+import { mapGreenButtonUtcTrustedDateKeysToHome } from "@/lib/time/greenButtonUtcTrustedDateKeys";
 
 vi.mock("server-only", () => ({}));
 
@@ -271,15 +279,40 @@ describe("green button full-day anchor", () => {
       timestampMode: "utcDayGrid",
     });
     const engine = await import("@/modules/onePathSim/simulatedUsage/engine");
-    const stitchedCurve = await import("@/modules/onePathSim/usageSimulator/pastStitchedCurve");
-    const dayStartMs = new Date("2026-05-14T00:00:00.000Z").getTime();
-    const trustedActualDateKeys = new Set(adapterOut.trustedActualDateKeys ?? []);
+    const utcDayStartMs = new Date("2026-05-14T00:00:00.000Z").getTime();
+    const actualIntervals = convertGreenButtonPersistedRowsToHome(
+      adapterOut.intervals.map((row) => ({
+        timestamp: new Date(row.timestamp),
+        consumptionKwh: Number(row.kwh) || 0,
+      }))
+    ).intervals.map(homeProjectedIntervalFromRecord);
+    const trustedActualDateKeys = mapGreenButtonUtcTrustedDateKeysToHome(
+      adapterOut.trustedActualDateKeys ?? [],
+      actualIntervals
+    );
     const homeTimezone = "America/Chicago";
+    const homeCalendar = resolveHomeCalendarForActualSource("GREEN_BUTTON", homeTimezone);
+    const trustedHomeDateKeys = Array.from(trustedActualDateKeys).sort();
+    expect(trustedHomeDateKeys.length).toBeGreaterThan(0);
+    const primaryTrustedHomeDateKey = trustedHomeDateKeys[0]!;
+    const homeDayGrid = buildHomeDayGridContext({
+      startDateKey: primaryTrustedHomeDateKey,
+      endDateKey: primaryTrustedHomeDateKey,
+      home: homeCalendar,
+    });
+    const dayStartMs = localDayBoundsUtc(primaryTrustedHomeDateKey, homeCalendar).startUtc.getTime();
+    const homeDateKeyByTs = new Map(
+      actualIntervals.map((row) => [String(row.timestamp), String(row.homeDateKey ?? "").slice(0, 10)])
+    );
     const engineArgs = {
       canonicalDayStartsMs: [dayStartMs],
       excludedDateKeys: new Set<string>(),
-      dateKeyFromTimestamp: (ts: string) => stitchedCurve.dateKeyFromTimestamp(ts, homeTimezone),
-      getDayGridTimestamps: (ms: number) => stitchedCurve.getDayGridTimestamps(ms, homeTimezone),
+      dateKeyFromTimestamp: (ts: string) => {
+        const homeKey = homeDateKeyByTs.get(ts);
+        return homeKey && /^\d{4}-\d{2}-\d{2}$/.test(homeKey) ? homeKey : homeDayGrid.dateKeyFromTimestamp(ts);
+      },
+      getDayGridTimestamps: homeDayGrid.getDayGridTimestamps,
+      intervalTrustedSource: "GREEN_BUTTON" as const,
       collectSimulatedDayResults: true,
     };
 
@@ -290,31 +323,27 @@ describe("green button full-day anchor", () => {
     expect(adapterOut.paddedIntervalCount).toBe(0);
     expect(adapterOut.paddedDateCount).toBe(0);
     expect(adapterOut.sourceDateByTargetDate?.["2026-05-14"]).toBe("2025-05-14");
-    expect(trustedActualDateKeys.has("2026-05-14")).toBe(true);
+    expect(adapterOut.trustedActualDateKeys).toContain("2026-05-14");
+    expect(trustedActualDateKeys.has(primaryTrustedHomeDateKey)).toBe(true);
 
     const trustedDebugOut: Record<string, unknown> = {};
     const trustedOut = engine.buildPastSimulatedBaselineV1({
       ...engineArgs,
-      actualIntervals: adapterOut.intervals,
+      actualIntervals,
       trustedActualDateKeys,
       debug: { out: trustedDebugOut as any },
     });
-    expect(trustedOut.dayResults.find((row) => row.localDate === "2026-05-14")?.simulatedReasonCode).not.toBe(
-      "INCOMPLETE_METER_DAY"
-    );
+    expect(
+      trustedOut.dayResults.find((row) => row.localDate === primaryTrustedHomeDateKey)?.simulatedReasonCode
+    ).not.toBe("INCOMPLETE_METER_DAY");
     expect(trustedDebugOut.excludedIncompleteMeterFingerprintDayCount).toBe(0);
 
-    // Mirrors the live v8 artifact: padded target day exists, but engine only sees fewer than 96 SMT slots.
-    const thinnedIntervals = adapterOut.intervals.filter((row) => {
+    const thinnedIntervals = actualIntervals.filter((row) => {
       if (!row.timestamp.startsWith("2026-05-14T")) return true;
-      const slotIndex = Math.round(
-        (new Date(row.timestamp).getTime() - dayStartMs) / (15 * 60 * 1000)
-      );
+      const slotIndex = Math.round((new Date(row.timestamp).getTime() - utcDayStartMs) / (15 * 60 * 1000));
       return slotIndex < 76;
     });
-    expect(
-      thinnedIntervals.filter((row) => row.timestamp.startsWith("2026-05-14T")).length
-    ).toBe(76);
+    expect(thinnedIntervals.filter((row) => row.timestamp.startsWith("2026-05-14T")).length).toBe(76);
 
     const untrustedDebugOut: Record<string, unknown> = {};
     const untrustedOut = engine.buildPastSimulatedBaselineV1({
@@ -322,9 +351,9 @@ describe("green button full-day anchor", () => {
       actualIntervals: thinnedIntervals,
       debug: { out: untrustedDebugOut as any },
     });
-    expect(untrustedOut.dayResults.find((row) => row.localDate === "2026-05-14")?.simulatedReasonCode).toBe(
-      "INCOMPLETE_METER_DAY"
-    );
+    expect(
+      untrustedOut.dayResults.find((row) => row.localDate === primaryTrustedHomeDateKey)?.simulatedReasonCode
+    ).toBe("INCOMPLETE_METER_DAY");
     expect(untrustedDebugOut.excludedIncompleteMeterFingerprintDayCount).toBe(1);
 
     const thinnedTrustedDebugOut: Record<string, unknown> = {};
@@ -335,7 +364,7 @@ describe("green button full-day anchor", () => {
       debug: { out: thinnedTrustedDebugOut as any },
     });
     expect(
-      thinnedTrustedOut.dayResults.find((row) => row.localDate === "2026-05-14")?.simulatedReasonCode
+      thinnedTrustedOut.dayResults.find((row) => row.localDate === primaryTrustedHomeDateKey)?.simulatedReasonCode
     ).not.toBe("INCOMPLETE_METER_DAY");
     expect(thinnedTrustedDebugOut.excludedIncompleteMeterFingerprintDayCount).toBe(0);
   });

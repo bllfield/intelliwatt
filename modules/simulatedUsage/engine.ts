@@ -1799,6 +1799,7 @@ export function buildPastSimulatedBaselineV1(args: {
       !dayIsPendingSmtIntervals &&
       !dayIsLedgerIncompleteMeter;
     const dayIsLeadingMissing =
+      presentSlotCount === 0 &&
       oldestActualTsMs !== Number.POSITIVE_INFINITY &&
       gridTs.length > 0 &&
       new Date(gridTs[0]).getTime() < oldestActualTsMs;
@@ -1822,16 +1823,16 @@ export function buildPastSimulatedBaselineV1(args: {
       !dayMeetsTrustedCompleteness &&
       presentSlotCount > 0 &&
       presentSlotCount < trustedThreshold;
+    const dayCountsAsActualBacked = dayIsTrustedActual || dayMeetsTrustedCompleteness;
     const shouldSimulateDay =
       dayIsForcedSimulate ||
       dayIsPendingSmtIntervals ||
       dayIsLedgerIncompleteMeter ||
       dayIsExcluded ||
-      dayIsLeadingMissing ||
-      dayIsDailyUsageMissing ||
-      dayIsIncomplete ||
       dayIsForceModeledKeepRef ||
-      dayIsLowDataSyntheticModeled;
+      dayIsLowDataSyntheticModeled ||
+      (!dayCountsAsActualBacked &&
+        (dayIsLeadingMissing || dayIsDailyUsageMissing || dayIsIncomplete));
     /** Reference pool: good at-home days only; excludes travel (forced elsewhere) and incomplete/leading; includes Gap-Fill test days (keep-ref modeled). */
     const isReferenceDayForPool =
       !dayIsForcedSimulate && !dayIsExcluded && !dayIsLeadingMissing && !dayIsDailyUsageMissing && !dayIsIncomplete;
