@@ -49,6 +49,28 @@ describe("greenButtonUserSiteBaseline", () => {
     expect((resolved.dataset as any)?.insights?.fifteenMinuteAverages?.length).toBeGreaterThan(0);
   });
 
+  it("keeps resolved actual dataset when shared passthrough returns no summary", async () => {
+    vi.mocked(runSharedSimulation).mockResolvedValueOnce({ dataset: {} } as any);
+
+    const resolvedUsage = {
+      dataset: {
+        summary: { source: "GREEN_BUTTON", totalKwh: 14082, start: "2025-05-14", end: "2026-05-13" },
+        meta: { actualSource: "GREEN_BUTTON" },
+        daily: [{ date: "2025-05-14", kwh: 41 }],
+      },
+      alternatives: { smt: null, greenButton: null },
+    };
+
+    const resolved = await resolveGreenButtonBaselineUsageForUserSite({
+      userId: "u1",
+      houseId: "h1",
+      resolvedUsage,
+    });
+
+    expect((resolved.dataset as any)?.summary?.totalKwh).toBe(14082);
+    expect((resolved.dataset as any)?.daily?.length).toBe(1);
+  });
+
   it("reads weather score from passthrough dataset meta", () => {
     const out = weatherSensitivityFromPassthroughDataset({
       meta: {

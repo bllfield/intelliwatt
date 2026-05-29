@@ -827,7 +827,8 @@ function chooseDataset(
   committedSource?: ActualUsageSource | null,
 ): UsageDatasetResult | null {
   if (committedSource === "GREEN_BUTTON") return greenButton ?? null;
-  if (committedSource === "SMT") return smt ?? null;
+  // Active SMT auth can commit the home to SMT before intervals land; still show GB when present.
+  if (committedSource === "SMT") return smt ?? greenButton ?? null;
   if (smt) return smt;
   if (greenButton) return greenButton;
   return null;
@@ -1227,7 +1228,7 @@ export async function getActualUsageDatasetForHouse(
       smtDataset = null;
     }
   }
-  if (!fetchOnlyPreferredSource || preferredSource === "GREEN_BUTTON") {
+  if (!fetchOnlyPreferredSource || preferredSource === "GREEN_BUTTON" || preferredSource === "SMT") {
     try {
       if (fetchOnlyPreferredSource && preferredSource === "GREEN_BUTTON" && USAGE_DB_ENABLED) {
         greenButtonRawId = await getLatestUsableRawGreenButtonIdForHouse(houseId);

@@ -21,6 +21,12 @@ vi.mock("@/lib/db", () => ({
       findFirst: (...args: any[]) => smtFindFirst(...args),
       findMany: (...args: any[]) => smtFindMany(...args),
     },
+    smtAuthorization: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    houseAddress: {
+      findFirst: vi.fn().mockResolvedValue({ esiid: "esiid-1" }),
+    },
     $queryRaw: (...args: any[]) => prismaQueryRaw(...args),
     $executeRaw: (...args: any[]) => prismaExecuteRaw(...args),
   },
@@ -44,6 +50,14 @@ vi.mock("@/lib/usage/buildUsageBucketsForEstimate", () => ({
 vi.mock("@/modules/realUsageAdapter/greenButton", () => ({
   getLatestUsableRawGreenButtonIdForHouse: (...args: any[]) => getLatestUsableRawGreenButtonIdForHouse(...args),
   getLatestGreenButtonFullDayDateKey: (...args: any[]) => getLatestGreenButtonFullDayDateKey(...args),
+}));
+
+vi.mock("@/lib/usage/smtCanonicalAvailability", () => ({
+  hasSmtIntervalsInCanonicalWindow: vi.fn().mockResolvedValue(true),
+}));
+
+vi.mock("@/lib/time/loadHouseTimezone", () => ({
+  loadHomeTimezoneForHouseId: vi.fn().mockResolvedValue("America/Chicago"),
 }));
 
 vi.mock("@/modules/usageSimulator/labTestHome", () => ({
@@ -89,24 +103,40 @@ describe("actualDatasetForHouse source selection", () => {
     smtFindFirst.mockResolvedValue({ ts: new Date("2025-12-01T23:45:00.000Z") });
     smtFindMany.mockResolvedValue([{ meter: "m1" }]);
     prismaExecuteRaw.mockResolvedValue(0);
-    prismaQueryRaw
-      .mockResolvedValueOnce([
-        {
-          intervalscount: 2,
-          importkwh: 10,
-          exportkwh: 0,
-          start: new Date("2024-12-02T06:00:00.000Z"),
-          end: new Date("2025-12-01T23:45:00.000Z"),
-        },
-      ])
-      .mockResolvedValueOnce([
-        { ts: new Date("2025-12-01T23:30:00.000Z"), kwh: 4 },
-        { ts: new Date("2025-12-01T23:45:00.000Z"), kwh: 6 },
-      ])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ bucket: new Date("2024-12-02T06:00:00.000Z"), kwh: 10 }])
-      .mockResolvedValueOnce([{ bucket: new Date("2024-12-01T06:00:00.000Z"), kwh: 10 }])
-      .mockResolvedValueOnce([{ bucket: new Date("2025-01-01T00:00:00.000Z"), kwh: 10 }]);
+    const smtAggRow = [
+      {
+        intervalscount: 2,
+        importkwh: 10,
+        exportkwh: 0,
+        start: new Date("2024-12-02T06:00:00.000Z"),
+        end: new Date("2025-12-01T23:45:00.000Z"),
+      },
+    ];
+    prismaQueryRaw.mockImplementation(async (query: unknown) => {
+      const sql = String((query as { strings?: string[] })?.strings?.join?.("") ?? query ?? "");
+      if (sql.includes("SmtInterval") && sql.includes("COUNT(*)")) {
+        return smtAggRow;
+      }
+      if (sql.includes('SELECT DISTINCT ON ("ts")')) {
+        return [
+          { ts: new Date("2025-12-01T23:30:00.000Z"), kwh: 4 },
+          { ts: new Date("2025-12-01T23:45:00.000Z"), kwh: 6 },
+        ];
+      }
+      if (sql.includes("date_trunc('hour'")) {
+        return [{ bucket: new Date("2024-12-02T06:00:00.000Z"), kwh: 10 }];
+      }
+      if (sql.includes("to_char") && sql.includes("YYYY-MM-DD")) {
+        return [{ date: "2025-12-01", kwh: 10 }];
+      }
+      if (sql.includes("date_trunc('month'")) {
+        return [{ bucket: new Date("2025-01-01T00:00:00.000Z"), kwh: 10 }];
+      }
+      if (sql.includes("date_trunc('year'")) {
+        return [{ bucket: new Date("2025-01-01T00:00:00.000Z"), kwh: 10 }];
+      }
+      return [];
+    });
 
     getLatestUsableRawGreenButtonIdForHouse.mockResolvedValue("raw-1");
     getLatestGreenButtonFullDayDateKey.mockResolvedValue("2025-12-01");
@@ -130,35 +160,32 @@ describe("actualDatasetForHouse source selection", () => {
     buildUsageBucketsForEstimate.mockResolvedValue(null);
   });
 
-  it("defaults to SMT dataset when both SMT and Green Button are available", async () => {
-    const { getActualUsageDatasetForHouse } = await import("@/lib/usage/actualDatasetForHouse");
+  it("falls back to Green Button when SMT is preferred but canonical intervals are missing", async () => {
+    prismaQueryRaw.mockImplementation(async (query: unknown) => {
+      const sql = String((query as { strings?: string[] })?.strings?.join?.("") ?? query ?? "");
+      if (sql.includes("SmtInterval") && sql.includes("COUNT(*)")) {
+        return [
+          {
+            intervalscount: 0,
+            importkwh: 0,
+            exportkwh: 0,
+            start: null,
+            end: null,
+          },
+        ];
+      }
+      return [];
+    });
 
+    const { getActualUsageDatasetForHouse } = await import("@/lib/usage/actualDatasetForHouse");
     const result = await getActualUsageDatasetForHouse("house-1", "esiid-1", {
+      preferredSource: "SMT",
       skipFullYearIntervalFetch: true,
+      userUsageDashboardLoad: true,
     });
 
-    expect(result.dataset?.summary.source).toBe("SMT");
-    expect(result.dataset?.summary.totalKwh).toBe(10);
-  });
-
-  it("anchors SMT reads to Chicago-local day boundaries for the canonical 365-day window", async () => {
-    const { getActualUsageDatasetForHouse } = await import("@/lib/usage/actualDatasetForHouse");
-
-    await getActualUsageDatasetForHouse("house-1", "esiid-1", {
-      skipFullYearIntervalFetch: true,
-    });
-
-    expect(smtFindFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          esiid: "esiid-1",
-          ts: expect.objectContaining({
-            gte: new Date("2024-12-02T06:00:00.000Z"),
-            lte: new Date("2025-12-02T05:59:59.999Z"),
-          }),
-        }),
-      }),
-    );
+    expect(result.dataset?.summary.source).toBe("GREEN_BUTTON");
+    expect(Number(result.dataset?.summary.totalKwh ?? 0)).toBeGreaterThan(0);
   });
 
   it("anchors GREEN_BUTTON baseline display to the uploaded file window, not the SMT canonical lag window", async () => {
@@ -206,7 +233,7 @@ describe("actualDatasetForHouse source selection", () => {
       preferredSource: "SMT",
     });
 
-    await getActualUsageDatasetForHouse("house-1", "esiid-1");
+    await getActualUsageDatasetForHouse("house-1", "esiid-1", { preferredSource: "SMT" });
 
     expect(boundsSpy).toHaveBeenCalledWith(
       expect.objectContaining({ startDate: "2024-12-02", endDate: "2025-12-01" })

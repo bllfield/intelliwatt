@@ -76,9 +76,15 @@ export async function resolveGreenButtonBaselineUsageForUserSite(args: {
     passthroughDataset: artifact?.dataset ?? null,
     resolvedDataset: args.resolvedUsage.dataset,
   });
+  const passthroughSummary =
+    passthroughDataset != null &&
+    typeof passthroughDataset === "object" &&
+    (passthroughDataset as Record<string, unknown>).summary != null
+      ? passthroughDataset
+      : null;
 
   return {
-    dataset: passthroughDataset,
+    dataset: passthroughSummary ?? args.resolvedUsage.dataset,
     alternatives: args.resolvedUsage.alternatives ?? { smt: null, greenButton: null },
   };
 }

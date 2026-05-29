@@ -78,7 +78,12 @@ export async function resolveHouseCommittedUsageSource(args: {
     })
     .catch(() => []);
   const authorization = pickBestSmtAuthorization(authorizationCandidates as any[]);
-  if (isActiveSmtAuthorizationRow(authorization as any)) return "SMT";
+  if (isActiveSmtAuthorizationRow(authorization as any)) {
+    if (gbReady && esiid && !(await hasSmtIntervalsInCanonicalWindow(esiid))) {
+      return "GREEN_BUTTON";
+    }
+    return "SMT";
+  }
   if (gbReady) return "GREEN_BUTTON";
   if (esiid && (await hasSmtIntervalsInCanonicalWindow(esiid))) return "SMT";
   return null;
