@@ -2241,7 +2241,10 @@ export async function simulatePastUsageDataset(
           sourceActualIntervals.length > 0
             ? mapGreenButtonUtcTrustedDateKeysToHome(
                 greenButtonCoverageIntervals.trustedActualDateKeys,
-                sourceActualIntervals
+                sourceActualIntervals.map((row) => ({
+                  timestamp: String(row.timestamp),
+                  homeDateKey: dateKeyFromTimestampForPast(String(row.timestamp)),
+                }))
               )
             : greenButtonCoverageIntervals?.trustedActualDateKeys
               ? new Set(greenButtonCoverageIntervals.trustedActualDateKeys)

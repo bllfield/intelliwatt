@@ -34,12 +34,16 @@ vi.mock("@/modules/realUsageAdapter/greenButton", () => ({
   getLatestGreenButtonFullDayDateKey: (...args: any[]) => getLatestGreenButtonFullDayDateKey(...args),
 }));
 
-vi.mock("@/lib/usage/canonicalMetadataWindow", () => ({
-  resolveCanonicalUsage365CoverageWindow: () => ({
-    startDate: "2025-04-15",
-    endDate: "2026-04-14",
-  }),
-}));
+vi.mock("@/lib/usage/canonicalMetadataWindow", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/usage/canonicalMetadataWindow")>();
+  return {
+    ...actual,
+    resolveCanonicalUsage365CoverageWindow: () => ({
+      startDate: "2025-04-15",
+      endDate: "2026-04-14",
+    }),
+  };
+});
 
 vi.mock("@/modules/weather/backfill", () => ({
   ensureHouseWeatherBackfill: (...args: any[]) => ensureHouseWeatherBackfill(...args),
@@ -134,8 +138,8 @@ describe("actualDatasetForHouse lightweight green button", () => {
     expect(ensureHouseWeatherBackfill).toHaveBeenCalledWith(
       expect.objectContaining({
         houseId: "house-1",
-        startDate: "2026-04-14",
-        endDate: "2026-04-15",
+        startDate: "2025-04-15",
+        endDate: "2026-04-14",
         allowOutsideCanonicalCoverage: true,
       }),
     );
@@ -150,5 +154,20 @@ describe("actualDatasetForHouse lightweight green button", () => {
       },
     });
     expect(result.dataset?.meta?.weatherSourceSummary).toBe("actual_only");
+  });
+
+  it("still loads the 15-minute load curve when lightweight insight recompute is skipped", async () => {
+    const { getActualUsageDatasetForHouse } = await import("@/lib/usage/actualDatasetForHouse");
+
+    const result = await getActualUsageDatasetForHouse("house-1", null, {
+      preferredSource: "GREEN_BUTTON",
+      skipFullYearIntervalFetch: true,
+      skipLightweightInsightRecompute: true,
+    });
+
+    expect(result.dataset?.insights?.fifteenMinuteAverages).toEqual([
+      { hhmm: "00:00", avgKw: 4 },
+      { hhmm: "00:15", avgKw: 4.4 },
+    ]);
   });
 });

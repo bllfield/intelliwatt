@@ -35,10 +35,10 @@ export function mapGreenButtonUtcTrustedDateKeysToHome(
   }
 
   const homeTrusted = new Set<string>();
-  for (const utcKey of trustedUtc) {
-    for (const homeKey of homeKeysByUtcDay.get(utcKey) ?? []) {
+  trustedUtc.forEach((utcKey) => {
+    homeKeysByUtcDay.get(utcKey)?.forEach((homeKey) => {
       homeTrusted.add(homeKey);
-    }
-  }
+    });
+  });
   return homeTrusted;
 }

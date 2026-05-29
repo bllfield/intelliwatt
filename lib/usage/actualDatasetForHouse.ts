@@ -1420,6 +1420,49 @@ export async function getActualUsageDatasetForHouse(
         // Keep series-derived totals when the lightweight SMT insight read fails.
       }
     }
+    const shouldQueryGreenButtonChartInsightsOnly =
+      selected.summary.source === "GREEN_BUTTON" &&
+      skipLightweightInsightRecompute &&
+      (!Array.isArray(insights.fifteenMinuteAverages) || insights.fifteenMinuteAverages.length === 0) &&
+      YYYY_MM_DD.test(lightweightRangeStart) &&
+      YYYY_MM_DD.test(lightweightRangeEnd);
+    if (shouldQueryGreenButtonChartInsightsOnly) {
+      try {
+        const rawId =
+          greenButtonRawId ??
+          (fetchOnlyPreferredSource && preferredSource === "GREEN_BUTTON"
+            ? null
+            : await getLatestUsableRawGreenButtonIdForHouse(houseId));
+        const lightweightRange =
+          buildUtcRangeForChicagoLocalDateRange({
+            startDateKey: lightweightRangeStart,
+            endDateKey: lightweightRangeEnd,
+          }) ?? null;
+        if (rawId != null) {
+          const computed = await computeInsightsFromDb({
+            source: "GREEN_BUTTON",
+            houseId,
+            rawId,
+            cutoff: lightweightRange?.startInclusive ?? new Date(`${lightweightRangeStart}T00:00:00.000Z`),
+            end: lightweightRange?.endInclusive ?? new Date(`${lightweightRangeEnd}T23:59:59.999Z`),
+            homeTimezone,
+            precomputedDailyTotals: dailyTotals.length > 0 ? dailyTotals : undefined,
+            precomputedMonthlyTotals: monthlyTotals.length > 0 ? monthlyTotals : undefined,
+          });
+          insights = {
+            ...insights,
+            fifteenMinuteAverages: computed.fifteenMinuteAverages,
+            ...((!Array.isArray(insights.timeOfDayBuckets) || insights.timeOfDayBuckets.length === 0) &&
+            computed.timeOfDayBuckets.length > 0
+              ? { timeOfDayBuckets: computed.timeOfDayBuckets }
+              : {}),
+            ...(insights.peakHour == null && computed.peakHour != null ? { peakHour: computed.peakHour } : {}),
+          };
+        }
+      } catch {
+        // Keep series-derived chart readouts when the chart-only aggregate read fails.
+      }
+    }
     const stitchedMonth = buildDisplayStitchedMonthMeta({
       monthlyTotals,
       coverageEndDateKey: selectedWindowEndDate,
