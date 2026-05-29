@@ -1242,7 +1242,7 @@ export async function getActualUsageDatasetForHouse(
     }
   }
   const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
-  const greenButtonOnlyLoad = greenButtonCommitted || (fetchOnlyPreferredSource && preferredSource === "GREEN_BUTTON");
+  const greenButtonOnlyLoad = committedSource === "GREEN_BUTTON";
   if (
     !greenButtonOnlyLoad &&
     !smtDataset &&
