@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useMemo, useState } from "react";
 import { buildWeekdayWeekendBreakdownNote } from "@/components/usage/readoutTruth";
 import {
   Bar,
@@ -124,6 +124,18 @@ export function UsageChartsPanel(props: {
       return a === b && daily[0]!.date.slice(0, 4) !== daily[daily.length - 1]!.date.slice(0, 4);
     })();
   const dailyLabelFormat = spansTwoYears || firstLastSameMonthDay ? formatDateShortWithYear : formatDateShort;
+  const [fifteenMinuteView, setFifteenMinuteView] = useState<"chart" | "table">("chart");
+  const sortedFifteenCurve = useMemo(
+    () =>
+      [...fifteenCurve].sort((left, right) => {
+        const toMinutes = (hhmm: string) => {
+          const [hour, minute] = hhmm.split(":").map(Number);
+          return hour * 60 + minute;
+        };
+        return toMinutes(left.hhmm) - toMinutes(right.hhmm);
+      }),
+    [fifteenCurve]
+  );
   const weekdayWeekendBreakdownNote = buildWeekdayWeekendBreakdownNote({
     weekdayKwh,
     weekendKwh,
@@ -587,26 +599,96 @@ export function UsageChartsPanel(props: {
         </div>
 
         <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-          <div className="mb-2 flex items-center justify-between">
-            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">15-minute load curve</div>
-            <div className="text-[11px] text-neutral-400">Average kW by time of day</div>
-          </div>
-          {fifteenCurve.length ? (
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart
-                  data={fifteenCurve.map((p) => ({ ...p, label: formatTimeLabel(p.hhmm) }))}
-                  margin={{ top: 10, right: 16, bottom: 8, left: 0 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="label" tick={{ fontSize: 10 }} minTickGap={20} />
-                  <YAxis />
-                  <Tooltip formatter={(value) => `${Number(value ?? 0).toFixed(2)} kW`} />
-                  <Legend />
-                  <Line type="monotone" dataKey="avgKw" stroke="#6366F1" dot={false} strokeWidth={2} />
-                </LineChart>
-              </ResponsiveContainer>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">15-minute load curve</div>
+              <div className="text-[11px] text-neutral-400">Average kW by time of day</div>
             </div>
+            {sortedFifteenCurve.length ? (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setFifteenMinuteView("chart")}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold border ${
+                    fifteenMinuteView === "chart"
+                      ? "border-indigo-300 bg-indigo-50 text-indigo-700"
+                      : "border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50"
+                  }`}
+                >
+                  Chart
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFifteenMinuteView("table")}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold border ${
+                    fifteenMinuteView === "table"
+                      ? "border-indigo-300 bg-indigo-50 text-indigo-700"
+                      : "border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50"
+                  }`}
+                >
+                  Table
+                </button>
+              </div>
+            ) : null}
+          </div>
+          {sortedFifteenCurve.length ? (
+            fifteenMinuteView === "chart" ? (
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart
+                    data={sortedFifteenCurve.map((p) => ({ ...p, label: formatTimeLabel(p.hhmm) }))}
+                    margin={{ top: 10, right: 16, bottom: 8, left: 0 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fontSize: 10 }} minTickGap={20} />
+                    <YAxis />
+                    <Tooltip formatter={(value) => `${Number(value ?? 0).toFixed(2)} kW`} />
+                    <Legend />
+                    <Line type="monotone" dataKey="avgKw" stroke="#6366F1" dot={false} strokeWidth={2} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <>
+                <p className="mb-2 text-xs text-neutral-500">
+                  One row per 15-minute slot (Chicago day). Select cells to copy values for auditing.
+                </p>
+                <div className="max-h-80 overflow-auto rounded-lg border border-neutral-200 select-text">
+                  <table className="min-w-[240px] w-full text-sm font-mono">
+                    <thead className="sticky top-0 z-10 bg-neutral-50 text-neutral-600">
+                      <tr>
+                        <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide">Slot</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide">Time</th>
+                        <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide">Avg kW</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-neutral-800">
+                      {sortedFifteenCurve.map((row, index) => (
+                        <tr key={`${row.hhmm}-${index}`} className="border-t border-neutral-100 hover:bg-neutral-50/50">
+                          <td className="px-3 py-1.5 tabular-nums text-neutral-500">{index + 1}</td>
+                          <td className="px-3 py-1.5">{row.hhmm}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{Number(row.avgKw).toFixed(3)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="bg-neutral-50 text-neutral-800">
+                      <tr className="border-t border-neutral-200">
+                        <td className="px-3 py-2 font-semibold" colSpan={2}>
+                          Slots ({sortedFifteenCurve.length})
+                        </td>
+                        <td className="px-3 py-2 text-right font-semibold tabular-nums">
+                          {(
+                            sortedFifteenCurve.reduce((sum, row) => sum + (Number(row.avgKw) || 0), 0) /
+                            sortedFifteenCurve.length
+                          ).toFixed(3)}{" "}
+                          kW avg
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </>
+            )
           ) : (
             <p className="text-xs text-neutral-500">
               {emptyFifteenCurveMessage ?? "Not enough interval data yet to build a load curve."}
