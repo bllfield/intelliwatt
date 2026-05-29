@@ -25,7 +25,6 @@ import {
   buildWeatherEfficiencyDerivedInput,
   resolveSharedWeatherSensitivityEnvelope,
 } from "@/modules/weatherSensitivity/shared";
-import { prepareUserSiteGreenButtonDisplayUsage } from "@/lib/usage/greenButtonChartInsights";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -108,18 +107,10 @@ export async function GET(request: NextRequest) {
         esiid: house.esiid ?? null,
         userUsageDashboardLoad: true,
       });
-      const usageForContract = await prepareUserSiteGreenButtonDisplayUsage(
-        resolved ?? { dataset: null, alternatives: { smt: null, greenButton: null } },
-        {
-          userId: u.user.id,
-          houseId: house.id,
-          actualContextHouseId: house.id,
-        }
-      );
       const contract = await buildUserUsageHouseContract({
         userId: u.user.id,
         house,
-        resolvedUsage: usageForContract,
+        resolvedUsage: resolved ?? { dataset: null, alternatives: { smt: null, greenButton: null } },
         weatherHouseId: house.id,
       });
       const baselineHeaders = new Headers({ "Cache-Control": "private, max-age=30" });

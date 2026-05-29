@@ -16,7 +16,6 @@ describe("prepareUserSiteGreenButtonDisplayUsage", () => {
     };
     const out = await prepareUserSiteGreenButtonDisplayUsage(resolved);
     expect(out).toBe(resolved);
-    expect(out.dataset).toEqual(resolved.dataset);
   });
 });
 

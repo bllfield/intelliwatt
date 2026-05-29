@@ -188,6 +188,55 @@ describe("actualDatasetForHouse source selection", () => {
     expect(Number(result.dataset?.summary.totalKwh ?? 0)).toBeGreaterThan(0);
   });
 
+  it("uses lightweight Green Button load for user usage dashboard reads", async () => {
+    const anchorEnd = "2026-05-14";
+    const anchorStart = prevCalendarDayDateKey(anchorEnd, 365 - 1);
+    getLatestGreenButtonFullDayDateKey.mockResolvedValue(anchorEnd);
+    greenButtonFindFirst.mockResolvedValue({ timestamp: new Date(`${anchorEnd}T12:00:00.000Z`) });
+    greenButtonAggregate.mockResolvedValue({
+      _count: { _all: 34562 },
+      _sum: { consumptionKwh: 14082 },
+      _min: { timestamp: new Date(`${anchorStart}T06:00:00.000Z`) },
+      _max: { timestamp: new Date(`${anchorEnd}T23:45:00.000Z`) },
+    });
+    usageQueryRaw.mockImplementation(async (query: unknown) => {
+      const sql = String((query as { strings?: string[] })?.strings?.join?.("") ?? query ?? "");
+      if (sql.includes("to_char") && sql.includes("YYYY-MM-DD") && sql.includes("consumptionKwh")) {
+        return [{ date: anchorEnd, kwh: 45 }];
+      }
+      if (sql.includes("date_trunc('month'") && sql.includes("consumptionKwh")) {
+        return [{ month: "2026-05", kwh: 14082 }];
+      }
+      if (sql.includes("HH24:MI")) {
+        return [{ hhmm: "00:00", avgkw: 1.2 }];
+      }
+      if (sql.includes("Overnight")) {
+        return [{ key: "evening", label: "Evening (6pm–12am)", sort: 4, kwh: 10 }];
+      }
+      if (sql.includes("ORDER BY avgkw DESC")) {
+        return [{ hour: 18, avgkw: 2.1 }];
+      }
+      if (sql.includes("percentile_cont")) {
+        return [{ baseload: 0.34 }];
+      }
+      if (sql.includes("weekdaykwh")) {
+        return [{ weekdaykwh: 70, weekendkwh: 30 }];
+      }
+      return [];
+    });
+
+    const { getActualUsageDatasetForHouse } = await import("@/lib/usage/actualDatasetForHouse");
+    const result = await getActualUsageDatasetForHouse("house-1", "esiid-1", {
+      preferredSource: "GREEN_BUTTON",
+      userUsageDashboardLoad: true,
+    });
+
+    expect(greenButtonFindMany).not.toHaveBeenCalled();
+    expect(result.skippedFullYearIntervalFetch).toBe(true);
+    expect(result.dataset?.summary.source).toBe("GREEN_BUTTON");
+    expect(Array.isArray(result.dataset?.daily)).toBe(true);
+  });
+
   it("anchors GREEN_BUTTON baseline display to the uploaded file window, not the SMT canonical lag window", async () => {
     const anchorEnd = "2026-05-14";
     const anchorStart = prevCalendarDayDateKey(anchorEnd, 365 - 1);

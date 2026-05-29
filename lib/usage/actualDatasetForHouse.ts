@@ -1209,9 +1209,12 @@ export async function getActualUsageDatasetForHouse(
   const homeTimezone = await loadHomeTimezoneForHouseId(houseId, {
     preferredActualSource: committedSource ?? null,
   });
-  const skippedFullYearIntervalFetch = Boolean(args?.skipFullYearIntervalFetch);
-  const skipLightweightInsightRecompute = Boolean(args?.skipLightweightInsightRecompute);
   const userUsageDashboardLoad = Boolean(args?.userUsageDashboardLoad);
+  const userSiteGreenButtonLightweightLoad =
+    userUsageDashboardLoad && committedSource === "GREEN_BUTTON";
+  const skippedFullYearIntervalFetch =
+    Boolean(args?.skipFullYearIntervalFetch) || userSiteGreenButtonLightweightLoad;
+  const skipLightweightInsightRecompute = Boolean(args?.skipLightweightInsightRecompute);
   const preferredSource = committedSource;
   const greenButtonCommitted = preferredSource === "GREEN_BUTTON";
   const fetchOnlyPreferredSource =
@@ -1478,34 +1481,36 @@ export async function getActualUsageDatasetForHouse(
       stitchedMonth,
     });
     const dailyTotalsForDataset = fillCanonicalDailyTotals(dailyTotals, displayCoverageWindow);
-    insights = await (async () => {
-      const baseloadFiltered = computeHomeBaseloadKw(
-        (
-          await getActualIntervalsForRange({
-            houseId,
-            esiid,
-            startDate: lightweightRangeStart,
-            endDate: lightweightRangeEnd,
-            preferredSource,
-            homeTimezone,
-          })
-        ).map((r) => ({
-          tsIso: String(r.timestamp ?? ""),
-          kwh: Number(r.kwh) || 0,
-          homeDateKey: r.homeDateKey ?? null,
-        })),
-        homeTimezone,
-        { excludedDateKeys: args?.excludedDateKeys },
-      );
-      if (baseloadFiltered.baseloadKw == null) return insights;
-      return {
-        ...insights,
-        baseload: baseloadFiltered.baseloadKw,
-        baseloadMethod: baseloadFiltered.fallbackUsed ? "FALLBACK_V1" : "FILTERED_NORMAL_LIFE_V1",
-        baseloadFallbackUsed: baseloadFiltered.fallbackUsed,
-        baseloadDebugNote: baseloadFiltered.debugNote,
-      };
-    })();
+    if (!userUsageDashboardLoad) {
+      insights = await (async () => {
+        const baseloadFiltered = computeHomeBaseloadKw(
+          (
+            await getActualIntervalsForRange({
+              houseId,
+              esiid,
+              startDate: lightweightRangeStart,
+              endDate: lightweightRangeEnd,
+              preferredSource,
+              homeTimezone,
+            })
+          ).map((r) => ({
+            tsIso: String(r.timestamp ?? ""),
+            kwh: Number(r.kwh) || 0,
+            homeDateKey: r.homeDateKey ?? null,
+          })),
+          homeTimezone,
+          { excludedDateKeys: args?.excludedDateKeys },
+        );
+        if (baseloadFiltered.baseloadKw == null) return insights;
+        return {
+          ...insights,
+          baseload: baseloadFiltered.baseloadKw,
+          baseloadMethod: baseloadFiltered.fallbackUsed ? "FALLBACK_V1" : "FILTERED_NORMAL_LIFE_V1",
+          baseloadFallbackUsed: baseloadFiltered.fallbackUsed,
+          baseloadDebugNote: baseloadFiltered.debugNote,
+        };
+      })();
+    }
     const monthlyForDisplay = buildDisplayedMonthlyRows({
       monthly: monthlyTotals,
       insights: { stitchedMonth: insights.stitchedMonth ?? stitchedMonth ?? null },

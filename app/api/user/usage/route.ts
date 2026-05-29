@@ -14,7 +14,6 @@ import {
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 import { IntervalSeriesKind } from '@/modules/usageSimulator/kinds';
 import { toPublicHouseLabel } from "@/modules/usageSimulator/houseLabel";
-import { prepareUserSiteGreenButtonDisplayUsage } from "@/lib/usage/greenButtonChartInsights";
 import { filterUserVisibleHouses } from "@/lib/usage/userSiteSimulationIsolation";
 import {
   classifySimulationFailure,
@@ -122,15 +121,7 @@ export async function GET(request: NextRequest) {
         }).catch(() => null);
         result = { dataset: null, alternatives: { smt: null, greenButton: null } };
       }
-      const usageForContract = await withTaskTimeout(
-        prepareUserSiteGreenButtonDisplayUsage(result, {
-          userId: user.id,
-          houseId: house.id,
-          actualContextHouseId: house.id,
-        }),
-        PER_HOUSE_RESOLVE_TIMEOUT_MS,
-        `greenButtonBaselinePassthrough:${house.id}`
-      ).then((resolved) => resolved ?? result);
+      const usageForContract = result;
 
       const contract = await buildUserUsageHouseContract({
         userId: user.id,
