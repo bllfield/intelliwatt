@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { ensureSmtCoverageForHouse } from "@/lib/usage/ensureSmtCoverage";
+import { isHouseCommittedToGreenButton } from "@/lib/usage/houseCommittedUsageSource";
 import {
   resolveUserUsageSessionKey,
   USER_USAGE_SESSION_COOKIE,
@@ -56,6 +57,37 @@ export async function POST(req: NextRequest) {
     request: req,
     cookieValue: cookieStore.get(USER_USAGE_SESSION_COOKIE)?.value ?? null,
   });
+
+  const house = await prisma.houseAddress.findFirst({
+    where: { id: requestedHomeId, userId: user.id, archivedAt: null },
+    select: { id: true, esiid: true },
+  });
+  if (!house) {
+    return NextResponse.json(
+      { ok: false, error: "home_not_found", message: "Home not found for this user." },
+      { status: 404 },
+    );
+  }
+
+  if (
+    await isHouseCommittedToGreenButton({
+      houseId: house.id,
+      userId: user.id,
+      esiid: house.esiid ?? null,
+    })
+  ) {
+    return NextResponse.json({
+      ok: true,
+      homes: [],
+      backfill: [],
+      ensure: {
+        healed: false,
+        skippedReason: "green_button_committed",
+      },
+      greenButtonCommitted: true,
+      message: "This home uses Green Button; SMT refresh was not requested.",
+    });
+  }
 
   const ensure = await ensureSmtCoverageForHouse({
     userId: user.id,

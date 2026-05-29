@@ -10,6 +10,7 @@ import { normalizeEmail } from "@/lib/utils/email";
 import { runGreenButtonUsagePipeline } from "@/lib/usage/greenButtonUsagePipeline";
 import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
 import { runPlanPipelineForHome } from "@/lib/plan-engine/runPlanPipelineForHome";
+import { clearSmtUsageForHouse } from "@/lib/usage/smtHouseCleanup";
 
 // No explicit upload cap; rely on platform limits. Large files are allowed to ensure full 12-month coverage.
 const MANUAL_USAGE_LIFETIME_DAYS = 365;
@@ -179,6 +180,9 @@ export async function POST(request: Request) {
         );
       }
       await Promise.all(cleanupTasks);
+      await clearSmtUsageForHouse({ houseId: house.id, esiid: house.esiid ?? null }).catch((err) => {
+        console.error("[green-button/upload] SMT cleanup after Green Button ingest failed (best-effort)", err);
+      });
 
       const intervalData = trimmed.map((interval) => ({
         rawId: rawRecord.id,

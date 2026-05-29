@@ -821,11 +821,13 @@ function isHomeDateKeyInCoverageWindow(
   return dateKey >= window.startDate && dateKey <= window.endDate;
 }
 
-/** SMT always wins when present; Green Button is only used when SMT is unavailable for the load. */
 function chooseDataset(
   smt: UsageDatasetResult | null,
   greenButton: UsageDatasetResult | null,
+  committedSource?: ActualUsageSource | null,
 ): UsageDatasetResult | null {
+  if (committedSource === "GREEN_BUTTON") return greenButton ?? null;
+  if (committedSource === "SMT") return smt ?? null;
   if (smt) return smt;
   if (greenButton) return greenButton;
   return null;
@@ -1174,6 +1176,7 @@ export async function getActualUsageDatasetForHouse(
   houseId: string,
   esiid: string | null,
   args?: {
+    userId?: string | null;
     cutoff?: Date;
     excludedDateKeys?: Set<string>;
     preferredSource?: ActualUsageSource | null;
@@ -1192,19 +1195,30 @@ export async function getActualUsageDatasetForHouse(
   /** True when skipFullYearIntervalFetch was true and we did not call getActualIntervalsForRange. */
   skippedFullYearIntervalFetch?: boolean;
 }> {
+  const { resolveHouseCommittedUsageSource } = await import("@/lib/usage/houseCommittedUsageSource");
+  const committedSource =
+    args?.preferredSource ??
+    (args?.userId || houseId
+      ? await resolveHouseCommittedUsageSource({
+          houseId,
+          userId: args?.userId ?? null,
+          esiid,
+        })
+      : null);
   const homeTimezone = await loadHomeTimezoneForHouseId(houseId, {
-    preferredActualSource: args?.preferredSource ?? null,
+    preferredActualSource: committedSource ?? null,
   });
   const skippedFullYearIntervalFetch = Boolean(args?.skipFullYearIntervalFetch);
   const skipLightweightInsightRecompute = Boolean(args?.skipLightweightInsightRecompute);
   const userUsageDashboardLoad = Boolean(args?.userUsageDashboardLoad);
-  const preferredSource = args?.preferredSource ?? null;
+  const preferredSource = committedSource;
+  const greenButtonCommitted = preferredSource === "GREEN_BUTTON";
   const fetchOnlyPreferredSource =
     skippedFullYearIntervalFetch && (preferredSource === "SMT" || preferredSource === "GREEN_BUTTON");
   let smtDataset: UsageDatasetResult | null = null;
   let greenDataset: UsageDatasetResult | null = null;
   let greenButtonRawId: string | null = null;
-  if (!fetchOnlyPreferredSource || preferredSource === "SMT") {
+  if (!greenButtonCommitted && (!fetchOnlyPreferredSource || preferredSource === "SMT")) {
     try {
       smtDataset = await fetchSmtDataset(esiid, homeTimezone, {
         skipFullIntervalRowLoad: userUsageDashboardLoad,
@@ -1228,7 +1242,7 @@ export async function getActualUsageDatasetForHouse(
     }
   }
   const canonicalWindow = resolveCanonicalUsage365CoverageWindow();
-  const greenButtonOnlyLoad = fetchOnlyPreferredSource && preferredSource === "GREEN_BUTTON";
+  const greenButtonOnlyLoad = greenButtonCommitted || (fetchOnlyPreferredSource && preferredSource === "GREEN_BUTTON");
   if (
     !greenButtonOnlyLoad &&
     !smtDataset &&
@@ -1243,7 +1257,7 @@ export async function getActualUsageDatasetForHouse(
       smtDataset = null;
     }
   }
-  const selected = chooseDataset(smtDataset, greenDataset);
+  const selected = chooseDataset(smtDataset, greenDataset, preferredSource);
   if (!greenButtonOnlyLoad && selected?.summary?.source === "SMT" && esiid) {
     await clearGreenButtonSupersededBySmtForHouse({ houseId, esiid });
   }

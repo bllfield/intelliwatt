@@ -159,14 +159,13 @@ export async function resolveUserSiteActualSourceForHouse(args: {
   houseId: string;
   esiid: string | null;
 }): Promise<"SMT" | "GREEN_BUTTON"> {
-  if (String(args.esiid ?? "").trim()) return "SMT";
-  const { getActualUsageDatasetForHouse } = await import("@/lib/usage/actualDatasetForHouse");
-  const result = await getActualUsageDatasetForHouse(args.houseId, null, {
-    skipFullYearIntervalFetch: true,
-    preferredSource: null,
-  }).catch(() => null);
-  const src = String(result?.dataset?.summary?.source ?? "").trim().toUpperCase();
-  if (src === "SMT" || src === "GREEN_BUTTON") return src;
+  const { resolveHouseCommittedUsageSource } = await import("@/lib/usage/houseCommittedUsageSource");
+  const committed = await resolveHouseCommittedUsageSource({
+    userId: args.userId,
+    houseId: args.houseId,
+    esiid: args.esiid,
+  });
+  if (committed === "SMT" || committed === "GREEN_BUTTON") return committed;
   return "GREEN_BUTTON";
 }
 

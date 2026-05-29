@@ -37,7 +37,11 @@ import {
 
 export type EnsureSmtCoverageProfile = "user_session" | "user_refresh" | "sim_run" | "admin_sim";
 
-export type EnsureSmtCoverageSkippedReason = "session_throttle" | "no_esiid" | "window_ready";
+export type EnsureSmtCoverageSkippedReason =
+  | "session_throttle"
+  | "no_esiid"
+  | "window_ready"
+  | "green_button_committed";
 
 export type EnsureSmtCoverageResult = {
   healed: boolean;
@@ -140,6 +144,22 @@ export async function ensureSmtCoverageForHouse(args: {
   skipUsageRefresh?: boolean;
 }): Promise<EnsureSmtCoverageResult> {
   const window = resolveSmtCanonicalWindow();
+  const { isHouseCommittedToGreenButton } = await import("@/lib/usage/houseCommittedUsageSource");
+  if (
+    await isHouseCommittedToGreenButton({
+      houseId: args.houseId,
+      userId: args.userId,
+      esiid: args.esiid ?? null,
+    })
+  ) {
+    return {
+      healed: false,
+      skippedReason: "green_button_committed",
+      dayStatus: emptyWindowStatus(window),
+      window,
+    };
+  }
+
   const esiidOverride = String(args.esiid ?? "").trim();
   const esiid = esiidOverride || (await resolveEsiidForHouse(args.houseId));
   if (!esiid) {

@@ -17,6 +17,7 @@ import {
   resolveSmtUserProcessingStage,
   type SmtUserProcessingStage,
 } from "@/lib/usage/smtUserProcessingStage";
+import { isHouseCommittedToGreenButton } from "@/lib/usage/houseCommittedUsageSource";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -338,6 +339,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { ok: false, error: "home_not_found", message: "No home found for this user." },
       { status: 404 },
+    );
+  }
+
+  if (
+    await isHouseCommittedToGreenButton({
+      houseId: house.id,
+      userId: user.id,
+      esiid: house.esiid ?? null,
+    })
+  ) {
+    return NextResponse.json(
+      {
+        ok: true,
+        phase: "green_button_committed",
+        done: true,
+        homeId: house.id,
+        message: "This home uses Green Button; SMT orchestration was skipped.",
+      },
+      { status: 200 },
     );
   }
 

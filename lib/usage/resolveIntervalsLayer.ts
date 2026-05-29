@@ -1,4 +1,5 @@
 import { getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
+import { resolveHouseCommittedUsageSource } from "@/lib/usage/houseCommittedUsageSource";
 import type { ActualHouseDataset, ActualHouseInsights, UsageSummary } from "@/lib/usage/actualDatasetForHouse";
 import { getIntervalSeries15m } from "@/lib/usage/intervalSeriesRepo";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
@@ -94,6 +95,8 @@ export async function resolveIntervalsLayer(args: {
   scenarioId?: string | null;
   esiid?: string | null;
   preferredActualSource?: ActualUsageSource | null;
+  /** When true, resolve committed user-site source (GB vs SMT) before loading datasets. */
+  resolveCommittedUsageSource?: boolean;
   lightweightActualUsage?: boolean;
   skipLightweightInsightRecompute?: boolean;
   userUsageDashboardLoad?: boolean;
@@ -102,8 +105,18 @@ export async function resolveIntervalsLayer(args: {
     args.layerKind === IntervalSeriesKind.ACTUAL_USAGE_INTERVALS ||
     args.layerKind === IntervalSeriesKind.BASELINE_INTERVALS
   ) {
+    const preferredSource =
+      args.preferredActualSource ??
+      (args.resolveCommittedUsageSource === false
+        ? null
+        : await resolveHouseCommittedUsageSource({
+            houseId: args.houseId,
+            userId: args.userId,
+            esiid: args.esiid ?? null,
+          }));
     return getActualUsageDatasetForHouse(args.houseId, args.esiid ?? null, {
-      preferredSource: args.preferredActualSource ?? null,
+      userId: args.userId,
+      preferredSource,
       skipFullYearIntervalFetch: args.lightweightActualUsage === true,
       skipLightweightInsightRecompute: args.skipLightweightInsightRecompute === true,
       userUsageDashboardLoad: args.userUsageDashboardLoad === true,

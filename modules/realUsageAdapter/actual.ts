@@ -52,8 +52,11 @@ export async function resolveActualUsageSourceAnchor(args: {
     typeof gbAnchorDateKey === "string" && /^\d{4}-\d{2}-\d{2}$/.test(gbAnchorDateKey)
       ? new Date(`${gbAnchorDateKey}T12:00:00.000Z`).getTime()
       : 0;
+  const preferred = args.preferredSource ?? null;
   let source: ActualUsageSource | null = null;
-  if (smtMs > 0) source = "SMT";
+  if (preferred === "GREEN_BUTTON" && gbMs > 0) source = "GREEN_BUTTON";
+  else if (preferred === "SMT" && smtMs > 0) source = "SMT";
+  else if (smtMs > 0) source = "SMT";
   else if (gbMs > 0) source = "GREEN_BUTTON";
   else source = null;
 
