@@ -1,6 +1,7 @@
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
 import type { UserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
 import type { OnePathBaselineParityAudit } from "@/modules/onePathSim/baselineParityAudit";
+import type { OnePathRunReadOnlyView } from "@/modules/onePathSim/runReadOnlyView";
 import type { WeatherSensitivityScore } from "@/modules/weatherSensitivity/shared";
 import type { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
 
@@ -77,5 +78,54 @@ export function buildOnePathBaselineReadOnlyView(args: {
         ?.meta?.weatherSensitivityScore ??
         null),
     parityAudit: args.parityAudit ?? null,
+  };
+}
+
+/** Maps the user-site baseline contract into the One Path run read model (baseline / passthrough runs). */
+export function buildOnePathRunReadOnlyViewFromBaselineContract(args: {
+  houseContract?: UserUsageHouseContract | null;
+  parityAudit?: OnePathBaselineParityAudit | null;
+}): OnePathRunReadOnlyView | null {
+  const baselineView = buildOnePathBaselineReadOnlyView(args);
+  if (!baselineView) return null;
+  const viewModel = buildUserUsageDashboardViewModel(args.houseContract ?? null);
+
+  return {
+    summary: {
+      source: baselineView.summary.source,
+      coverageStart: baselineView.summary.coverageStart,
+      coverageEnd: baselineView.summary.coverageEnd,
+      displayWindowNote: null,
+      intervalsCount: baselineView.summary.intervalsCount,
+      weatherBasisLabel: baselineView.summary.weatherBasisLabel,
+      dailyUsageDisclosureNote: viewModel?.coverage.dailyUsageDisclosureNote ?? null,
+      sourceOfDaySimulationCore: baselineView.summary.sourceOfDaySimulationCore,
+      pastValidationPolicyRevision: null,
+      hasSimulatedFill: false,
+      totals: baselineView.summary.totals,
+      avgDailyKwh: baselineView.summary.avgDailyKwh,
+      baseload: baselineView.summary.baseload,
+      baseloadDaily: baselineView.summary.baseloadDaily,
+      baseloadMonthly: baselineView.summary.baseloadMonthly,
+      peakDay: baselineView.summary.peakDay,
+      peakHour: baselineView.summary.peakHour,
+      weekdayKwh: baselineView.summary.weekdayKwh,
+      weekendKwh: baselineView.summary.weekendKwh,
+      timeOfDayBuckets: baselineView.summary.timeOfDayBuckets,
+    },
+    monthlyRows: baselineView.monthlyRows,
+    dailyRows: baselineView.dailyRows,
+    dailyWeather: baselineView.dailyWeather,
+    fifteenMinuteAverages: baselineView.fifteenMinuteAverages,
+    fifteenMinuteCurveSourceOwner:
+      "buildGreenButtonUserSiteParityContract -> buildOnePathBaselineReadOnlyView",
+    stitchedMonth: baselineView.stitchedMonth,
+    weatherScore: baselineView.weatherScore,
+    pastVariables: [],
+    compare: {
+      rows: [],
+      metrics: null,
+      selectedValidationRows: [],
+    },
   };
 }

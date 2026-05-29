@@ -55,7 +55,12 @@ import {
 import { buildOnePathBaselineParityAudit } from "@/modules/onePathSim/baselineParityAudit";
 import { runFullWindowSmtReingestForHouse } from "@/lib/usage/fullWindowSmtReingest";
 import { buildBaselineParityReport } from "@/modules/onePathSim/baselineParityReport";
-import { buildOnePathBaselineReadOnlyView } from "@/modules/onePathSim/baselineReadOnlyView";
+import {
+  buildOnePathBaselineReadOnlyView,
+  buildOnePathRunReadOnlyViewFromBaselineContract,
+} from "@/modules/onePathSim/baselineReadOnlyView";
+import { buildGreenButtonUserSiteParityContract } from "@/lib/usage/greenButtonUserSiteBaseline";
+import { ensureWorkspaceScenariosForHouse } from "@/lib/usage/ensureWorkspaceScenarios";
 import { buildKnownHouseScenarioPrereqStatus } from "@/modules/onePathSim/knownHouseScenarioPrereqs";
 import {
   hasUsableAnnualPayload,
@@ -1111,6 +1116,41 @@ type OnePathIncompleteMeterBackfillRetry = OnePathSmtPostSimHealingResult & {
 };
 
 /** SMT pull/backfill must run on a house with ESIID + authorization; pinned lab homes keep esiid null by design. */
+function resolveOnePathGreenButtonParitySource(args: {
+  resolved: {
+    userId: string;
+    selectedHouse: { id: string; label?: string | null; esiid?: string | null };
+  };
+  onePathTestHomeState: {
+    isPinned: boolean;
+    linkedSourceHouseId: string | null;
+    linkedSourceUserId: string | null;
+  };
+}): { userId: string; house: { id: string; label?: string | null; esiid?: string | null } } {
+  if (
+    args.onePathTestHomeState.isPinned &&
+    args.onePathTestHomeState.linkedSourceHouseId &&
+    args.onePathTestHomeState.linkedSourceUserId
+  ) {
+    return {
+      userId: args.onePathTestHomeState.linkedSourceUserId,
+      house: {
+        id: args.onePathTestHomeState.linkedSourceHouseId,
+        label: args.resolved.selectedHouse.label ?? null,
+        esiid: args.resolved.selectedHouse.esiid ?? null,
+      },
+    };
+  }
+  return {
+    userId: args.resolved.userId,
+    house: {
+      id: args.resolved.selectedHouse.id,
+      label: args.resolved.selectedHouse.label ?? null,
+      esiid: args.resolved.selectedHouse.esiid ?? null,
+    },
+  };
+}
+
 function resolveOnePathAdminSmtHealTarget(args: {
   effectiveUserId: string;
   effectiveHouseId: string;
@@ -1283,6 +1323,9 @@ export async function POST(request: NextRequest) {
       ? onePathTestHomeState.testHomeHouseId
       : null;
   const defaultActualContextHouseId = onePathUsageTruthHouseId ?? resolved.selectedHouse.id;
+  if (onePathTestHomeState.isPinned && effectiveHouseId) {
+    await ensureWorkspaceScenariosForHouse({ userId: effectiveUserId, houseId: effectiveHouseId }).catch(() => null);
+  }
   const effectiveScenarios =
     onePathTestHomeState.isPinned && effectiveHouseId
       ? (
@@ -1451,6 +1494,23 @@ export async function POST(request: NextRequest) {
     const mode = normalizeMode(body?.mode);
     const correlationId = createSimCorrelationId();
     const stageTimingsMs: Record<string, number> = {};
+    let runScenarioId =
+      typeof body?.scenarioId === "string" && body.scenarioId.trim() ? body.scenarioId.trim() : null;
+    const runReasonText = String(body?.runReason ?? "").trim().toLowerCase();
+    if (!runScenarioId && mode === "GREEN_BUTTON" && onePathTestHomeState.isPinned && effectiveHouseId) {
+      const ensured = await ensureWorkspaceScenariosForHouse({
+        userId: effectiveUserId,
+        houseId: effectiveHouseId,
+      }).catch(() => ({ pastScenarioId: null, futureScenarioId: null }));
+      if (runReasonText.includes("green-button-past") || runReasonText.includes("keeper-green-button-past")) {
+        runScenarioId = ensured.pastScenarioId;
+      } else if (
+        runReasonText.includes("green-button-future") ||
+        runReasonText.includes("keeper-green-button-future")
+      ) {
+        runScenarioId = ensured.futureScenarioId;
+      }
+    }
     const isManualMode = mode === "MANUAL_MONTHLY" || mode === "MANUAL_ANNUAL";
     const manualUsage =
       isManualMode
@@ -1468,7 +1528,7 @@ export async function POST(request: NextRequest) {
         body?.preferredActualSource === "SMT" || body?.preferredActualSource === "GREEN_BUTTON"
           ? body.preferredActualSource
           : null,
-      scenarioId: typeof body?.scenarioId === "string" && body.scenarioId.trim() ? body.scenarioId.trim() : null,
+      scenarioId: runScenarioId,
       weatherPreference:
         body?.weatherPreference === "NONE" || body?.weatherPreference === "LONG_TERM_AVERAGE"
           ? body.weatherPreference
@@ -1496,6 +1556,21 @@ export async function POST(request: NextRequest) {
             ? "GREEN_BUTTON"
             : rawInputBase.preferredActualSource,
     } as const;
+    if (
+      mode === "GREEN_BUTTON" &&
+      (runReasonText.includes("green-button-past") || runReasonText.includes("keeper-green-button-past")) &&
+      !effectiveRawInputBase.scenarioId
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "past_scenario_missing",
+          message:
+            "Green Button Past Sim requires a Past (Corrected) scenario on the One Path test home. Load lookup again, then reload the Green Button Past preset.",
+        },
+        { status: 409 }
+      );
+    }
     const adminManualSeeds =
       isManualMode
         ? await buildOnePathAdminManualSeeds({
@@ -1588,39 +1663,49 @@ export async function POST(request: NextRequest) {
                 });
       let slimEngineInput = buildSlimAdminEngineInput(engineInput);
       if (mode === "GREEN_BUTTON" && !effectiveRawInputBase.scenarioId) {
+        const gbParitySource = resolveOnePathGreenButtonParitySource({
+          resolved,
+          onePathTestHomeState,
+        });
+        const gbParityContract = await withAdminRouteStageTimeout({
+          stage: "build_green_button_user_site_parity_contract",
+          correlationId,
+          timeoutMs: GREEN_BUTTON_ROUTE_STAGE_TIMEOUT_MS,
+          mode,
+          houseId: effectiveHouseId,
+          stageTimingsMs,
+          promise: buildGreenButtonUserSiteParityContract({
+            userId: gbParitySource.userId,
+            sourceHouse: gbParitySource.house,
+            actualContextHouseId: effectiveRawInputBase.actualContextHouseId ?? defaultActualContextHouseId,
+            lightweightActualUsage: true,
+            skipLightweightInsightRecompute: true,
+          }),
+        });
         const baselineDataset = asRecord(
-          await withAdminRouteStageTimeout({
-            stage: "build_green_button_baseline_dataset",
-            correlationId,
-            timeoutMs: GREEN_BUTTON_ROUTE_STAGE_TIMEOUT_MS,
-            mode,
-            houseId: effectiveHouseId,
-            stageTimingsMs,
-            promise: buildIntervalLikeBaselinePassthroughDataset(engineInput, {
-              skipGreenButtonInsightHydration: true,
-            }),
-          })
-        );
-        const baselineDatasetMeta = asRecord(baselineDataset?.meta);
-        const compactRunDisplayView =
-          (
-            await withAdminRouteStageTimeout({
-              stage: "build_green_button_baseline_view",
+          gbParityContract?.dataset ??
+            (await withAdminRouteStageTimeout({
+              stage: "build_green_button_baseline_dataset",
               correlationId,
               timeoutMs: GREEN_BUTTON_ROUTE_STAGE_TIMEOUT_MS,
               mode,
               houseId: effectiveHouseId,
               stageTimingsMs,
-              promise: Promise.resolve(
-                buildOnePathRunReadOnlyView({
-                  dataset: baselineDataset,
-                  engineInput: asRecord(engineInput),
-                  readModel: null,
-                  weatherSensitivityScore: engineInput.weatherSensitivityScore ?? null,
-                }) ?? null
-              ),
-            })
-          ) ?? null;
+              promise: buildIntervalLikeBaselinePassthroughDataset(engineInput, {
+                skipGreenButtonInsightHydration: true,
+              }),
+            }))
+        );
+        const baselineDatasetMeta = asRecord(baselineDataset?.meta);
+        const compactRunDisplayView =
+          buildOnePathRunReadOnlyViewFromBaselineContract({ houseContract: gbParityContract }) ??
+          buildOnePathRunReadOnlyView({
+            dataset: baselineDataset,
+            engineInput: asRecord(engineInput),
+            readModel: null,
+            weatherSensitivityScore: engineInput.weatherSensitivityScore ?? null,
+          }) ??
+          null;
         const compactReadModel =
           compactRunDisplayView || baselineDataset
             ? {
@@ -1652,7 +1737,19 @@ export async function POST(request: NextRequest) {
         !effectiveRawInputBase.scenarioId &&
         Boolean(artifactDatasetMeta?.baselinePassthrough);
       if (isGreenButtonBaselinePassthroughRun) {
+        const gbParitySource = resolveOnePathGreenButtonParitySource({
+          resolved,
+          onePathTestHomeState,
+        });
+        const gbParityContract = await buildGreenButtonUserSiteParityContract({
+          userId: gbParitySource.userId,
+          sourceHouse: gbParitySource.house,
+          actualContextHouseId: effectiveRawInputBase.actualContextHouseId ?? defaultActualContextHouseId,
+          lightweightActualUsage: true,
+          skipLightweightInsightRecompute: true,
+        }).catch(() => null);
         const compactRunDisplayView =
+          buildOnePathRunReadOnlyViewFromBaselineContract({ houseContract: gbParityContract }) ??
           buildOnePathRunReadOnlyView({
             dataset: artifactDataset,
             engineInput: asRecord(engineInput),
@@ -1664,7 +1761,8 @@ export async function POST(request: NextRequest) {
                   }
                 : null,
             weatherSensitivityScore: engineInput.weatherSensitivityScore ?? null,
-          }) ?? null;
+          }) ??
+          null;
         const compactReadModel =
           compactRunDisplayView || artifactDataset
             ? {

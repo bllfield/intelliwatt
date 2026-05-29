@@ -1,7 +1,15 @@
+import { resolveIntervalsLayer } from "@/lib/usage/resolveIntervalsLayer";
+import {
+  buildUserUsageHouseContract,
+  type UserUsageHouseContract,
+  type UserUsageHouseSelection,
+} from "@/lib/usage/userUsageHouseContract";
+import { isGreenButtonPrimaryDataset } from "@/lib/usage/smtTailCoverage";
 import {
   isGreenButtonUsageDataset,
   mergeGreenButtonChartInsightsOntoPassthroughDataset,
 } from "@/lib/usage/greenButtonChartInsights";
+import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import type {
   WeatherEfficiencyDerivedInput,
   WeatherSensitivityScore,
@@ -73,4 +81,58 @@ export async function resolveGreenButtonBaselineUsageForUserSite(args: {
     dataset: passthroughDataset,
     alternatives: args.resolvedUsage.alternatives ?? { smt: null, greenButton: null },
   };
+}
+
+/**
+ * Same Green Button baseline contract path as the user usage dashboard and One Path lookup.
+ */
+export async function buildGreenButtonUserSiteParityContract(args: {
+  userId: string;
+  sourceHouse: UserUsageHouseSelection;
+  actualContextHouseId: string;
+  homeProfile?: unknown;
+  applianceProfileRecord?: { appliancesJson?: unknown } | null;
+  lightweightActualUsage?: boolean;
+  skipLightweightInsightRecompute?: boolean;
+}): Promise<UserUsageHouseContract | null> {
+  const userId = String(args.userId ?? "").trim();
+  const houseId = String(args.sourceHouse.id ?? "").trim();
+  const actualContextHouseId = String(args.actualContextHouseId ?? houseId).trim() || houseId;
+  if (!userId || !houseId) return null;
+
+  const sourceLayer = await resolveIntervalsLayer({
+    userId,
+    houseId,
+    layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
+    esiid: args.sourceHouse.esiid ?? null,
+    lightweightActualUsage: args.lightweightActualUsage === true,
+    skipLightweightInsightRecompute: args.skipLightweightInsightRecompute === true,
+  }).catch(() => null);
+
+  let resolvedUsage: ResolvedUsageLayer | null = sourceLayer
+    ? {
+        dataset: sourceLayer.dataset ?? null,
+        alternatives: sourceLayer.alternatives ?? { smt: null, greenButton: null },
+      }
+    : null;
+
+  if (resolvedUsage && isGreenButtonPrimaryDataset(resolvedUsage.dataset)) {
+    resolvedUsage = await resolveGreenButtonBaselineUsageForUserSite({
+      userId,
+      houseId,
+      actualContextHouseId,
+      resolvedUsage,
+    }).catch(() => resolvedUsage);
+  }
+
+  return buildUserUsageHouseContract({
+    userId,
+    house: args.sourceHouse,
+    weatherHouseId: actualContextHouseId,
+    resolvedUsage,
+    lightweightActualUsage: args.lightweightActualUsage === true,
+    skipLightweightInsightRecompute: args.skipLightweightInsightRecompute === true,
+    homeProfile: args.homeProfile,
+    applianceProfileRecord: args.applianceProfileRecord,
+  }).catch(() => null);
 }

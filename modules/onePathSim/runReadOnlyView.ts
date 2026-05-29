@@ -62,6 +62,18 @@ function dateKeyFromUtcGridTimestamp(timestamp: string): string | null {
   return ts.toISOString().slice(0, 10);
 }
 
+function isGreenButtonBackedDatasetMeta(meta: Record<string, unknown> | null): boolean {
+  if (!meta) return false;
+  if (meta.actualSource === "GREEN_BUTTON") return true;
+  if (typeof meta.greenButtonCoverageIntervalCount === "number") return true;
+  if (meta.greenButtonIntervalTimestampMode === "utcDayGrid") return true;
+  return Boolean(
+    meta.greenButtonSourceDateByTargetDate &&
+      typeof meta.greenButtonSourceDateByTargetDate === "object" &&
+      !Array.isArray(meta.greenButtonSourceDateByTargetDate)
+  );
+}
+
 function resolveIntervalTimestampMode(meta: Record<string, unknown> | null): "timezone" | "utcDayGrid" {
   if (meta?.greenButtonIntervalTimestampMode === "utcDayGrid") return "utcDayGrid";
   if (
@@ -474,6 +486,7 @@ export function buildOnePathRunReadOnlyView(args: {
         ? intervalBackedLocalDailyRows[intervalBackedLocalDailyRows.length - 1]?.date ?? null
         : null;
     const shouldPreferIntervalBackedLocalDailyRows =
+      !isGreenButtonBackedDatasetMeta(meta) &&
       intervalBackedLocalDailyRows.length > 0 &&
       (datasetDailyRows.length === 0 ||
         intervalBackedLocalDailyRows.length > datasetDailyRows.length ||

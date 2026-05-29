@@ -7,6 +7,9 @@ const requireAdmin = vi.fn();
 const lookupAdminHousesByEmail = vi.fn();
 const resolveAdminHouseSelection = vi.fn();
 const listScenarios = vi.fn();
+const createScenario = vi.fn();
+const buildGreenButtonUserSiteParityContract = vi.fn();
+const buildOnePathRunReadOnlyViewFromBaselineContract = vi.fn();
 const prismaUserFindFirst = vi.fn();
 const prismaHouseAddressFindFirst = vi.fn();
 const prismaGreenButtonUploadFindFirst = vi.fn();
@@ -114,7 +117,23 @@ vi.mock("@/lib/admin/adminHouseLookup", () => ({
 
 vi.mock("@/modules/usageSimulator/service", () => ({
   listScenarios: (...args: any[]) => listScenarios(...args),
+  createScenario: (...args: any[]) => createScenario(...args),
 }));
+
+vi.mock("@/lib/usage/greenButtonUserSiteBaseline", () => ({
+  buildGreenButtonUserSiteParityContract: (...args: any[]) => buildGreenButtonUserSiteParityContract(...args),
+  resolveGreenButtonBaselineUsageForUserSite: vi.fn(async (args: any) => args.resolvedUsage),
+  weatherSensitivityFromPassthroughDataset: vi.fn(() => null),
+}));
+
+vi.mock("@/modules/onePathSim/baselineReadOnlyView", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/modules/onePathSim/baselineReadOnlyView")>();
+  return {
+    ...actual,
+    buildOnePathRunReadOnlyViewFromBaselineContract: (...args: any[]) =>
+      buildOnePathRunReadOnlyViewFromBaselineContract(...args),
+  };
+});
 
 vi.mock("@/modules/usageSimulator/labTestHome", () => ({
   ONE_PATH_LAB_TEST_HOME_LABEL: "ONE_PATH_LAB_TEST_HOME",
@@ -276,6 +295,9 @@ describe("admin one path sim route", () => {
     lookupAdminHousesByEmail.mockReset();
     resolveAdminHouseSelection.mockReset();
     listScenarios.mockReset();
+    createScenario.mockReset();
+    buildGreenButtonUserSiteParityContract.mockReset();
+    buildOnePathRunReadOnlyViewFromBaselineContract.mockReset();
     prismaUserFindFirst.mockReset();
     prismaHouseAddressFindFirst.mockReset();
     prismaGreenButtonUploadFindFirst.mockReset();
@@ -672,6 +694,46 @@ describe("admin one path sim route", () => {
         },
       ],
     });
+    createScenario.mockResolvedValue({
+      ok: true,
+      scenario: { id: "past-scenario-1", name: "Past (Corrected)" },
+    });
+    buildGreenButtonUserSiteParityContract.mockImplementation(async () =>
+      buildUserUsageHouseContract()
+    );
+    buildOnePathRunReadOnlyViewFromBaselineContract.mockReturnValue({
+      summary: {
+        source: "GREEN_BUTTON",
+        coverageStart: "2025-04-15",
+        coverageEnd: "2026-04-14",
+        displayWindowNote: null,
+        intervalsCount: 34823,
+        weatherBasisLabel: "actual cached weather",
+        dailyUsageDisclosureNote: null,
+        sourceOfDaySimulationCore: null,
+        pastValidationPolicyRevision: null,
+        hasSimulatedFill: false,
+        totals: { importKwh: 13542.3, exportKwh: 0, netKwh: 13542.3 },
+        avgDailyKwh: 37.1,
+        baseload: 0.22,
+        baseloadDaily: 12.99,
+        baseloadMonthly: 716.25,
+        peakDay: { date: "2026-01-25", kwh: 189.3 },
+        peakHour: { hour: 23, kw: 2.3 },
+        weekdayKwh: 9800,
+        weekendKwh: 3742.3,
+        timeOfDayBuckets: [{ key: "overnight", label: "Overnight", kwh: 2800 }],
+      },
+      monthlyRows: [{ month: "2026-04", kwh: 13542.3 }],
+      dailyRows: [{ date: "2026-04-14", kwh: 13542.3, source: "ACTUAL", sourceDetail: "ACTUAL" }],
+      dailyWeather: null,
+      fifteenMinuteAverages: [{ hhmm: "00:00", avgKw: 1.2 }],
+      fifteenMinuteCurveSourceOwner: "buildGreenButtonUserSiteParityContract",
+      stitchedMonth: null,
+      weatherScore: { scoringMode: "INTERVAL_BASED" },
+      pastVariables: [],
+      compare: { rows: [], metrics: null, selectedValidationRows: [] },
+    });
     buildUserUsageHouseContract.mockResolvedValue({
       houseId: "house-1",
       label: "Home",
@@ -790,7 +852,7 @@ describe("admin one path sim route", () => {
         house: expect.objectContaining({ id: "house-1" }),
       })
     );
-    expect(buildUserUsageHouseContract).toHaveBeenCalledTimes(2);
+    expect(buildUserUsageHouseContract).toHaveBeenCalledTimes(1);
     expect(getHomeProfileReadOnlyByUserHouse).toHaveBeenCalledWith({ userId: "user-1", houseId: "house-1" });
     expect(getHomeProfileSimulatedByUserHouse).not.toHaveBeenCalled();
     expect(saveManualUsageInputForUserHouse).not.toHaveBeenCalled();
@@ -964,8 +1026,16 @@ describe("admin one path sim route", () => {
       seedIfMissing: false,
       preferredActualSource: "GREEN_BUTTON",
     });
-    expect(json.sourceContext.userUsageBaselineContract).toBeNull();
-    expect(json.sourceContext.userUsagePageBaselineContract).toBeNull();
+    expect(json.sourceContext.userUsageBaselineContract).toEqual(
+      expect.objectContaining({
+        houseId: "house-1",
+      })
+    );
+    expect(json.sourceContext.userUsagePageBaselineContract).toEqual(
+      expect.objectContaining({
+        houseId: "house-1",
+      })
+    );
     expect(buildUserUsageHouseContract).toHaveBeenCalledTimes(1);
     expect(json.sourceContext.userUsageBaselineView).toEqual(
       expect.objectContaining({
@@ -1144,13 +1214,13 @@ describe("admin one path sim route", () => {
       })
     );
     expect(adaptIntervalRawInput).not.toHaveBeenCalled();
-    expect(buildIntervalLikeBaselinePassthroughDataset).toHaveBeenCalledWith(
+    expect(buildGreenButtonUserSiteParityContract).toHaveBeenCalledWith(
       expect.objectContaining({
-        sharedProducerPathUsed: true,
-        inputType: "GREEN_BUTTON",
-      }),
-      { skipGreenButtonInsightHydration: true },
+        userId: "user-1",
+        sourceHouse: expect.objectContaining({ id: "house-1" }),
+      })
     );
+    expect(buildOnePathRunReadOnlyViewFromBaselineContract).toHaveBeenCalled();
     expect(runSharedSimulation).not.toHaveBeenCalled();
     expect(json.debugDiagnosticsIncluded).toBe(false);
     expect(json.runType).toBe("BASELINE_PASSTHROUGH");
@@ -2130,6 +2200,7 @@ describe("admin one path sim route", () => {
   });
 
   it("returns a distinct usage DB unavailable error for upstream truth failures when the usage env is missing", async () => {
+    buildGreenButtonUserSiteParityContract.mockResolvedValueOnce(null);
     buildIntervalLikeBaselinePassthroughDataset.mockRejectedValueOnce(
       new UpstreamUsageTruthMissingError({
         usageTruthSource: "missing_usage_truth",
@@ -2373,14 +2444,10 @@ describe("admin one path sim route", () => {
       expect.objectContaining({
         userId: "user-1",
         house: expect.objectContaining({ id: "house-1", esiid: "esiid-1" }),
+        weatherHouseId: "test-home-1",
       })
     );
-    expect(buildUserUsageHouseContract).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: "user-1",
-        house: expect.objectContaining({ id: "test-home-1", esiid: "esiid-test-1" }),
-      })
-    );
+    expect(buildUserUsageHouseContract).toHaveBeenCalledTimes(1);
     expect(json.sourceContext.onePathTestHome).toEqual(
       expect.objectContaining({
         houseId: "test-home-1",

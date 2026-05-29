@@ -1071,6 +1071,16 @@ export function OnePathSimAdmin() {
     } = resolvedSelection;
     const onePathTestHomeHouseId = String(asRecord(json.sourceContext?.onePathTestHome)?.houseId ?? "").trim();
 
+    if (
+      selectedKnownScenario.scenarioSelectionStrategy === "scenario_name" &&
+      !presetScenarioId
+    ) {
+      setError(
+        `Could not resolve a "${selectedKnownScenario.scenarioNameHint ?? "Past"}" scenario on the One Path test home. Lookup again (workspace scenarios are auto-created on pinned test homes), then reload this preset.`
+      );
+      return;
+    }
+
     if (selectedKnownScenario.scenarioType === "GREEN_BUTTON_TRUTH") {
       const targetActualContextHouseId = onePathTestHomeHouseId;
       if (!targetActualContextHouseId) {
