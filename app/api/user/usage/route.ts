@@ -15,6 +15,7 @@ import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator
 import { IntervalSeriesKind } from '@/modules/usageSimulator/kinds';
 import { toPublicHouseLabel } from "@/modules/usageSimulator/houseLabel";
 import { prepareUserSiteGreenButtonDisplayUsage } from "@/lib/usage/greenButtonChartInsights";
+import { resolveHousePreferredActualUsageSource } from "@/lib/usage/preferredActualUsageSource";
 import { filterUserVisibleHouses } from "@/lib/usage/userSiteSimulationIsolation";
 import {
   classifySimulationFailure,
@@ -78,6 +79,7 @@ export async function GET(request: NextRequest) {
     const canonicalCoverage = resolveCanonicalUsage365CoverageWindow();
     for (const house of houses) {
       let result: { dataset: any | null; alternatives: { smt: any; greenButton: any } };
+      const preferredActualSource = await resolveHousePreferredActualUsageSource(house.id);
       try {
         const resolved = await withTaskTimeout(
           resolveIntervalsLayer({
@@ -85,6 +87,7 @@ export async function GET(request: NextRequest) {
             houseId: house.id,
             layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
             esiid: house.esiid ?? null,
+            preferredActualSource,
             userUsageDashboardLoad: true,
           }),
           PER_HOUSE_RESOLVE_TIMEOUT_MS,
