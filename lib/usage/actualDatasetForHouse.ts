@@ -821,15 +821,14 @@ function isHomeDateKeyInCoverageWindow(
   return dateKey >= window.startDate && dateKey <= window.endDate;
 }
 
-function chooseDatasetBySource(
-  source: ActualUsageSource | null,
+/** SMT always wins when present; Green Button is only used when SMT is unavailable for the load. */
+function chooseDataset(
   smt: UsageDatasetResult | null,
   greenButton: UsageDatasetResult | null,
 ): UsageDatasetResult | null {
-  if (source === "GREEN_BUTTON") return greenButton ?? null;
-  if (source === "SMT") return smt ?? null;
   if (smt) return smt;
-  return greenButton ?? null;
+  if (greenButton) return greenButton;
+  return null;
 }
 
 async function fetchSmtDataset(
@@ -1199,8 +1198,7 @@ export async function getActualUsageDatasetForHouse(
   const skippedFullYearIntervalFetch = Boolean(args?.skipFullYearIntervalFetch);
   const skipLightweightInsightRecompute = Boolean(args?.skipLightweightInsightRecompute);
   const userUsageDashboardLoad = Boolean(args?.userUsageDashboardLoad);
-  const preferredSource =
-    args?.preferredSource ?? (await resolveHousePreferredActualUsageSource(houseId));
+  const preferredSource = args?.preferredSource ?? null;
   const fetchOnlyPreferredSource =
     skippedFullYearIntervalFetch && (preferredSource === "SMT" || preferredSource === "GREEN_BUTTON");
   let smtDataset: UsageDatasetResult | null = null;
@@ -1245,19 +1243,8 @@ export async function getActualUsageDatasetForHouse(
       smtDataset = null;
     }
   }
-  const chosenSource = await chooseActualSource({
-    houseId,
-    esiid,
-    preferredSource,
-  });
-  const selected = chooseDatasetBySource(chosenSource, smtDataset, greenDataset);
-  const protectGreenButtonUpload = await houseHasSuccessfulGreenButtonUpload(houseId);
-  if (
-    !greenButtonOnlyLoad &&
-    !protectGreenButtonUpload &&
-    selected?.summary?.source === "SMT" &&
-    esiid
-  ) {
+  const selected = chooseDataset(smtDataset, greenDataset);
+  if (!greenButtonOnlyLoad && selected?.summary?.source === "SMT" && esiid) {
     await clearGreenButtonSupersededBySmtForHouse({ houseId, esiid });
   }
   const greenButtonBaselineWindow =

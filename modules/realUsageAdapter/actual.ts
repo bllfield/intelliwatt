@@ -52,25 +52,14 @@ export async function resolveActualUsageSourceAnchor(args: {
     typeof gbAnchorDateKey === "string" && /^\d{4}-\d{2}-\d{2}$/.test(gbAnchorDateKey)
       ? new Date(`${gbAnchorDateKey}T12:00:00.000Z`).getTime()
       : 0;
+  let source: ActualUsageSource | null = null;
+  if (smtMs > 0) source = "SMT";
+  else if (gbMs > 0) source = "GREEN_BUTTON";
+  else source = null;
+
   const smtAnchorEndDate = toAnchorDateKey(smtLatest, timezone);
   const greenButtonAnchorEndDate = gbAnchorDateKey;
-  const smtAvailable = smtMs > 0;
-  const gbAvailable = gbMs > 0;
-  const preferred = args.preferredSource ?? null;
-
-  let source: ActualUsageSource | null = null;
-  if (preferred === "GREEN_BUTTON" && gbAvailable) {
-    source = "GREEN_BUTTON";
-  } else if (preferred === "SMT" && smtAvailable) {
-    source = "SMT";
-  } else if (smtAvailable) {
-    source = "SMT";
-  } else if (gbAvailable) {
-    source = "GREEN_BUTTON";
-  }
-
-  const anchorEndDate =
-    source === "SMT" ? smtAnchorEndDate : source === "GREEN_BUTTON" ? greenButtonAnchorEndDate : null;
+  const anchorEndDate = source === "SMT" ? smtAnchorEndDate : source === "GREEN_BUTTON" ? greenButtonAnchorEndDate : null;
   return { source, anchorEndDate, smtAnchorEndDate, greenButtonAnchorEndDate };
 }
 

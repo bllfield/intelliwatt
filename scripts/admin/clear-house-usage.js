@@ -6,6 +6,9 @@
  *
  * Apply:
  *   node scripts/admin/clear-house-usage.js --emails "a@b.com" --houseIds "uuid1" --apply --confirm CLEAR
+ *
+ * Green Button-only re-test (clears SMT intervals + SMT authorization so usage won't re-sync SMT):
+ *   node scripts/admin/clear-house-usage.js --houseIds "<uuid>" --green-button-only --apply --confirm CLEAR
  */
 /* eslint-disable no-console */
 
@@ -89,7 +92,11 @@ async function clearUsageForHouse(db, usageDb, house, options) {
   await count("houseDailyWeather", () => db.houseDailyWeather.count({ where: { houseId } }));
   await count("simulationDataAlert", () => db.simulationDataAlert.count({ where: { houseId } }));
   if (options.clearSmtAuth) {
-    await count("smtAuthorization", () => db.smtAuthorization.count({ where: { houseAddressId: houseId } }));
+    await count("smtAuthorization", () =>
+      db.smtAuthorization.count({
+        where: { OR: [{ houseAddressId: houseId }, { houseId }] },
+      }),
+    );
   }
 
   if (usageDb) {
@@ -209,7 +216,8 @@ async function clearUsageForHouse(db, usageDb, house, options) {
 async function main() {
   const apply = argHas("--apply");
   const confirm = String(argValue("--confirm", "")).trim();
-  const clearSmtAuth = argHas("--clear-smt-auth");
+  const greenButtonOnly = argHas("--green-button-only");
+  const clearSmtAuth = argHas("--clear-smt-auth") || greenButtonOnly;
   const emails = uniq(csvList(argValue("--emails", "")).map((x) => x.toLowerCase()));
   const houseIds = uniq(csvList(argValue("--houseIds", "")).concat(csvList(argValue("--houseids", ""))));
 
@@ -290,6 +298,7 @@ async function main() {
         {
           ok: true,
           dryRun: !apply,
+          greenButtonOnly,
           clearSmtAuth,
           inputs: { emails, houseIds },
           housesResolved: targetHouses.length,
