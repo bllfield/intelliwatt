@@ -624,6 +624,20 @@ async function resolveIntervalBaselineDisplayCoverageWindow(args: {
   const isGreenButtonBaseline =
     args.engineInput.scenarioId == null && args.engineInput.inputType === "GREEN_BUTTON";
   if (isGreenButtonBaseline) {
+    if (
+      typeof args.engineInput.coverageWindowStart === "string" &&
+      /^\d{4}-\d{2}-\d{2}$/.test(args.engineInput.coverageWindowStart) &&
+      typeof args.engineInput.coverageWindowEnd === "string" &&
+      /^\d{4}-\d{2}-\d{2}$/.test(args.engineInput.coverageWindowEnd)
+    ) {
+      return {
+        window: {
+          startDate: args.engineInput.coverageWindowStart,
+          endDate: args.engineInput.coverageWindowEnd,
+        },
+        owner: "engineInput.coverageWindowStart/coverageWindowEnd",
+      };
+    }
     const fromFileAnchor = await resolveGreenButtonBaselineCoverageWindow(args.engineInput.actualContextHouseId);
     if (fromFileAnchor) {
       return { window: fromFileAnchor, owner: "resolveGreenButtonBaselineCoverageWindow" };
