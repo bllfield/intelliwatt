@@ -4,11 +4,14 @@ export function shouldAutoPreparePastWorkspace(args: {
   mode: SimulatorMode;
   canRecalc: boolean;
   baselineReady: boolean;
+  /** When actual intervals are connected, baseline build may lag behind viewable usage. */
+  workspacePrereqReady?: boolean;
   pastScenarioId?: string | null;
   pastBuildLastBuiltAt?: string | null;
 }): "create" | "recalc" | "none" {
   if (args.mode !== "MANUAL_TOTALS") return "none";
-  if (!args.canRecalc || !args.baselineReady) return "none";
+  const workspaceReady = args.workspacePrereqReady ?? args.baselineReady;
+  if (!args.canRecalc || !workspaceReady) return "none";
   if (!args.pastScenarioId) return "create";
   if (!args.pastBuildLastBuiltAt) return "recalc";
   return "none";

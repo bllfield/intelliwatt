@@ -384,17 +384,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         setMissingRequirements(j.canRecalc ? [] : (Array.isArray((j as any).missingItems) ? (j as any).missingItems : []));
         setRequirementsDbStatus((j as any).dbStatus ?? null);
         setCanonicalEndMonth(typeof (j as any).canonicalEndMonth === "string" ? String((j as any).canonicalEndMonth) : "");
-        // If the only blocker is manual usage but we have actual intervals + home details, switch to SMT_BASELINE so user can calculate without entering manual totals.
-        const missing = Array.isArray((j as any).missingItems) ? (j as any).missingItems as string[] : [];
-        const onlyManualMissing =
-          missing.length === 1 &&
-          String(missing[0]).toLowerCase().includes("manual usage totals");
-        if (
-          !j.canRecalc &&
-          onlyManualMissing &&
-          (j as any).hasActualIntervals === true &&
-          mode === "MANUAL_TOTALS"
-        ) {
+        if ((j as any).hasActualIntervals === true && mode === "MANUAL_TOTALS") {
           setMode("SMT_BASELINE");
         }
       } catch {
@@ -475,6 +465,15 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
 
   const baselineReady = useMemo(() => Boolean(baselineBuild?.lastBuiltAt), [baselineBuild?.lastBuiltAt]);
 
+  /** Usage baseline is viewable from persisted actual intervals even before a simulator build row exists. */
+  const baselineViewable = useMemo(() => baselineReady || hasActualIntervals, [baselineReady, hasActualIntervals]);
+
+  /** Past/Future workspace actions need home/appliances + actual or a completed baseline build. */
+  const workspacePrereqReady = useMemo(
+    () => baselineReady || (hasActualIntervals && canRecalc),
+    [baselineReady, canRecalc, hasActualIntervals],
+  );
+
   const pastScenario = useMemo(() => scenarios.find((s) => s.name === WORKSPACE_PAST_NAME) ?? null, [scenarios]);
   const futureScenario = useMemo(() => scenarios.find((s) => s.name === WORKSPACE_FUTURE_NAME) ?? null, [scenarios]);
 
@@ -494,13 +493,13 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
 
   const pastReady = useMemo(() => {
     if (!pastScenario?.id) return false;
-    return Boolean(pastBuild?.lastBuiltAt) || baselineReady;
-  }, [pastBuild?.lastBuiltAt, pastScenario?.id, baselineReady]);
+    return Boolean(pastBuild?.lastBuiltAt) || workspacePrereqReady;
+  }, [pastBuild?.lastBuiltAt, pastScenario?.id, workspacePrereqReady]);
 
   const futureReady = useMemo(() => {
     if (!futureScenario?.id) return false;
-    return Boolean(futureBuild?.lastBuiltAt) || baselineReady;
-  }, [futureBuild?.lastBuiltAt, futureScenario?.id, baselineReady]);
+    return Boolean(futureBuild?.lastBuiltAt) || workspacePrereqReady;
+  }, [futureBuild?.lastBuiltAt, futureScenario?.id, workspacePrereqReady]);
 
   const pastScenarioHasConfiguredValidationDays = useMemo(() => {
     const meta = scenarioSimHouseOverride?.[0]?.dataset?.meta;
@@ -920,6 +919,11 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         } else {
           setMissingRequirements([]);
         }
+        if (j?.error === "baseline_passthrough_required") {
+          setRecalcNote(null);
+          setRecalcBannerTone("neutral");
+          return;
+        }
         const feedback = recalcUserMessageFromResponse({
           httpOk: r.ok,
           httpStatus: r.status,
@@ -1009,6 +1013,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
       mode,
       canRecalc,
       baselineReady,
+      workspacePrereqReady,
       pastScenarioId: pastScenario?.id ?? null,
       pastBuildLastBuiltAt: pastBuild?.lastBuiltAt ?? null,
     });
@@ -1024,7 +1029,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
     autoPastScenarioRecalcAttemptedRef.current = pastScenario.id;
     enqueueRecalc({ scenarioId: pastScenario.id, note: "Preparing Past…" });
     void drainRecalcQueue();
-  }, [baselineReady, canRecalc, mode, pastBuild?.lastBuiltAt, pastScenario?.id, recalcBusy]);
+  }, [baselineReady, canRecalc, mode, pastBuild?.lastBuiltAt, pastScenario?.id, recalcBusy, workspacePrereqReady]);
 
   useEffect(() => {
     // Weather preference affects determinism of builds; recompute when it changes.
@@ -1235,7 +1240,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                       setWorkspace("PAST");
                       if (!pastScenario) void createScenario(WORKSPACE_PAST_NAME);
                     }}
-                    disabled={!baselineReady}
+                    disabled={!workspacePrereqReady}
                     className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10 disabled:opacity-60"
                   >
                     {pastScenario ? "Past workspace ready" : mode === "MANUAL_TOTALS" ? "Preparing Past" : "Create Past"}
@@ -1248,7 +1253,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                       if (pastScenario?.id) setScenarioId(pastScenario.id);
                       void loadTimeline(pastScenario?.id ?? undefined);
                     }}
-                    disabled={!baselineReady || !pastScenario}
+                    disabled={!workspacePrereqReady || !pastScenario}
                     className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10 disabled:opacity-60"
                   >
                     Edit Past
@@ -1274,7 +1279,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                       setWorkspace("FUTURE");
                       if (!futureScenario) void createScenario(WORKSPACE_FUTURE_NAME);
                     }}
-                    disabled={!baselineReady}
+                    disabled={!workspacePrereqReady}
                     className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10 disabled:opacity-60"
                   >
                     {futureScenario ? "Future workspace ready" : "Create Future"}
@@ -1287,7 +1292,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                       if (futureScenario?.id) setScenarioId(futureScenario.id);
                       void loadTimeline(futureScenario?.id ?? undefined);
                     }}
-                    disabled={!baselineReady || !futureScenario}
+                    disabled={!workspacePrereqReady || !futureScenario}
                     className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10 disabled:opacity-60"
                   >
                     Edit Future
@@ -1405,12 +1410,12 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                     <button
                       type="button"
                       onClick={() => setCurveView("BASELINE")}
-                      disabled={!baselineReady}
+                      disabled={!baselineViewable}
                       className={[
                         "rounded-full border px-4 py-2 text-[0.7rem] font-semibold uppercase tracking-wide transition",
-                        curveView === "BASELINE" && baselineReady
+                        curveView === "BASELINE" && baselineViewable
                           ? "border-brand-cyan/50 bg-brand-cyan/10 text-brand-cyan"
-                          : baselineReady
+                          : baselineViewable
                             ? "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70 hover:bg-brand-white/10"
                             : "cursor-not-allowed border-brand-cyan/20 bg-brand-white/5 text-brand-white/50 opacity-60",
                       ].join(" ")}

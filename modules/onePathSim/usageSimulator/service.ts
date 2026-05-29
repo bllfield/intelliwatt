@@ -4304,6 +4304,20 @@ async function recalcSimulatorBuildImpl(args: {
   const isBaselineSyntheticInvariantMode =
     scenarioId == null && (mode === "SMT_BASELINE" || mode === "MANUAL_TOTALS");
   if (isBaselineSyntheticInvariantMode) {
+    if (isUserSiteCaller) {
+      const { recalcUserSiteBaselinePassthrough } = await import(
+        "@/modules/onePathSim/usageSimulator/userSiteBaselinePassthrough"
+      );
+      return recalcUserSiteBaselinePassthrough({
+        userId,
+        houseId,
+        esiid,
+        mode,
+        weatherPreference: args.weatherPreference,
+        correlationId: args.correlationId,
+        now: args.now,
+      });
+    }
     logSimPipelineEvent("baseline_invariant_violation_synthetic_packaging_attempt", {
       correlationId: args.correlationId,
       userId,

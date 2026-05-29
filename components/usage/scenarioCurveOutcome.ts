@@ -124,6 +124,9 @@ export function recalcUserMessageFromResponse(params: {
   if (json?.error === "requirements_unmet" && Array.isArray((json as any).missingItems) && (json as any).missingItems.length > 0) {
     return { tone: "failed", text: "Complete the required details below before we can calculate." };
   }
+  if (json?.error === "baseline_passthrough_required") {
+    return { tone: "success", text: "Usage is ready from your connected data." };
+  }
   const msg =
     typeof json?.failureMessage === "string" && (json.failureMessage as string).trim()
       ? String(json.failureMessage)
