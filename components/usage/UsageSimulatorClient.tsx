@@ -1124,7 +1124,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
               Manual totals
             </button>
 
-            {hasActualIntervals ? (
+            {baselineViewable ? (
               <div className="rounded-full border border-brand-cyan/20 bg-brand-white/5 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-cyan/80">
                 Actual connected
               </div>
@@ -1139,7 +1139,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
             <div>
               <div className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">Steps</div>
               <div className="mt-2 text-sm text-brand-cyan/80">
-                {hasActualIntervals ? (
+                {baselineViewable ? (
                   <>
                     Your <span className="font-semibold">Usage is Actual usage</span> (read-only). Complete the required
                     details below to unlock Past/Future simulations.
@@ -1153,7 +1153,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
             </div>
             <div className="text-xs text-brand-cyan/75">
               <span className="font-semibold">Actual coverage:</span>{" "}
-              {hasActualIntervals
+              {baselineViewable
                 ? `${actualSource ?? "ACTUAL"} · ${actualCoverage?.start ?? "?"} → ${actualCoverage?.end ?? "?"} · ${
                     actualCoverage?.intervalsCount ?? 0
                   } intervals`

@@ -17,6 +17,12 @@ import {
 } from "@/lib/usage/actualDatasetForHouse";
 import { resolveStaleIncompleteMeterSlotCompleteDateKeys } from "@/lib/usage/pastSimStaleIncompleteMeter";
 import {
+  buildGreenButtonActualDailyKwhByHomeDateKey,
+  resolveGreenButtonPastValidationCandidateDateKeys,
+} from "@/lib/usage/greenButtonPastValidationCandidates";
+import { resolvePastSimTravelRangesForRecalc } from "@/lib/usage/pastSimTravelRanges";
+import { redistributeGreenButtonGridZeroSamples } from "@/modules/onePathSim/greenButtonIntervalCorrections";
+import {
   resolveCanonicalPastValidationDayCount,
   resolveCanonicalPastValidationSelectionMode,
   resolvePastSmtValidationPolicy,
@@ -4726,7 +4732,15 @@ async function recalcSimulatorBuildImpl(args: {
         : scenarioMergedTravelRanges
       : simMode === "NEW_BUILD_ESTIMATE"
         ? []
-        : scenarioMergedTravelRanges;
+        : await resolvePastSimTravelRangesForRecalc({
+            prisma: prisma as any,
+            userId,
+            houseId,
+            actualContextHouseId,
+            pastScenarioName: WORKSPACE_PAST_NAME,
+            preLockboxTravelRanges: requestedPreLockboxTravelRanges,
+            scenarioTravelRanges: scenarioMergedTravelRanges,
+          });
   // Month-level uplift for travel exclusions: when travel days exclude usage, uplift remaining days to fill the month.
   // Past SMT patch baseline mode uses day-level patching and must not use month-level travel uplift.
   const isPastSmtPatchMode = scenario?.name === WORKSPACE_PAST_NAME && simMode === "SMT_BASELINE";
@@ -4941,47 +4955,58 @@ async function recalcSimulatorBuildImpl(args: {
     );
     try {
       const validationSelectionStartedAt = Date.now();
-      const coverageSelection = await getCandidateDateCoverageForSelection({
-        houseId: actualContextHouseId,
-        scenarioIdentity: `past_shared:${scenarioId ?? "BASELINE"}`,
-        windowStart: selectionStart,
-        windowEnd: selectionEnd,
-        timezone: timezoneForStoredBuild,
-        // Compare projection later requires full interval-backed daily truth, so do not
-        // allow partially covered days into the validation selection pool.
-        minDayCoveragePct: 1,
-        stratifyByMonth: true,
-        stratifyByWeekend: true,
-        loadIntervalsForWindow: async () => {
-          if (actualSource === "GREEN_BUTTON") {
-            const rebased = await fetchGreenButtonIntervalsForCoverageWindow({
+      let candidateDateKeys: string[] = [];
+      if (actualSource === "GREEN_BUTTON") {
+        const rebased = await fetchGreenButtonIntervalsForCoverageWindow({
+          houseId: actualContextHouseId,
+          coverageStartDate: selectionStart,
+          coverageEndDate: selectionEnd,
+          timestampMode: "utcDayGrid",
+        });
+        const corrected = redistributeGreenButtonGridZeroSamples(rebased.intervals);
+        candidateDateKeys = resolveGreenButtonPastValidationCandidateDateKeys({
+          trustedUtcDateKeys: rebased.trustedActualDateKeys ?? [],
+          intervals: corrected.intervals,
+          timezone: timezoneForStoredBuild,
+          windowStart: selectionStart,
+          windowEnd: selectionEnd,
+          travelDateKeys: travelDateKeysLocal,
+        });
+      } else {
+        const coverageSelection = await getCandidateDateCoverageForSelection({
+          houseId: actualContextHouseId,
+          scenarioIdentity: `past_shared:${scenarioId ?? "BASELINE"}`,
+          windowStart: selectionStart,
+          windowEnd: selectionEnd,
+          timezone: timezoneForStoredBuild,
+          // Compare projection later requires full interval-backed daily truth, so do not
+          // allow partially covered days into the validation selection pool.
+          minDayCoveragePct: 1,
+          stratifyByMonth: true,
+          stratifyByWeekend: true,
+          loadIntervalsForWindow: async () => {
+            if (recalcIntervalPreload) {
+              const preloaded = await recalcIntervalPreload.getIntervals({
+                startDate: selectionStart,
+                endDate: selectionEnd,
+              });
+              return preloaded.intervals;
+            }
+            return await getActualIntervalsForRange({
               houseId: actualContextHouseId,
-              coverageStartDate: selectionStart,
-              coverageEndDate: selectionEnd,
-              timestampMode: "utcDayGrid",
-            });
-            return rebased.intervals;
-          }
-          if (recalcIntervalPreload) {
-            const preloaded = await recalcIntervalPreload.getIntervals({
+              esiid: esiid ?? null,
               startDate: selectionStart,
               endDate: selectionEnd,
+              preferredSource: preferredActualSource ?? null,
             });
-            return preloaded.intervals;
-          }
-          return await getActualIntervalsForRange({
-            houseId: actualContextHouseId,
-            esiid: esiid ?? null,
-            startDate: selectionStart,
-            endDate: selectionEnd,
-            preferredSource: preferredActualSource ?? null,
-          });
-        },
-      });
+          },
+        });
+        candidateDateKeys = coverageSelection.candidateDateKeys;
+      }
       const selection = selectValidationDayKeys({
         mode: autoMode,
         targetCount,
-        candidateDateKeys: coverageSelection.candidateDateKeys,
+        candidateDateKeys,
         travelDateKeysSet: travelDateKeysLocal,
         timezone: timezoneForStoredBuild,
         seed: `${actualContextHouseId}-${selectionEnd}`,

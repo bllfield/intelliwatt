@@ -21,7 +21,7 @@ import {
   resolveHomeCalendarForActualSource,
 } from "@/lib/time/actualIntervalCalendar";
 import { convertGreenButtonPersistedRowsToHome } from "@/lib/time/greenButtonPersistedIntervalConvert";
-import { mapGreenButtonUtcTrustedDateKeysToHome } from "@/lib/time/greenButtonUtcTrustedDateKeys";
+import { resolveGreenButtonPastSimTrustedHomeDateKeys } from "@/lib/usage/greenButtonPastTrustedPool";
 import { enumerateLocalDateKeys, localDayBoundsUtc } from "@/lib/time/homeIntervalCalendar";
 import type { PastIntervalGrid } from "@/lib/time/pastIntervalGrid";
 import { dateKeyFromTimestamp, getDayGridTimestamps } from "@/modules/usageSimulator/pastStitchedCurve";
@@ -1989,13 +1989,17 @@ export async function simulatePastUsageDataset(
           greenButtonCoverageIntervals?.trustedActualDateKeys &&
           intervalActualSource === "GREEN_BUTTON" &&
           sourceActualIntervals.length > 0
-            ? mapGreenButtonUtcTrustedDateKeysToHome(
-                greenButtonCoverageIntervals.trustedActualDateKeys,
-                sourceActualIntervals.map((row) => ({
+            ? resolveGreenButtonPastSimTrustedHomeDateKeys({
+                trustedUtcDateKeys: greenButtonCoverageIntervals.trustedActualDateKeys,
+                intervals: sourceActualIntervals.map((row) => ({
                   timestamp: String(row.timestamp),
-                  homeDateKey: dateKeyFromTimestampForPast(String(row.timestamp)),
-                }))
-              )
+                  homeDateKey:
+                    String((row as { homeDateKey?: string }).homeDateKey ?? "").slice(0, 10) ||
+                    dateKeyFromTimestampForPast(String(row.timestamp)),
+                  homeSlot: (row as { homeSlot?: number }).homeSlot,
+                })),
+                timezone: timezone ?? "America/Chicago",
+              })
             : greenButtonCoverageIntervals?.trustedActualDateKeys
               ? new Set(greenButtonCoverageIntervals.trustedActualDateKeys)
               : undefined,
