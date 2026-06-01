@@ -184,6 +184,14 @@ export default async function UsageEntryHub() {
   const actualLockMessage = hasActualData
     ? "Actual usage is already connected. Disconnect Smart Meter Texas and/or delete your Green Button upload to use this option."
     : null;
+  const smtSelectable = Boolean(existingAuthorization && isActiveSmtAuthorizationRow(existingAuthorization));
+  const greenButtonSelectable = Boolean(
+    context.greenButtonUpload &&
+      isGreenButtonUsageIngestionReady(
+        context.greenButtonUpload,
+        context.greenButtonUpload.persistedIntervalCount ?? 0,
+      ),
+  );
 
   return (
     <div className="min-h-screen bg-brand-white">
