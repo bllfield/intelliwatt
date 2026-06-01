@@ -1,7 +1,30 @@
-import { createScenario } from "@/modules/usageSimulator/service";
+import { createScenario, listScenarios } from "@/modules/usageSimulator/service";
 
 export const WORKSPACE_PAST_SCENARIO_NAME = "Past (Corrected)";
 export const WORKSPACE_FUTURE_SCENARIO_NAME = "Future (What-if)";
+
+async function resolveWorkspaceScenarioId(args: {
+  userId: string;
+  houseId: string;
+  name: string;
+}): Promise<string | null> {
+  const created = await createScenario({
+    userId: args.userId,
+    houseId: args.houseId,
+    name: args.name,
+  });
+  if (created.ok) return String(created.scenario.id);
+
+  if (created.error !== "name_not_unique") return null;
+
+  const listed = await listScenarios({ userId: args.userId, houseId: args.houseId }).catch(() => ({
+    ok: false as const,
+    scenarios: [] as Array<{ id: string; name: string }>,
+  }));
+  if (!listed.ok) return null;
+  const existing = listed.scenarios.find((row) => String(row.name) === args.name);
+  return existing ? String(existing.id) : null;
+}
 
 /**
  * Ensures the standard usage-simulator workspace scenarios exist on a house.
@@ -17,13 +40,10 @@ export async function ensureWorkspaceScenariosForHouse(args: {
     return { pastScenarioId: null, futureScenarioId: null };
   }
 
-  const [pastResult, futureResult] = await Promise.all([
-    createScenario({ userId, houseId, name: WORKSPACE_PAST_SCENARIO_NAME }),
-    createScenario({ userId, houseId, name: WORKSPACE_FUTURE_SCENARIO_NAME }),
+  const [pastScenarioId, futureScenarioId] = await Promise.all([
+    resolveWorkspaceScenarioId({ userId, houseId, name: WORKSPACE_PAST_SCENARIO_NAME }),
+    resolveWorkspaceScenarioId({ userId, houseId, name: WORKSPACE_FUTURE_SCENARIO_NAME }),
   ]);
 
-  return {
-    pastScenarioId: pastResult.ok ? String(pastResult.scenario.id) : null,
-    futureScenarioId: futureResult.ok ? String(futureResult.scenario.id) : null,
-  };
+  return { pastScenarioId, futureScenarioId };
 }

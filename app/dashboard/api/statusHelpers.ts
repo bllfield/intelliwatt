@@ -1,4 +1,19 @@
 import { UsageEntryContext } from "./context";
+import { resolveGreenButtonConnectionExpiresAt } from "@/lib/usage/awardGreenButtonUsageEntry";
+import {
+  GREEN_BUTTON_UPLOAD_COMPLETE_MESSAGE,
+  GREEN_BUTTON_UPLOAD_PROCESSING_MESSAGE,
+} from "@/lib/usage/greenButtonUserMessages";
+import {
+  isGreenButtonUploadParseError,
+  isGreenButtonUploadProcessing,
+  isGreenButtonUploadReady,
+} from "@/lib/usage/greenButtonUploadStatus";
+
+export {
+  GREEN_BUTTON_UPLOAD_COMPLETE_MESSAGE,
+  GREEN_BUTTON_UPLOAD_PROCESSING_MESSAGE,
+} from "@/lib/usage/greenButtonUserMessages";
 
 export type StatusTone = "success" | "warning" | "error" | "info";
 
@@ -59,7 +74,6 @@ export function deriveSmtStatus(
   }
 
   if (rawStatus === "pending") {
-    // If we have recent SMT interval data, the orchestrator has already treated this as active.
     const hasRecentUsage =
       smtLatestIntervalAt &&
       Date.now() - smtLatestIntervalAt.getTime() < 7 * 24 * 60 * 60 * 1000;
@@ -81,7 +95,7 @@ export function deriveSmtStatus(
       message:
         auth.smtStatusMessage && auth.smtStatusMessage.trim().length > 0
           ? auth.smtStatusMessage
-          : "We’re finalizing your SMT agreement. This usually resolves within a minute.",
+          : "We're finalizing your SMT agreement. This usually resolves within a minute.",
       lastUpdated,
     };
   }
@@ -93,7 +107,7 @@ export function deriveSmtStatus(
       message:
         auth.smtStatusMessage && auth.smtStatusMessage.trim().length > 0
           ? auth.smtStatusMessage
-          : "We couldn’t complete your SMT authorization. Try again or contact support.",
+          : "We couldn't complete your SMT authorization. Try again or contact support.",
       lastUpdated,
     };
   }
@@ -117,64 +131,56 @@ export function deriveGreenButtonStatus(
     };
   }
 
-  const rawStatus = upload.parseStatus?.toLowerCase() ?? "";
-  const isError = rawStatus.includes("error") || rawStatus === "failed";
-  if (isError) {
+  const expiresAt = resolveGreenButtonConnectionExpiresAt(upload.createdAt);
+  const expired = expiresAt.getTime() < Date.now();
+
+  if (isGreenButtonUploadParseError(upload.parseStatus)) {
     return {
       label: "ERROR",
       tone: "error",
       message:
         upload.parseMessage && upload.parseMessage.trim().length > 0
           ? upload.parseMessage
-          : "We couldn’t parse this upload. Please re-export the file and try again.",
+          : "We couldn't parse this upload. Please re-export the file and try again.",
       lastUpdated: upload.updatedAt ?? upload.createdAt,
+      expiresAt,
     };
   }
 
-  const normalizedMessage =
-    upload.parseStatus &&
-    upload.parseStatus.toLowerCase() !== "success" &&
-    upload.parseStatus.toLowerCase() !== "complete"
-      ? upload.parseMessage
-      : null;
+  if (expired) {
+    return {
+      label: "Expired",
+      tone: "warning",
+      message: "Your Green Button connection expired. Upload a fresh file to restore usage.",
+      lastUpdated: upload.updatedAt ?? upload.createdAt,
+      expiresAt,
+    };
+  }
 
+  if (isGreenButtonUploadProcessing(upload)) {
+    return {
+      label: "Processing",
+      tone: "warning",
+      message: GREEN_BUTTON_UPLOAD_PROCESSING_MESSAGE,
+      lastUpdated: upload.updatedAt ?? upload.createdAt,
+      expiresAt,
+    };
+  }
+
+  const ready = isGreenButtonUploadReady(upload);
   const hasCoverage = Boolean(upload.dateRangeStart && upload.dateRangeEnd);
-  const isParseSuccess =
-    upload.parseStatus &&
-    ["success", "complete", "complete_with_warnings"].includes(upload.parseStatus.toLowerCase());
-
-  const expiresAt = upload.dateRangeEnd
-    ? (() => {
-        const expiry = new Date(upload.dateRangeEnd);
-        expiry.setFullYear(expiry.getFullYear() + 1);
-        return expiry;
-      })()
-    : null;
-
-  // If coverage exists (we already normalized data), surface as active even if parseStatus wasn't updated.
-  const label = hasCoverage || isParseSuccess
-    ? "ACTIVE"
-    : upload.parseStatus
-      ? upload.parseStatus.replace(/_/g, " ").toUpperCase()
-      : "Upload received";
-
-  const tone: StatusTone = hasCoverage || isParseSuccess
-    ? "success"
-    : "warning";
 
   return {
-    label,
-    tone,
-    message:
-      normalizedMessage ??
-      (hasCoverage
-        ? "Usage file processed and active. We’ll keep your dashboard in sync with the latest upload."
-        : "Usage file received. Processing shortly."),
+    label: ready ? "ACTIVE" : "Upload received",
+    tone: ready ? "success" : "warning",
+    message: ready
+      ? GREEN_BUTTON_UPLOAD_COMPLETE_MESSAGE
+      : GREEN_BUTTON_UPLOAD_PROCESSING_MESSAGE,
     lastUpdated: upload.updatedAt ?? upload.createdAt,
-    detail:
-      hasCoverage
-        ? `Coverage: ${upload.dateRangeStart!.toLocaleDateString()} – ${upload.dateRangeEnd!.toLocaleDateString()}${expiresAt ? ` Expires ${expiresAt.toLocaleDateString()}` : ""}`
-        : undefined,
+    expiresAt,
+    detail: hasCoverage
+      ? `Coverage: ${upload.dateRangeStart!.toLocaleDateString()} – ${upload.dateRangeEnd!.toLocaleDateString()} · Expires ${expiresAt.toLocaleDateString()}`
+      : `Connection active until ${expiresAt.toLocaleDateString()}`,
   };
 }
 
@@ -186,7 +192,7 @@ export function deriveManualStatus(
       label: "Not Active",
       tone: "info",
       message:
-        "Log a manual reading for a jackpot entry if SMT or Green Button access isn’t available. It’s less accurate and a bit more work, so prefer SMT or Green Button when possible.",
+        "Log a manual reading for a jackpot entry if SMT or Green Button access isn't available. It's less accurate and a bit more work, so prefer SMT or Green Button when possible.",
     };
   }
 
@@ -197,4 +203,3 @@ export function deriveManualStatus(
     detail: `Expires ${manual.expiresAt.toLocaleDateString()}`,
   };
 }
-

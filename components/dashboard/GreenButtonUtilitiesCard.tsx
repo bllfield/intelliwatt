@@ -1,6 +1,15 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+
+import {
+  GREEN_BUTTON_UPLOAD_COMPLETE_MESSAGE,
+  GREEN_BUTTON_UPLOAD_PROCESSING_MESSAGE,
+} from "@/lib/usage/greenButtonUserMessages";
+
+const GREEN_BUTTON_STATUS_POLL_MS = 2000;
+const GREEN_BUTTON_STATUS_MAX_POLLS = 90;
 
 interface GreenButtonHelpSectionProps {
   houseAddressId?: string | null;
@@ -11,6 +20,7 @@ export default function GreenButtonHelpSection({
   houseAddressId,
   defaultUtilityName,
 }: GreenButtonHelpSectionProps) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [utilityName, setUtilityName] = useState(defaultUtilityName ?? "");
@@ -66,99 +76,109 @@ export default function GreenButtonHelpSection({
 
       const trimmedUtility = utilityName.trim();
       const trimmedAccount = accountNumber.trim();
-      const attemptDropletUpload = async () => {
-        try {
-          const ticketRes = await fetch("/api/green-button/upload-ticket", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ homeId: houseAddressId }),
-          });
-
-          if (!ticketRes.ok) {
-            const detail = await ticketRes.text().catch(() => "Unable to obtain upload ticket.");
-            throw new Error(detail || "Unable to obtain upload ticket.");
-          }
-
-          const ticket = await ticketRes.json();
-          if (!ticket?.ok || !ticket?.uploadUrl || !ticket?.payload || !ticket?.signature) {
-            throw new Error("Upload ticket missing required fields.");
-          }
-
-          const dropletForm = new FormData();
-          dropletForm.append("file", selectedFile);
-          dropletForm.append("payload", ticket.payload);
-          dropletForm.append("signature", ticket.signature);
-          if (trimmedUtility.length > 0) {
-            dropletForm.append("utilityName", trimmedUtility);
-          }
-          if (trimmedAccount.length > 0) {
-            dropletForm.append("accountNumber", trimmedAccount);
-          }
-
-          const dropletResponse = await fetch(ticket.uploadUrl as string, {
-            method: "POST",
-            body: dropletForm,
-            credentials: "omit",
-          });
-
-          if (!dropletResponse.ok) {
-            const data = await dropletResponse.json().catch(() => ({}));
-            const detail = typeof data?.error === "string" ? data.error : "Upload failed on the secure uploader.";
-            throw new Error(detail);
-          }
-
-          return true;
-        } catch (err) {
-          console.error("[GreenButtonHelpSection] droplet upload failed", err);
-          throw err;
-        }
-      };
-
-      const triggerUsageRefresh = async () => {
-        try {
-          const refreshRes = await fetch('/api/user/usage/refresh', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ homeId: houseAddressId }),
-          });
-          if (!refreshRes.ok) {
-            const data = await refreshRes.json().catch(() => null);
-            const code = typeof (data as any)?.error === "string" ? String((data as any).error) : null;
-            const message = typeof (data as any)?.message === "string" ? String((data as any).message) : null;
-            if (code === "admin_token_missing") {
-              return { ok: false as const, code, message };
+      const waitForGreenButtonReady = async () => {
+        setStatusMessage(GREEN_BUTTON_UPLOAD_PROCESSING_MESSAGE);
+        for (let attempt = 0; attempt < GREEN_BUTTON_STATUS_MAX_POLLS; attempt += 1) {
+          const statusRes = await fetch(
+            `/api/green-button/status?homeId=${encodeURIComponent(houseAddressId)}`,
+            { cache: "no-store" },
+          );
+          const statusJson = await statusRes.json().catch(() => null);
+          if (statusRes.ok && statusJson?.ok) {
+            if (statusJson.errored) {
+              const detail =
+                typeof statusJson.upload?.parseMessage === "string"
+                  ? statusJson.upload.parseMessage
+                  : "We couldn't parse this upload. Please re-export the file and try again.";
+              throw new Error(detail);
             }
-            console.warn('Usage refresh after Green Button upload failed', refreshRes.status, data ?? null);
-            return { ok: false as const, code: code ?? `http_${refreshRes.status}`, message };
+            if (statusJson.ready) {
+              return;
+            }
           }
-          return { ok: true as const };
-        } catch (refreshError) {
-          console.error('Usage refresh post-upload encountered an error', refreshError);
-          return { ok: false as const, code: "refresh_failed", message: null as string | null };
+          await new Promise((resolve) => window.setTimeout(resolve, GREEN_BUTTON_STATUS_POLL_MS));
+        }
+        throw new Error("Processing is taking longer than expected. Refresh this page in a minute.");
+      };
+
+      const uploadViaAppRoute = async () => {
+        const form = new FormData();
+        form.append("file", selectedFile);
+        form.append("homeId", houseAddressId);
+        if (trimmedUtility.length > 0) form.append("utilityName", trimmedUtility);
+        if (trimmedAccount.length > 0) form.append("accountNumber", trimmedAccount);
+
+        const response = await fetch("/api/green-button/upload", {
+          method: "POST",
+          body: form,
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data?.ok) {
+          const detail = typeof data?.error === "string" ? data.error : "Upload failed. Please try again.";
+          throw new Error(detail);
         }
       };
 
-      try {
-        await attemptDropletUpload();
-        const refresh = await triggerUsageRefresh();
+      const uploadViaDroplet = async () => {
+        const ticketRes = await fetch("/api/green-button/upload-ticket", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ homeId: houseAddressId }),
+        });
+
+        if (ticketRes.status === 503) {
+          await uploadViaAppRoute();
+          return;
+        }
+
+        if (!ticketRes.ok) {
+          const detail = await ticketRes.text().catch(() => "Unable to obtain upload ticket.");
+          throw new Error(detail || "Unable to obtain upload ticket.");
+        }
+
+        const ticket = await ticketRes.json();
+        if (!ticket?.ok || !ticket?.uploadUrl || !ticket?.payload || !ticket?.signature) {
+          throw new Error("Upload ticket missing required fields.");
+        }
+
+        const dropletForm = new FormData();
+        dropletForm.append("file", selectedFile);
+        dropletForm.append("payload", ticket.payload);
+        dropletForm.append("signature", ticket.signature);
+        if (trimmedUtility.length > 0) dropletForm.append("utilityName", trimmedUtility);
+        if (trimmedAccount.length > 0) dropletForm.append("accountNumber", trimmedAccount);
+
+        const dropletResponse = await fetch(ticket.uploadUrl as string, {
+          method: "POST",
+          body: dropletForm,
+          credentials: "omit",
+        });
+
+        const dropletData = await dropletResponse.json().catch(() => ({}));
+        if (!dropletResponse.ok || dropletData?.ok === false) {
+          const detail =
+            typeof dropletData?.error === "string"
+              ? dropletData.error
+              : "Upload failed on the secure uploader.";
+          throw new Error(detail);
+        }
+      };
+
+        await uploadViaDroplet();
+        await waitForGreenButtonReady();
         setStatusTone("success");
-        setStatusMessage(
-          refresh.ok
-            ? "Upload received! We’ll start parsing your usage data shortly."
-            : refresh.code === "admin_token_missing"
-              ? "Upload complete. Usage refresh is pending because ADMIN_TOKEN is not configured in this environment."
-              : "Upload received! Parsing will begin shortly (usage refresh pending).",
-        );
+        setStatusMessage(GREEN_BUTTON_UPLOAD_COMPLETE_MESSAGE);
         setSelectedFile(null);
         if (fileInputRef.current) {
           fileInputRef.current.value = "";
         }
+        router.refresh();
       } catch (uploadErr: any) {
         setStatusTone("error");
         setStatusMessage(
           typeof uploadErr?.message === "string"
             ? uploadErr.message
-            : "Upload failed on the secure uploader. Please try again."
+            : "Upload failed. Please try again."
         );
       }
     } catch (error) {

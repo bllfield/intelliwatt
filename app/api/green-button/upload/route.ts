@@ -1,11 +1,11 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { createHash } from "node:crypto";
-import { EntryStatus, Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
-import { refreshUserEntryStatuses } from "@/lib/hitthejackwatt/entryLifecycle";
+import { awardGreenButtonUsageEntry } from "@/lib/usage/awardGreenButtonUsageEntry";
 import { normalizeEmail } from "@/lib/utils/email";
 import { runGreenButtonUsagePipeline } from "@/lib/usage/greenButtonUsagePipeline";
 import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
@@ -266,61 +266,16 @@ export async function POST(request: Request) {
       throw parseErr;
     }
 
-    // Award / refresh the usage entry using a ManualUsageUpload placeholder so it expires after 12 months
-    const now = new Date();
-    const expiryAnchor = coverageEnd ?? now;
-    const expiresAt = new Date(expiryAnchor.getTime());
-    expiresAt.setFullYear(expiresAt.getFullYear() + 1);
-
-    const manualUsage = await (prisma as any).manualUsageUpload.create({
-      data: {
-        userId: user.id,
-        houseId: house.id,
-        source: "green_button",
-        expiresAt,
-        metadata: {
-          rawGreenButtonId: rawRecord.id,
-          uploadId: uploadRecord.id,
-          utilityName,
-          accountNumber,
-          summary: parsedSummary,
-        },
-      },
-      select: { id: true },
+    await awardGreenButtonUsageEntry({
+      userId: user.id,
+      houseId: house.id,
+      uploadId: uploadRecord.id,
+      rawGreenButtonId: rawRecord.id,
+      utilityName,
+      accountNumber,
+      summary: parsedSummary,
+      coverageEnd,
     });
-
-    const existingEntry = await prisma.entry.findFirst({
-      where: { userId: user.id, houseId: house.id, type: "smart_meter_connect" },
-      select: { id: true, amount: true },
-    });
-
-    if (existingEntry) {
-      await prisma.entry.update({
-        where: { id: existingEntry.id },
-        data: {
-          amount: Math.max(existingEntry.amount, 1),
-          manualUsageId: manualUsage.id,
-          status: EntryStatus.ACTIVE,
-          expiresAt: null,
-          expirationReason: null,
-          lastValidated: now,
-        },
-      });
-    } else {
-      await prisma.entry.create({
-        data: {
-          userId: user.id,
-          houseId: house.id,
-          type: "smart_meter_connect",
-          amount: 1,
-          manualUsageId: manualUsage.id,
-          status: EntryStatus.ACTIVE,
-          lastValidated: now,
-        },
-      });
-    }
-
-    await refreshUserEntryStatuses(user.id);
 
     return NextResponse.json(
       {

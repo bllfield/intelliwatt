@@ -936,17 +936,18 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
     const earliest = trimmed[0]?.timestamp ?? null;
     const latest = trimmed[trimmed.length - 1]?.timestamp ?? null;
 
+    const summary = {
+      format: parsed.format,
+      totalRawReadings: parsed.metadata.totalReadings,
+      normalizedIntervals: trimmed.length,
+      totalKwh: Number(totalKwh.toFixed(6)),
+      appliedWindowDays: MANUAL_USAGE_LIFETIME_DAYS,
+      coverageStartDateKey: startDateKey,
+      coverageEndDateKey: endDateKey,
+      warnings: parsed.warnings,
+    };
+
     if (uploadRecordId) {
-      const summary = {
-        format: parsed.format,
-        totalRawReadings: parsed.metadata.totalReadings,
-        normalizedIntervals: trimmed.length,
-        totalKwh: Number(totalKwh.toFixed(6)),
-        appliedWindowDays: MANUAL_USAGE_LIFETIME_DAYS,
-        coverageStartDateKey: startDateKey,
-        coverageEndDateKey: endDateKey,
-        warnings: parsed.warnings,
-      };
       await (prisma as any).greenButtonUpload.update({
         where: { id: uploadRecordId },
         data: {
@@ -957,6 +958,22 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
           intervalMinutes: 15,
         },
       });
+    }
+
+    try {
+      const { awardGreenButtonUsageEntry } = await import("@/lib/usage/awardGreenButtonUsageEntry");
+      await awardGreenButtonUsageEntry({
+        userId: house.userId,
+        houseId: house.id,
+        uploadId: uploadRecordId!,
+        rawGreenButtonId: rawRecordId!,
+        utilityName,
+        accountNumber,
+        summary,
+        coverageEnd: latest,
+      });
+    } catch (entryErr) {
+      logEvent("upload.entry_award_error", { error: String(entryErr) });
     }
 
     res.status(201).json({

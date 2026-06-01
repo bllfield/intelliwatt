@@ -1,5 +1,8 @@
-import { prisma } from "@/lib/db";
 import { resolveIntervalsLayer } from "@/lib/usage/resolveIntervalsLayer";
+import {
+  resolveActualContextHouseForSimulation,
+  resolveSimulationHouseForUser,
+} from "@/lib/usage/resolveActualContextHouseForSimulation";
 import { ensureSmtCoverageForHouse } from "@/lib/usage/ensureSmtCoverage";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import { resolveReportedCoverageWindow } from "@/modules/usageSimulator/metadataWindow";
@@ -175,18 +178,6 @@ export function buildUpstreamUsageTruthSummary(args: {
   };
 }
 
-async function loadHouseForUser(args: { userId: string; houseId: string }) {
-  const house = await (prisma as any).houseAddress.findFirst({
-    where: { id: args.houseId, userId: args.userId, archivedAt: null },
-    select: { id: true, esiid: true },
-  });
-  if (!house) throw new Error("house_not_found");
-  return {
-    id: String(house.id),
-    esiid: house.esiid ? String(house.esiid) : null,
-  };
-}
-
 async function readPersistedUsageTruth(args: {
   userId: string;
   houseId: string;
@@ -212,14 +203,17 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
   seedIfMissing: boolean;
   runId?: string | null;
 }): Promise<UpstreamUsageTruthResult> {
-  const selectedHouse = await loadHouseForUser({
+  const selectedHouse = await resolveSimulationHouseForUser({
     userId: args.userId,
     houseId: args.houseId,
   });
-  const actualContextHouse = await loadHouseForUser({
+  const actualContextResolved = await resolveActualContextHouseForSimulation({
     userId: args.userId,
-    houseId: String(args.actualContextHouseId ?? args.houseId),
+    selectedHouseId: selectedHouse.id,
+    actualContextHouseId: String(args.actualContextHouseId ?? args.houseId),
   });
+  const actualContextHouse = actualContextResolved.house;
+  const actualContextOwnerUserId = actualContextResolved.ownerUserId;
   const effectiveSmtEsiid =
     actualContextHouse.esiid ??
     (typeof args.smtSourceEsiid === "string" && args.smtSourceEsiid.trim() ? args.smtSourceEsiid.trim() : null);
@@ -233,7 +227,7 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
   };
 
   let resolved = await readPersistedUsageTruth({
-    userId: args.userId,
+    userId: actualContextOwnerUserId,
     houseId: actualContextHouse.id,
     esiid: actualContextHouseWithEffectiveEsiid.esiid,
   });
@@ -275,7 +269,7 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
 
   const runSessionKey = `sim:${String(args.runId ?? actualContextHouse.id).trim()}`;
   const ensure = await ensureSmtCoverageForHouse({
-    userId: args.userId,
+    userId: actualContextOwnerUserId,
     houseId: actualContextHouse.id,
     profile: "sim_run",
     sessionKey: runSessionKey,
@@ -301,7 +295,7 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
         };
 
   resolved = await readPersistedUsageTruth({
-    userId: args.userId,
+    userId: actualContextOwnerUserId,
     houseId: actualContextHouse.id,
     esiid: actualContextHouseWithEffectiveEsiid.esiid,
   });
