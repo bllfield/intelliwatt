@@ -5,6 +5,7 @@ import { buildSimulatedHomeDateKeysExcludedFromBaseload } from "@/lib/usage/simu
 import {
   filterSimulatedDateKeysWithoutGreenButtonTrustedHome,
   pruneGreenButtonTrustedDaysFromPastDatasetMeta,
+  readGreenButtonTrustedHomeDateKeysFromPastMeta,
   resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals,
   resolvePastDatasetMetaActualSource,
 } from "@/lib/usage/greenButtonPastTrustedPool";
@@ -694,13 +695,17 @@ export function reconcileRestoredPastDatasetFromDecodedIntervals(args: {
       slotCompleteDateKeys: args.smtSlotCompleteDateKeys,
     });
   }
-  const greenButtonTrustedHomeDateKeys =
-    meta && typeof meta === "object" && resolvePastDatasetMetaActualSource(meta) === "GREEN_BUTTON"
-      ? resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals({
-          decodedIntervals,
-          timezone: String((meta as Record<string, unknown>).timezone ?? "America/Chicago"),
-        })
-      : new Set<string>();
+  const greenButtonTrustedHomeDateKeys = (() => {
+    const persisted = readGreenButtonTrustedHomeDateKeysFromPastMeta(meta);
+    if (persisted.size > 0) return persisted;
+    if (meta && typeof meta === "object" && resolvePastDatasetMetaActualSource(meta) === "GREEN_BUTTON") {
+      return resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals({
+        decodedIntervals,
+        timezone: String((meta as Record<string, unknown>).timezone ?? "America/Chicago"),
+      });
+    }
+    return new Set<string>();
+  })();
   if (greenButtonTrustedHomeDateKeys.size > 0 && meta && typeof meta === "object") {
     pruneGreenButtonTrustedDaysFromPastDatasetMeta(meta as Record<string, unknown>, greenButtonTrustedHomeDateKeys);
     simDateKeys = filterSimulatedDateKeysWithoutGreenButtonTrustedHome({
@@ -1406,6 +1411,8 @@ export function buildSimulatedUsageDatasetFromCurve(
     useUtcMonth?: boolean;
     /** Canonical simulated-day artifacts used for simulated-date daily display parity. */
     simulatedDayResults?: SimulatedDayResult[];
+    /** GB trusted home-local days stay ACTUAL even if a stale dayResult exists. */
+    greenButtonTrustedHomeDateKeys?: Set<string>;
     /**
      * Gap-Fill lab_validation + sparse stitched curves: skip fifteen-minute profiles, time-of-day buckets,
      * and normal-life baseload math (heavy on CPU/allocations; not used for compare_core scoring).
@@ -1495,9 +1502,11 @@ export function buildSimulatedUsageDatasetFromCurve(
     () => {
       const nextSimulatedDisplayByDate = new Map<string, number>();
       const nextSimulatedSourceDetailByDate = new Map<string, PastSimulatedDaySourceDetail>();
+      const trustedHome = options?.greenButtonTrustedHomeDateKeys ?? new Set<string>();
       for (const row of options?.simulatedDayResults ?? []) {
         const dk = String(row?.localDate ?? "").slice(0, 10);
         if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
+        if (trustedHome.has(dk)) continue;
         nextSimulatedDisplayByDate.set(
           dk,
           Number(row.displayDayKwh ?? row.intervalSumKwh ?? row.finalDayKwh) || 0

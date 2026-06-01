@@ -464,10 +464,22 @@ export function attachValidationCompareProjection(dataset: any): any {
         missingActualTotals.join(", ")
     );
   }
-  const simSrc =
-    ((projected as any)?.meta?.canonicalArtifactSimulatedDayTotalsByDate as Record<string, number> | undefined) ??
-    ((projected as any)?.canonicalArtifactSimulatedDayTotalsByDate as Record<string, number> | undefined) ??
-    {};
+  const simSrc: Record<string, number> = {
+    ...(((projected as any)?.meta?.canonicalArtifactSimulatedDayTotalsByDate as Record<string, number> | undefined) ??
+      ((projected as any)?.canonicalArtifactSimulatedDayTotalsByDate as Record<string, number> | undefined) ??
+      {}),
+  };
+  for (const dk of validationOnlyDateKeysLocal) {
+    const raw = simSrc[dk];
+    if (raw !== undefined && raw !== null && Number.isFinite(Number(raw))) continue;
+    const dailyRow = (dailyRows as Array<{ date?: string; kwh?: number; source?: string }>).find(
+      (row) => String(row?.date ?? "").slice(0, 10) === dk
+    );
+    const dailySource = String(dailyRow?.source ?? "").toUpperCase();
+    if (dailySource !== "SIMULATED" && dailySource !== "ACTUAL") continue;
+    const kwh = Number(dailyRow?.kwh);
+    if (Number.isFinite(kwh)) simSrc[dk] = kwh;
+  }
   const missingSimTotals = validationOnlyDateKeysLocal.filter((dk) => {
     const raw = simSrc[dk];
     return raw === undefined || raw === null || !Number.isFinite(Number(raw));

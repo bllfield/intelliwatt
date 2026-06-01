@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { convertGreenButtonPersistedRowsToHome } from "@/lib/time/greenButtonPersistedIntervalConvert";
 import { homeProjectedIntervalFromRecord } from "@/lib/time/actualIntervalCalendar";
 import {
+  materializeGreenButtonPastProducerIntervals,
   resolveGreenButtonPastSimTrustedHomeDateKeys,
   resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals,
 } from "@/lib/usage/greenButtonPastTrustedPool";
@@ -48,6 +49,26 @@ describe("greenButtonPastTrustedPool", () => {
       windowEnd: "2026-05-16",
     });
     expect(candidates.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("materializes preloaded raw UTC-grid intervals with home slots for trusted-day detection", () => {
+    const raw = Array.from({ length: 96 }, (_, slot) => ({
+      timestamp: new Date(new Date("2026-05-14T00:00:00.000Z").getTime() + slot * 15 * 60 * 1000).toISOString(),
+      kwh: 0.25,
+    }));
+    const materialized = materializeGreenButtonPastProducerIntervals({
+      sourceIntervals: raw,
+      timezone: "America/Chicago",
+    });
+    expect(materialized.length).toBe(96);
+    expect(materialized.every((row) => /^\d{4}-\d{2}-\d{2}$/.test(row.homeDateKey))).toBe(true);
+    expect(materialized.every((row) => Number.isFinite(row.homeSlot))).toBe(true);
+    const trustedHome = resolveGreenButtonPastSimTrustedHomeDateKeys({
+      trustedUtcDateKeys: ["2026-05-14"],
+      intervals: materialized,
+      timezone: "America/Chicago",
+    });
+    expect(trustedHome.size).toBeGreaterThan(0);
   });
 
   it("resolves trusted home keys from decoded intervals without adapter fetch metadata", () => {

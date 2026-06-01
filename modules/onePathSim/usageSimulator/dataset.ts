@@ -5,6 +5,7 @@ import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMet
 import {
   filterSimulatedDateKeysWithoutGreenButtonTrustedHome,
   pruneGreenButtonTrustedDaysFromPastDatasetMeta,
+  readGreenButtonTrustedHomeDateKeysFromPastMeta,
   resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals,
   resolvePastDatasetMetaActualSource,
 } from "@/lib/usage/greenButtonPastTrustedPool";
@@ -702,13 +703,17 @@ export function reconcileRestoredPastDatasetFromDecodedIntervals(args: {
       slotCompleteDateKeys: args.smtSlotCompleteDateKeys,
     });
   }
-  const greenButtonTrustedHomeDateKeys =
-    meta && typeof meta === "object" && resolvePastDatasetMetaActualSource(meta) === "GREEN_BUTTON"
-      ? resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals({
-          decodedIntervals,
-          timezone: String((meta as Record<string, unknown>).timezone ?? "America/Chicago"),
-        })
-      : new Set<string>();
+  const greenButtonTrustedHomeDateKeys = (() => {
+    const persisted = readGreenButtonTrustedHomeDateKeysFromPastMeta(meta);
+    if (persisted.size > 0) return persisted;
+    if (meta && typeof meta === "object" && resolvePastDatasetMetaActualSource(meta) === "GREEN_BUTTON") {
+      return resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals({
+        decodedIntervals,
+        timezone: String((meta as Record<string, unknown>).timezone ?? "America/Chicago"),
+      });
+    }
+    return new Set<string>();
+  })();
   if (greenButtonTrustedHomeDateKeys.size > 0 && meta && typeof meta === "object") {
     pruneGreenButtonTrustedDaysFromPastDatasetMeta(meta as Record<string, unknown>, greenButtonTrustedHomeDateKeys);
     simDateKeys = filterSimulatedDateKeysWithoutGreenButtonTrustedHome({
@@ -1421,6 +1426,8 @@ export function buildSimulatedUsageDatasetFromCurve(
     useUtcMonth?: boolean;
     /** Canonical simulated-day artifacts used for simulated-date daily display parity. */
     simulatedDayResults?: SimulatedDayResult[];
+    /** GB trusted home-local days stay ACTUAL even if a stale dayResult exists. */
+    greenButtonTrustedHomeDateKeys?: Set<string>;
     /**
      * Gap-Fill lab_validation + sparse stitched curves: skip fifteen-minute profiles, time-of-day buckets,
      * and normal-life baseload math (heavy on CPU/allocations; not used for compare_core scoring).

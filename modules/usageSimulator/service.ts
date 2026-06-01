@@ -1381,7 +1381,7 @@ function augmentCanonicalArtifactSimulatedDayTotalsFromArtifactDailySimulated(
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dk) || !limitDateKeys.has(dk)) continue;
     if (out[dk] !== undefined && Number.isFinite(Number(out[dk]))) continue;
     const src = String(row?.source ?? "").trim().toUpperCase();
-    if (src !== "SIMULATED") continue;
+    if (src !== "SIMULATED" && src !== "ACTUAL") continue;
     const kwh = Number(row?.kwh);
     if (!Number.isFinite(kwh)) continue;
     out[dk] = round2Local(kwh);
@@ -1427,7 +1427,10 @@ function rehydrateValidationCompareMetaFromBuildInputsForRead(args: {
           .map((v) => String(v ?? "").slice(0, 10))
           .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
       : [];
-  if (existing.length === 0 && fromBuild.length > 0) {
+  if (
+    fromBuild.length > 0 &&
+    (existing.length === 0 || buildActualSource === "GREEN_BUTTON")
+  ) {
     (prevMeta as any).validationOnlyDateKeysLocal = fromBuild;
   }
   const buildValidationActualDaily =
@@ -4992,6 +4995,7 @@ async function recalcSimulatorBuildImpl(args: {
   let validationSelectionPreloadWindowStart: string | null = null;
   let validationSelectionPreloadWindowEnd: string | null = null;
   let validationActualDailyKwhByDateLocal: Record<string, number> | undefined;
+  let greenButtonTrustedUtcDateKeysForBuild: string[] | undefined;
   let effectiveValidationOnlyDateKeysLocal = new Set<string>(requestedValidationOnlyDateKeysLocal);
   if (
     effectiveValidationOnlyDateKeysLocal.size === 0 &&
@@ -5019,8 +5023,9 @@ async function recalcSimulatorBuildImpl(args: {
         });
         const corrected = redistributeGreenButtonGridZeroSamples(rebased.intervals);
         intervalsForValidationWindow = corrected.intervals;
+        greenButtonTrustedUtcDateKeysForBuild = [...(rebased.trustedActualDateKeys ?? [])];
         candidateDateKeys = resolveGreenButtonPastValidationCandidateDateKeys({
-          trustedUtcDateKeys: rebased.trustedActualDateKeys ?? [],
+          trustedUtcDateKeys: greenButtonTrustedUtcDateKeysForBuild,
           intervals: corrected.intervals,
           timezone: timezoneForStoredBuild,
           windowStart: selectionStart,
@@ -5262,6 +5267,9 @@ async function recalcSimulatorBuildImpl(args: {
           weatherEfficiencyDerivedInput,
         },
         ...(resolvedSimFingerprint ? { resolvedSimFingerprint } : {}),
+        ...(greenButtonTrustedUtcDateKeysForBuild?.length
+          ? { greenButtonTrustedUtcDateKeys: greenButtonTrustedUtcDateKeysForBuild }
+          : {}),
       };
       let preloadedActualIntervalsForSim: Array<{ timestamp: string; kwh: number }> | undefined;
       let simulationPreloadCacheHit: boolean | undefined;

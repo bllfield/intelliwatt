@@ -61,14 +61,60 @@ export function resolvePastProducerIntervalActualSource(buildInputs: {
   snapshots?: { actualSource?: unknown };
   lockboxRunContext?: { preferredActualSource?: unknown };
   actualSource?: unknown;
+  preferredActualSource?: unknown;
 }): "SMT" | "GREEN_BUTTON" | null {
   const snapshotSource = buildInputs.snapshots?.actualSource;
   if (snapshotSource === "GREEN_BUTTON" || snapshotSource === "SMT") return snapshotSource;
   const lockboxSource = buildInputs.lockboxRunContext?.preferredActualSource;
   if (lockboxSource === "GREEN_BUTTON" || lockboxSource === "SMT") return lockboxSource;
+  const preferredSource = buildInputs.preferredActualSource;
+  if (preferredSource === "GREEN_BUTTON" || preferredSource === "SMT") return preferredSource;
   const topLevelSource = buildInputs.actualSource;
   if (topLevelSource === "GREEN_BUTTON" || topLevelSource === "SMT") return topLevelSource;
   return null;
+}
+
+/** Engine-ready GB intervals with home-local date keys and slots (required for trusted-day detection). */
+export function materializeGreenButtonPastProducerIntervals(args: {
+  sourceIntervals: PastProducerSourceInterval[];
+  timezone: string;
+}): Array<{ timestamp: string; kwh: number; homeDateKey: string; homeSlot: number }> {
+  const timezone = String(args.timezone ?? "America/Chicago").trim() || "America/Chicago";
+  if (!args.sourceIntervals.length) return [];
+  const homeCalendar = createHomeIntervalCalendar(timezone);
+  const kwhByTs = new Map<string, number>();
+  for (const row of args.sourceIntervals) {
+    const ts = String(row.timestamp ?? "");
+    if (!ts) continue;
+    kwhByTs.set(ts, Number(row.kwh ?? row.consumption_kwh) || 0);
+  }
+  const projected = projectSourceIntervalsForGreenButtonPastTrust({
+    sourceIntervals: args.sourceIntervals,
+    timezone,
+    dateKeyFromTimestamp: (ts) => {
+      const parsed = new Date(ts);
+      if (!Number.isFinite(parsed.getTime())) return "";
+      return dateKeyFromIntervalPoint({ timestamp: ts, homeDateKey: null });
+    },
+    homeCalendar,
+    localSlotIndex,
+  });
+  const out: Array<{ timestamp: string; kwh: number; homeDateKey: string; homeSlot: number }> = [];
+  for (const row of projected) {
+    const timestamp = String(row.timestamp ?? "");
+    const homeDateKey = String(row.homeDateKey ?? "").slice(0, 10);
+    if (!timestamp || !/^\d{4}-\d{2}-\d{2}$/.test(homeDateKey)) continue;
+    out.push({
+      timestamp,
+      kwh: kwhByTs.get(timestamp) ?? 0,
+      homeDateKey,
+      homeSlot:
+        typeof row.homeSlot === "number" && Number.isFinite(row.homeSlot)
+          ? Math.trunc(row.homeSlot)
+          : localSlotIndex(timestamp, homeCalendar),
+    });
+  }
+  return out;
 }
 
 export function resolvePastDatasetMetaActualSource(meta: unknown): "SMT" | "GREEN_BUTTON" | null {
@@ -128,8 +174,8 @@ export function resolveGreenButtonPastSimTrustedHomeDateKeysForProducer(args: {
   dateKeyFromTimestamp: (ts: string) => string;
   homeCalendar: HomeIntervalCalendar;
   localSlotIndex: (ts: string, home: HomeIntervalCalendar) => number;
-}): Set<string> | undefined {
-  if (!args.sourceIntervals.length) return undefined;
+}): Set<string> {
+  if (!args.sourceIntervals.length) return new Set();
   const projected = projectSourceIntervalsForGreenButtonPastTrust(args);
   return resolveGreenButtonPastSimTrustedHomeDateKeys({
     trustedUtcDateKeys: args.trustedUtcDateKeys ?? [],
@@ -145,17 +191,31 @@ export function resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals(args: 
 }): Set<string> {
   const timezone = String(args.timezone ?? "America/Chicago").trim() || "America/Chicago";
   if (!args.decodedIntervals.length) return new Set();
-  const homeCalendar = createHomeIntervalCalendar(timezone);
-  return (
+  return new Set(
     resolveGreenButtonPastSimTrustedHomeDateKeysForProducer({
       trustedUtcDateKeys: args.trustedUtcDateKeys,
-      sourceIntervals: args.decodedIntervals,
+      sourceIntervals: materializeGreenButtonPastProducerIntervals({
+        sourceIntervals: args.decodedIntervals,
+        timezone,
+      }),
       timezone,
       dateKeyFromTimestamp: (ts) => new Date(ts).toISOString().slice(0, 10),
-      homeCalendar,
+      homeCalendar: createHomeIntervalCalendar(timezone),
       localSlotIndex,
-    }) ?? new Set()
+    })
   );
+}
+
+export function readGreenButtonTrustedHomeDateKeysFromPastMeta(meta: unknown): Set<string> {
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return new Set();
+  const raw = (meta as Record<string, unknown>).greenButtonTrustedHomeDateKeysLocal;
+  if (!Array.isArray(raw)) return new Set();
+  const out = new Set<string>();
+  for (const entry of raw) {
+    const dk = String(entry ?? "").slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dk)) out.add(dk);
+  }
+  return out;
 }
 
 /** Drop stale SIMULATED_INCOMPLETE_METER ownership for GB trusted home days on cache restore. */

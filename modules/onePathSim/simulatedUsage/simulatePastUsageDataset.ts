@@ -23,6 +23,7 @@ import {
 } from "@/lib/time/actualIntervalCalendar";
 import { convertGreenButtonPersistedRowsToHome } from "@/lib/time/greenButtonPersistedIntervalConvert";
 import {
+  materializeGreenButtonPastProducerIntervals,
   resolveGreenButtonPastSimTrustedHomeDateKeysForProducer,
   resolvePastProducerIntervalActualSource,
 } from "@/lib/usage/greenButtonPastTrustedPool";
@@ -1723,6 +1724,7 @@ export async function simulatePastUsageDataset(
         snapshots?: { actualSource?: unknown };
         lockboxRunContext?: { preferredActualSource?: unknown };
         actualSource?: unknown;
+        preferredActualSource?: unknown;
       }
     );
     const eligibleManualBillPeriods = manualBillPeriods.filter((period) => period.eligibleForConstraint);
@@ -1788,10 +1790,29 @@ export async function simulatePastUsageDataset(
           ).intervals.map(homeProjectedIntervalFromRecord)
         : null;
     const sourceActualIntervals = greenButtonProjected ?? correctedGreenButtonIntervals?.intervals ?? rawSourceActualIntervals;
+    const homeTimezoneForPast = timezone ?? "America/Chicago";
+    const greenButtonTrustedUtcDateKeys =
+      greenButtonCoverageIntervals?.trustedActualDateKeys ??
+      (Array.isArray((buildInputs as { greenButtonTrustedUtcDateKeys?: unknown }).greenButtonTrustedUtcDateKeys)
+        ? ((buildInputs as { greenButtonTrustedUtcDateKeys?: string[] }).greenButtonTrustedUtcDateKeys ?? [])
+        : []);
+    const needsGreenButtonMaterialize =
+      intervalActualSource === "GREEN_BUTTON" &&
+      sourceActualIntervals.length > 0 &&
+      !sourceActualIntervals.some((row) =>
+        /^\d{4}-\d{2}-\d{2}$/.test(String((row as { homeDateKey?: string }).homeDateKey ?? "").slice(0, 10))
+      );
+    const engineSourceIntervals =
+      intervalActualSource === "GREEN_BUTTON" && needsGreenButtonMaterialize
+        ? materializeGreenButtonPastProducerIntervals({
+            sourceIntervals: sourceActualIntervals,
+            timezone: homeTimezoneForPast,
+          })
+        : sourceActualIntervals;
     const greenButtonZeroRedistributedIntervalCount =
       correctedGreenButtonIntervals?.redistributedIntervalCount ?? 0;
     const actualIntervals =
-      useWholeHomeOnlyLowDataFastPath || lowDataSyntheticContextBase ? [] : sourceActualIntervals;
+      useWholeHomeOnlyLowDataFastPath || lowDataSyntheticContextBase ? [] : engineSourceIntervals;
     const sourceActualIntervalsCount = sourceActualIntervals.length;
     const actualIntervalPayloadSuppressedCount = Math.max(0, sourceActualIntervalsCount - actualIntervals.length);
     const actualIntervalPayloadSuppressed = actualIntervalPayloadSuppressedCount > 0;
@@ -1807,13 +1828,27 @@ export async function simulatePastUsageDataset(
     });
     const canonicalDayStartsMs = homeDayGrid.canonicalDayStartsMs;
     const homeDateKeyByTs = new Map(
-      sourceActualIntervals.map((row) => [String(row.timestamp), String((row as any).homeDateKey ?? "").slice(0, 10)]),
+      engineSourceIntervals.map((row) => [
+        String(row.timestamp),
+        String((row as { homeDateKey?: string }).homeDateKey ?? "").slice(0, 10),
+      ]),
     );
     const dateKeyFromTimestampForPast = (ts: string) => {
       const homeKey = homeDateKeyByTs.get(ts);
       if (homeKey && /^\d{4}-\d{2}-\d{2}$/.test(homeKey)) return homeKey;
       return homeDayGrid.dateKeyFromTimestamp(ts);
     };
+    const greenButtonTrustedHomeDateKeys =
+      intervalActualSource === "GREEN_BUTTON" && engineSourceIntervals.length > 0
+        ? resolveGreenButtonPastSimTrustedHomeDateKeysForProducer({
+            trustedUtcDateKeys: greenButtonTrustedUtcDateKeys,
+            sourceIntervals: engineSourceIntervals,
+            timezone: homeTimezoneForPast,
+            dateKeyFromTimestamp: dateKeyFromTimestampForPast,
+            homeCalendar,
+            localSlotIndex,
+          })
+        : new Set<string>();
     const canonicalDateKeys = dateKeysFromCanonicalDayStarts(canonicalDayStartsMs, homeDayGrid);
     const canonicalDateKeyByDayStartMs = new Map<number, string>();
     for (const dateKey of enumerateLocalDateKeys(startDate, endDate, homeCalendar)) {
@@ -2240,16 +2275,7 @@ export async function simulatePastUsageDataset(
         ledgerIncompleteMeterDateKeys:
           ledgerIncompleteMeterDateKeys.size > 0 ? ledgerIncompleteMeterDateKeys : undefined,
         trustedActualDateKeys:
-          intervalActualSource === "GREEN_BUTTON"
-            ? resolveGreenButtonPastSimTrustedHomeDateKeysForProducer({
-                trustedUtcDateKeys: greenButtonCoverageIntervals?.trustedActualDateKeys,
-                sourceIntervals: sourceActualIntervals,
-                timezone: timezone ?? "America/Chicago",
-                dateKeyFromTimestamp: dateKeyFromTimestampForPast,
-                homeCalendar,
-                localSlotIndex,
-              })
-            : undefined,
+          greenButtonTrustedHomeDateKeys.size > 0 ? greenButtonTrustedHomeDateKeys : undefined,
         actualWxByDateKey: weatherByDateKeyForSimulation,
         _normalWxByDateKey: normalWxByDateKey,
         collectSimulatedDayResults: collectSimulatedDayResultsForDiagnostics,
@@ -2603,6 +2629,8 @@ export async function simulatePastUsageDataset(
           homeTimezone: timezone ?? undefined,
           useUtcMonth: true,
           simulatedDayResults: dayResults,
+          greenButtonTrustedHomeDateKeys:
+            greenButtonTrustedHomeDateKeys.size > 0 ? greenButtonTrustedHomeDateKeys : undefined,
           excludedDateKeys: excludedDateKeys.size > 0 ? excludedDateKeys : undefined,
           skipHeavyInsights: skipHeavyDatasetInsights,
           correlationId,
@@ -2732,6 +2760,12 @@ export async function simulatePastUsageDataset(
           greenButtonShiftedWeatherDateCount: greenButtonShiftedWeatherDateCount || undefined,
           greenButtonWeatherSourceCoverageStart: greenButtonWeatherSourceCoverageStart ?? undefined,
           greenButtonWeatherSourceCoverageEnd: greenButtonWeatherSourceCoverageEnd ?? undefined,
+          actualSource: intervalActualSource ?? undefined,
+          greenButtonTrustedHomeDateKeysLocal:
+            greenButtonTrustedHomeDateKeys.size > 0
+              ? Array.from(greenButtonTrustedHomeDateKeys).sort()
+              : undefined,
+          greenButtonTrustedHomeDateKeyCount: greenButtonTrustedHomeDateKeys.size || undefined,
           ...(smtDayLedgerSnapshot ? buildSmtDayLedgerMeta(smtDayLedgerSnapshot) : {}),
           actualDayCount:
             typeof pastDayCounts.totalDays === "number" && typeof pastDayCounts.simulatedDays === "number"

@@ -89,14 +89,26 @@ describe("simulator architecture contract (stitch vs compare, truth parity)", ()
     expect(w?.weatherMissing).toBe(true);
   });
 
-  it("attachValidationCompareProjection fails closed when canonical simulated-day totals are missing for a validation day", () => {
+  it("attachValidationCompareProjection uses ACTUAL daily kwh when canonical simulated totals are missing (GB trusted days)", () => {
+    const projected = attachValidationCompareProjection({
+      meta: {
+        validationOnlyDateKeysLocal: ["2026-07-04"],
+        validationActualDailyKwhByDateLocal: { "2026-07-04": 40 },
+        canonicalArtifactSimulatedDayTotalsByDate: {},
+      },
+      daily: [{ date: "2026-07-04", kwh: 40, source: "ACTUAL" }],
+    });
+    expect(projected.meta.validationCompareRows?.[0]?.simulatedDayKwh).toBe(40);
+  });
+
+  it("attachValidationCompareProjection fails closed when canonical simulated-day totals are missing and daily has no SIMULATED or ACTUAL row", () => {
     expect(() =>
       attachValidationCompareProjection({
         meta: {
           validationOnlyDateKeysLocal: ["2026-07-04"],
           canonicalArtifactSimulatedDayTotalsByDate: {},
         },
-        daily: [{ date: "2026-07-04", kwh: 40, source: "ACTUAL" }],
+        daily: [],
       })
     ).toThrow(CompareTruthIncompleteError);
   });
