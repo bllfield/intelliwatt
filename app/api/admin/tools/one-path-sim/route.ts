@@ -1318,11 +1318,8 @@ export async function POST(request: NextRequest) {
   const smtSourceEsiid = resolved.selectedHouse.esiid ? String(resolved.selectedHouse.esiid) : null;
   const effectiveUserId = onePathTestHomeState.isPinned ? ownerUserId : resolved.userId;
   const effectiveHouseId = onePathTestHomeState.isPinned ? onePathTestHomeState.testHomeHouseId : resolved.selectedHouse.id;
-  const onePathUsageTruthHouseId =
-    onePathTestHomeState.isPinned && onePathTestHomeState.testHomeHouseId
-      ? onePathTestHomeState.testHomeHouseId
-      : null;
-  const defaultActualContextHouseId = onePathUsageTruthHouseId ?? resolved.selectedHouse.id;
+  /** User-site actual truth always comes from the email-selected source house, not the pinned test home. */
+  const defaultActualContextHouseId = resolved.selectedHouse.id;
   if (onePathTestHomeState.isPinned && effectiveHouseId) {
     await ensureWorkspaceScenariosForHouse({ userId: effectiveUserId, houseId: effectiveHouseId }).catch(() => null);
   }
@@ -1502,7 +1499,10 @@ export async function POST(request: NextRequest) {
         userId: effectiveUserId,
         houseId: effectiveHouseId,
       }).catch(() => ({ pastScenarioId: null, futureScenarioId: null }));
-      if (runReasonText.includes("green-button-past") || runReasonText.includes("keeper-green-button-past")) {
+      if (
+        runReasonText.includes("green-button-past") ||
+        runReasonText.includes("keeper-green-button-past")
+      ) {
         runScenarioId = ensured.pastScenarioId;
       } else if (
         runReasonText.includes("green-button-future") ||

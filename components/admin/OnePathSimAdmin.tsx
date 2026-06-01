@@ -14,9 +14,8 @@ import {
 import { buildOnePathSandboxHarnessSummary } from "@/modules/onePathSim/adminHarnessSummary";
 import { buildOnePathTuningCycleSummary } from "@/modules/onePathSim/tuningCycleSummary";
 import {
-  DEFAULT_BRIAN_KNOWN_SCENARIO_KEY,
-  KNOWN_HOUSE_SCENARIOS,
-  PRIMARY_BRIAN_SANDBOX_CONTEXT,
+  DEFAULT_ONE_PATH_SCENARIO_PRESET_KEY,
+  ONE_PATH_SCENARIO_PRESETS,
   getKnownHouseScenarioByKey,
   resolveKnownHouseScenarioSelection,
 } from "@/modules/onePathSim/knownHouseScenarios";
@@ -191,7 +190,7 @@ export function OnePathSimAdmin() {
   const [selectedHouseId, setSelectedHouseId] = useState("");
   const [actualContextHouseId, setActualContextHouseId] = useState("");
   const [selectedScenarioId, setSelectedScenarioId] = useState("");
-  const [selectedKnownScenarioKey, setSelectedKnownScenarioKey] = useState(DEFAULT_BRIAN_KNOWN_SCENARIO_KEY);
+  const [selectedKnownScenarioKey, setSelectedKnownScenarioKey] = useState(DEFAULT_ONE_PATH_SCENARIO_PRESET_KEY);
   const [lastRunKnownScenarioKey, setLastRunKnownScenarioKey] = useState("");
   const [mode, setMode] = useState<"INTERVAL" | "GREEN_BUTTON" | "MANUAL_MONTHLY" | "MANUAL_ANNUAL" | "NEW_BUILD">("INTERVAL");
   const [weatherPreference, setWeatherPreference] = useState<"NONE" | "LAST_YEAR_WEATHER" | "LONG_TERM_AVERAGE">(
@@ -268,7 +267,13 @@ export function OnePathSimAdmin() {
   const effectiveMutableHouseId =
     typeof onePathTestHome?.houseId === "string" && onePathTestHome.houseId.trim() ? onePathTestHome.houseId.trim() : "";
   const onePathTestHomePinned = onePathTestHome?.isPinned === true && Boolean(effectiveMutableHouseId);
-  const effectiveActualContextHouseId = onePathTestHomePinned ? effectiveMutableHouseId : actualContextHouseId || effectiveHouseId;
+  const sourceTruthHouseId = String(
+    lookup?.selectedHouse?.id ?? onePathTestHome?.sourceHouseId ?? effectiveHouseId ?? ""
+  ).trim();
+  const effectiveActualContextHouseId =
+    onePathTestHomePinned && sourceTruthHouseId
+      ? sourceTruthHouseId
+      : actualContextHouseId || effectiveHouseId;
   useEffect(() => {
     setGreenButtonSelectedFile(null);
     setGreenButtonUploadInputKey((current) => current + 1);
@@ -289,15 +294,20 @@ export function OnePathSimAdmin() {
     [lastRunKnownScenarioKey]
   );
   const orderedKnownScenarios = useMemo(() => {
-    const brianEmail = PRIMARY_BRIAN_SANDBOX_CONTEXT.email;
-    const registryOrder = new Map(KNOWN_HOUSE_SCENARIOS.map((scenario, index) => [scenario.scenarioKey, index]));
-    return [...KNOWN_HOUSE_SCENARIOS].sort((left, right) => {
-      if (left.scenarioKey === DEFAULT_BRIAN_KNOWN_SCENARIO_KEY) return -1;
-      if (right.scenarioKey === DEFAULT_BRIAN_KNOWN_SCENARIO_KEY) return 1;
-      if (left.sourceUserEmail === brianEmail && right.sourceUserEmail !== brianEmail) return -1;
-      if (right.sourceUserEmail === brianEmail && left.sourceUserEmail !== brianEmail) return 1;
+    const modeOrder: Record<string, number> = {
+      INTERVAL: 0,
+      GREEN_BUTTON: 1,
+      MANUAL_MONTHLY: 2,
+      MANUAL_ANNUAL: 3,
+      NEW_BUILD: 4,
+    };
+    return [...ONE_PATH_SCENARIO_PRESETS].sort((left, right) => {
+      if (left.scenarioKey === DEFAULT_ONE_PATH_SCENARIO_PRESET_KEY) return -1;
+      if (right.scenarioKey === DEFAULT_ONE_PATH_SCENARIO_PRESET_KEY) return 1;
+      const modeDelta = (modeOrder[left.mode] ?? 99) - (modeOrder[right.mode] ?? 99);
+      if (modeDelta !== 0) return modeDelta;
       if (left.active !== right.active) return left.active ? -1 : 1;
-      return (registryOrder.get(left.scenarioKey) ?? 0) - (registryOrder.get(right.scenarioKey) ?? 0);
+      return left.label.localeCompare(right.label);
     });
   }, []);
   const ownershipAudit = useMemo(() => buildOnePathOwnershipAudit(), []);
@@ -995,35 +1005,19 @@ export function OnePathSimAdmin() {
       setError("Choose a known-house scenario preset first.");
       return;
     }
-    const resolvedEmail = email.trim() || lookup?.email?.trim() || selectedKnownScenario.sourceUserEmail;
+    const resolvedEmail = email.trim() || lookup?.email?.trim() || "";
+    if (!resolvedEmail) {
+      setError("Enter an email before loading a scenario preset.");
+      return;
+    }
     const normalizedResolvedEmail = resolvedEmail.trim().toLowerCase();
-    const normalizedPresetEmail = selectedKnownScenario.sourceUserEmail.trim().toLowerCase();
     const reusingCurrentLookup = lookup?.email?.trim().toLowerCase() === normalizedResolvedEmail;
-    const shouldUsePresetSourceContext = normalizedResolvedEmail === normalizedPresetEmail;
-    const scenarioForSelection = shouldUsePresetSourceContext
-      ? selectedKnownScenario
-      : {
-          ...selectedKnownScenario,
-          sourceHouseId: null,
-          actualContextHouseId: null,
-          houseSelectionStrategy: "selected_house" as const,
-        };
     const lookupArgs = {
       email: resolvedEmail,
-      houseId:
-        shouldUsePresetSourceContext
-          ? selectedKnownScenario.sourceHouseId ?? undefined
-          : reusingCurrentLookup
-            ? selectedHouseId || undefined
-            : undefined,
+      houseId: reusingCurrentLookup ? selectedHouseId || undefined : undefined,
       mode: selectedKnownScenario.mode,
-      actualContextHouseId:
-        shouldUsePresetSourceContext
-          ? selectedKnownScenario.actualContextHouseId
-          : reusingCurrentLookup
-            ? actualContextHouseId || selectedHouseId || null
-            : null,
-      freshSelection: !shouldUsePresetSourceContext && !reusingCurrentLookup,
+      actualContextHouseId: reusingCurrentLookup ? actualContextHouseId || selectedHouseId || null : null,
+      freshSelection: !reusingCurrentLookup,
     } as const;
 
     setRunResult(null);
@@ -1061,7 +1055,7 @@ export function OnePathSimAdmin() {
     json = ensuredLookup;
 
     const resolvedSelection = resolveKnownHouseScenarioSelection({
-      scenario: scenarioForSelection,
+      scenario: selectedKnownScenario,
       lookup: json,
     });
     const {
@@ -1082,22 +1076,25 @@ export function OnePathSimAdmin() {
     }
 
     if (selectedKnownScenario.scenarioType === "GREEN_BUTTON_TRUTH") {
-      const targetActualContextHouseId = onePathTestHomeHouseId;
-      if (!targetActualContextHouseId) {
+      const targetUploadHouseId = onePathTestHomeHouseId;
+      if (!targetUploadHouseId) {
         setGreenButtonUploadStatus(null);
         setGreenButtonUploadError(
           "One Path test home is not ready. Replace the test home from the selected source before uploading Green Button data."
         );
         return;
       }
-      const hasExistingGreenButtonUsage = hasUsableGreenButtonCoverage(asRecord(json.sourceContext?.greenButtonUpload));
+      const sourceHouseIdForGbTruth = String(json.selectedHouse?.id ?? presetActualContextHouseId ?? "").trim();
+      const hasExistingGreenButtonUsage = hasUsableGreenButtonCoverage(
+        asRecord(json.sourceContext?.greenButtonUpload)
+      );
       if (greenButtonSelectedFile) {
-        const uploaded = await uploadGreenButtonThroughUsage(targetActualContextHouseId);
+        const uploaded = await uploadGreenButtonThroughUsage(targetUploadHouseId);
         if (!uploaded) return;
         json = await requestLookup({
           ...lookupArgs,
           houseId: presetSelectedHouseId || lookupArgs.houseId,
-          actualContextHouseId: targetActualContextHouseId,
+          actualContextHouseId: sourceHouseIdForGbTruth || presetActualContextHouseId,
           freshSelection: false,
           includeDebugDiagnostics: includeSimRunAuditEnabled,
           lightweightLookup: !includeSimRunAuditEnabled,
@@ -1126,11 +1123,9 @@ export function OnePathSimAdmin() {
     applyLookupResponse(json, {
       selectedHouseId: presetSelectedHouseId,
       actualContextHouseId:
-        selectedKnownScenario.scenarioType === "GREEN_BUTTON_TRUTH"
-          ? onePathTestHomeHouseId || effectiveActualContextHouseId
-          : onePathTestHomePinned
-            ? effectiveActualContextHouseId
-            : presetActualContextHouseId,
+        presetActualContextHouseId ||
+        String(json.selectedHouse?.id ?? "").trim() ||
+        effectiveActualContextHouseId,
       selectedScenarioId: presetScenarioId,
       travelRanges: selectedKnownScenario.travelRanges.length
         ? selectedKnownScenario.travelRanges
@@ -1138,7 +1133,7 @@ export function OnePathSimAdmin() {
           ? (json.sourceContext.travelRangesFromDb as Array<{ startDate: string; endDate: string }>)
           : [],
     });
-    setStatus(`Known-house scenario preset loaded: ${selectedKnownScenario.label}.`);
+    setStatus(`Scenario preset loaded: ${selectedKnownScenario.label}.`);
   }, [
     actualContextHouseId,
     applyLookupResponse,
@@ -1429,17 +1424,17 @@ export function OnePathSimAdmin() {
 
           <div className="mt-6 grid gap-4 lg:grid-cols-4">
             <label className="text-sm text-slate-700 lg:col-span-2">
-              <div className="font-semibold text-brand-navy">Known-house scenario preset</div>
+              <div className="font-semibold text-brand-navy">Scenario preset (by data mode)</div>
               <div className="mt-1 text-xs text-slate-500">
-                Presets apply to the currently entered email and loaded house. Brian stays the default reference context only
-                when the active email is {PRIMARY_BRIAN_SANDBOX_CONTEXT.email}.
+                Generic tuning templates for Interval, Green Button, manual monthly/annual, and new build. Load an email
+                first—presets never bind to a fixed house or account.
               </div>
               <select
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
                 value={selectedKnownScenarioKey}
                 onChange={(event) => setSelectedKnownScenarioKey(event.target.value)}
               >
-                <option value="">Select sandbox preset</option>
+                <option value="">Select scenario preset</option>
                 {orderedKnownScenarios.map((scenario) => (
                   <option key={scenario.scenarioKey} value={scenario.scenarioKey}>
                     {scenario.label} {scenario.active ? "" : "(inactive)"}
@@ -1584,7 +1579,8 @@ export function OnePathSimAdmin() {
               <div className="font-semibold text-brand-navy">Actual context house</div>
               {onePathTestHomePinned ? (
                 <div className="mt-1 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                  Pinned to One Path test home: {effectiveActualContextHouseId}
+                  Test home (mutable runs): {effectiveMutableHouseId || "—"} · Actual truth house:{" "}
+                  {effectiveActualContextHouseId}
                 </div>
               ) : (
                 <select
@@ -1819,7 +1815,7 @@ export function OnePathSimAdmin() {
           <SectionJson
             title="Known scenario prerequisite status"
             value={{
-              brianSandboxContext: PRIMARY_BRIAN_SANDBOX_CONTEXT,
+              sourceTruthHouseId: sourceTruthHouseId || null,
               selectedKnownScenarioKey: selectedKnownScenarioKey || null,
               selectedKnownScenarioLabel: selectedKnownScenario?.label ?? null,
               ...knownScenarioPrereqStatus,

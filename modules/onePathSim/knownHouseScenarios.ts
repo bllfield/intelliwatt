@@ -21,12 +21,14 @@ export type OnePathKnownScenarioExpectations = {
   knownWeaknessNotes?: string;
 };
 
+/** Generic One Path tuning preset — applies to the email/house currently loaded in the harness. */
 export type OnePathKnownScenario = {
   scenarioKey: string;
   label: string;
   active: boolean;
   mode: OnePathKnownScenarioMode;
   scenarioType: OnePathKnownScenarioType;
+  /** @deprecated Always empty; presets bind to lookup email, not a fixed account. */
   sourceUserEmail: string;
   sourceUserId: string | null;
   sourceHouseId: string | null;
@@ -47,35 +49,23 @@ export type OnePathKnownScenario = {
   notes: string;
 };
 
-export const PRIMARY_BRIAN_SANDBOX_CONTEXT = {
-  email: "brian@intellipath-solutions.com",
-  houseId: "8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8",
-  actualContextHouseId: "8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8",
-  houseLabel: "146 Valley View Drive, Lewisville, TX (10400511114390001)",
-} as const;
+export const DEFAULT_ONE_PATH_SCENARIO_PRESET_KEY = "interval-past-primary";
 
-/** Fort Worth Green Button keeper home (user site source); One Path uses pinned test home for GB truth. */
-export const FORT_WORTH_GREEN_BUTTON_CONTEXT = {
-  email: "bllfield32@icloud.com",
-  houseId: "0bbd25b6-9b8b-40ba-9382-dd85a1e1eda4",
-  actualContextHouseId: "0bbd25b6-9b8b-40ba-9382-dd85a1e1eda4",
-  houseLabel: "1860 East Northside Drive, Fort Worth, TX",
-} as const;
+/** @deprecated Use DEFAULT_ONE_PATH_SCENARIO_PRESET_KEY */
+export const DEFAULT_BRIAN_KNOWN_SCENARIO_KEY = DEFAULT_ONE_PATH_SCENARIO_PRESET_KEY;
 
-export const DEFAULT_BRIAN_KNOWN_SCENARIO_KEY = "keeper-interval-past-primary";
-
-const PRIMARY_INTERVAL_TRAVEL_RANGES = [
-  { startDate: "2025-03-14", endDate: "2025-06-01" },
-  { startDate: "2025-08-13", endDate: "2025-08-17" },
-] as const;
-
-function buildKnownScenario(
-  scenario: Omit<OnePathKnownScenario, "sourceUserId" | "sourceHouseId" | "actualContextHouseId">
+function buildPreset(
+  scenario: Omit<
+    OnePathKnownScenario,
+    "sourceUserId" | "sourceHouseId" | "actualContextHouseId" | "sourceUserEmail" | "houseSelectionStrategy"
+  >
 ): OnePathKnownScenario {
   return {
     sourceUserId: null,
-    sourceHouseId: PRIMARY_BRIAN_SANDBOX_CONTEXT.houseId,
-    actualContextHouseId: PRIMARY_BRIAN_SANDBOX_CONTEXT.actualContextHouseId,
+    sourceHouseId: null,
+    actualContextHouseId: null,
+    sourceUserEmail: "",
+    houseSelectionStrategy: "selected_house",
     ...scenario,
   };
 }
@@ -102,47 +92,16 @@ function matchScenarioIdByHint(
   return contains?.id ? String(contains.id) : "";
 }
 
-export const KNOWN_HOUSE_SCENARIOS: OnePathKnownScenario[] = [
-  buildKnownScenario({
-    scenarioKey: "keeper-brian-interval-baseline-primary",
-    label: "Brian interval baseline primary",
+export const ONE_PATH_SCENARIO_PRESETS: OnePathKnownScenario[] = [
+  buildPreset({
+    scenarioKey: "interval-baseline-primary",
+    label: "Interval · Baseline",
     active: true,
     mode: "INTERVAL",
     scenarioType: "INTERVAL_TRUTH",
-    sourceUserEmail: PRIMARY_BRIAN_SANDBOX_CONTEXT.email,
     scenarioId: null,
     scenarioNameHint: null,
     scenarioSelectionStrategy: "baseline",
-    houseSelectionStrategy: "source_house_id",
-    baselineType: "interval_truth",
-    travelRanges: [...PRIMARY_INTERVAL_TRAVEL_RANGES],
-    validationSelectionMode: "stratified_weather_balanced",
-    validationDayCount: 14,
-    validationOnlyDateKeysLocal: [],
-    weatherPreference: "LAST_YEAR_WEATHER",
-    persistRequested: true,
-    expectedTruthSource: "persisted_usage_output",
-    expectations: {
-      expectedBaselineParity: true,
-      expectedPastSimCompareAvailable: false,
-      expectedMonthlyCompareAvailable: true,
-      expectedIntervalCompareAvailable: false,
-      knownWeaknessNotes: "Brian baseline is the primary sandbox truth control before any Past compare run.",
-    },
-    notes:
-      "Primary Brian baseline control preset. This uses the resolved Brian sandbox house/context directly so the first tuning cycle starts from the same house every time.",
-  }),
-  buildKnownScenario({
-    scenarioKey: "keeper-interval-past-primary",
-    label: "Brian interval Past Sim primary",
-    active: true,
-    mode: "INTERVAL",
-    scenarioType: "INTERVAL_TRUTH",
-    sourceUserEmail: PRIMARY_BRIAN_SANDBOX_CONTEXT.email,
-    scenarioId: null,
-    scenarioNameHint: "Past (Corrected)",
-    scenarioSelectionStrategy: "scenario_name",
-    houseSelectionStrategy: "source_house_id",
     baselineType: "interval_truth",
     travelRanges: [],
     validationSelectionMode: "stratified_weather_balanced",
@@ -156,26 +115,18 @@ export const KNOWN_HOUSE_SCENARIOS: OnePathKnownScenario[] = [
       expectedPastSimCompareAvailable: false,
       expectedMonthlyCompareAvailable: true,
       expectedIntervalCompareAvailable: false,
-      targetWapeMax: 15,
-      targetMaeMax: 10,
-      targetRmseMax: 15,
-      knownWeaknessNotes:
-        "Current cycle shows the Past run is blocked until shared Home Details are completed on the bound sandbox house.",
     },
-    notes:
-      "Primary repeated-tuning interval preset for the real sandbox cycle. It targets the Brian sandbox house and fuzzy-matches the Past scenario name after lookup.",
+    notes: "Usage passthrough baseline for SMT/interval committed homes.",
   }),
-  buildKnownScenario({
-    scenarioKey: "keeper-brian-interval-future-primary",
-    label: "Brian interval Future Sim primary",
+  buildPreset({
+    scenarioKey: "interval-past-primary",
+    label: "Interval · Past Sim",
     active: true,
     mode: "INTERVAL",
     scenarioType: "INTERVAL_TRUTH",
-    sourceUserEmail: PRIMARY_BRIAN_SANDBOX_CONTEXT.email,
     scenarioId: null,
-    scenarioNameHint: "Future (What-if)",
+    scenarioNameHint: "Past (Corrected)",
     scenarioSelectionStrategy: "scenario_name",
-    houseSelectionStrategy: "source_house_id",
     baselineType: "interval_truth",
     travelRanges: [],
     validationSelectionMode: "stratified_weather_balanced",
@@ -185,32 +136,51 @@ export const KNOWN_HOUSE_SCENARIOS: OnePathKnownScenario[] = [
     persistRequested: true,
     expectedTruthSource: "persisted_usage_output",
     expectations: {
-      expectedBaselineParity: false,
+      expectedBaselineParity: true,
       expectedPastSimCompareAvailable: true,
       expectedMonthlyCompareAvailable: true,
       expectedIntervalCompareAvailable: true,
       targetWapeMax: 15,
       targetMaeMax: 10,
       targetRmseMax: 15,
-      knownWeaknessNotes:
-        "Future tuning should stay explicit and separate from baseline passthrough so comparison drift is visible against the same keeper context.",
     },
-    notes:
-      "Primary repeated-tuning interval Future preset for the Brian sandbox house. It fuzzy-matches the Future scenario name after lookup.",
+    notes: "Primary interval Past preset; fuzzy-matches Past scenario on the loaded house.",
   }),
-  buildKnownScenario({
-    scenarioKey: "keeper-manual-monthly-baseline-primary",
-    label: "Brian manual monthly baseline / phase 1 primary",
+  buildPreset({
+    scenarioKey: "interval-future-primary",
+    label: "Interval · Future Sim",
+    active: true,
+    mode: "INTERVAL",
+    scenarioType: "INTERVAL_TRUTH",
+    scenarioId: null,
+    scenarioNameHint: "Future (What-if)",
+    scenarioSelectionStrategy: "scenario_name",
+    baselineType: "interval_truth",
+    travelRanges: [],
+    validationSelectionMode: "stratified_weather_balanced",
+    validationDayCount: 14,
+    validationOnlyDateKeysLocal: [],
+    weatherPreference: "LAST_YEAR_WEATHER",
+    persistRequested: true,
+    expectedTruthSource: "persisted_usage_output",
+    expectations: {
+      expectedPastSimCompareAvailable: true,
+      expectedMonthlyCompareAvailable: true,
+      expectedIntervalCompareAvailable: true,
+    },
+    notes: "Interval Future checkpoint separate from baseline and Past.",
+  }),
+  buildPreset({
+    scenarioKey: "manual-monthly-baseline-primary",
+    label: "Manual monthly · Baseline",
     active: true,
     mode: "MANUAL_MONTHLY",
     scenarioType: "MANUAL_MONTHLY_TEST",
-    sourceUserEmail: PRIMARY_BRIAN_SANDBOX_CONTEXT.email,
     scenarioId: null,
     scenarioNameHint: null,
     scenarioSelectionStrategy: "baseline",
-    houseSelectionStrategy: "source_house_id",
     baselineType: "manual_monthly",
-    travelRanges: [...PRIMARY_INTERVAL_TRAVEL_RANGES],
+    travelRanges: [],
     validationSelectionMode: "stratified_weather_balanced",
     validationDayCount: 14,
     validationOnlyDateKeysLocal: [],
@@ -220,187 +190,114 @@ export const KNOWN_HOUSE_SCENARIOS: OnePathKnownScenario[] = [
     expectations: {
       expectedBaselineParity: true,
       expectedPastSimCompareAvailable: false,
-      expectedMonthlyCompareAvailable: false,
-      expectedIntervalCompareAvailable: false,
-      targetWapeMax: 20,
-      targetMaeMax: 12,
-      knownWeaknessNotes:
-        "This preset is the passthrough usage-chart / phase-1 check. The saved manual monthly payload remains the Stage 1 truth while baseline stays usage passthrough only.",
     },
-    notes:
-      "Manual-monthly baseline preset for the Brian sandbox house. Use it as the phase-1 / usage-chart passthrough checkpoint before Past or Future simulation.",
+    notes: "Manual monthly phase-1 / usage-chart passthrough.",
   }),
-  buildKnownScenario({
-    scenarioKey: "keeper-manual-monthly-past-primary",
-    label: "Brian manual monthly Past Sim primary",
+  buildPreset({
+    scenarioKey: "manual-monthly-past-primary",
+    label: "Manual monthly · Past Sim",
     active: true,
     mode: "MANUAL_MONTHLY",
     scenarioType: "MANUAL_MONTHLY_TEST",
-    sourceUserEmail: PRIMARY_BRIAN_SANDBOX_CONTEXT.email,
     scenarioId: null,
     scenarioNameHint: "Past (Corrected)",
     scenarioSelectionStrategy: "scenario_name",
-    houseSelectionStrategy: "source_house_id",
     baselineType: "manual_monthly",
-    travelRanges: [...PRIMARY_INTERVAL_TRAVEL_RANGES],
+    travelRanges: [],
     validationSelectionMode: "stratified_weather_balanced",
     validationDayCount: 14,
     validationOnlyDateKeysLocal: [],
     weatherPreference: "LAST_YEAR_WEATHER",
     persistRequested: true,
     expectedTruthSource: "effective_manual_stage_one_payload",
-    expectations: {
-      expectedBaselineParity: false,
-      expectedPastSimCompareAvailable: false,
-      expectedMonthlyCompareAvailable: false,
-      expectedIntervalCompareAvailable: false,
-      targetWapeMax: 20,
-      targetMaeMax: 12,
-      knownWeaknessNotes:
-        "Current cycle shows the saved monthly payload is present but not filled, and the shared Home Details / Appliances prerequisites still block Past Sim.",
-    },
-    notes:
-      "Manual-monthly Past preset for the Brian sandbox house. It keeps the saved manual payload plus shared travel ranges attached for repeatable tuning checks.",
+    notes: "Manual monthly Past; requires saved manual payload on the loaded house.",
   }),
-  buildKnownScenario({
-    scenarioKey: "keeper-manual-monthly-future-primary",
-    label: "Brian manual monthly Future Sim primary",
+  buildPreset({
+    scenarioKey: "manual-monthly-future-primary",
+    label: "Manual monthly · Future Sim",
     active: true,
     mode: "MANUAL_MONTHLY",
     scenarioType: "MANUAL_MONTHLY_TEST",
-    sourceUserEmail: PRIMARY_BRIAN_SANDBOX_CONTEXT.email,
     scenarioId: null,
     scenarioNameHint: "Future (What-if)",
     scenarioSelectionStrategy: "scenario_name",
-    houseSelectionStrategy: "source_house_id",
     baselineType: "manual_monthly",
-    travelRanges: [...PRIMARY_INTERVAL_TRAVEL_RANGES],
+    travelRanges: [],
     validationSelectionMode: "stratified_weather_balanced",
     validationDayCount: 14,
     validationOnlyDateKeysLocal: [],
     weatherPreference: "LAST_YEAR_WEATHER",
     persistRequested: true,
     expectedTruthSource: "effective_manual_stage_one_payload",
-    expectations: {
-      expectedBaselineParity: false,
-      expectedPastSimCompareAvailable: true,
-      expectedMonthlyCompareAvailable: true,
-      expectedIntervalCompareAvailable: true,
-      targetWapeMax: 20,
-      targetMaeMax: 12,
-      knownWeaknessNotes:
-        "Future manual-monthly tuning should stay separate from the phase-1 passthrough checkpoint so stage-2 drift remains explicit.",
-    },
-    notes:
-      "Manual-monthly Future preset for the Brian sandbox house. It keeps future sim runs distinct from both baseline passthrough and Past Sim tuning.",
+    notes: "Manual monthly Future checkpoint.",
   }),
-  buildKnownScenario({
-    scenarioKey: "keeper-manual-annual-phase1-primary",
-    label: "Brian manual annual phase 1 primary",
+  buildPreset({
+    scenarioKey: "manual-annual-phase1-primary",
+    label: "Manual annual · Phase 1",
     active: true,
     mode: "MANUAL_ANNUAL",
     scenarioType: "MANUAL_ANNUAL_TEST",
-    sourceUserEmail: PRIMARY_BRIAN_SANDBOX_CONTEXT.email,
     scenarioId: null,
     scenarioNameHint: null,
     scenarioSelectionStrategy: "baseline",
-    houseSelectionStrategy: "source_house_id",
     baselineType: "manual_annual",
-    travelRanges: [...PRIMARY_INTERVAL_TRAVEL_RANGES],
+    travelRanges: [],
     validationSelectionMode: "stratified_weather_balanced",
     validationDayCount: 14,
     validationOnlyDateKeysLocal: [],
     weatherPreference: "LAST_YEAR_WEATHER",
     persistRequested: true,
     expectedTruthSource: "effective_manual_stage_one_payload",
-    expectations: {
-      expectedBaselineParity: true,
-      expectedPastSimCompareAvailable: false,
-      expectedMonthlyCompareAvailable: false,
-      expectedIntervalCompareAvailable: false,
-      targetWapeMax: 20,
-      targetMaeMax: 12,
-      knownWeaknessNotes:
-        "This phase-1 preset is the annual passthrough checkpoint. It should not fabricate a synthetic annual baseline when the saved annual payload is missing.",
-    },
-    notes:
-      "Manual-annual phase-1 preset for the Brian sandbox house. Use it as the Stage 1 passthrough checkpoint before Past or Future simulation.",
+    expectations: { expectedBaselineParity: true },
+    notes: "Manual annual passthrough checkpoint.",
   }),
-  buildKnownScenario({
-    scenarioKey: "keeper-manual-annual-past-primary",
-    label: "Brian manual annual Past primary",
+  buildPreset({
+    scenarioKey: "manual-annual-past-primary",
+    label: "Manual annual · Past Sim",
     active: true,
     mode: "MANUAL_ANNUAL",
     scenarioType: "MANUAL_ANNUAL_TEST",
-    sourceUserEmail: PRIMARY_BRIAN_SANDBOX_CONTEXT.email,
     scenarioId: null,
     scenarioNameHint: "Past (Corrected)",
     scenarioSelectionStrategy: "scenario_name",
-    houseSelectionStrategy: "source_house_id",
     baselineType: "manual_annual",
-    travelRanges: [...PRIMARY_INTERVAL_TRAVEL_RANGES],
+    travelRanges: [],
     validationSelectionMode: "stratified_weather_balanced",
     validationDayCount: 14,
     validationOnlyDateKeysLocal: [],
     weatherPreference: "LAST_YEAR_WEATHER",
     persistRequested: true,
     expectedTruthSource: "effective_manual_stage_one_payload",
-    expectations: {
-      expectedBaselineParity: false,
-      expectedPastSimCompareAvailable: false,
-      expectedMonthlyCompareAvailable: false,
-      expectedIntervalCompareAvailable: false,
-      targetWapeMax: 20,
-      targetMaeMax: 12,
-      knownWeaknessNotes:
-        "This preset remains blocked until Brian's sandbox house has a real MANUAL_ANNUAL payload plus completed shared prerequisite data.",
-    },
-    notes:
-      "Manual-annual Past preset for the Brian sandbox house. It is separate from the annual baseline preset so annual passthrough and annual compare readiness stay explicit.",
+    notes: "Manual annual Past; requires annual payload on the loaded house.",
   }),
-  buildKnownScenario({
-    scenarioKey: "keeper-manual-annual-future-primary",
-    label: "Brian manual annual Future primary",
+  buildPreset({
+    scenarioKey: "manual-annual-future-primary",
+    label: "Manual annual · Future Sim",
     active: true,
     mode: "MANUAL_ANNUAL",
     scenarioType: "MANUAL_ANNUAL_TEST",
-    sourceUserEmail: PRIMARY_BRIAN_SANDBOX_CONTEXT.email,
     scenarioId: null,
     scenarioNameHint: "Future (What-if)",
     scenarioSelectionStrategy: "scenario_name",
-    houseSelectionStrategy: "source_house_id",
     baselineType: "manual_annual",
-    travelRanges: [...PRIMARY_INTERVAL_TRAVEL_RANGES],
+    travelRanges: [],
     validationSelectionMode: "stratified_weather_balanced",
     validationDayCount: 14,
     validationOnlyDateKeysLocal: [],
     weatherPreference: "LAST_YEAR_WEATHER",
     persistRequested: true,
     expectedTruthSource: "effective_manual_stage_one_payload",
-    expectations: {
-      expectedBaselineParity: false,
-      expectedPastSimCompareAvailable: true,
-      expectedMonthlyCompareAvailable: true,
-      expectedIntervalCompareAvailable: true,
-      targetWapeMax: 20,
-      targetMaeMax: 12,
-      knownWeaknessNotes:
-        "Future manual-annual tuning should stay separate from the phase-1 checkpoint so annual stage-2 drift remains visible.",
-    },
-    notes:
-      "Manual-annual Future preset for the Brian sandbox house. It keeps future sim runs distinct from both phase 1 passthrough and Past Sim tuning.",
+    notes: "Manual annual Future checkpoint.",
   }),
-  buildKnownScenario({
-    scenarioKey: "keeper-new-build-past-primary",
-    label: "Brian new build Past Sim primary",
+  buildPreset({
+    scenarioKey: "new-build-past-primary",
+    label: "New build · Past Sim",
     active: true,
     mode: "NEW_BUILD",
     scenarioType: "NEW_BUILD_TEST",
-    sourceUserEmail: PRIMARY_BRIAN_SANDBOX_CONTEXT.email,
     scenarioId: null,
     scenarioNameHint: "Past (Corrected)",
     scenarioSelectionStrategy: "scenario_name",
-    houseSelectionStrategy: "source_house_id",
     baselineType: "new_build",
     travelRanges: [],
     validationSelectionMode: "stratified_weather_balanced",
@@ -409,27 +306,17 @@ export const KNOWN_HOUSE_SCENARIOS: OnePathKnownScenario[] = [
     weatherPreference: "LAST_YEAR_WEATHER",
     persistRequested: true,
     expectedTruthSource: "new_build_profile_inputs",
-    expectations: {
-      expectedBaselineParity: false,
-      expectedPastSimCompareAvailable: true,
-      expectedMonthlyCompareAvailable: true,
-      expectedIntervalCompareAvailable: true,
-      knownWeaknessNotes: "New build has no baseline preset. Past and Future are the only sim lifecycle checkpoints.",
-    },
-    notes:
-      "Primary new-build Past preset for the Brian sandbox house. It intentionally skips baseline and starts at the simulated Past checkpoint.",
+    notes: "New build Past; no baseline passthrough.",
   }),
-  buildKnownScenario({
-    scenarioKey: "keeper-new-build-future-primary",
-    label: "Brian new build Future Sim primary",
+  buildPreset({
+    scenarioKey: "new-build-future-primary",
+    label: "New build · Future Sim",
     active: true,
     mode: "NEW_BUILD",
     scenarioType: "NEW_BUILD_TEST",
-    sourceUserEmail: PRIMARY_BRIAN_SANDBOX_CONTEXT.email,
     scenarioId: null,
     scenarioNameHint: "Future (What-if)",
     scenarioSelectionStrategy: "scenario_name",
-    houseSelectionStrategy: "source_house_id",
     baselineType: "new_build",
     travelRanges: [],
     validationSelectionMode: "stratified_weather_balanced",
@@ -438,27 +325,17 @@ export const KNOWN_HOUSE_SCENARIOS: OnePathKnownScenario[] = [
     weatherPreference: "LAST_YEAR_WEATHER",
     persistRequested: true,
     expectedTruthSource: "new_build_profile_inputs",
-    expectations: {
-      expectedBaselineParity: false,
-      expectedPastSimCompareAvailable: true,
-      expectedMonthlyCompareAvailable: true,
-      expectedIntervalCompareAvailable: true,
-      knownWeaknessNotes: "New build has no passthrough baseline; Future stays a separate sim checkpoint from new-build Past.",
-    },
-    notes:
-      "Primary new-build Future preset for the Brian sandbox house. It intentionally skips baseline and keeps Future separate from Past.",
+    notes: "New build Future checkpoint.",
   }),
-  buildKnownScenario({
-    scenarioKey: "keeper-green-button-baseline-primary",
-    label: "Brian green button baseline primary",
+  buildPreset({
+    scenarioKey: "green-button-baseline-primary",
+    label: "Green Button · Baseline",
     active: true,
     mode: "GREEN_BUTTON",
     scenarioType: "GREEN_BUTTON_TRUTH",
-    sourceUserEmail: PRIMARY_BRIAN_SANDBOX_CONTEXT.email,
     scenarioId: null,
     scenarioNameHint: null,
     scenarioSelectionStrategy: "baseline",
-    houseSelectionStrategy: "source_house_id",
     baselineType: "green_button_truth",
     travelRanges: [],
     validationSelectionMode: "stratified_weather_balanced",
@@ -471,24 +348,18 @@ export const KNOWN_HOUSE_SCENARIOS: OnePathKnownScenario[] = [
       expectedBaselineParity: true,
       expectedPastSimCompareAvailable: false,
       expectedMonthlyCompareAvailable: true,
-      expectedIntervalCompareAvailable: false,
-      knownWeaknessNotes:
-        "Green Button baseline is still usage passthrough only. Keep it separate from interval SMT presets so source-family checks stay explicit.",
     },
-    notes:
-      "Green Button baseline preset family. Baseline remains passthrough only and should be used when the keeper context resolves Green Button-backed actual usage truth.",
+    notes: "Green Button usage passthrough; load email/house with GB data first.",
   }),
-  buildKnownScenario({
-    scenarioKey: "keeper-green-button-past-primary",
-    label: "Brian green button Past Sim primary",
+  buildPreset({
+    scenarioKey: "green-button-past-primary",
+    label: "Green Button · Past Sim",
     active: true,
     mode: "GREEN_BUTTON",
     scenarioType: "GREEN_BUTTON_TRUTH",
-    sourceUserEmail: PRIMARY_BRIAN_SANDBOX_CONTEXT.email,
     scenarioId: null,
     scenarioNameHint: "Past (Corrected)",
     scenarioSelectionStrategy: "scenario_name",
-    houseSelectionStrategy: "source_house_id",
     baselineType: "green_button_truth",
     travelRanges: [],
     validationSelectionMode: "stratified_weather_balanced",
@@ -498,30 +369,23 @@ export const KNOWN_HOUSE_SCENARIOS: OnePathKnownScenario[] = [
     persistRequested: true,
     expectedTruthSource: "green_button_usage_output",
     expectations: {
-      expectedBaselineParity: false,
       expectedPastSimCompareAvailable: true,
       expectedMonthlyCompareAvailable: true,
-      expectedIntervalCompareAvailable: true,
       targetWapeMax: 15,
       targetMaeMax: 10,
       targetRmseMax: 15,
-      knownWeaknessNotes:
-        "Green Button Past should remain separate from baseline passthrough so simulated drift is measured against interval-backed Green Button truth.",
     },
-    notes:
-      "Green Button Past preset family. Use it when the keeper context resolves Green Button-backed interval truth and you want Past compare/checkpoint coverage.",
+    notes: "Green Button Past; actual context should be the source house with GB intervals.",
   }),
-  buildKnownScenario({
-    scenarioKey: "keeper-green-button-future-primary",
-    label: "Brian green button Future Sim primary",
+  buildPreset({
+    scenarioKey: "green-button-future-primary",
+    label: "Green Button · Future Sim",
     active: true,
     mode: "GREEN_BUTTON",
     scenarioType: "GREEN_BUTTON_TRUTH",
-    sourceUserEmail: PRIMARY_BRIAN_SANDBOX_CONTEXT.email,
     scenarioId: null,
     scenarioNameHint: "Future (What-if)",
     scenarioSelectionStrategy: "scenario_name",
-    houseSelectionStrategy: "source_house_id",
     baselineType: "green_button_truth",
     travelRanges: [],
     validationSelectionMode: "stratified_weather_balanced",
@@ -530,85 +394,50 @@ export const KNOWN_HOUSE_SCENARIOS: OnePathKnownScenario[] = [
     weatherPreference: "LAST_YEAR_WEATHER",
     persistRequested: true,
     expectedTruthSource: "green_button_usage_output",
-    expectations: {
-      expectedBaselineParity: false,
-      expectedPastSimCompareAvailable: true,
-      expectedMonthlyCompareAvailable: true,
-      expectedIntervalCompareAvailable: true,
-      targetWapeMax: 15,
-      targetMaeMax: 10,
-      targetRmseMax: 15,
-      knownWeaknessNotes:
-        "Green Button Future should remain a separate sim checkpoint from both Green Button baseline passthrough and Green Button Past.",
-    },
-    notes:
-      "Green Button Future preset family. Use it when the keeper context resolves Green Button-backed interval truth and you want Future checkpoint coverage.",
+    notes: "Green Button Future checkpoint.",
   }),
-  {
-    scenarioKey: "keeper-fort-worth-green-button-baseline-primary",
-    label: "Fort Worth green button baseline primary",
-    active: true,
-    mode: "GREEN_BUTTON",
-    scenarioType: "GREEN_BUTTON_TRUTH",
-    sourceUserEmail: FORT_WORTH_GREEN_BUTTON_CONTEXT.email,
-    sourceUserId: null,
-    sourceHouseId: FORT_WORTH_GREEN_BUTTON_CONTEXT.houseId,
-    actualContextHouseId: FORT_WORTH_GREEN_BUTTON_CONTEXT.actualContextHouseId,
-    scenarioId: null,
-    scenarioNameHint: null,
-    scenarioSelectionStrategy: "baseline",
-    houseSelectionStrategy: "source_house_id",
-    baselineType: "green_button_truth",
-    travelRanges: [],
-    validationSelectionMode: "stratified_weather_balanced",
-    validationDayCount: 14,
-    validationOnlyDateKeysLocal: [],
-    weatherPreference: "LAST_YEAR_WEATHER",
-    persistRequested: true,
-    expectedTruthSource: "green_button_usage_output",
-    expectations: {
-      expectedBaselineParity: true,
-      expectedPastSimCompareAvailable: false,
-      expectedMonthlyCompareAvailable: true,
-      expectedIntervalCompareAvailable: false,
-    },
-    notes: "Fort Worth GB home baseline passthrough; pairs with pinned One Path test home when email matches.",
-  },
-  {
-    scenarioKey: "keeper-fort-worth-green-button-past-primary",
-    label: "Fort Worth green button Past Sim primary",
-    active: true,
-    mode: "GREEN_BUTTON",
-    scenarioType: "GREEN_BUTTON_TRUTH",
-    sourceUserEmail: FORT_WORTH_GREEN_BUTTON_CONTEXT.email,
-    sourceUserId: null,
-    sourceHouseId: FORT_WORTH_GREEN_BUTTON_CONTEXT.houseId,
-    actualContextHouseId: FORT_WORTH_GREEN_BUTTON_CONTEXT.actualContextHouseId,
-    scenarioId: null,
-    scenarioNameHint: "Past (Corrected)",
-    scenarioSelectionStrategy: "scenario_name",
-    houseSelectionStrategy: "source_house_id",
-    baselineType: "green_button_truth",
-    travelRanges: [],
-    validationSelectionMode: "stratified_weather_balanced",
-    validationDayCount: 14,
-    validationOnlyDateKeysLocal: [],
-    weatherPreference: "LAST_YEAR_WEATHER",
-    persistRequested: true,
-    expectedTruthSource: "green_button_usage_output",
-    expectations: {
-      expectedBaselineParity: false,
-      expectedPastSimCompareAvailable: true,
-      expectedMonthlyCompareAvailable: true,
-      expectedIntervalCompareAvailable: true,
-    },
-    notes: "Fort Worth GB Past compare; travel/vacant ranges optional (empty by default).",
-  },
 ];
+
+/** @deprecated Use ONE_PATH_SCENARIO_PRESETS */
+export const KNOWN_HOUSE_SCENARIOS = ONE_PATH_SCENARIO_PRESETS;
 
 export function getKnownHouseScenarioByKey(scenarioKey: string | null | undefined): OnePathKnownScenario | null {
   if (!scenarioKey) return null;
-  return KNOWN_HOUSE_SCENARIOS.find((scenario) => scenario.scenarioKey === scenarioKey) ?? null;
+  const legacyKey =
+    scenarioKey === "keeper-interval-past-primary"
+      ? "interval-past-primary"
+      : scenarioKey === "keeper-brian-interval-baseline-primary"
+        ? "interval-baseline-primary"
+        : scenarioKey === "keeper-brian-interval-future-primary"
+          ? "interval-future-primary"
+          : scenarioKey === "keeper-manual-monthly-baseline-primary"
+            ? "manual-monthly-baseline-primary"
+            : scenarioKey === "keeper-manual-monthly-past-primary"
+              ? "manual-monthly-past-primary"
+              : scenarioKey === "keeper-manual-monthly-future-primary"
+                ? "manual-monthly-future-primary"
+                : scenarioKey === "keeper-manual-annual-phase1-primary"
+                  ? "manual-annual-phase1-primary"
+                  : scenarioKey === "keeper-manual-annual-past-primary"
+                    ? "manual-annual-past-primary"
+                    : scenarioKey === "keeper-manual-annual-future-primary"
+                      ? "manual-annual-future-primary"
+                      : scenarioKey === "keeper-new-build-past-primary"
+                        ? "new-build-past-primary"
+                        : scenarioKey === "keeper-new-build-future-primary"
+                          ? "new-build-future-primary"
+                          : scenarioKey === "keeper-green-button-baseline-primary"
+                            ? "green-button-baseline-primary"
+                            : scenarioKey === "keeper-green-button-past-primary"
+                              ? "green-button-past-primary"
+                              : scenarioKey === "keeper-green-button-future-primary"
+                                ? "green-button-future-primary"
+                                : scenarioKey === "keeper-fort-worth-green-button-baseline-primary"
+                                  ? "green-button-baseline-primary"
+                                  : scenarioKey === "keeper-fort-worth-green-button-past-primary"
+                                    ? "green-button-past-primary"
+                                    : scenarioKey;
+  return ONE_PATH_SCENARIO_PRESETS.find((scenario) => scenario.scenarioKey === legacyKey) ?? null;
 }
 
 export function resolveKnownHouseScenarioSelection(args: {
@@ -624,11 +453,13 @@ export function resolveKnownHouseScenarioSelection(args: {
 } {
   const houses = Array.isArray(args.lookup.houses) ? args.lookup.houses : [];
   const scenarios = Array.isArray(args.lookup.scenarios) ? args.lookup.scenarios : [];
+  const lookupSelectedId = String(args.lookup.selectedHouse?.id ?? "").trim();
   const selectedHouseId =
     args.scenario.houseSelectionStrategy === "source_house_id" && args.scenario.sourceHouseId
       ? houses.find((house) => String(house?.id ?? "") === args.scenario.sourceHouseId)?.id ?? args.scenario.sourceHouseId
-      : args.lookup.selectedHouse?.id ?? args.scenario.sourceHouseId ?? "";
-  const actualContextHouseId = args.scenario.actualContextHouseId ?? selectedHouseId ?? "";
+      : lookupSelectedId || args.scenario.sourceHouseId || "";
+  const actualContextHouseId =
+    String(args.scenario.actualContextHouseId ?? "").trim() || String(selectedHouseId ?? "").trim() || lookupSelectedId;
   const selectedScenarioId =
     args.scenario.scenarioSelectionStrategy === "scenario_id"
       ? args.scenario.scenarioId ?? ""

@@ -39,9 +39,9 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("VALIDATION_SELECTION_OPTIONS");
     expect(source).toContain("Actual context house");
     expect(source).toContain("Manual validation date keys");
-    expect(source).toContain("Known-house scenario preset");
-    expect(source).toContain("Presets apply to the currently entered email and loaded house.");
-    expect(source).toContain('useState(DEFAULT_BRIAN_KNOWN_SCENARIO_KEY)');
+    expect(source).toContain("Scenario preset (by data mode)");
+    expect(source).toContain("Generic tuning templates");
+    expect(source).toContain("useState(DEFAULT_ONE_PATH_SCENARIO_PRESET_KEY)");
     expect(source).toContain("Debug diagnostics");
     expect(source).toContain("useState(true)");
     expect(source).toContain("Load known scenario preset");
@@ -98,7 +98,7 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("One Path calculation variable popups");
     expect(source).toContain("buildOnePathSandboxHarnessSummary");
     expect(source).toContain("getKnownHouseScenarioByKey");
-    expect(source).toContain("KNOWN_HOUSE_SCENARIOS");
+    expect(source).toContain("ONE_PATH_SCENARIO_PRESETS");
     expect(source).toContain("resolveKnownHouseScenarioSelection");
     expect(source).toContain("sandboxHarnessSummary");
     expect(source).toContain("openVariableFamily");
@@ -185,9 +185,9 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(adminHarnessSummarySource).toContain("curveCompareActualIntervals15");
     expect(adminHarnessSummarySource).toContain("manualMonthlyReconciliation");
     const tuningCycleSummarySource = readRepoFile("modules/onePathSim/tuningCycleSummary.ts");
-    expect(knownScenarioSource).toContain("KNOWN_HOUSE_SCENARIOS");
-    expect(knownScenarioSource).toContain("PRIMARY_BRIAN_SANDBOX_CONTEXT");
-    expect(knownScenarioSource).toContain("DEFAULT_BRIAN_KNOWN_SCENARIO_KEY");
+    expect(knownScenarioSource).toContain("ONE_PATH_SCENARIO_PRESETS");
+    expect(knownScenarioSource).toContain("DEFAULT_ONE_PATH_SCENARIO_PRESET_KEY");
+    expect(knownScenarioSource).not.toContain("PRIMARY_BRIAN_SANDBOX_CONTEXT");
     expect(knownScenarioSource).toContain("resolveKnownHouseScenarioSelection");
     expect(knownScenarioSource).toContain("matchScenarioIdByHint");
     expect(knownScenarioSource).toContain("scenarioKey");
@@ -255,21 +255,17 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain('onClick={() => void loadLookup(undefined, { freshSelection: true })}');
   });
 
-  it("applies known scenario presets to the active email unless that email is Brian's", () => {
+  it("applies generic scenario presets to the active email only", () => {
     const source = readRepoFile("components/admin/OnePathSimAdmin.tsx");
+    const presetSource = readRepoFile("modules/onePathSim/knownHouseScenarios.ts");
 
-    expect(source).toContain("const resolvedEmail = email.trim() || lookup?.email?.trim() || selectedKnownScenario.sourceUserEmail");
-    expect(source).toContain("const shouldUsePresetSourceContext = normalizedResolvedEmail === normalizedPresetEmail");
+    expect(source).toContain('const resolvedEmail = email.trim() || lookup?.email?.trim() || ""');
+    expect(source).not.toContain("shouldUsePresetSourceContext");
+    expect(source).toContain("sourceTruthHouseId");
     expect(source).toContain('setEmail(resolvedEmail);');
-    expect(source).toContain("houseSelectionStrategy: \"selected_house\" as const");
-    expect(source).toContain("freshSelection: !shouldUsePresetSourceContext && !reusingCurrentLookup");
-    expect(source).toContain("email: resolvedEmail,");
-    expect(source).toContain("includeDebugDiagnostics?: boolean");
-    expect(source).toContain("lightweightLookup?: boolean");
-    expect(source).toContain("includeDebugDiagnostics: args?.includeDebugDiagnostics ?? effectiveIncludeDebugDiagnostics");
-    expect(source).toContain("includeDebugDiagnostics: effectiveIncludeDebugDiagnostics");
     expect(source).not.toContain("setEmail(selectedKnownScenario.sourceUserEmail);");
-    expect(source).not.toContain("email: selectedKnownScenario.sourceUserEmail,");
+    expect(presetSource).not.toContain("PRIMARY_BRIAN_SANDBOX_CONTEXT");
+    expect(presetSource).not.toContain("FORT_WORTH_GREEN_BUTTON_CONTEXT");
   });
 
   it("keeps Green Button known-preset lookup lightweight so the Past scenario can be selected before run", () => {
