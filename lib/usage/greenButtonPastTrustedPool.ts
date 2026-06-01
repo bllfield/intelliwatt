@@ -146,14 +146,16 @@ export function resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals(args: 
   const timezone = String(args.timezone ?? "America/Chicago").trim() || "America/Chicago";
   if (!args.decodedIntervals.length) return new Set();
   const homeCalendar = createHomeIntervalCalendar(timezone);
-  return resolveGreenButtonPastSimTrustedHomeDateKeysForProducer({
-    trustedUtcDateKeys: args.trustedUtcDateKeys,
-    sourceIntervals: args.decodedIntervals,
-    timezone,
-    dateKeyFromTimestamp: (ts) => new Date(ts).toISOString().slice(0, 10),
-    homeCalendar,
-    localSlotIndex,
-  });
+  return (
+    resolveGreenButtonPastSimTrustedHomeDateKeysForProducer({
+      trustedUtcDateKeys: args.trustedUtcDateKeys,
+      sourceIntervals: args.decodedIntervals,
+      timezone,
+      dateKeyFromTimestamp: (ts) => new Date(ts).toISOString().slice(0, 10),
+      homeCalendar,
+      localSlotIndex,
+    }) ?? new Set()
+  );
 }
 
 /** Drop stale SIMULATED_INCOMPLETE_METER ownership for GB trusted home days on cache restore. */
