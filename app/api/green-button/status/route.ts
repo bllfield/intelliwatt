@@ -60,27 +60,27 @@ export async function GET(request: Request) {
         },
       })) ?? null;
 
-    if (!upload?.dateRangeStart || !upload?.dateRangeEnd) {
-      const coverage = await (usagePrisma as any).greenButtonInterval
-        .aggregate({
-          where: { homeId: house.id },
-          _min: { timestamp: true },
-          _max: { timestamp: true },
-          _count: { _all: true },
-        })
-        .catch(() => null);
-      if (coverage && (coverage._count?._all ?? 0) > 0 && upload) {
-        upload = {
-          ...upload,
-          dateRangeStart: upload.dateRangeStart ?? coverage._min?.timestamp ?? null,
-          dateRangeEnd: upload.dateRangeEnd ?? coverage._max?.timestamp ?? null,
-          parseStatus: upload.parseStatus ?? "complete",
-        };
-      }
+    const coverage = await (usagePrisma as any).greenButtonInterval
+      .aggregate({
+        where: { homeId: house.id },
+        _min: { timestamp: true },
+        _max: { timestamp: true },
+        _count: { _all: true },
+      })
+      .catch(() => null);
+    const persistedIntervalCount = Math.max(0, Number(coverage?._count?._all ?? 0) || 0);
+
+    if ((!upload?.dateRangeStart || !upload?.dateRangeEnd) && upload && persistedIntervalCount > 0) {
+      upload = {
+        ...upload,
+        dateRangeStart: upload.dateRangeStart ?? coverage?._min?.timestamp ?? null,
+        dateRangeEnd: upload.dateRangeEnd ?? coverage?._max?.timestamp ?? null,
+        parseStatus: upload.parseStatus ?? "complete",
+      };
     }
 
-    const ready = isGreenButtonUploadReady(upload);
-    const processing = isGreenButtonUploadProcessing(upload);
+    const ready = isGreenButtonUsageIngestionReady(upload, persistedIntervalCount);
+    const processing = isGreenButtonUsageIngestionProcessing(upload, persistedIntervalCount);
     const errored = isGreenButtonUploadParseError(upload?.parseStatus ?? null);
     const expiresAt = upload ? resolveGreenButtonConnectionExpiresAt(upload.createdAt) : null;
     const expired = Boolean(expiresAt && expiresAt.getTime() < Date.now());
