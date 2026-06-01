@@ -7,6 +7,7 @@ import { WeatherSensitivityCard } from "@/components/usage/WeatherSensitivityCar
 import { formatDateLong, formatDateShort } from "@/components/usage/usageFormatting";
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
 import { ensureDashboardSmtOrchestrate } from "@/components/smt/ensureDashboardSmtOrchestrate";
+import { GREEN_BUTTON_USAGE_PAGE_PROCESSING_MESSAGE } from "@/lib/usage/greenButtonUserMessages";
 import type { UserUsageIngestionStatus } from "@/lib/usage/userUsageHouseContract";
 import {
   type ManualAnnualStageOneSummary,
@@ -367,6 +368,8 @@ export const UsageDashboard: React.FC<Props> = ({
     useState<WeatherSensitivityScore | null>(null);
   const lastSmtIntervalsRef = useRef<number>(0);
   const smtPollTimerRef = useRef<number | null>(null);
+  const gbPollTimerRef = useRef<number | null>(null);
+  const [greenButtonIngestionPending, setGreenButtonIngestionPending] = useState(false);
 
   const pickSelectedHouseId = (nextHouses: HouseUsage[]): string | null => {
     if (!nextHouses.length) return null;
@@ -569,6 +572,92 @@ export const UsageDashboard: React.FC<Props> = ({
     };
   }, [datasetMode, fetchModeOverride, houses, housesOverride, loading, selectedHouseId]);
 
+  useEffect(() => {
+    const effectiveMode = fetchModeOverride ?? datasetMode;
+    if (housesOverride && housesOverride.length) {
+      setGreenButtonIngestionPending(false);
+      if (gbPollTimerRef.current) {
+        window.clearTimeout(gbPollTimerRef.current);
+        gbPollTimerRef.current = null;
+      }
+      return;
+    }
+    if (effectiveMode !== "REAL") {
+      setGreenButtonIngestionPending(false);
+      return;
+    }
+    if (loading || !selectedHouseId) return;
+
+    const active = houses.find((h) => h.houseId === selectedHouseId) || null;
+    if (active?.dataset) {
+      setGreenButtonIngestionPending(false);
+      return;
+    }
+
+    let cancelled = false;
+    let attempts = 0;
+
+    async function reloadUsageOnce() {
+      const res = await fetch(`/api/user/usage?ts=${Date.now()}`, { cache: "no-store" });
+      let json: UsageApiResponse;
+      try {
+        const text = await res.text();
+        json = JSON.parse(text) as UsageApiResponse;
+      } catch {
+        return;
+      }
+      if (!res.ok || json.ok === false || cancelled) return;
+      setHouses(json.houses || []);
+      setSelectedHouseId(pickSelectedHouseId(json.houses || []));
+    }
+
+    async function tick() {
+      if (cancelled) return;
+      attempts += 1;
+      if (attempts > 150) {
+        setGreenButtonIngestionPending(false);
+        return;
+      }
+      try {
+        const statusRes = await fetch(
+          `/api/green-button/status?homeId=${encodeURIComponent(selectedHouseId)}`,
+          { cache: "no-store" },
+        );
+        const statusJson = await statusRes.json().catch(() => null);
+        if (!statusRes.ok || !statusJson?.ok) {
+          gbPollTimerRef.current = window.setTimeout(() => void tick(), 3000);
+          return;
+        }
+        if (statusJson.errored) {
+          setGreenButtonIngestionPending(false);
+          return;
+        }
+        const pending = Boolean(statusJson.processing) || Boolean(statusJson.upload && !statusJson.ready);
+        setGreenButtonIngestionPending(pending);
+        if (statusJson.ready) {
+          await reloadUsageOnce();
+          setGreenButtonIngestionPending(false);
+          return;
+        }
+        if (pending) {
+          await reloadUsageOnce();
+          gbPollTimerRef.current = window.setTimeout(() => void tick(), 3000);
+        }
+      } catch {
+        gbPollTimerRef.current = window.setTimeout(() => void tick(), 5000);
+      }
+    }
+
+    void tick();
+    return () => {
+      cancelled = true;
+      if (gbPollTimerRef.current) {
+        window.clearTimeout(gbPollTimerRef.current);
+        gbPollTimerRef.current = null;
+      }
+    };
+  }, [datasetMode, fetchModeOverride, houses, housesOverride, loading, refreshToken, selectedHouseId]);
+
   const activeHouse = useMemo(() => {
     if (!selectedHouseId) return null;
     return houses.find((h) => h.houseId === selectedHouseId) || null;
@@ -697,11 +786,13 @@ export const UsageDashboard: React.FC<Props> = ({
       baseloadMonthly: null,
     };
 
-  if (loading || smtTailIngestionPending) {
+  if (loading || smtTailIngestionPending || greenButtonIngestionPending) {
     return (
       <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
         <p className="text-sm text-neutral-600">
-          {smtTailIngestionPending && !loading
+          {greenButtonIngestionPending && !loading
+            ? GREEN_BUTTON_USAGE_PAGE_PROCESSING_MESSAGE
+            : smtTailIngestionPending && !loading
             ? "Finishing the latest meter usage for your dashboard…"
             : "Loading usage data…"}
         </p>
@@ -890,7 +981,7 @@ export const UsageDashboard: React.FC<Props> = ({
               "No usage data for this home yet. Once SMT or Green Button data is ingested, charts will appear here."
             )}
           </p>
-          {houseDatasetExplanation ? (
+          {houseDatasetExplanation && !greenButtonIngestionPending ? (
             <p className="mt-2 text-sm text-amber-700">Why: {houseDatasetExplanation}</p>
           ) : null}
         </div>

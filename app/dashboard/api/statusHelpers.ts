@@ -6,8 +6,8 @@ import {
 } from "@/lib/usage/greenButtonUserMessages";
 import {
   isGreenButtonUploadParseError,
-  isGreenButtonUploadProcessing,
-  isGreenButtonUploadReady,
+  isGreenButtonUsageIngestionProcessing,
+  isGreenButtonUsageIngestionReady,
 } from "@/lib/usage/greenButtonUploadStatus";
 
 export {
@@ -157,7 +157,9 @@ export function deriveGreenButtonStatus(
     };
   }
 
-  if (isGreenButtonUploadProcessing(upload)) {
+  const persistedIntervalCount = Math.max(0, Number(upload.persistedIntervalCount ?? 0) || 0);
+
+  if (isGreenButtonUsageIngestionProcessing(upload, persistedIntervalCount)) {
     return {
       label: "Processing",
       tone: "warning",
@@ -167,7 +169,7 @@ export function deriveGreenButtonStatus(
     };
   }
 
-  const ready = isGreenButtonUploadReady(upload);
+  const ready = isGreenButtonUsageIngestionReady(upload, persistedIntervalCount);
   const hasCoverage = Boolean(upload.dateRangeStart && upload.dateRangeEnd);
 
   return {

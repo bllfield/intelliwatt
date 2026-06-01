@@ -26,3 +26,27 @@ export function isGreenButtonUploadProcessing(upload: GreenButtonUploadStatusRow
   const raw = String(upload.parseStatus ?? "").toLowerCase();
   return raw === "processing" || raw.length === 0;
 }
+
+/** Usage is display-ready only after persisted interval rows exist (upload metadata alone is not enough). */
+export function isGreenButtonUsageIngestionReady(
+  upload: GreenButtonUploadStatusRow | null | undefined,
+  persistedIntervalCount: number
+): boolean {
+  const intervalCount = Math.max(0, Number(persistedIntervalCount) || 0);
+  return isGreenButtonUploadReady(upload) && intervalCount > 0;
+}
+
+/** Includes parse in-flight and the gap where upload metadata is complete but intervals are not queryable yet. */
+export function isGreenButtonUsageIngestionProcessing(
+  upload: GreenButtonUploadStatusRow | null | undefined,
+  persistedIntervalCount: number
+): boolean {
+  if (!upload) return false;
+  if (isGreenButtonUploadParseError(upload.parseStatus)) return false;
+  const intervalCount = Math.max(0, Number(persistedIntervalCount) || 0);
+  if (isGreenButtonUsageIngestionReady(upload, intervalCount)) return false;
+  const raw = String(upload.parseStatus ?? "").toLowerCase();
+  if (raw === "processing" || raw.length === 0) return true;
+  if (isGreenButtonUploadReady(upload) && intervalCount === 0) return true;
+  return false;
+}

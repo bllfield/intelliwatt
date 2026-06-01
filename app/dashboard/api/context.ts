@@ -54,6 +54,7 @@ export type UsageEntryContext = {
     intervalMinutes: number | null;
     fileName: string;
     fileSizeBytes: number | null;
+    persistedIntervalCount?: number;
   } | null;
   manualUsageUpload: {
     id: string;
@@ -212,6 +213,7 @@ export async function loadUsageEntryContext(): Promise<UsageEntryContext> {
           ...greenButtonUpload,
           dateRangeStart: greenButtonUpload.dateRangeStart ?? gbCoverage?.start ?? null,
           dateRangeEnd: greenButtonUpload.dateRangeEnd ?? gbCoverage?.end ?? null,
+          persistedIntervalCount: gbCoverage?.count ?? 0,
         }
       : gbCoverage
         ? {
@@ -225,6 +227,7 @@ export async function loadUsageEntryContext(): Promise<UsageEntryContext> {
             intervalMinutes: 15,
             fileName: "derived",
             fileSizeBytes: null,
+            persistedIntervalCount: gbCoverage.count,
           }
         : null;
 

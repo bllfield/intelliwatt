@@ -5,8 +5,8 @@ import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
 import {
   isGreenButtonUploadParseError,
-  isGreenButtonUploadProcessing,
-  isGreenButtonUploadReady,
+  isGreenButtonUsageIngestionProcessing,
+  isGreenButtonUsageIngestionReady,
 } from "@/lib/usage/greenButtonUploadStatus";
 import { resolveGreenButtonConnectionExpiresAt } from "@/lib/usage/awardGreenButtonUsageEntry";
 import { normalizeEmail } from "@/lib/utils/email";
@@ -101,6 +101,7 @@ export async function GET(request: Request) {
         : null,
       ready,
       processing,
+      persistedIntervalCount,
       errored,
       expired,
       expiresAt: expiresAt?.toISOString() ?? null,

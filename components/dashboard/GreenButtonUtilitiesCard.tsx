@@ -8,8 +8,8 @@ import {
   GREEN_BUTTON_UPLOAD_PROCESSING_MESSAGE,
 } from "@/lib/usage/greenButtonUserMessages";
 
-const GREEN_BUTTON_STATUS_POLL_MS = 2000;
-const GREEN_BUTTON_STATUS_MAX_POLLS = 90;
+const GREEN_BUTTON_STATUS_POLL_MS = 2500;
+const GREEN_BUTTON_STATUS_MAX_WAIT_MS = 12 * 60 * 1000;
 
 interface GreenButtonHelpSectionProps {
   houseAddressId?: string | null;
@@ -76,9 +76,10 @@ export default function GreenButtonHelpSection({
 
       const trimmedUtility = utilityName.trim();
       const trimmedAccount = accountNumber.trim();
-      const waitForGreenButtonReady = async () => {
+      const waitForGreenButtonReady = async (): Promise<"ready" | "deferred_to_usage_page"> => {
         setStatusMessage(GREEN_BUTTON_UPLOAD_PROCESSING_MESSAGE);
-        for (let attempt = 0; attempt < GREEN_BUTTON_STATUS_MAX_POLLS; attempt += 1) {
+        const startedAt = Date.now();
+        while (Date.now() - startedAt < GREEN_BUTTON_STATUS_MAX_WAIT_MS) {
           const statusRes = await fetch(
             `/api/green-button/status?homeId=${encodeURIComponent(houseAddressId)}`,
             { cache: "no-store" },
@@ -93,12 +94,26 @@ export default function GreenButtonHelpSection({
               throw new Error(detail);
             }
             if (statusJson.ready) {
-              return;
+              return "ready";
+            }
+            if (statusJson.processing) {
+              setStatusMessage(GREEN_BUTTON_UPLOAD_PROCESSING_MESSAGE);
             }
           }
           await new Promise((resolve) => window.setTimeout(resolve, GREEN_BUTTON_STATUS_POLL_MS));
         }
-        throw new Error("Processing is taking longer than expected. Refresh this page in a minute.");
+        const finalRes = await fetch(
+          `/api/green-button/status?homeId=${encodeURIComponent(houseAddressId)}`,
+          { cache: "no-store" },
+        );
+        const finalJson = await finalRes.json().catch(() => null);
+        if (finalRes.ok && finalJson?.ok && finalJson.ready) {
+          return "ready";
+        }
+        if (finalRes.ok && finalJson?.ok && finalJson.processing) {
+          return "deferred_to_usage_page";
+        }
+        throw new Error("Processing is taking longer than expected. Please try again in a few minutes.");
       };
 
       const uploadViaAppRoute = async () => {
@@ -166,13 +181,23 @@ export default function GreenButtonHelpSection({
 
       try {
         await uploadViaDroplet();
-        await waitForGreenButtonReady();
-        setStatusTone("success");
-        setStatusMessage(GREEN_BUTTON_UPLOAD_COMPLETE_MESSAGE);
+        const ingestOutcome = await waitForGreenButtonReady();
         setSelectedFile(null);
         if (fileInputRef.current) {
           fileInputRef.current.value = "";
         }
+        if (ingestOutcome === "deferred_to_usage_page") {
+          setStatusTone(null);
+          setStatusMessage(
+            "Your file is still processing. Opening the Usage page—we'll load results automatically when ready.",
+          );
+          router.push("/dashboard/usage");
+          router.refresh();
+          return;
+        }
+        setStatusTone("success");
+        setStatusMessage(GREEN_BUTTON_UPLOAD_COMPLETE_MESSAGE);
+        router.push("/dashboard/usage");
         router.refresh();
       } catch (uploadErr: any) {
         setStatusTone("error");
