@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const findFirst = vi.fn();
 const resolveIntervalsLayer = vi.fn();
+const getActualUsageDatasetForHouse = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -13,6 +14,10 @@ vi.mock("@/lib/db", () => ({
 
 vi.mock("@/lib/usage/resolveIntervalsLayer", () => ({
   resolveIntervalsLayer: (...args: any[]) => resolveIntervalsLayer(...args),
+}));
+
+vi.mock("@/lib/usage/actualDatasetForHouse", () => ({
+  getActualUsageDatasetForHouse: (...args: any[]) => getActualUsageDatasetForHouse(...args),
 }));
 
 vi.mock("@/lib/usage/ensureSmtCoverage", () => ({
@@ -38,6 +43,35 @@ describe("one path upstream usage truth actual context house", () => {
       dataset: { summary: { totalKwh: 100 }, meta: { actualSource: "GREEN_BUTTON" } },
       alternatives: { smt: null, greenButton: { totalKwh: 100 } },
     });
+  });
+
+  it("falls back to dashboard GB load when interval-layer read is empty", async () => {
+    resolveIntervalsLayer.mockResolvedValueOnce({ dataset: null, alternatives: { smt: null, greenButton: null } });
+    getActualUsageDatasetForHouse.mockResolvedValueOnce({
+      dataset: { summary: { totalKwh: 50 }, meta: { actualSource: "GREEN_BUTTON" } },
+      alternatives: { smt: null, greenButton: { totalKwh: 50 } },
+    });
+
+    const { resolveUpstreamUsageTruthForSimulation } = await import("@/modules/onePathSim/upstreamUsageTruth");
+    const out = await resolveUpstreamUsageTruthForSimulation({
+      userId: "owner-1",
+      houseId: "test-home-1",
+      actualContextHouseId: "test-home-1",
+      actualContextUserId: "owner-1",
+      seedIfMissing: false,
+      preferredActualSource: "GREEN_BUTTON",
+    });
+
+    expect(getActualUsageDatasetForHouse).toHaveBeenCalledWith(
+      "test-home-1",
+      null,
+      expect.objectContaining({
+        userId: "owner-1",
+        preferredSource: "GREEN_BUTTON",
+        userUsageDashboardLoad: true,
+      })
+    );
+    expect(out.dataset).toEqual({ summary: { totalKwh: 50 }, meta: { actualSource: "GREEN_BUTTON" } });
   });
 
   it("reads persisted usage from the source-house owner when lab test home differs", async () => {

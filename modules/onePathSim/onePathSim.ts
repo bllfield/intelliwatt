@@ -1363,6 +1363,16 @@ export async function buildReadOnlyIntervalBaselinePreview(args: {
   };
 }
 
+function isCrossHouseActualContext(args: {
+  houseId: string;
+  actualContextHouseId?: string | null;
+  actualContextUserId?: string | null;
+}) {
+  const contextUserId = String(args.actualContextUserId ?? "").trim();
+  const contextHouseId = String(args.actualContextHouseId ?? "").trim();
+  return Boolean(contextUserId && contextHouseId && contextHouseId !== String(args.houseId ?? "").trim());
+}
+
 async function loadSharedContext(args: {
   userId: string;
   houseId: string;
@@ -1377,9 +1387,10 @@ async function loadSharedContext(args: {
   skipOptionalEnrichment?: boolean;
   skipLightweightInsightRecompute?: boolean;
 }): Promise<LoadedSharedContext> {
-  const upstreamUsageTruth = await resolveOnePathUpstreamUsageTruthForSimulation({
-    userId: args.userId,
-    houseId: args.houseId,
+  const crossHouse = isCrossHouseActualContext(args);
+  let upstreamUsageTruth = await resolveOnePathUpstreamUsageTruthForSimulation({
+    userId: crossHouse ? String(args.actualContextUserId).trim() : args.userId,
+    houseId: crossHouse ? String(args.actualContextHouseId).trim() : args.houseId,
     actualContextHouseId: args.actualContextHouseId,
     actualContextUserId: args.actualContextUserId ?? null,
     smtSourceEsiid: args.smtSourceEsiid ?? null,
@@ -1387,6 +1398,17 @@ async function loadSharedContext(args: {
     preferredActualSource: args.preferredActualSource ?? null,
     skipLightweightInsightRecompute: args.skipLightweightInsightRecompute === true,
   });
+  if (crossHouse) {
+    const { resolveSimulationHouseForUser } = await import("@/lib/usage/resolveActualContextHouseForSimulation");
+    const runtimeHouse = await resolveSimulationHouseForUser({
+      userId: args.userId,
+      houseId: args.houseId,
+    });
+    upstreamUsageTruth = {
+      ...upstreamUsageTruth,
+      selectedHouse: runtimeHouse,
+    };
+  }
   if (!upstreamUsageTruth.dataset && args.allowMissingUsageTruth !== true) {
     throw new UpstreamUsageTruthMissingError({
       usageTruthSource: upstreamUsageTruth.usageTruthSource,

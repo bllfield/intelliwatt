@@ -271,9 +271,11 @@ export function OnePathSimAdmin() {
     lookup?.selectedHouse?.id ?? onePathTestHome?.sourceHouseId ?? effectiveHouseId ?? ""
   ).trim();
   const effectiveActualContextHouseId =
-    onePathTestHomePinned && sourceTruthHouseId
-      ? sourceTruthHouseId
-      : actualContextHouseId || effectiveHouseId;
+    mode === "GREEN_BUTTON" && onePathTestHomePinned && effectiveMutableHouseId
+      ? effectiveMutableHouseId
+      : onePathTestHomePinned && sourceTruthHouseId
+        ? sourceTruthHouseId
+        : actualContextHouseId || effectiveHouseId;
   useEffect(() => {
     setGreenButtonSelectedFile(null);
     setGreenButtonUploadInputKey((current) => current + 1);
@@ -1084,7 +1086,6 @@ export function OnePathSimAdmin() {
         );
         return;
       }
-      const sourceHouseIdForGbTruth = String(json.selectedHouse?.id ?? presetActualContextHouseId ?? "").trim();
       const hasExistingGreenButtonUsage = hasUsableGreenButtonCoverage(
         asRecord(json.sourceContext?.greenButtonUpload)
       );
@@ -1094,7 +1095,8 @@ export function OnePathSimAdmin() {
         json = await requestLookup({
           ...lookupArgs,
           houseId: presetSelectedHouseId || lookupArgs.houseId,
-          actualContextHouseId: sourceHouseIdForGbTruth || presetActualContextHouseId,
+          onePathTestHomeHouseId: targetUploadHouseId,
+          mode: "GREEN_BUTTON",
           freshSelection: false,
           includeDebugDiagnostics: includeSimRunAuditEnabled,
           lightweightLookup: !includeSimRunAuditEnabled,

@@ -1,3 +1,4 @@
+import { getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
 import { resolveIntervalsLayer } from "@/lib/usage/resolveIntervalsLayer";
 import {
   resolveActualContextHouseForSimulation,
@@ -262,6 +263,25 @@ async function readPersistedUsageTruth(args: {
   );
 }
 
+/** Same GB load path as the user usage dashboard when interval-layer read returns empty. */
+async function readGreenButtonUsageTruthFallback(args: {
+  userId: string;
+  houseId: string;
+  esiid: string | null;
+  skipLightweightInsightRecompute?: boolean;
+}) {
+  return getActualUsageDatasetForHouse(args.houseId, args.esiid, {
+    userId: args.userId,
+    preferredSource: "GREEN_BUTTON",
+    skipFullYearIntervalFetch: true,
+    skipLightweightInsightRecompute: args.skipLightweightInsightRecompute === true,
+    userUsageDashboardLoad: true,
+  }).catch(() => ({
+    dataset: null,
+    alternatives: { smt: null, greenButton: null },
+  }));
+}
+
 export async function resolveUpstreamUsageTruthForSimulation(args: {
   userId: string;
   houseId: string;
@@ -313,6 +333,20 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
     preferredActualSource: args.preferredActualSource ?? null,
     skipLightweightInsightRecompute: args.skipLightweightInsightRecompute === true,
   });
+  if (!resolved?.dataset && args.preferredActualSource === "GREEN_BUTTON") {
+    const gbFallback = await readGreenButtonUsageTruthFallback({
+      userId: actualContextOwnerUserId,
+      houseId: actualContextHouse.id,
+      esiid: actualContextHouseWithEffectiveEsiid.esiid,
+      skipLightweightInsightRecompute: args.skipLightweightInsightRecompute === true,
+    });
+    if (gbFallback.dataset) {
+      resolved = {
+        dataset: gbFallback.dataset,
+        alternatives: gbFallback.alternatives ?? { smt: null, greenButton: null },
+      };
+    }
+  }
   if (resolved?.dataset) {
     const greenButtonOnlyMode = args.preferredActualSource === "GREEN_BUTTON" || isGreenButtonPrimaryDataset(resolved.dataset);
     const esiidForTail = actualContextHouseWithEffectiveEsiid.esiid;

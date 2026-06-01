@@ -1116,6 +1116,120 @@ type OnePathIncompleteMeterBackfillRetry = OnePathSmtPostSimHealingResult & {
   postRetryIncompleteDateKeys?: string[];
 };
 
+function greenButtonUploadHasPersistedUsage(upload: Record<string, unknown> | null | undefined): boolean {
+  if (!upload) return false;
+  if (upload.hasPersistedUsageIntervals === true) return true;
+  const intervalCount = Number(upload.intervalCount ?? 0);
+  return Number.isFinite(intervalCount) && intervalCount > 0;
+}
+
+/** Green Button usage truth for One Path: pinned lab uploads land on the test home, not the source. */
+function resolveOnePathGreenButtonUsageContext(args: {
+  onePathTestHomeState: {
+    isPinned: boolean;
+    testHomeHouseId: string;
+    testHomeHouse?: { id: string; label: string; esiid: string | null } | null;
+  };
+  effectiveUserId: string;
+  effectiveHouseId: string;
+  resolved: {
+    userId: string;
+    selectedHouse: { id: string; label?: string | null; esiid?: string | null };
+  };
+}): { userId: string; houseId: string; house: { id: string; label?: string | null; esiid?: string | null } } {
+  if (args.onePathTestHomeState.isPinned && args.effectiveHouseId) {
+    return {
+      userId: args.effectiveUserId,
+      houseId: args.effectiveHouseId,
+      house: {
+        id: args.effectiveHouseId,
+        label: args.onePathTestHomeState.testHomeHouse?.label ?? ONE_PATH_LAB_TEST_HOME_LABEL,
+        esiid: args.onePathTestHomeState.testHomeHouse?.esiid ?? null,
+      },
+    };
+  }
+  return {
+    userId: args.resolved.userId,
+    houseId: args.resolved.selectedHouse.id,
+    house: {
+      id: args.resolved.selectedHouse.id,
+      label: args.resolved.selectedHouse.label ?? null,
+      esiid: args.resolved.selectedHouse.esiid ?? null,
+    },
+  };
+}
+
+/** Prefer test-home GB when pinned; fall back to source only when the lab home has no persisted GB usage. */
+async function resolveOnePathGreenButtonActualContextForUsage(args: {
+  resolved: {
+    userId: string;
+    selectedHouse: { id: string; label?: string | null; esiid?: string | null };
+  };
+  onePathTestHomeState: {
+    isPinned: boolean;
+    linkedSourceHouseId: string | null;
+    linkedSourceUserId: string | null;
+    testHomeHouseId: string;
+    testHomeHouse?: { id: string; label: string; esiid: string | null } | null;
+  };
+  effectiveUserId: string;
+  effectiveHouseId: string;
+}): Promise<{ userId: string; houseId: string; house: { id: string; label?: string | null; esiid?: string | null } }> {
+  const primary = resolveOnePathGreenButtonUsageContext(args);
+  if (!args.onePathTestHomeState.isPinned) {
+    return primary;
+  }
+  const testUpload = await loadGreenButtonUploadSummary(primary.houseId);
+  if (greenButtonUploadHasPersistedUsage(testUpload as Record<string, unknown> | null)) {
+    return primary;
+  }
+  const source = resolveOnePathGreenButtonParitySource({
+    resolved: args.resolved,
+    onePathTestHomeState: args.onePathTestHomeState,
+  });
+  if (source.house.id !== primary.houseId) {
+    return { userId: source.userId, houseId: source.house.id, house: source.house };
+  }
+  return primary;
+}
+
+async function resolveOnePathUpstreamGreenButtonUsageTruth(args: {
+  runtimeUserId: string;
+  runtimeHouseId: string;
+  actualContextUserId: string;
+  actualContextHouseId: string;
+  smtSourceEsiid: string | null;
+  seedIfMissing: boolean;
+  fallbackActualContext?: { userId: string; houseId: string } | null;
+}) {
+  const primary = await resolveOnePathUpstreamUsageTruthForSimulation({
+    userId: args.runtimeUserId,
+    houseId: args.runtimeHouseId,
+    actualContextHouseId: args.actualContextHouseId,
+    actualContextUserId: args.actualContextUserId,
+    smtSourceEsiid: args.smtSourceEsiid,
+    seedIfMissing: args.seedIfMissing,
+    preferredActualSource: "GREEN_BUTTON",
+  }).catch(() => null);
+  if (primary?.dataset || !args.fallbackActualContext) {
+    return primary;
+  }
+  const fallbackHouseId = String(args.fallbackActualContext.houseId ?? "").trim();
+  const fallbackUserId = String(args.fallbackActualContext.userId ?? "").trim();
+  if (!fallbackHouseId || !fallbackUserId || fallbackHouseId === args.actualContextHouseId) {
+    return primary;
+  }
+  return resolveOnePathUpstreamUsageTruthForSimulation({
+    userId: args.runtimeUserId,
+    houseId: args.runtimeHouseId,
+    actualContextHouseId: fallbackHouseId,
+    actualContextUserId: fallbackUserId,
+    smtSourceEsiid: args.smtSourceEsiid,
+    seedIfMissing: args.seedIfMissing,
+    preferredActualSource: "GREEN_BUTTON",
+  }).catch(() => primary);
+}
+
 /** SMT pull/backfill must run on a house with ESIID + authorization; pinned lab homes keep esiid null by design. */
 function resolveOnePathGreenButtonParitySource(args: {
   resolved: {
@@ -1152,7 +1266,7 @@ function resolveOnePathGreenButtonParitySource(args: {
   };
 }
 
-/** User-site actual truth for lookup previews: source house when pinned, not the mutable test home. */
+/** Lookup/run actual context: SMT stays on source when pinned; Green Button prefers the lab test home upload. */
 function resolveOnePathLookupActualContext(args: {
   resolved: {
     userId: string;
@@ -1163,7 +1277,12 @@ function resolveOnePathLookupActualContext(args: {
     isPinned: boolean;
     linkedSourceHouseId: string | null;
     linkedSourceUserId: string | null;
+    testHomeHouseId: string;
+    testHomeHouse?: { id: string; label: string; esiid: string | null } | null;
   };
+  effectiveUserId: string;
+  effectiveHouseId: string;
+  previewMode?: CanonicalSimulationInputType;
   defaultActualContextHouseId: string;
   defaultActualContextUserId: string;
   bodyActualContextHouseId?: string | null;
@@ -1172,6 +1291,19 @@ function resolveOnePathLookupActualContext(args: {
   userId: string;
   house: { id: string; label?: string | null; esiid?: string | null };
 } {
+  if (args.previewMode === "GREEN_BUTTON" && args.onePathTestHomeState.isPinned && args.effectiveHouseId) {
+    const gb = resolveOnePathGreenButtonUsageContext({
+      resolved: args.resolved,
+      onePathTestHomeState: args.onePathTestHomeState,
+      effectiveUserId: args.effectiveUserId,
+      effectiveHouseId: args.effectiveHouseId,
+    });
+    return {
+      houseId: gb.houseId,
+      userId: gb.userId,
+      house: gb.house,
+    };
+  }
   if (args.onePathTestHomeState.isPinned && args.onePathTestHomeState.linkedSourceHouseId) {
     const source = resolveOnePathGreenButtonParitySource({
       resolved: args.resolved,
@@ -1570,11 +1702,20 @@ export async function POST(request: NextRequest) {
             updatedAt: null,
           }))
         : { payload: null, updatedAt: null };
+    const greenButtonRunActualContext =
+      mode === "GREEN_BUTTON"
+        ? await resolveOnePathGreenButtonActualContextForUsage({
+            resolved,
+            onePathTestHomeState,
+            effectiveUserId,
+            effectiveHouseId,
+          })
+        : null;
     const rawInputBase = {
       userId: effectiveUserId,
       houseId: effectiveHouseId,
-      actualContextHouseId: defaultActualContextHouseId,
-      actualContextUserId: defaultActualContextUserId,
+      actualContextHouseId: greenButtonRunActualContext?.houseId ?? defaultActualContextHouseId,
+      actualContextUserId: greenButtonRunActualContext?.userId ?? defaultActualContextUserId,
       smtSourceEsiid,
       preferredActualSource:
         body?.preferredActualSource === "SMT" || body?.preferredActualSource === "GREEN_BUTTON"
@@ -2051,11 +2192,34 @@ export async function POST(request: NextRequest) {
   const lookupActualContext = resolveOnePathLookupActualContext({
     resolved,
     onePathTestHomeState,
+    effectiveUserId,
+    effectiveHouseId,
+    previewMode,
     defaultActualContextHouseId,
     defaultActualContextUserId,
     bodyActualContextHouseId:
       typeof body?.actualContextHouseId === "string" ? body.actualContextHouseId : null,
   });
+  const greenButtonActualContext =
+    previewMode === "GREEN_BUTTON"
+      ? await resolveOnePathGreenButtonActualContextForUsage({
+          resolved,
+          onePathTestHomeState,
+          effectiveUserId,
+          effectiveHouseId,
+        })
+      : null;
+  const greenButtonSourceFallbackContext =
+    previewMode === "GREEN_BUTTON" &&
+    onePathTestHomeState.isPinned &&
+    onePathTestHomeState.linkedSourceHouseId &&
+    onePathTestHomeState.linkedSourceUserId &&
+    greenButtonActualContext?.houseId === effectiveHouseId
+      ? {
+          userId: onePathTestHomeState.linkedSourceUserId,
+          houseId: onePathTestHomeState.linkedSourceHouseId,
+        }
+      : null;
 
   if ((action === "lookup" || !action) && (!includeDebugDiagnostics || lightweightLookupRequested)) {
     const travelRangesFromDb = await getOnePathTravelRangesFromDb(effectiveUserId, effectiveHouseId).catch(() => []);
@@ -2082,7 +2246,11 @@ export async function POST(request: NextRequest) {
       (lightweightApplianceProfileRecord as any)?.appliancesJson ?? null
     );
     const previewActualContextHouseId = lookupActualContext.houseId;
-    const greenButtonUpload = await loadGreenButtonUploadSummary(previewActualContextHouseId);
+    const greenButtonUploadHouseId =
+      previewMode === "GREEN_BUTTON" && onePathTestHomeState.isPinned && effectiveHouseId
+        ? effectiveHouseId
+        : previewActualContextHouseId;
+    const greenButtonUpload = await loadGreenButtonUploadSummary(greenButtonUploadHouseId);
     const manualUsage =
       previewMode === "MANUAL_MONTHLY" || previewMode === "MANUAL_ANNUAL"
         ? await getOnePathManualUsageInput({ userId: effectiveUserId, houseId: effectiveHouseId }).catch(() => ({
@@ -2143,7 +2311,11 @@ export async function POST(request: NextRequest) {
   }
 
   const previewActualContextHouse = lookupActualContext.house;
-  const actualContextGreenButtonUpload = await loadGreenButtonUploadSummary(previewActualContextHouse.id);
+  const greenButtonUploadSummaryHouseId =
+    previewMode === "GREEN_BUTTON" && onePathTestHomeState.isPinned && effectiveHouseId
+      ? effectiveHouseId
+      : previewActualContextHouse.id;
+  const actualContextGreenButtonUpload = await loadGreenButtonUploadSummary(greenButtonUploadSummaryHouseId);
   let previewSimulationVariablePolicy: SimulationVariablePolicy | null = null;
   try {
     const sharedSimulationVariablePolicy = await getOnePathSimulationVariablePolicy();
@@ -2168,15 +2340,30 @@ export async function POST(request: NextRequest) {
   });
 
   const [usageTruth, manualUsage, fetchedHomeProfile, fetchedApplianceProfileRecord, travelRangesFromDb] = await Promise.all([
-    resolveOnePathUpstreamUsageTruthForSimulation({
-      userId: effectiveUserId,
-      houseId: effectiveHouseId,
-      actualContextHouseId: lookupActualContext.houseId,
-      actualContextUserId: lookupActualContext.userId,
-      smtSourceEsiid,
-      seedIfMissing: false,
-      preferredActualSource: previewMode === "GREEN_BUTTON" ? "GREEN_BUTTON" : null,
-    }).catch(() => null),
+    previewMode === "GREEN_BUTTON"
+      ? resolveOnePathUpstreamGreenButtonUsageTruth({
+          runtimeUserId: effectiveUserId,
+          runtimeHouseId: effectiveHouseId,
+          actualContextHouseId: greenButtonActualContext?.houseId ?? lookupActualContext.houseId,
+          actualContextUserId: greenButtonActualContext?.userId ?? lookupActualContext.userId,
+          smtSourceEsiid,
+          seedIfMissing: false,
+          fallbackActualContext:
+            greenButtonActualContext &&
+            greenButtonActualContext.houseId === effectiveHouseId &&
+            greenButtonSourceFallbackContext
+              ? greenButtonSourceFallbackContext
+              : null,
+        })
+      : resolveOnePathUpstreamUsageTruthForSimulation({
+          userId: effectiveUserId,
+          houseId: effectiveHouseId,
+          actualContextHouseId: lookupActualContext.houseId,
+          actualContextUserId: lookupActualContext.userId,
+          smtSourceEsiid,
+          seedIfMissing: false,
+          preferredActualSource: null,
+        }).catch(() => null),
     getOnePathManualUsageInput({ userId: effectiveUserId, houseId: effectiveHouseId }).catch(() => ({
       payload: null,
       updatedAt: null,

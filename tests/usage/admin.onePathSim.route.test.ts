@@ -2409,6 +2409,74 @@ describe("admin one path sim route", () => {
     );
   });
 
+  it("uses the pinned test home for Green Button usage truth while SMT stays on the source house", async () => {
+    ensureGlobalOnePathLabTestHomeHouse.mockResolvedValueOnce({
+      id: "test-home-1",
+      esiid: null,
+      label: "ONE_PATH_LAB_TEST_HOME",
+    });
+    getOnePathLabTestHomeLink.mockResolvedValueOnce({
+      ownerUserId: "user-1",
+      testHomeHouseId: "test-home-1",
+      sourceUserId: "user-1",
+      sourceHouseId: "house-1",
+      status: "ready",
+      statusMessage: "ready",
+      lastReplacedAt: new Date("2026-04-16T00:00:00.000Z"),
+    });
+    prismaHouseAddressFindFirst.mockImplementationOnce(async () => ({
+      id: "test-home-1",
+      label: "One Path Test Home",
+      esiid: null,
+    }));
+    usageGreenButtonIntervalAggregate.mockResolvedValueOnce({
+      _count: { _all: 120 },
+      _min: { timestamp: new Date("2025-04-15T00:00:00.000Z") },
+      _max: { timestamp: new Date("2026-04-14T00:00:00.000Z") },
+    });
+    adaptGreenButtonRawInput.mockResolvedValueOnce({
+      sharedProducerPathUsed: true,
+      inputType: "GREEN_BUTTON",
+      simulatorMode: "GREEN_BUTTON",
+    });
+    buildGreenButtonUserSiteParityContract.mockResolvedValueOnce({
+      dataset: { summary: { source: "GREEN_BUTTON" }, meta: { baselinePassthrough: true } },
+    });
+    buildOnePathRunReadOnlyViewFromBaselineContract.mockReturnValueOnce({ source: "GREEN_BUTTON" });
+
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const res = await POST(
+      buildRequest({
+        action: "run",
+        email: "customer@example.com",
+        houseId: "house-1",
+        sourceHouseId: "house-1",
+        onePathTestHomeHouseId: "test-home-1",
+        mode: "GREEN_BUTTON",
+        includeDebugDiagnostics: true,
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(adaptGreenButtonRawInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        houseId: "test-home-1",
+        actualContextHouseId: "test-home-1",
+        actualContextUserId: "user-1",
+        preferredActualSource: "GREEN_BUTTON",
+      })
+    );
+    expect(buildGreenButtonUserSiteParityContract).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        sourceHouse: expect.objectContaining({ id: "house-1" }),
+      })
+    );
+    expect(json.runType).toBe("BASELINE_PASSTHROUGH");
+  });
+
   it("keeps the live user baseline bound to the source house while One Path uses the test home", async () => {
     ensureGlobalOnePathLabTestHomeHouse.mockResolvedValueOnce({
       id: "test-home-1",

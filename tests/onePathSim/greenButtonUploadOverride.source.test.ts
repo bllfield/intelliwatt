@@ -41,7 +41,8 @@ describe("one path green button preset wiring", () => {
     expect(lookupRouteSource).toContain("greenButtonUpload: actualContextGreenButtonUpload");
     expect(lookupRouteSource).toContain("mode === \"GREEN_BUTTON\"");
     expect(lookupRouteSource).toContain("promise: adaptGreenButtonRawInput(effectiveRawInputBase)");
-    expect(lookupRouteSource).toContain("const greenButtonUpload = await loadGreenButtonUploadSummary(previewActualContextHouseId);");
+    expect(lookupRouteSource).toContain("resolveOnePathGreenButtonUsageContext");
+    expect(lookupRouteSource).toContain("greenButtonUploadHouseId");
             expect(lookupRouteSource).toContain("hasPersistedUsageIntervals: Boolean(derivedCoverage)");
             expect(lookupRouteSource).toContain("intervalCount: derivedCoverage?.count ?? 0");
     expect(onePathSource).toContain("export async function adaptGreenButtonRawInput");
