@@ -37,19 +37,29 @@ export async function GET(request: Request) {
 
     const house = await prisma.houseAddress.findFirst({
       where: { id: homeId, userId: user.id, archivedAt: null },
-      select: { id: true, committedUsageSource: true, committedUsageSourceAt: true },
+      select: { id: true, esiid: true },
     });
     if (!house) {
       return NextResponse.json({ ok: false, error: "home_not_found" }, { status: 404 });
     }
 
     const source = await readHouseCommittedUsageSource(house.id);
+    let committedUsageSourceAt: string | null = null;
+    try {
+      const atRow = await prisma.houseAddress.findFirst({
+        where: { id: house.id },
+        select: { committedUsageSourceAt: true },
+      });
+      committedUsageSourceAt = atRow?.committedUsageSourceAt?.toISOString() ?? null;
+    } catch {
+      committedUsageSourceAt = null;
+    }
 
     return NextResponse.json({
       ok: true,
       homeId: house.id,
       source,
-      committedUsageSourceAt: house.committedUsageSourceAt?.toISOString() ?? null,
+      committedUsageSourceAt,
     });
   } catch (error) {
     console.error("[user/usage/committed-source] GET failed", error);

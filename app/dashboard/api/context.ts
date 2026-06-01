@@ -250,15 +250,31 @@ export async function loadUsageEntryContext(): Promise<UsageEntryContext> {
         },
       }));
 
-    const committedUsageSource = houseAddress
-      ? await readHouseCommittedUsageSource(houseAddress.id)
-      : null;
-    const committedRow = houseAddress
-      ? await prismaAny.houseAddress.findFirst({
+    let committedUsageSource: ActualUsageSource | null = null;
+    let committedUsageSourceAt: Date | null = null;
+    if (houseAddress && user) {
+      try {
+        committedUsageSource = await readHouseCommittedUsageSource(houseAddress.id);
+        const committedRow = await prismaAny.houseAddress.findFirst({
           where: { id: houseAddress.id },
           select: { committedUsageSourceAt: true },
-        })
-      : null;
+        });
+        committedUsageSourceAt = committedRow?.committedUsageSourceAt ?? null;
+      } catch (committedErr) {
+        console.error(
+          "[loadUsageEntryContext] committedUsageSource unavailable; run prisma migrate deploy",
+          committedErr,
+        );
+      }
+      if (!committedUsageSource) {
+        const { resolveHouseCommittedUsageSource } = await import("@/lib/usage/houseCommittedUsageSource");
+        committedUsageSource = await resolveHouseCommittedUsageSource({
+          houseId: houseAddress.id,
+          userId: user.id,
+          esiid: houseAddress.esiid ?? null,
+        });
+      }
+    }
 
     return {
       user,
@@ -269,7 +285,7 @@ export async function loadUsageEntryContext(): Promise<UsageEntryContext> {
       greenButtonUpload: resolvedGreenButtonUpload,
       manualUsageUpload,
       committedUsageSource,
-      committedUsageSourceAt: committedRow?.committedUsageSourceAt ?? null,
+      committedUsageSourceAt,
     };
   } catch (e: any) {
     return {

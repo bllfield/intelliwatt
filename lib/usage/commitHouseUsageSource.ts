@@ -31,13 +31,20 @@ export async function commitHouseUsageSource(args: {
     await clearGreenButtonUsageForHouse(houseId);
   }
 
-  await prisma.houseAddress.update({
-    where: { id: houseId },
-    data: {
-      committedUsageSource: source,
-      committedUsageSourceAt: new Date(),
-    },
-  });
+  try {
+    await prisma.houseAddress.update({
+      where: { id: houseId },
+      data: {
+        committedUsageSource: source,
+        committedUsageSourceAt: new Date(),
+      },
+    });
+  } catch (err) {
+    console.error(
+      "[commitHouseUsageSource] Failed to persist committedUsageSource; run prisma migrate deploy on main DB",
+      err,
+    );
+  }
 }
 
 export async function readHouseCommittedUsageSource(
