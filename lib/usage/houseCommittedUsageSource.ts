@@ -1,7 +1,8 @@
 import { prisma } from "@/lib/db";
 import { pickBestSmtAuthorization } from "@/lib/smt/authorizationSelection";
 import { getLatestUsableRawGreenButtonIdForHouse } from "@/modules/realUsageAdapter/greenButton";
-import { hasSmtIntervalsInCanonicalWindow } from "@/lib/usage/smtCanonicalAvailability";
+import { isSmtHealScopeReady } from "@/lib/usage/smtTailCoverage";
+import { loadSmtWindowDayStatus, resolveSmtPersistedCoverageSpan } from "@/lib/usage/smtWindowStatus";
 import type { ActualUsageSource } from "@/modules/realUsageAdapter/actual";
 
 function normStatus(value: string | null | undefined): string {
@@ -43,9 +44,24 @@ async function resolveEsiidForHouse(houseId: string, esiid?: string | null): Pro
   return fromHouse || null;
 }
 
+/** True when SMT has completed the canonical heal scope (not merely a few tail intervals). */
+async function isHouseSmtHealScopeReady(esiid: string): Promise<boolean> {
+  const normalized = String(esiid ?? "").trim();
+  if (!normalized) return false;
+  try {
+    const [dayStatus, persistedSpan] = await Promise.all([
+      loadSmtWindowDayStatus({ esiid: normalized }),
+      resolveSmtPersistedCoverageSpan(normalized),
+    ]);
+    return isSmtHealScopeReady(dayStatus, persistedSpan);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * User-site homes use one committed actual source at a time.
- * Active SMT authorization wins; otherwise a usable Green Button upload wins over stale SMT rows.
+ * Active SMT authorization wins once heal scope is ready; otherwise a usable Green Button upload wins.
  */
 export async function resolveHouseCommittedUsageSource(args: {
   houseId: string;
@@ -79,13 +95,13 @@ export async function resolveHouseCommittedUsageSource(args: {
     .catch(() => []);
   const authorization = pickBestSmtAuthorization(authorizationCandidates as any[]);
   if (isActiveSmtAuthorizationRow(authorization as any)) {
-    if (gbReady && esiid && !(await hasSmtIntervalsInCanonicalWindow(esiid))) {
+    if (gbReady && (!esiid || !(await isHouseSmtHealScopeReady(esiid)))) {
       return "GREEN_BUTTON";
     }
     return "SMT";
   }
   if (gbReady) return "GREEN_BUTTON";
-  if (esiid && (await hasSmtIntervalsInCanonicalWindow(esiid))) return "SMT";
+  if (esiid && (await isHouseSmtHealScopeReady(esiid))) return "SMT";
   return null;
 }
 

@@ -79,8 +79,11 @@ vi.mock("@/lib/usage/canonicalMetadataWindow", async (importOriginal) => {
   };
 });
 
+const clearGreenButtonSupersededBySmtForHouse = vi.fn().mockResolvedValue(false);
+
 vi.mock("@/lib/usage/greenButtonHouseCleanup", () => ({
-  clearGreenButtonSupersededBySmtForHouse: vi.fn().mockResolvedValue(false),
+  clearGreenButtonSupersededBySmtForHouse: (...args: unknown[]) =>
+    clearGreenButtonSupersededBySmtForHouse(...args),
   clearGreenButtonUsageForHouse: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -99,6 +102,7 @@ describe("actualDatasetForHouse source selection", () => {
     getLatestUsableRawGreenButtonIdForHouse.mockReset();
     getLatestGreenButtonFullDayDateKey.mockReset();
     buildUsageBucketsForEstimate.mockReset();
+    clearGreenButtonSupersededBySmtForHouse.mockClear();
 
     smtFindFirst.mockResolvedValue({ ts: new Date("2025-12-01T23:45:00.000Z") });
     smtFindMany.mockResolvedValue([{ meter: "m1" }]);
@@ -158,6 +162,16 @@ describe("actualDatasetForHouse source selection", () => {
       .mockResolvedValueOnce([{ bucket: new Date("2025-01-01T00:00:00.000Z"), kwh: 100 }]);
 
     buildUsageBucketsForEstimate.mockResolvedValue(null);
+  });
+
+  it("does not purge Green Button data during user usage dashboard reads", async () => {
+    const { getActualUsageDatasetForHouse } = await import("@/lib/usage/actualDatasetForHouse");
+    await getActualUsageDatasetForHouse("house-1", "esiid-1", {
+      preferredSource: "SMT",
+      userUsageDashboardLoad: true,
+    });
+
+    expect(clearGreenButtonSupersededBySmtForHouse).not.toHaveBeenCalled();
   });
 
   it("falls back to Green Button when SMT is preferred but canonical intervals are missing", async () => {

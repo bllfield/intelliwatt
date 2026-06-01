@@ -44,7 +44,6 @@ import {
 import { loadHomeTimezoneForHouseId } from "@/lib/time/loadHouseTimezone";
 import { resolveHomeTimezone } from "@/lib/time/resolveHomeTimezone";
 import { computeHomeBaseloadKw } from "@/lib/usage/computeHomeBaseloadKw";
-import { clearGreenButtonSupersededBySmtForHouse } from "@/lib/usage/greenButtonHouseCleanup";
 import {
   hasSmtIntervalsInCanonicalWindow,
   resolveSmtCanonicalFetchWindow,
@@ -1262,9 +1261,6 @@ export async function getActualUsageDatasetForHouse(
     }
   }
   const selected = chooseDataset(smtDataset, greenDataset, preferredSource);
-  if (!greenButtonOnlyLoad && selected?.summary?.source === "SMT" && esiid) {
-    await clearGreenButtonSupersededBySmtForHouse({ houseId, esiid });
-  }
   const greenButtonBaselineWindow =
     selected?.summary?.source === "GREEN_BUTTON"
       ? await resolveGreenButtonBaselineCoverageWindow(houseId)

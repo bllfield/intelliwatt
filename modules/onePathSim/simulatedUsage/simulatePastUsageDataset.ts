@@ -23,7 +23,7 @@ import {
 } from "@/lib/time/actualIntervalCalendar";
 import { convertGreenButtonPersistedRowsToHome } from "@/lib/time/greenButtonPersistedIntervalConvert";
 import { resolveGreenButtonPastSimTrustedHomeDateKeys } from "@/lib/usage/greenButtonPastTrustedPool";
-import { enumerateLocalDateKeys, localDayBoundsUtc } from "@/lib/time/homeIntervalCalendar";
+import { enumerateLocalDateKeys, localDayBoundsUtc, localSlotIndex } from "@/lib/time/homeIntervalCalendar";
 import type { PastIntervalGrid } from "@/lib/time/pastIntervalGrid";
 import { dateKeyFromTimestamp, getDayGridTimestamps } from "@/modules/onePathSim/usageSimulator/pastStitchedCurve";
 import { buildPastSimulatedBaselineV1 } from "@/modules/onePathSim/simulatedUsage/engine";
@@ -2241,13 +2241,21 @@ export async function simulatePastUsageDataset(
           sourceActualIntervals.length > 0
             ? resolveGreenButtonPastSimTrustedHomeDateKeys({
                 trustedUtcDateKeys: greenButtonCoverageIntervals.trustedActualDateKeys,
-                intervals: sourceActualIntervals.map((row) => ({
-                  timestamp: String(row.timestamp),
-                  homeDateKey:
+                intervals: sourceActualIntervals.map((row) => {
+                  const timestamp = String(row.timestamp);
+                  const homeDateKey =
                     String((row as { homeDateKey?: string }).homeDateKey ?? "").slice(0, 10) ||
-                    dateKeyFromTimestampForPast(String(row.timestamp)),
-                  homeSlot: (row as { homeSlot?: number }).homeSlot,
-                })),
+                    dateKeyFromTimestampForPast(timestamp);
+                  const slot = (row as { homeSlot?: number }).homeSlot;
+                  return {
+                    timestamp,
+                    homeDateKey,
+                    homeSlot:
+                      typeof slot === "number" && Number.isFinite(slot)
+                        ? slot
+                        : localSlotIndex(timestamp, homeCalendar),
+                  };
+                }),
                 timezone: timezone ?? "America/Chicago",
               })
             : greenButtonCoverageIntervals?.trustedActualDateKeys

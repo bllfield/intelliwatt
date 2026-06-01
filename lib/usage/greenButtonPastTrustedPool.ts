@@ -33,7 +33,7 @@ export function resolveGreenButtonPastSimTrustedHomeDateKeys(args: {
     intervalsByHomeDate.set(dk, list);
   }
 
-  for (const [dateKey, dayIntervals] of intervalsByHomeDate) {
+  for (const [dateKey, dayIntervals] of Array.from(intervalsByHomeDate.entries())) {
     if (
       dayMeetsTrustedIntervalThreshold({
         intervals: dayIntervals,
