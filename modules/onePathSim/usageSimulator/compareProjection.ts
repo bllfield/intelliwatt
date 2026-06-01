@@ -1,4 +1,5 @@
 import { dateKeyInTimezone } from "@/lib/admin/gapfillLab";
+import { isSimulatedDailySourceForCompare } from "@/lib/usage/dailySourceNotation";
 import { DateTime } from "luxon";
 
 /** Weekday vs weekend in `zone` for a local `YYYY-MM-DD` key (matches usage daily semantics, not UTC calendar). */
@@ -472,11 +473,11 @@ export function attachValidationCompareProjection(dataset: any): any {
   for (const dk of validationOnlyDateKeysLocal) {
     const raw = simSrc[dk];
     if (raw !== undefined && raw !== null && Number.isFinite(Number(raw))) continue;
-    const dailyRow = (dailyRows as Array<{ date?: string; kwh?: number; source?: string }>).find(
+    const dailyRow = (dailyRows as Array<{ date?: string; kwh?: number; source?: string; sourceDetail?: string }>).find(
       (row) => String(row?.date ?? "").slice(0, 10) === dk
     );
-    const dailySource = String(dailyRow?.source ?? "").toUpperCase();
-    if (dailySource !== "SIMULATED" && dailySource !== "ACTUAL") continue;
+    if (!dailyRow) continue;
+    if (!isSimulatedDailySourceForCompare(dailyRow)) continue;
     const kwh = Number(dailyRow?.kwh);
     if (Number.isFinite(kwh)) simSrc[dk] = kwh;
   }

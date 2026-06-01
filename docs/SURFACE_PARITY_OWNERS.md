@@ -23,7 +23,7 @@
 |---------|--------------|-----|--------------|
 | 365-day window | `lib/usage/canonicalMetadataWindow.ts` | Chicago bounds | GB file-anchored via `greenButtonCoverage.ts` |
 | Per-home timezone | `lib/time/resolveHomeTimezone.ts` | Default Central | Address/state |
-| Interval calendar | `lib/time/homeIntervalCalendar.ts` + `actualIntervalCalendar.ts` | 96/96 slots | 92/96/100 DST via `greenButtonTrustedIntervalThreshold` |
+| Interval calendar | `lib/time/homeIntervalCalendar.ts` + `actualIntervalCalendar.ts` | 96/96 slots | DST wall 92/96/100; trusted pool completeness via `greenButtonTrustedCompletenessThreshold` (96 cap on fall-back, same as SMT) |
 | Day completeness (SMT) | `lib/usage/smtWindowStatus.ts` | 96 distinct Chicago slots | N/A |
 | SMT ledger (Past) | `lib/usage/pastSimSmtLedgerPrep.ts` → `smtDayCoverageLedger.ts` | Pending + incomplete-meter keys | N/A |
 | Heal / backfill | `lib/usage/ensureSmtCoverage.ts` | Only | N/A |

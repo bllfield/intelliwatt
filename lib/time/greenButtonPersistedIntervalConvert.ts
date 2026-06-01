@@ -14,6 +14,7 @@ import {
   type HomeIntervalRecord,
   type RawIntervalInput,
 } from "@/lib/time/homeIntervalCalendar";
+import { smtCompletenessIntervalThreshold } from "@/lib/usage/smtWindowStatus";
 
 export const GREEN_BUTTON_DEFAULT_HOME_TIMEZONE = "America/Chicago";
 
@@ -49,10 +50,22 @@ export function convertGreenButtonPersistedRowsToHome(
   return convertRawIntervalsToHome(rawRows, GREEN_BUTTON_PERSISTED_INTERVAL_DELIVERY, home);
 }
 
-/** DST-aware completeness: 92 spring-forward, 96 normal, 100 fall-back (full wall periods). */
+/** DST-aware wall-period count: 92 spring-forward, 96 normal, 100 fall-back. */
 export function greenButtonTrustedIntervalThreshold(dateKey: string, home?: HomeIntervalCalendar): number {
   const calendar = home ?? greenButtonHomeIntervalCalendar();
   return expectedSlotsForLocalDate(dateKey, calendar);
+}
+
+/**
+ * Past-sim / trusted-pool completeness (aligned with SMT): vendor feeds cap at 96 rows/day,
+ * so fall-back days require min(100, 96) = 96 present intervals, not 100 wall periods.
+ */
+export function greenButtonCompletenessIntervalThreshold(requiredSlots: number): number {
+  return smtCompletenessIntervalThreshold(requiredSlots);
+}
+
+export function greenButtonTrustedCompletenessThreshold(dateKey: string, home?: HomeIntervalCalendar): number {
+  return greenButtonCompletenessIntervalThreshold(greenButtonTrustedIntervalThreshold(dateKey, home));
 }
 
 export function homeDailyToUsageSeriesPoints(

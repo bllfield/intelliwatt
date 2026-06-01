@@ -13,7 +13,7 @@ import {
 } from "@/lib/time/homeIntervalCalendar";
 import { resolveHomeTimezone } from "@/lib/time/resolveHomeTimezone";
 import { smtCompletenessIntervalThreshold, smtRequiredSlotsForDateKey } from "@/lib/usage/smtWindowStatus";
-import { greenButtonTrustedIntervalThreshold } from "@/lib/time/greenButtonPersistedIntervalConvert";
+import { greenButtonTrustedCompletenessThreshold } from "@/lib/time/greenButtonPersistedIntervalConvert";
 
 const FIFTEEN_MIN_MS = 15 * 60 * 1000;
 
@@ -55,7 +55,7 @@ export function trustedIntervalThresholdForDateKey(
   }
   const calendar =
     home ?? createHomeIntervalCalendar(resolveHomeTimezone({ preferredActualSource: "GREEN_BUTTON" }));
-  return greenButtonTrustedIntervalThreshold(dateKey, calendar);
+  return greenButtonTrustedCompletenessThreshold(dateKey, calendar);
 }
 
 export function countPresentSlotsForIntervalDay(
@@ -77,8 +77,8 @@ export function countPresentSlotsForIntervalDay(
 }
 
 /**
- * Trusted-day completeness units aligned with `smtWindowStatus` for SMT (interval-row count)
- * and home-local distinct slots for Green Button.
+ * Trusted-day completeness units: deduped interval-row count (aligned with `smtWindowStatus`).
+ * Row count — not distinct home slots alone — so DST fall-back days with 96 vendor rows stay trusted.
  */
 export function countPresentUnitsForIntervalDay(args: {
   intervals: ReadonlyArray<{ timestamp: string; homeSlot?: number | null; homeDateKey?: string | null }>;
@@ -88,18 +88,15 @@ export function countPresentUnitsForIntervalDay(args: {
   const filtered = args.dateKey
     ? args.intervals.filter((row) => dateKeyFromIntervalPoint(row) === args.dateKey)
     : args.intervals;
-  if (args.source === "SMT") {
-    const seen = new Set<string>();
-    let count = 0;
-    for (const row of filtered) {
-      const ts = String(row.timestamp ?? "").trim();
-      if (!ts || seen.has(ts)) continue;
-      seen.add(ts);
-      count += 1;
-    }
-    return count;
+  const seen = new Set<string>();
+  let count = 0;
+  for (const row of filtered) {
+    const ts = String(row.timestamp ?? "").trim();
+    if (!ts || seen.has(ts)) continue;
+    seen.add(ts);
+    count += 1;
   }
-  return countPresentSlotsForIntervalDay(filtered, args.dateKey);
+  return count;
 }
 
 export function dayMeetsTrustedIntervalThreshold(args: {

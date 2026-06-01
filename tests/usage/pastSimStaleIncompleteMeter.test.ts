@@ -80,6 +80,26 @@ describe("pastSimStaleIncompleteMeter", () => {
     expect(rows[1]?.kwh).toBe(11.2);
   });
 
+  it("relabels stale incomplete-meter via persisted GB trusted home keys", () => {
+    const rows = applyPastSimDisplayTruthOverlay(
+      [
+        {
+          date: "2025-11-02",
+          kwh: 33.48,
+          source: "SIMULATED",
+          sourceDetail: "SIMULATED_INCOMPLETE_METER",
+        },
+      ],
+      {
+        greenButtonTrustedHomeDateKeys: new Set(["2025-11-02"]),
+      }
+    );
+    expect(rows[0]).toMatchObject({
+      source: "ACTUAL",
+      sourceDetail: "ACTUAL",
+    });
+  });
+
   it("applyPastSimDisplayTruthToDataset updates daily and series.daily", () => {
     const dataset: Record<string, unknown> = {
       daily: [

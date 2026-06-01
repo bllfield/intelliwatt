@@ -19,10 +19,31 @@ describe("actualIntervalCalendar", () => {
     expect(trustedIntervalThresholdForDateKey("2025-11-02", "SMT")).toBe(96);
   });
 
-  test("Green Button trusted threshold uses full DST-aware expected slots (92/96/100)", () => {
+  test("Green Button trusted threshold caps fall-back at 96 rows like SMT", () => {
     expect(trustedIntervalThresholdForDateKey("2026-03-08", "GREEN_BUTTON")).toBe(92);
     expect(trustedIntervalThresholdForDateKey("2025-05-20", "GREEN_BUTTON")).toBe(96);
-    expect(trustedIntervalThresholdForDateKey("2025-11-02", "GREEN_BUTTON")).toBe(100);
+    expect(trustedIntervalThresholdForDateKey("2025-11-02", "GREEN_BUTTON")).toBe(96);
+  });
+
+  test("Green Button fall-back day with 96 rows meets trusted completeness", () => {
+    const dateKey = "2025-11-02";
+    const home = smtHomeIntervalCalendar();
+    const intervals: Array<{ timestamp: string; homeDateKey: string; homeSlot: number }> = [];
+    for (let i = 0; i < 96; i += 1) {
+      intervals.push({
+        timestamp: `2025-11-02T06:${String(i).padStart(2, "0")}:00.000Z`,
+        homeDateKey: dateKey,
+        homeSlot: i % 92,
+      });
+    }
+    expect(
+      dayMeetsTrustedIntervalThreshold({
+        intervals,
+        dateKey,
+        source: "GREEN_BUTTON",
+        home,
+      }),
+    ).toBe(true);
   });
 
   test("home day grid emits 92 timestamps on spring-forward day", () => {

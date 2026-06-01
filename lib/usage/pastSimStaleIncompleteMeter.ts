@@ -5,6 +5,11 @@
  */
 
 import type { DailyRowWithSource } from "@/lib/usage/sageActualDailyTruth";
+import {
+  readGreenButtonTrustedHomeDateKeysFromPastMeta,
+  resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals,
+  resolvePastDatasetMetaActualSource,
+} from "@/lib/usage/greenButtonPastTrustedPool";
 import { loadSmtWindowDayStatus } from "@/lib/usage/smtWindowStatus";
 
 const INCOMPLETE_METER_DETAIL = "SIMULATED_INCOMPLETE_METER";
@@ -117,12 +122,18 @@ export function applyPastSimDisplayTruthToDataset(
   args: {
     sageByDate?: Map<string, number>;
     smtSlotCompleteDateKeys?: ReadonlySet<string>;
+    greenButtonTrustedHomeDateKeys?: ReadonlySet<string>;
   }
 ): void {
   if (!dataset || typeof dataset !== "object") return;
   const daily = Array.isArray(dataset.daily) ? (dataset.daily as DailyRowWithSource[]) : [];
   if (!daily.length) return;
-  const enriched = applyPastSimDisplayTruthOverlay(daily, args);
+  const greenButtonTrustedHomeDateKeys =
+    args.greenButtonTrustedHomeDateKeys ?? readGreenButtonTrustedHomeDateKeysFromPastMeta(dataset.meta);
+  const enriched = applyPastSimDisplayTruthOverlay(daily, {
+    ...args,
+    greenButtonTrustedHomeDateKeys,
+  });
   dataset.daily = enriched;
   const series = dataset.series;
   if (series && typeof series === "object" && !Array.isArray(series) && Array.isArray((series as { daily?: unknown }).daily)) {
@@ -148,18 +159,21 @@ export function applyPastSimDisplayTruthOverlay<T extends DailyRowWithSource>(
   args: {
     sageByDate?: Map<string, number>;
     smtSlotCompleteDateKeys?: ReadonlySet<string>;
+    greenButtonTrustedHomeDateKeys?: ReadonlySet<string>;
   }
 ): T[] {
   const sageByDate = args.sageByDate ?? new Map<string, number>();
   const slotComplete = args.smtSlotCompleteDateKeys ?? new Set<string>();
-  if (!sageByDate.size && !slotComplete.size) return rows;
+  const greenButtonTrusted = args.greenButtonTrustedHomeDateKeys ?? new Set<string>();
+  if (!sageByDate.size && !slotComplete.size && !greenButtonTrusted.size) return rows;
 
   return rows.map((row) => {
     const date = asDateKey(row.date);
     if (!date) return row;
     const detail = String(row.sourceDetail ?? "").trim();
     const isStaleIncompleteMeter =
-      detail === INCOMPLETE_METER_DETAIL && slotComplete.has(date);
+      detail === INCOMPLETE_METER_DETAIL &&
+      (slotComplete.has(date) || sageByDate.has(date) || greenButtonTrusted.has(date));
     if (!isStaleIncompleteMeter) {
       if (String(row.source ?? "").toUpperCase() !== "ACTUAL") return row;
       const sageKwh = sageByDate.get(date);

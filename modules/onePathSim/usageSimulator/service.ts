@@ -16,6 +16,7 @@ import {
   getIntervalDataFingerprint,
 } from "@/lib/usage/actualDatasetForHouse";
 import { redistributeGreenButtonGridZeroSamples } from "@/modules/onePathSim/greenButtonIntervalCorrections";
+import { isSimulatedDailySourceForCompare } from "@/lib/usage/dailySourceNotation";
 import { resolveStaleIncompleteMeterSlotCompleteDateKeys } from "@/lib/usage/pastSimStaleIncompleteMeter";
 import {
   buildGreenButtonActualDailyKwhByHomeDateKey,
@@ -1476,8 +1477,7 @@ function augmentCanonicalArtifactSimulatedDayTotalsFromArtifactDailySimulated(
     const dk = String(row?.date ?? "").slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dk) || !limitDateKeys.has(dk)) continue;
     if (out[dk] !== undefined && Number.isFinite(Number(out[dk]))) continue;
-    const src = String(row?.source ?? "").trim().toUpperCase();
-    if (src !== "SIMULATED" && src !== "ACTUAL") continue;
+    if (!isSimulatedDailySourceForCompare(row)) continue;
     const kwh = Number(row?.kwh);
     if (!Number.isFinite(kwh)) continue;
     out[dk] = round2Local(kwh);
@@ -5322,7 +5322,11 @@ async function recalcSimulatorBuildImpl(args: {
         memoryRssMb: getMemoryRssMb(),
         source: "recalcSimulatorBuildImpl",
       });
-    } catch {
+    } catch (validationSelectionError) {
+      console.warn(
+        "[usageSimulator] Past validation-day selection failed; continuing without scored validation keys",
+        validationSelectionError
+      );
       effectiveValidationOnlyDateKeysLocal = new Set<string>();
       validationSelectionDiagnostics = null;
       effectiveValidationSelectionMode = autoMode;
