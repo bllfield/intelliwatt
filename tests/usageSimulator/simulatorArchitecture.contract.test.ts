@@ -37,6 +37,23 @@ describe("simulator architecture contract (stitch vs compare, truth parity)", ()
     expect(row0?.weather?.tAvgF).toBe(72.3);
   });
 
+  it("compare projection prefers persisted validationActualDailyKwhByDateLocal over mismatched daily ACTUAL rows", () => {
+    const projected = attachValidationCompareProjection({
+      meta: {
+        validationOnlyDateKeysLocal: ["2026-03-07"],
+        validationActualDailyKwhByDateLocal: { "2026-03-07": 30.79 },
+        canonicalArtifactSimulatedDayTotalsByDate: { "2026-03-07": 18.31 },
+      },
+      daily: [{ date: "2026-03-07", kwh: 23.86, source: "ACTUAL" }],
+    });
+    const row = projected.meta.validationCompareRows?.[0] as {
+      actualDayKwh: number;
+      simulatedDayKwh: number;
+    };
+    expect(row?.actualDayKwh).toBe(30.79);
+    expect(row?.simulatedDayKwh).toBe(18.31);
+  });
+
   it("user-style compare sidecar matches repeated reads of the same stored dataset (additive analytics only)", () => {
     const base = {
       meta: {

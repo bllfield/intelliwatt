@@ -363,6 +363,32 @@ function validateSharedSimQuality(dataset: any): { ok: true } | { ok: false; mes
   return { ok: true };
 }
 
+function buildActualDailyKwhByDateLocalFromIntervals(args: {
+  intervals: Array<{ timestamp: string; kwh: number }>;
+  dateKeysLocal: Iterable<string>;
+  timezone: string;
+}): Record<string, number> {
+  const wanted = new Set(
+    Array.from(args.dateKeysLocal)
+      .map((dk) => String(dk ?? "").slice(0, 10))
+      .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+  );
+  if (wanted.size === 0) return {};
+  const totals = new Map<string, number>();
+  for (const interval of args.intervals ?? []) {
+    const timestamp = String(interval?.timestamp ?? "");
+    if (!timestamp) continue;
+    const dateKey = dateKeyInTimezone(timestamp, args.timezone);
+    if (!wanted.has(dateKey)) continue;
+    totals.set(dateKey, (totals.get(dateKey) ?? 0) + Math.max(0, Number(interval?.kwh) || 0));
+  }
+  return Object.fromEntries(
+    Array.from(totals.entries())
+      .map(([date, kwh]) => [date, Math.round(kwh * 100) / 100] as const)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+  );
+}
+
 async function getValidationActualDailyByDateForDataset(args: {
   dataset: any;
   fallbackHouseId: string;
@@ -375,6 +401,20 @@ async function getValidationActualDailyByDateForDataset(args: {
     .map((v) => String(v ?? "").slice(0, 10))
     .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk));
   if (validationKeys.length === 0) return null;
+
+  const persistedActualDaily =
+    args.dataset?.meta && typeof args.dataset.meta === "object"
+      ? ((args.dataset.meta as any).validationActualDailyKwhByDateLocal as Record<string, unknown> | undefined)
+      : undefined;
+  if (persistedActualDaily && typeof persistedActualDaily === "object") {
+    const map = new Map<string, number>();
+    for (const dk of validationKeys) {
+      const raw = persistedActualDaily[dk];
+      const kwh = Number(raw);
+      if (Number.isFinite(kwh)) map.set(dk, Math.round(kwh * 100) / 100);
+    }
+    if (map.size > 0) return map;
+  }
 
   const actualContextHouseId = String(args.dataset?.meta?.actualContextHouseId ?? args.fallbackHouseId);
   const persistedSourceEsiid = String(
@@ -1389,6 +1429,18 @@ function rehydrateValidationCompareMetaFromBuildInputsForRead(args: {
       : [];
   if (existing.length === 0 && fromBuild.length > 0) {
     (prevMeta as any).validationOnlyDateKeysLocal = fromBuild;
+  }
+  const buildValidationActualDaily =
+    buildInputs && typeof buildInputs === "object"
+      ? ((buildInputs as any).validationActualDailyKwhByDateLocal as Record<string, unknown> | undefined)
+      : undefined;
+  if (
+    buildValidationActualDaily &&
+    typeof buildValidationActualDaily === "object" &&
+    !((prevMeta as any).validationActualDailyKwhByDateLocal &&
+      typeof (prevMeta as any).validationActualDailyKwhByDateLocal === "object")
+  ) {
+    (prevMeta as any).validationActualDailyKwhByDateLocal = buildValidationActualDaily;
   }
   if (!((prevMeta as any).actualSource === "SMT" || (prevMeta as any).actualSource === "GREEN_BUTTON") && buildActualSource) {
     (prevMeta as any).actualSource = buildActualSource;
@@ -4939,6 +4991,7 @@ async function recalcSimulatorBuildImpl(args: {
   let validationSelectionUsedSharedPreloadWindow = false;
   let validationSelectionPreloadWindowStart: string | null = null;
   let validationSelectionPreloadWindowEnd: string | null = null;
+  let validationActualDailyKwhByDateLocal: Record<string, number> | undefined;
   let effectiveValidationOnlyDateKeysLocal = new Set<string>(requestedValidationOnlyDateKeysLocal);
   if (
     effectiveValidationOnlyDateKeysLocal.size === 0 &&
@@ -4956,6 +5009,7 @@ async function recalcSimulatorBuildImpl(args: {
     try {
       const validationSelectionStartedAt = Date.now();
       let candidateDateKeys: string[] = [];
+      let intervalsForValidationWindow: Array<{ timestamp: string; kwh: number }> = [];
       if (actualSource === "GREEN_BUTTON") {
         const rebased = await fetchGreenButtonIntervalsForCoverageWindow({
           houseId: actualContextHouseId,
@@ -4964,6 +5018,7 @@ async function recalcSimulatorBuildImpl(args: {
           timestampMode: "utcDayGrid",
         });
         const corrected = redistributeGreenButtonGridZeroSamples(rebased.intervals);
+        intervalsForValidationWindow = corrected.intervals;
         candidateDateKeys = resolveGreenButtonPastValidationCandidateDateKeys({
           trustedUtcDateKeys: rebased.trustedActualDateKeys ?? [],
           intervals: corrected.intervals,
@@ -4984,6 +5039,7 @@ async function recalcSimulatorBuildImpl(args: {
           minDayCoveragePct: 1,
           stratifyByMonth: true,
           stratifyByWeekend: true,
+          returnIntervalsForWindow: true,
           loadIntervalsForWindow: async () => {
             if (recalcIntervalPreload) {
               const preloaded = await recalcIntervalPreload.getIntervals({
@@ -5002,6 +5058,7 @@ async function recalcSimulatorBuildImpl(args: {
           },
         });
         candidateDateKeys = coverageSelection.candidateDateKeys;
+        intervalsForValidationWindow = coverageSelection.intervalsForWindow;
       }
       const selection = selectValidationDayKeys({
         mode: autoMode,
@@ -5012,6 +5069,18 @@ async function recalcSimulatorBuildImpl(args: {
         seed: `${actualContextHouseId}-${selectionEnd}`,
       });
       effectiveValidationOnlyDateKeysLocal = new Set(selection.selectedDateKeys);
+      validationActualDailyKwhByDateLocal =
+        actualSource === "GREEN_BUTTON"
+          ? buildGreenButtonActualDailyKwhByHomeDateKey({
+              intervals: intervalsForValidationWindow,
+              dateKeysLocal: effectiveValidationOnlyDateKeysLocal,
+              timezone: timezoneForStoredBuild,
+            })
+          : buildActualDailyKwhByDateLocalFromIntervals({
+              intervals: intervalsForValidationWindow,
+              dateKeysLocal: effectiveValidationOnlyDateKeysLocal,
+              timezone: timezoneForStoredBuild,
+            });
       validationSelectionDiagnostics = selection.diagnostics;
       effectiveValidationSelectionMode = autoMode;
       validationSelectionUsedSharedPreloadWindow = Boolean(sharedPastRecalcWindow);
@@ -5354,6 +5423,7 @@ async function recalcSimulatorBuildImpl(args: {
           : [],
     actualContextHouseId,
     validationOnlyDateKeysLocal: Array.from(boundedValidationOnlyDateKeysLocal).sort(),
+    validationActualDailyKwhByDateLocal,
     effectiveValidationSelectionMode: effectiveValidationSelectionMode ?? undefined,
     validationSelectionDiagnostics: validationSelectionDiagnostics ?? undefined,
     timezone: timezoneForStoredBuild,
@@ -5597,6 +5667,8 @@ async function recalcSimulatorBuildImpl(args: {
     validationOnlyDateKeysLocal: Array.isArray((buildInputs as any).validationOnlyDateKeysLocal)
       ? ((buildInputs as any).validationOnlyDateKeysLocal as string[])
       : [],
+    validationActualDailyKwhByDateLocal:
+      (buildInputs as any).validationActualDailyKwhByDateLocal ?? undefined,
     monthlyTargetConstructionDiagnostics: built.monthlyTargetConstructionDiagnostics ?? null,
     manualMonthlyInputState: built.manualMonthlyInputState ?? null,
     manualBillPeriods: built.manualBillPeriods ?? [],
