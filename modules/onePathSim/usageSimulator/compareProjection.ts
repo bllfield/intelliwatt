@@ -440,9 +440,18 @@ export function attachValidationCompareProjection(dataset: any): any {
   const keySet = new Set(validationOnlyDateKeysLocal);
   const dailyRows = Array.isArray((projected as any)?.daily) ? (projected as any).daily : [];
   const actualByDate = new Map<string, number>();
+  const persistedActualDaily = (projected as any)?.meta?.validationActualDailyKwhByDateLocal as
+    | Record<string, unknown>
+    | undefined;
+  if (persistedActualDaily && typeof persistedActualDaily === "object") {
+    for (const dk of validationOnlyDateKeysLocal) {
+      const kwh = Number(persistedActualDaily[dk]);
+      if (Number.isFinite(kwh)) actualByDate.set(dk, kwh);
+    }
+  }
   for (const row of dailyRows as Array<{ date?: string; kwh?: number }>) {
     const dk = String(row?.date ?? "").slice(0, 10);
-    if (!keySet.has(dk)) continue;
+    if (!keySet.has(dk) || actualByDate.has(dk)) continue;
     const source = String((row as any)?.source ?? "").toUpperCase();
     if (source !== "ACTUAL") continue;
     actualByDate.set(dk, Number(row?.kwh ?? 0) || 0);

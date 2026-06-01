@@ -117,6 +117,40 @@ describe("reconcileRestoredPastDatasetFromDecodedIntervals", () => {
     expect(byDate["2020-06-02"].sourceDetail).toBe("ACTUAL");
   });
 
+  it("relabels stale SIMULATED_INCOMPLETE_METER to ACTUAL for Green Button trusted home days", () => {
+    const intervals = Array.from({ length: 96 }, (_, slot) => ({
+      timestamp: new Date(new Date("2026-05-14T00:00:00.000Z").getTime() + slot * 15 * 60 * 1000).toISOString(),
+      kwh: 0.25,
+    }));
+    const dataset: any = {
+      summary: { end: "2026-05-14" },
+      meta: {
+        actualSource: "GREEN_BUTTON",
+        timezone: "America/Chicago",
+        simulatedSourceDetailByDate: { "2026-05-13": "SIMULATED_INCOMPLETE_METER" },
+        canonicalArtifactSimulatedDayTotalsByDate: { "2026-05-13": 12 },
+      },
+      daily: [
+        { date: "2026-05-13", kwh: 12, source: "SIMULATED", sourceDetail: "SIMULATED_INCOMPLETE_METER" },
+        { date: "2026-05-14", kwh: 24, source: "SIMULATED", sourceDetail: "SIMULATED_INCOMPLETE_METER" },
+      ],
+      monthly: [],
+      series: { daily: [], monthly: [], annual: [] },
+      insights: {},
+      totals: {},
+    };
+
+    reconcileRestoredPastDatasetFromDecodedIntervals({
+      dataset,
+      decodedIntervals: intervals,
+      fallbackEndDate: "2026-05-14",
+    });
+
+    const byDate = Object.fromEntries(dataset.daily.map((d: any) => [d.date, d]));
+    expect(byDate["2026-05-14"].source).toBe("ACTUAL");
+    expect(byDate["2026-05-14"].sourceDetail).toBe("ACTUAL");
+  });
+
   it("preserves TRAVEL_VACANT vs TEST sourceDetail from meta after replacement", () => {
     const intervals = [
       { timestamp: "2020-06-01T00:00:00.000Z", kwh: 1 },

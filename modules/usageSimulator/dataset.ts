@@ -1,6 +1,13 @@
 import { dateKeyInTimezone } from "@/lib/admin/gapfillLab";
 import { resolveHomeTimezone } from "@/lib/time/resolveHomeTimezone";
 import { computeHomeBaseloadKw } from "@/lib/usage/computeHomeBaseloadKw";
+import { buildSimulatedHomeDateKeysExcludedFromBaseload } from "@/lib/usage/simulatedBaseloadExclusions";
+import {
+  filterSimulatedDateKeysWithoutGreenButtonTrustedHome,
+  pruneGreenButtonTrustedDaysFromPastDatasetMeta,
+  resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals,
+  resolvePastDatasetMetaActualSource,
+} from "@/lib/usage/greenButtonPastTrustedPool";
 import {
   filterSimulatedDateKeysWithoutStaleIncompleteMeter,
   incompleteMeterDateKeysFromPastMeta,
@@ -685,6 +692,20 @@ export function reconcileRestoredPastDatasetFromDecodedIntervals(args: {
       simulatedDateKeys: simDateKeys,
       staleIncompleteMeterDateKeys: new Set(staleIncompleteMeterDateKeys),
       slotCompleteDateKeys: args.smtSlotCompleteDateKeys,
+    });
+  }
+  const greenButtonTrustedHomeDateKeys =
+    meta && typeof meta === "object" && resolvePastDatasetMetaActualSource(meta) === "GREEN_BUTTON"
+      ? resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals({
+          decodedIntervals,
+          timezone: String((meta as Record<string, unknown>).timezone ?? "America/Chicago"),
+        })
+      : new Set<string>();
+  if (greenButtonTrustedHomeDateKeys.size > 0 && meta && typeof meta === "object") {
+    pruneGreenButtonTrustedDaysFromPastDatasetMeta(meta as Record<string, unknown>, greenButtonTrustedHomeDateKeys);
+    simDateKeys = filterSimulatedDateKeysWithoutGreenButtonTrustedHome({
+      simulatedDateKeys: simDateKeys,
+      trustedHomeDateKeys: greenButtonTrustedHomeDateKeys,
     });
   }
 
@@ -1625,18 +1646,16 @@ export function buildSimulatedUsageDatasetFromCurve(
     () => {
       const nextFifteenMinuteAverages = skipHeavyInsights ? [] : computeFifteenMinuteAverages(curve.intervals);
       const nextTimeOfDayBuckets = skipHeavyInsights ? [] : computeTimeOfDayBuckets(curve.intervals);
-      const simulatedHomeDateKeys = new Set<string>();
-      for (const row of options?.simulatedDayResults ?? []) {
-        const dk = String(row?.localDate ?? "").slice(0, 10);
-        if (/^\d{4}-\d{2}-\d{2}$/.test(dk)) simulatedHomeDateKeys.add(dk);
-      }
+      const simulatedHomeDateKeys = buildSimulatedHomeDateKeysExcludedFromBaseload(
+        options?.simulatedDayResults
+      );
       const homeTimezone = String(options?.homeTimezone ?? options?.timezone ?? "America/Chicago");
       const nextBaseloadComputed = skipHeavyInsights
         ? { baseloadKw: null as number | null, fallbackUsed: true, debugNote: "sparse_curve_lab_skip" as string | null }
         : computeBaseloadKwFromCurveIntervals(curve.intervals, {
             homeTimezone,
             excludedDateKeys: options?.excludedDateKeys,
-            simulatedHomeDateKeys: simulatedHomeDateKeys.size > 0 ? simulatedHomeDateKeys : undefined,
+            simulatedHomeDateKeys,
           });
       return {
         fifteenMinuteAverages: nextFifteenMinuteAverages,

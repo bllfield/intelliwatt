@@ -21,7 +21,10 @@ import {
   resolveHomeCalendarForActualSource,
 } from "@/lib/time/actualIntervalCalendar";
 import { convertGreenButtonPersistedRowsToHome } from "@/lib/time/greenButtonPersistedIntervalConvert";
-import { resolveGreenButtonPastSimTrustedHomeDateKeys } from "@/lib/usage/greenButtonPastTrustedPool";
+import {
+  resolveGreenButtonPastSimTrustedHomeDateKeysForProducer,
+  resolvePastProducerIntervalActualSource,
+} from "@/lib/usage/greenButtonPastTrustedPool";
 import { enumerateLocalDateKeys, localDayBoundsUtc, localSlotIndex } from "@/lib/time/homeIntervalCalendar";
 import type { PastIntervalGrid } from "@/lib/time/pastIntervalGrid";
 import { dateKeyFromTimestamp, getDayGridTimestamps } from "@/modules/usageSimulator/pastStitchedCurve";
@@ -1506,12 +1509,13 @@ export async function simulatePastUsageDataset(
       resolvedSimFingerprint?.blendMode === "whole_home_only" ||
       resolvedSimFingerprint?.underlyingSourceMix === "whole_home_only";
     const useWholeHomeOnlyLowDataFastPath = isLowDataSharedPastMode && usesWholeHomeOnlyPrior;
-    const intervalActualSource =
-      (buildInputs as { snapshots?: { actualSource?: unknown } }).snapshots?.actualSource === "GREEN_BUTTON"
-        ? "GREEN_BUTTON"
-        : (buildInputs as { snapshots?: { actualSource?: unknown } }).snapshots?.actualSource === "SMT"
-          ? "SMT"
-          : null;
+    const intervalActualSource = resolvePastProducerIntervalActualSource(
+      buildInputs as {
+        snapshots?: { actualSource?: unknown };
+        lockboxRunContext?: { preferredActualSource?: unknown };
+        actualSource?: unknown;
+      }
+    );
     const eligibleManualBillPeriods = manualBillPeriods.filter((period) => period.eligibleForConstraint);
     const canonicalMonths = ((buildInputs as any).canonicalMonths ?? []) as string[];
     const lowDataSyntheticContextBase: {
@@ -1986,31 +1990,16 @@ export async function simulatePastUsageDataset(
         ledgerIncompleteMeterDateKeys:
           ledgerIncompleteMeterDateKeys.size > 0 ? ledgerIncompleteMeterDateKeys : undefined,
         trustedActualDateKeys:
-          greenButtonCoverageIntervals?.trustedActualDateKeys &&
-          intervalActualSource === "GREEN_BUTTON" &&
-          sourceActualIntervals.length > 0
-            ? resolveGreenButtonPastSimTrustedHomeDateKeys({
-                trustedUtcDateKeys: greenButtonCoverageIntervals.trustedActualDateKeys,
-                intervals: sourceActualIntervals.map((row) => {
-                  const timestamp = String(row.timestamp);
-                  const homeDateKey =
-                    String((row as { homeDateKey?: string }).homeDateKey ?? "").slice(0, 10) ||
-                    dateKeyFromTimestampForPast(timestamp);
-                  const slot = (row as { homeSlot?: number }).homeSlot;
-                  return {
-                    timestamp,
-                    homeDateKey,
-                    homeSlot:
-                      typeof slot === "number" && Number.isFinite(slot)
-                        ? slot
-                        : localSlotIndex(timestamp, homeCalendar),
-                  };
-                }),
+          intervalActualSource === "GREEN_BUTTON"
+            ? resolveGreenButtonPastSimTrustedHomeDateKeysForProducer({
+                trustedUtcDateKeys: greenButtonCoverageIntervals?.trustedActualDateKeys,
+                sourceIntervals: sourceActualIntervals,
                 timezone: timezone ?? "America/Chicago",
+                dateKeyFromTimestamp: dateKeyFromTimestampForPast,
+                homeCalendar,
+                localSlotIndex,
               })
-            : greenButtonCoverageIntervals?.trustedActualDateKeys
-              ? new Set(greenButtonCoverageIntervals.trustedActualDateKeys)
-              : undefined,
+            : undefined,
         actualWxByDateKey: weatherByDateKeyForSimulation,
         _normalWxByDateKey: normalWxByDateKey,
         collectSimulatedDayResults: collectSimulatedDayResultsForDiagnostics,
