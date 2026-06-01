@@ -240,7 +240,7 @@ export function pruneGreenButtonTrustedDaysFromPastDatasetMeta(
   const canonicalKey = "canonicalArtifactSimulatedDayTotalsByDate";
   const canonical = meta[canonicalKey];
   if (canonical && typeof canonical === "object" && !Array.isArray(canonical)) {
-    for (const dk of staleIncompleteMeterTrustedKeys) {
+    for (const dk of Array.from(staleIncompleteMeterTrustedKeys)) {
       delete (canonical as Record<string, unknown>)[dk];
     }
   }

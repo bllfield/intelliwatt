@@ -1817,7 +1817,9 @@ export async function simulatePastUsageDataset(
         : new Set<string>());
     const greenButtonTrustedActualDateKeysForEngine = new Set(greenButtonTrustedHomeDateKeys);
     if (greenButtonPastProducerLoad?.sourceDateByTargetDate) {
-      for (const dk of greenButtonShiftedTargetDateKeys(greenButtonPastProducerLoad.sourceDateByTargetDate)) {
+      for (const dk of Array.from(
+        greenButtonShiftedTargetDateKeys(greenButtonPastProducerLoad.sourceDateByTargetDate)
+      )) {
         greenButtonTrustedActualDateKeysForEngine.add(dk);
       }
     }

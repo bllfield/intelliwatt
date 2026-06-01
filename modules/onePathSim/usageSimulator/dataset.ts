@@ -1117,6 +1117,8 @@ export type SimulatedUsageDatasetMeta = {
    * These keys stay actual in baseline display/totals and are used by compare projection surfaces.
    */
   validationOnlyDateKeysLocal?: string[];
+  /** Canonical modeled totals for validation-only days (compare projection). */
+  validationCanonicalSimulatedDayTotalsByDateLocal?: Record<string, number>;
   /** Actual validation-day totals from the same source interval pool used by the selector. */
   validationActualDailyKwhByDateLocal?: Record<string, number>;
   /** Effective selector used when this artifact/build was generated. */
@@ -1186,7 +1188,7 @@ export type SimulatedUsageDataset = {
       timestamp: string;
       kwh: number;
       source?: "ACTUAL" | "SIMULATED";
-      sourceDetail?: PastSimulatedDaySourceDetail | "ACTUAL" | "ACTUAL_VALIDATION_TEST_DAY";
+      sourceDetail?: PastSimulatedDaySourceDetail | PastActualDaySourceDetail;
     }>;
     monthly: Array<{ timestamp: string; kwh: number }>;
     annual: Array<{ timestamp: string; kwh: number }>;
@@ -1195,7 +1197,7 @@ export type SimulatedUsageDataset = {
     date: string;
     kwh: number;
     source?: "ACTUAL" | "SIMULATED";
-    sourceDetail?: PastSimulatedDaySourceDetail | "ACTUAL" | "ACTUAL_VALIDATION_TEST_DAY";
+    sourceDetail?: PastSimulatedDaySourceDetail | PastActualDaySourceDetail;
   }>;
   monthly: Array<{ month: string; kwh: number }>;
   insights: {

@@ -224,6 +224,7 @@ async function attachSelectedDailyWeatherForDataset(args: {
     if (weather) wxEntries.push([dateKey, weather]);
   }
   if (wxEntries.length === 0) return;
+  const wxMap = new Map(wxEntries);
   (dataset as any).dailyWeather = Object.fromEntries(
     wxEntries.map(([dateKey, w]) => [
       dateKey,
