@@ -3,6 +3,8 @@ import { createScenario, listScenarios } from "@/modules/usageSimulator/service"
 export const WORKSPACE_PAST_SCENARIO_NAME = "Past (Corrected)";
 export const WORKSPACE_FUTURE_SCENARIO_NAME = "Future (What-if)";
 
+type WorkspaceScenarioRow = { id: string; name: string };
+
 async function resolveWorkspaceScenarioId(args: {
   userId: string;
   houseId: string;
@@ -19,10 +21,11 @@ async function resolveWorkspaceScenarioId(args: {
 
   const listed = await listScenarios({ userId: args.userId, houseId: args.houseId }).catch(() => ({
     ok: false as const,
-    scenarios: [] as Array<{ id: string; name: string }>,
+    scenarios: [] as WorkspaceScenarioRow[],
   }));
   if (!listed.ok) return null;
-  const existing = listed.scenarios.find((row) => String(row.name) === args.name);
+  const scenarios = listed.scenarios as WorkspaceScenarioRow[];
+  const existing = scenarios.find((row) => row.name === args.name);
   return existing ? String(existing.id) : null;
 }
 

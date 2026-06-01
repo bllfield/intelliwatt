@@ -93,7 +93,8 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 const GREEN_BUTTON_ROUTE_STAGE_TIMEOUT_MS = 120_000;
 /** Same heal profile as POST /api/user/usage/refresh. */
-const ONE_PATH_SMT_HEAL_PROFILE = "user_session" as const;
+/** Lookup/load must wait for full canonical SMT coverage (admin waits), not the short user-session tail budget. */
+const ONE_PATH_SMT_HEAL_PROFILE = "admin_sim" as const;
 
 class AdminRouteStageTimeoutError extends Error {
   code = "one_path_admin_timeout" as const;
@@ -1151,6 +1152,49 @@ function resolveOnePathGreenButtonParitySource(args: {
   };
 }
 
+/** User-site actual truth for lookup previews: source house when pinned, not the mutable test home. */
+function resolveOnePathLookupActualContext(args: {
+  resolved: {
+    userId: string;
+    selectedHouse: { id: string; label?: string | null; esiid?: string | null };
+    houses: Array<{ id: string; label?: string | null; esiid?: string | null }>;
+  };
+  onePathTestHomeState: {
+    isPinned: boolean;
+    linkedSourceHouseId: string | null;
+    linkedSourceUserId: string | null;
+  };
+  defaultActualContextHouseId: string;
+  defaultActualContextUserId: string;
+  bodyActualContextHouseId?: string | null;
+}): {
+  houseId: string;
+  userId: string;
+  house: { id: string; label?: string | null; esiid?: string | null };
+} {
+  if (args.onePathTestHomeState.isPinned && args.onePathTestHomeState.linkedSourceHouseId) {
+    const source = resolveOnePathGreenButtonParitySource({
+      resolved: args.resolved,
+      onePathTestHomeState: args.onePathTestHomeState,
+    });
+    return {
+      houseId: source.house.id,
+      userId: source.userId,
+      house: source.house,
+    };
+  }
+  const requested =
+    typeof args.bodyActualContextHouseId === "string" && args.bodyActualContextHouseId.trim()
+      ? args.bodyActualContextHouseId.trim()
+      : args.defaultActualContextHouseId;
+  const house = args.resolved.houses.find((entry) => entry.id === requested) ?? args.resolved.selectedHouse;
+  return {
+    houseId: house.id,
+    userId: args.defaultActualContextUserId,
+    house,
+  };
+}
+
 function resolveOnePathAdminSmtHealTarget(args: {
   effectiveUserId: string;
   effectiveHouseId: string;
@@ -2004,6 +2048,14 @@ export async function POST(request: NextRequest) {
       ? normalizeMode(body.mode)
       : "INTERVAL";
   const lightweightLookupRequested = body?.lightweightLookup === true;
+  const lookupActualContext = resolveOnePathLookupActualContext({
+    resolved,
+    onePathTestHomeState,
+    defaultActualContextHouseId,
+    defaultActualContextUserId,
+    bodyActualContextHouseId:
+      typeof body?.actualContextHouseId === "string" ? body.actualContextHouseId : null,
+  });
 
   if ((action === "lookup" || !action) && (!includeDebugDiagnostics || lightweightLookupRequested)) {
     const travelRangesFromDb = await getOnePathTravelRangesFromDb(effectiveUserId, effectiveHouseId).catch(() => []);
@@ -2029,10 +2081,7 @@ export async function POST(request: NextRequest) {
     const lightweightApplianceProfile = normalizeStoredApplianceProfile(
       (lightweightApplianceProfileRecord as any)?.appliancesJson ?? null
     );
-    const previewActualContextHouseId =
-      typeof body?.actualContextHouseId === "string" && body.actualContextHouseId.trim()
-        ? defaultActualContextHouseId
-        : defaultActualContextHouseId;
+    const previewActualContextHouseId = lookupActualContext.houseId;
     const greenButtonUpload = await loadGreenButtonUploadSummary(previewActualContextHouseId);
     const manualUsage =
       previewMode === "MANUAL_MONTHLY" || previewMode === "MANUAL_ANNUAL"
@@ -2093,16 +2142,7 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const previewActualContextHouse =
-    onePathTestHomeState.isPinned && onePathTestHomeState.testHomeHouse
-      ? onePathTestHomeState.testHomeHouse
-      : resolved.houses.find(
-            (house) =>
-              house.id ===
-              (typeof body?.actualContextHouseId === "string" && body.actualContextHouseId.trim()
-                ? body.actualContextHouseId.trim()
-                : resolved.selectedHouse.id)
-          ) ?? resolved.selectedHouse;
+  const previewActualContextHouse = lookupActualContext.house;
   const actualContextGreenButtonUpload = await loadGreenButtonUploadSummary(previewActualContextHouse.id);
   let previewSimulationVariablePolicy: SimulationVariablePolicy | null = null;
   try {
@@ -2131,7 +2171,8 @@ export async function POST(request: NextRequest) {
     resolveOnePathUpstreamUsageTruthForSimulation({
       userId: effectiveUserId,
       houseId: effectiveHouseId,
-      actualContextHouseId: previewActualContextHouse.id,
+      actualContextHouseId: lookupActualContext.houseId,
+      actualContextUserId: lookupActualContext.userId,
       smtSourceEsiid,
       seedIfMissing: false,
       preferredActualSource: previewMode === "GREEN_BUTTON" ? "GREEN_BUTTON" : null,

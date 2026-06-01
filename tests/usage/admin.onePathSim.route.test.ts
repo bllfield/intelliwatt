@@ -1022,6 +1022,7 @@ describe("admin one path sim route", () => {
       userId: "user-1",
       houseId: "house-1",
       actualContextHouseId: "house-1",
+      actualContextUserId: "user-1",
       smtSourceEsiid: "esiid-1",
       seedIfMissing: false,
       preferredActualSource: "GREEN_BUTTON",
@@ -1074,6 +1075,7 @@ describe("admin one path sim route", () => {
       userId: "user-1",
       houseId: "house-1",
       actualContextHouseId: "house-1",
+      actualContextUserId: "user-1",
       smtSourceEsiid: "esiid-1",
       seedIfMissing: false,
       preferredActualSource: null,
@@ -1337,7 +1339,7 @@ describe("admin one path sim route", () => {
     expect(runSharedSimulation).toHaveBeenCalledTimes(1);
   });
 
-  it("runs SMT backfill on INTERVAL lookup with the same user_session profile as usage refresh", async () => {
+  it("runs SMT backfill on INTERVAL lookup with admin_sim waits (full canonical window)", async () => {
     enablePostSimEnsureHeal();
     const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
     const res = await POST(
@@ -1355,7 +1357,7 @@ describe("admin one path sim route", () => {
     expect(json.sourceContext?.smtRefreshCheck).toBeTruthy();
     expect(ensureSmtCoverageForHouse).toHaveBeenCalledWith(
       expect.objectContaining({
-        profile: "user_session",
+        profile: "admin_sim",
         force: true,
         sessionKey: expect.stringMatching(/^load:/),
       })
@@ -2401,7 +2403,8 @@ describe("admin one path sim route", () => {
       expect.objectContaining({
         userId: "user-1",
         houseId: "test-home-1",
-        actualContextHouseId: "test-home-1",
+        actualContextHouseId: "house-1",
+        actualContextUserId: "user-1",
       })
     );
   });
@@ -2440,11 +2443,17 @@ describe("admin one path sim route", () => {
     const json = await res.json();
 
     expect(res.status).toBe(200);
+    expect(resolveUpstreamUsageTruthForSimulation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actualContextHouseId: "house-1",
+        actualContextUserId: "user-1",
+      })
+    );
     expect(buildUserUsageHouseContract).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "user-1",
         house: expect.objectContaining({ id: "house-1", esiid: "esiid-1" }),
-        weatherHouseId: "test-home-1",
+        weatherHouseId: "house-1",
       })
     );
     expect(buildUserUsageHouseContract).toHaveBeenCalledTimes(1);
