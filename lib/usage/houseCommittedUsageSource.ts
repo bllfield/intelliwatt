@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/db";
 import { pickBestSmtAuthorization } from "@/lib/smt/authorizationSelection";
+import { resolveGreenButtonConnectionExpiresAt } from "@/lib/usage/awardGreenButtonUsageEntry";
+import { isGreenButtonUploadParseError } from "@/lib/usage/greenButtonUploadStatus";
 import { getLatestUsableRawGreenButtonIdForHouse } from "@/modules/realUsageAdapter/greenButton";
 import { isSmtHealScopeReady } from "@/lib/usage/smtTailCoverage";
 import { loadSmtWindowDayStatus, resolveSmtPersistedCoverageSpan } from "@/lib/usage/smtWindowStatus";
@@ -29,6 +31,26 @@ export async function houseHasUsableGreenButton(houseId: string): Promise<boolea
   if (!id) return false;
   const rawId = await getLatestUsableRawGreenButtonIdForHouse(id).catch(() => null);
   return Boolean(rawId);
+}
+
+/**
+ * True when the user has a non-expired Green Button upload on file (Utility Exports card).
+ * Locks the home to Green Button for committed-source and blocks SMT heal from deleting that upload.
+ */
+export async function houseHasActiveGreenButtonUploadLock(houseId: string): Promise<boolean> {
+  const id = String(houseId ?? "").trim();
+  if (!id) return false;
+  const upload = await prisma.greenButtonUpload
+    .findFirst({
+      where: { houseId: id },
+      orderBy: { createdAt: "desc" },
+      select: { parseStatus: true, createdAt: true },
+    })
+    .catch(() => null);
+  if (!upload) return false;
+  if (isGreenButtonUploadParseError(upload.parseStatus)) return false;
+  const expiresAt = resolveGreenButtonConnectionExpiresAt(upload.createdAt);
+  return expiresAt.getTime() >= Date.now();
 }
 
 async function resolveEsiidForHouse(houseId: string, esiid?: string | null): Promise<string | null> {
@@ -71,10 +93,15 @@ export async function resolveHouseCommittedUsageSource(args: {
   const houseId = String(args.houseId ?? "").trim();
   if (!houseId) return null;
 
-  const [gbReady, esiid] = await Promise.all([
+  const [gbReady, gbUploadLock, esiid] = await Promise.all([
     houseHasUsableGreenButton(houseId),
+    houseHasActiveGreenButtonUploadLock(houseId),
     resolveEsiidForHouse(houseId, args.esiid),
   ]);
+
+  if (gbUploadLock) {
+    return "GREEN_BUTTON";
+  }
 
   const authWhere: Record<string, unknown> = {
     archivedAt: null,

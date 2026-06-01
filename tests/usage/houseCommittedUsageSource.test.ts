@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 const smtAuthorizationFindMany = vi.fn();
+const greenButtonUploadFindFirst = vi.fn();
 const getLatestUsableRawGreenButtonIdForHouse = vi.fn();
 const loadSmtWindowDayStatus = vi.fn();
 const resolveSmtPersistedCoverageSpan = vi.fn();
@@ -15,6 +16,9 @@ vi.mock("@/lib/db", () => ({
     },
     smtAuthorization: {
       findMany: (...args: unknown[]) => smtAuthorizationFindMany(...args),
+    },
+    greenButtonUpload: {
+      findFirst: (...args: unknown[]) => greenButtonUploadFindFirst(...args),
     },
   },
 }));
@@ -37,6 +41,8 @@ describe("resolveHouseCommittedUsageSource", () => {
   beforeEach(() => {
     vi.resetModules();
     smtAuthorizationFindMany.mockReset();
+    greenButtonUploadFindFirst.mockReset();
+    greenButtonUploadFindFirst.mockResolvedValue(null);
     getLatestUsableRawGreenButtonIdForHouse.mockReset();
     loadSmtWindowDayStatus.mockReset();
     resolveSmtPersistedCoverageSpan.mockReset();
@@ -51,6 +57,26 @@ describe("resolveHouseCommittedUsageSource", () => {
     smtAuthorizationFindMany.mockResolvedValue([
       { smtStatus: "ACTIVE", authorizationEndDate: null },
     ]);
+
+    const { resolveHouseCommittedUsageSource } = await import("@/lib/usage/houseCommittedUsageSource");
+    const source = await resolveHouseCommittedUsageSource({
+      houseId: "house-1",
+      userId: "user-1",
+      esiid: "esiid-1",
+    });
+
+    expect(source).toBe("GREEN_BUTTON");
+  });
+
+  it("keeps Green Button when a non-expired upload lock exists even if SMT heal scope is ready", async () => {
+    smtAuthorizationFindMany.mockResolvedValue([
+      { smtStatus: "ACTIVE", authorizationEndDate: null },
+    ]);
+    isSmtHealScopeReady.mockReturnValue(true);
+    greenButtonUploadFindFirst.mockResolvedValue({
+      parseStatus: "complete",
+      createdAt: new Date(),
+    });
 
     const { resolveHouseCommittedUsageSource } = await import("@/lib/usage/houseCommittedUsageSource");
     const source = await resolveHouseCommittedUsageSource({
