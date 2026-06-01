@@ -889,6 +889,8 @@ export type SimulatorBuildInputsV1 = {
    * These keys remain ACTUAL in baseline display surfaces and are used for compare projection sidecar output.
    */
   validationOnlyDateKeysLocal?: string[];
+  /** Actual validation-day totals from the same source interval pool used by the selector. */
+  validationActualDailyKwhByDateLocal?: Record<string, number>;
   /** Effective selector used for this build's validation-day selection. */
   effectiveValidationSelectionMode?:
     | "manual"
@@ -1050,6 +1052,8 @@ export type SimulatedUsageDatasetMeta = {
    * These keys stay actual in baseline display/totals and are used by compare projection surfaces.
    */
   validationOnlyDateKeysLocal?: string[];
+  /** Actual validation-day totals from the same source interval pool used by the selector. */
+  validationActualDailyKwhByDateLocal?: Record<string, number>;
   /** Effective selector used when this artifact/build was generated. */
   effectiveValidationSelectionMode?:
     | "manual"
