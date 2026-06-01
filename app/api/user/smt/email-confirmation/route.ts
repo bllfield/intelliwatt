@@ -6,6 +6,7 @@ import { prisma } from '@/lib/db';
 import { normalizeEmail } from '@/lib/utils/email';
 import { qualifyReferralsForUser } from '@/lib/referral/qualify';
 import { refreshUserEntryStatuses } from '@/lib/hitthejackwatt/entryLifecycle';
+import { commitHouseUsageSource } from '@/lib/usage/commitHouseUsageSource';
 import { getRollingBackfillRange, refreshSmtAuthorizationStatus, requestSmtBackfillForAuthorization } from '@/lib/smt/agreements';
 import { pickBestSmtAuthorization } from '@/lib/smt/authorizationSelection';
 import { ensureSmartMeterEntry } from '@/lib/smt/ensureSmartMeterEntry';
@@ -281,6 +282,17 @@ export async function POST(request: Request) {
         }
       } catch (error) {
         console.error('[user/smt/email-confirmation] Failed to request SMT backfill', error);
+      }
+
+      if (resolvedHouseAddressId) {
+        await commitHouseUsageSource({
+          userId: user.id,
+          houseId: resolvedHouseAddressId,
+          source: 'SMT',
+          esiid: refreshedAuth?.esiid ?? null,
+        }).catch((err) => {
+          console.error('[user/smt/email-confirmation] commit SMT usage source failed (best-effort)', err);
+        });
       }
 
       await refreshUserEntryStatuses(user.id);

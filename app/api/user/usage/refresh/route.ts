@@ -122,6 +122,5 @@ export async function POST(req: NextRequest) {
     homes: refreshResult?.ok ? refreshResult.homes : [],
     backfill: refreshResult?.ok ? refreshResult.backfill : [],
     ensure,
-    greenButtonCleared: ensure.greenButtonSuperseded === true,
   });
 }

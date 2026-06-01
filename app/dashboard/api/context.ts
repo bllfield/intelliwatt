@@ -4,6 +4,8 @@ import { usagePrisma } from "@/lib/db/usageClient";
 import { pickBestSmtAuthorization } from "@/lib/smt/authorizationSelection";
 import { normalizeEmail } from "@/lib/utils/email";
 import { filterUserVisibleHouses } from "@/lib/usage/userSiteSimulationIsolation";
+import { readHouseCommittedUsageSource } from "@/lib/usage/commitHouseUsageSource";
+import type { ActualUsageSource } from "@/modules/realUsageAdapter/actual";
 
 type UserSummary = { id: string; email: string };
 
@@ -64,6 +66,8 @@ export type UsageEntryContext = {
     createdAt: Date;
     updatedAt: Date;
   } | null;
+  committedUsageSource: ActualUsageSource | null;
+  committedUsageSourceAt: Date | null;
 };
 
 export async function loadUsageEntryContext(): Promise<UsageEntryContext> {
@@ -246,6 +250,16 @@ export async function loadUsageEntryContext(): Promise<UsageEntryContext> {
         },
       }));
 
+    const committedUsageSource = houseAddress
+      ? await readHouseCommittedUsageSource(houseAddress.id)
+      : null;
+    const committedRow = houseAddress
+      ? await prismaAny.houseAddress.findFirst({
+          where: { id: houseAddress.id },
+          select: { committedUsageSourceAt: true },
+        })
+      : null;
+
     return {
       user,
       houseAddress,
@@ -254,6 +268,8 @@ export async function loadUsageEntryContext(): Promise<UsageEntryContext> {
       displacedAttention,
       greenButtonUpload: resolvedGreenButtonUpload,
       manualUsageUpload,
+      committedUsageSource,
+      committedUsageSourceAt: committedRow?.committedUsageSourceAt ?? null,
     };
   } catch (e: any) {
     return {
@@ -264,6 +280,8 @@ export async function loadUsageEntryContext(): Promise<UsageEntryContext> {
       displacedAttention: false,
       greenButtonUpload: null,
       manualUsageUpload: null,
+      committedUsageSource: null,
+      committedUsageSourceAt: null,
       loadError: e?.message ?? String(e ?? "usage_entry_context_failed"),
     };
   }

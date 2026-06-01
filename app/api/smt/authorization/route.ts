@@ -9,6 +9,7 @@ import { archiveConflictingAuthorizations, setPrimaryHouse } from "@/lib/house/p
 import { syncHouseIdentifiersFromAuthorization } from "@/lib/house/syncIdentifiers";
 import { Entry } from "@prisma/client";
 import { refreshUserEntryStatuses } from "@/lib/hitthejackwatt/entryLifecycle";
+import { commitHouseUsageSource } from "@/lib/usage/commitHouseUsageSource";
 
 type SmtAuthorizationBody = {
   houseAddressId: string;
@@ -487,6 +488,15 @@ export async function POST(req: NextRequest) {
     for (const displacedId of conflictResult.displacedUserIds ?? []) {
       await refreshUserEntryStatuses(displacedId);
     }
+
+    await commitHouseUsageSource({
+      userId: user.id,
+      houseId: house.id,
+      source: "SMT",
+      esiid: updatedAuthAny.esiid ?? houseEsiid ?? null,
+    }).catch((err) => {
+      console.error("[SMT_AUTH] commit SMT usage source failed (best-effort)", err);
+    });
 
     const webhookUrl = process.env.DROPLET_WEBHOOK_URL;
     const webhookSecret = process.env.DROPLET_WEBHOOK_SECRET;

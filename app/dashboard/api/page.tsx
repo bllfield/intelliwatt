@@ -14,6 +14,9 @@ import LocalTime from "@/components/LocalTime";
 import RefreshSmtButton from "@/components/smt/RefreshSmtButton";
 import { fetchActualCanonicalMonthlyTotals } from "@/modules/realUsageAdapter/actual";
 import { lastFullMonthChicago, monthsEndingAt } from "@/modules/manualUsage/anchor";
+import UsageCommittedSourceSelector from "@/components/dashboard/UsageCommittedSourceSelector";
+import { isActiveSmtAuthorizationRow } from "@/lib/usage/houseCommittedUsageSource";
+import { isGreenButtonUsageIngestionReady } from "@/lib/usage/greenButtonUploadStatus";
 
 // Note: this page is user-specific (reads cookies) so it will remain dynamic,
 // but we avoid forcing re-render on every client navigation so Next can reuse
@@ -284,6 +287,15 @@ export default async function UsageEntryHub() {
                 />
               </div>
             </div>
+          ) : null}
+
+          {user && houseAddress ? (
+            <UsageCommittedSourceSelector
+              homeId={houseAddress.id}
+              initialSource={context.committedUsageSource}
+              smtAvailable={smtSelectable}
+              greenButtonAvailable={greenButtonSelectable}
+            />
           ) : null}
 
           <div className="mt-1 grid gap-5 md:grid-cols-2">

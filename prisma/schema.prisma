@@ -892,6 +892,9 @@ model HouseAddress {
   isPrimary             Boolean          @default(false)
   archivedAt            DateTime?
   label                 String?          @db.VarChar(64)
+  /// User-selected usage mode for this home (SMT vs Green Button). Latest connect/upload wins.
+  committedUsageSource   HouseCommittedUsageSource?
+  committedUsageSourceAt DateTime?
 
   smtAuthorizations  SmtAuthorization[]
   entries            Entry[]
@@ -915,6 +918,11 @@ model HouseAddress {
 enum HouseDailyWeatherKind {
   ACTUAL_LAST_YEAR
   NORMAL_AVG
+}
+
+enum HouseCommittedUsageSource {
+  SMT
+  GREEN_BUTTON
 }
 
 model HouseDailyWeather {

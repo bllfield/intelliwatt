@@ -1,8 +1,5 @@
 import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
-import { houseHasActiveGreenButtonUploadLock } from "@/lib/usage/houseCommittedUsageSource";
-import { isSmtHealScopeReady } from "@/lib/usage/smtTailCoverage";
-import { loadSmtWindowDayStatus, resolveSmtPersistedCoverageSpan } from "@/lib/usage/smtWindowStatus";
 import { getOnePathLabTestHomeLink } from "@/modules/usageSimulator/labTestHome";
 
 const USAGE_DB_ENABLED = Boolean((process.env.USAGE_DATABASE_URL ?? "").trim());
@@ -20,7 +17,7 @@ export async function clearGreenButtonIntervalUsageForHouse(houseId: string): Pr
   }
 }
 
-/** Removes all persisted Green Button usage for a house (intervals, raw, uploads). Admin/purge only. */
+/** Removes all persisted Green Button usage for a house (intervals, raw, uploads). */
 export async function clearGreenButtonUsageForHouse(houseId: string): Promise<void> {
   const id = String(houseId ?? "").trim();
   if (!id) return;
@@ -47,24 +44,9 @@ async function isOnePathLabTestHomeHouse(houseId: string): Promise<boolean> {
   return typeof link?.testHomeHouseId === "string" && link.testHomeHouseId.trim() === id;
 }
 
-async function isHouseSmtHealScopeReady(esiid: string): Promise<boolean> {
-  const normalized = String(esiid ?? "").trim();
-  if (!normalized) return false;
-  try {
-    const [dayStatus, persistedSpan] = await Promise.all([
-      loadSmtWindowDayStatus({ esiid: normalized }),
-      resolveSmtPersistedCoverageSpan(normalized),
-    ]);
-    return isSmtHealScopeReady(dayStatus, persistedSpan);
-  } catch {
-    return false;
-  }
-}
-
 /**
- * When canonical SMT heal scope is ready, drop Green Button interval rows so reads prefer SMT.
- * Never deletes `GreenButtonUpload` rows — Utility Exports must keep showing the user's file.
- * Skips homes with an active (non-expired) Green Button upload lock.
+ * @deprecated User homes commit usage source explicitly via `commitHouseUsageSource`.
+ * Kept for admin tooling; does not run on user SMT heal anymore.
  */
 export async function clearGreenButtonSupersededBySmtForHouse(args: {
   houseId: string;
@@ -74,8 +56,6 @@ export async function clearGreenButtonSupersededBySmtForHouse(args: {
   const esiid = String(args.esiid ?? "").trim();
   if (!houseId || !esiid) return false;
   if (await isOnePathLabTestHomeHouse(houseId)) return false;
-  if (await houseHasActiveGreenButtonUploadLock(houseId)) return false;
-  if (!(await isHouseSmtHealScopeReady(esiid))) return false;
   await clearGreenButtonIntervalUsageForHouse(houseId);
   return true;
 }
