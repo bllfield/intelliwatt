@@ -29,10 +29,32 @@ describe("manual workspace auto build", () => {
     ).toBe("recalc");
   });
 
-  it("does not auto-prepare Past for non-manual modes", () => {
+  it("auto-creates and recalculates Past for SMT baseline (Green Button / SMT interval homes)", () => {
     expect(
       shouldAutoPreparePastWorkspace({
         mode: "SMT_BASELINE",
+        canRecalc: true,
+        baselineReady: true,
+        pastScenarioId: null,
+        pastBuildLastBuiltAt: null,
+      })
+    ).toBe("create");
+    expect(
+      shouldAutoPreparePastWorkspace({
+        mode: "SMT_BASELINE",
+        canRecalc: true,
+        workspacePrereqReady: true,
+        baselineReady: false,
+        pastScenarioId: "past-1",
+        pastBuildLastBuiltAt: null,
+      })
+    ).toBe("recalc");
+  });
+
+  it("does not auto-prepare Past for new-build mode", () => {
+    expect(
+      shouldAutoPreparePastWorkspace({
+        mode: "NEW_BUILD_ESTIMATE",
         canRecalc: true,
         baselineReady: true,
         pastScenarioId: null,
@@ -45,6 +67,12 @@ describe("manual workspace auto build", () => {
     expect(
       shouldRecalcPastWorkspaceWithoutEvents({
         mode: "MANUAL_TOTALS",
+        pastScenarioId: "past-1",
+      })
+    ).toBe(true);
+    expect(
+      shouldRecalcPastWorkspaceWithoutEvents({
+        mode: "SMT_BASELINE",
         pastScenarioId: "past-1",
       })
     ).toBe(true);

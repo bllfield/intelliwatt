@@ -997,6 +997,21 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
     scenarioRecalcTimersRef.current.set(sid, t);
   }
 
+  async function retryScenarioLoad() {
+    const scenarioIdForRetry =
+      curveView === "PAST" ? pastScenario?.id ?? null : curveView === "FUTURE" ? futureScenario?.id ?? null : null;
+    setScenarioCurveOutcome(null);
+    if (!scenarioIdForRetry) {
+      setRefreshToken((x) => x + 1);
+      return;
+    }
+    await recalcNow({
+      scenarioId: scenarioIdForRetry,
+      note: curveView === "PAST" ? "Building Past simulation…" : "Building Future simulation…",
+    });
+    setRefreshToken((x) => x + 1);
+  }
+
   useEffect(() => {
     // With no explicit "Recalculate" button, auto-generate the baseline once requirements are met.
     if (baselineReady) return;
@@ -1357,13 +1372,11 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                       <div className="mt-1 text-amber-50/95">{scenarioCurveOutcome.message}</div>
                       <button
                         type="button"
-                        onClick={() => {
-                          setScenarioCurveOutcome(null);
-                          setRefreshToken((x) => x + 1);
-                        }}
-                        className="mt-2 inline-flex rounded-lg border border-amber-400/40 bg-amber-500/20 px-2.5 py-1 text-[0.7rem] font-semibold uppercase tracking-wide text-amber-50 hover:bg-amber-500/30"
+                        disabled={recalcBusy || !canRecalc}
+                        onClick={() => void retryScenarioLoad()}
+                        className="mt-2 inline-flex rounded-lg border border-amber-400/40 bg-amber-500/20 px-2.5 py-1 text-[0.7rem] font-semibold uppercase tracking-wide text-amber-50 hover:bg-amber-500/30 disabled:opacity-50"
                       >
-                        Retry load
+                        {recalcBusy ? "Building…" : "Build simulation"}
                       </button>
                     </div>
                   ) : curveView !== "BASELINE" && scenarioCurveOutcome?.kind === "timeout" ? (
@@ -1638,13 +1651,11 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
             <div className="mt-1">{scenarioCurveOutcome.message}</div>
             <button
               type="button"
-              onClick={() => {
-                setScenarioCurveOutcome(null);
-                setRefreshToken((x) => x + 1);
-              }}
-              className="mt-2 inline-flex rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-[0.7rem] font-semibold uppercase tracking-wide text-amber-900 hover:bg-amber-100"
+              disabled={recalcBusy || !canRecalc}
+              onClick={() => void retryScenarioLoad()}
+              className="mt-2 inline-flex rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-[0.7rem] font-semibold uppercase tracking-wide text-amber-900 hover:bg-amber-100 disabled:opacity-50"
             >
-              Retry load
+              {recalcBusy ? "Building…" : "Build simulation"}
             </button>
           </div>
         ) : scenarioCurveOutcome?.kind === "timeout" ? (

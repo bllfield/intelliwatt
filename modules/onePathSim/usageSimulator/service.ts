@@ -4349,16 +4349,16 @@ async function recalcSimulatorBuildImpl(args: {
     normalizeValidationSelectionMode(args.validationDaySelectionMode) ??
     (requestedValidationOnlyDateKeysLocal.size > 0 ? ("manual" as ValidationDaySelectionMode) : null);
   let validationSelectionDiagnostics: ValidationDaySelectionDiagnostics | null = null;
+  let preferredActualSource = args.runContext?.preferredActualSource ?? undefined;
   const runContext = buildPastSimRunContext({
     correlationId: String(args.correlationId ?? ""),
     callerLabel: args.runContext?.callerLabel ?? "user_recalc",
     buildPathKind: args.runContext?.buildPathKind ?? "recalc",
     persistRequested: args.runContext?.persistRequested ?? (args.persistPastSimBaseline === true),
     adminLabTreatmentMode: args.runContext?.adminLabTreatmentMode ?? args.adminLabTreatmentMode ?? undefined,
-    preferredActualSource: args.runContext?.preferredActualSource ?? undefined,
+    preferredActualSource,
     asyncMetadata: args.runContext?.asyncMetadata ?? undefined,
   });
-  const preferredActualSource = runContext.preferredActualSource ?? undefined;
   const initialLockboxInput = buildInitialPastSimLockboxInput({
     houseId,
     actualContextHouseId,
@@ -4462,6 +4462,11 @@ async function recalcSimulatorBuildImpl(args: {
       greenButtonAnchorEndDate: resolvedActualSourceAnchor.greenButtonAnchorEndDate,
     };
   }
+  if (!preferredActualSource && actualSourceAnchor.source) {
+    preferredActualSource = actualSourceAnchor.source;
+    (runContext as { preferredActualSource?: "SMT" | "GREEN_BUTTON" }).preferredActualSource =
+      preferredActualSource;
+  }
   let actualSource = actualSourceAnchor.source;
   const canonical = canonicalMonthsForRecalc({
     mode,
@@ -4561,7 +4566,7 @@ async function recalcSimulatorBuildImpl(args: {
   const isGreenButtonPastSharedProducer =
     mode === "SMT_BASELINE" &&
     scenario?.name === WORKSPACE_PAST_NAME &&
-    preferredActualSource === "GREEN_BUTTON";
+    (preferredActualSource === "GREEN_BUTTON" || actualSource === "GREEN_BUTTON");
 
   // NEW_BUILD_ESTIMATE completeness enforcement uses existing validators via requirements.
   const req = computeRequirements(
