@@ -1,9 +1,15 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const getActualIntervalsForRangeWithSource = vi.fn();
+const fetchGreenButtonIntervalsForCoverageWindow = vi.fn();
 
 vi.mock("@/lib/usage/actualDatasetForHouse", () => ({
   getActualIntervalsForRangeWithSource: (...args: unknown[]) => getActualIntervalsForRangeWithSource(...args),
+}));
+
+vi.mock("@/modules/realUsageAdapter/greenButton", () => ({
+  fetchGreenButtonIntervalsForCoverageWindow: (...args: unknown[]) =>
+    fetchGreenButtonIntervalsForCoverageWindow(...args),
 }));
 
 import { loadGreenButtonPastProducerIntervals } from "@/lib/usage/greenButtonPastProducerLoad";
@@ -11,43 +17,54 @@ import { loadGreenButtonPastProducerIntervals } from "@/lib/usage/greenButtonPas
 describe("loadGreenButtonPastProducerIntervals", () => {
   beforeEach(() => {
     getActualIntervalsForRangeWithSource.mockReset();
+    fetchGreenButtonIntervalsForCoverageWindow.mockReset();
   });
 
-  it("uses home-local Green Button intervals and builds a multi-day trusted pool", async () => {
-    const intervals = Array.from({ length: 96 * 5 }, (_, index) => {
-      const dayOffset = Math.floor(index / 96);
-      const slot = index % 96;
-      const date = `2026-03-${String(3 + dayOffset).padStart(2, "0")}`;
-      const hour = Math.floor((slot * 15) / 60);
-      const minute = (slot * 15) % 60;
-      return {
-        timestamp: `${date}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00.000Z`,
-        kwh: 0.25,
-        homeDateKey: date,
-        homeSlot: slot,
-      };
+  it("merges home-local intervals with prior-year shifted trailing days", async () => {
+    const homeLocal = Array.from({ length: 96 }, (_, slot) => ({
+      timestamp: new Date(new Date("2026-05-13T00:00:00.000Z").getTime() + slot * 15 * 60 * 1000).toISOString(),
+      kwh: 0.25,
+      homeDateKey: "2026-05-13",
+      homeSlot: slot,
+    }));
+    const shiftedTargetDay = Array.from({ length: 96 }, (_, slot) => ({
+      timestamp: new Date(new Date("2026-05-14T00:00:00.000Z").getTime() + slot * 15 * 60 * 1000).toISOString(),
+      kwh: 0.36,
+    }));
+
+    getActualIntervalsForRangeWithSource.mockResolvedValue({ source: "GREEN_BUTTON", intervals: homeLocal });
+    fetchGreenButtonIntervalsForCoverageWindow.mockResolvedValue({
+      intervals: [...homeLocal.map((row) => ({ timestamp: row.timestamp, kwh: row.kwh })), ...shiftedTargetDay],
+      intervalsCount: homeLocal.length + shiftedTargetDay.length,
+      sourceCoverageStart: "2025-05-14",
+      sourceCoverageEnd: "2026-05-13",
+      shiftedIntervalCount: 96,
+      shiftedDateCount: 1,
+      sourceDateByTargetDate: { "2026-05-14": "2025-05-14", "2026-05-13": "2026-05-13" },
+      trustedActualDateKeys: [],
+      displayWindowNote:
+        "Historical Green Button intervals and their matching source-day weather were shifted into the current coverage window so available actual data stays in the Past Sim pool up to the current date. Travel/Vacant dates remain excluded.",
     });
-    getActualIntervalsForRangeWithSource.mockResolvedValue({ source: "GREEN_BUTTON", intervals });
 
     const loaded = await loadGreenButtonPastProducerIntervals({
       houseId: "house-1",
       esiid: null,
-      coverageStartDate: "2026-03-03",
-      coverageEndDate: "2026-03-07",
+      coverageStartDate: "2026-05-01",
+      coverageEndDate: "2026-05-30",
       timezone: "America/Chicago",
     });
 
-    expect(getActualIntervalsForRangeWithSource).toHaveBeenCalledWith(
+    expect(fetchGreenButtonIntervalsForCoverageWindow).toHaveBeenCalledWith(
       expect.objectContaining({
         houseId: "house-1",
-        preferredSource: "GREEN_BUTTON",
-        startDate: "2026-03-03",
-        endDate: "2026-03-07",
+        timestampMode: "raw",
       })
     );
-    expect(loaded.engineSourceIntervals.length).toBe(intervals.length);
-    expect(loaded.trustedHomeDateKeys.size).toBeGreaterThanOrEqual(5);
-    expect(loaded.trustedUtcDateKeys).toEqual([]);
-    expect(loaded.shiftedIntervalCount).toBe(0);
+    expect(loaded.shiftedDateCount).toBe(1);
+    expect(loaded.sourceDateByTargetDate["2026-05-14"]).toBe("2025-05-14");
+    expect(loaded.displayWindowNote).toContain("shifted into the current coverage window");
+    const may14 = loaded.engineSourceIntervals.filter((row) => row.homeDateKey === "2026-05-14");
+    expect(may14.length).toBeGreaterThan(0);
+    expect(may14.every((row) => row.kwh === 0.36)).toBe(true);
   });
 });

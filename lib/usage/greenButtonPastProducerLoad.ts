@@ -1,8 +1,9 @@
 import { getActualIntervalsForRangeWithSource } from "@/lib/usage/actualDatasetForHouse";
 import {
-  materializeGreenButtonPastProducerIntervals,
-  resolveGreenButtonPastSimTrustedHomeDateKeysForProducer,
-} from "@/lib/usage/greenButtonPastTrustedPool";
+  loadGreenButtonPastYearShiftedPayload,
+  mergeGreenButtonHomeLocalWithYearShifted,
+} from "@/lib/usage/greenButtonPastYearShiftMerge";
+import { resolveGreenButtonPastSimTrustedHomeDateKeysForProducer } from "@/lib/usage/greenButtonPastTrustedPool";
 import { createHomeIntervalCalendar, localSlotIndex } from "@/lib/time/homeIntervalCalendar";
 
 export type GreenButtonPastProducerIntervalRow = {
@@ -28,9 +29,8 @@ export type GreenButtonPastProducerLoadResult = {
 
 /**
  * Green Button Past producer interval load — home-local persisted rows for the coverage
- * window (same path as Usage dashboard / getActualIntervalsForRange). Do not use
- * fetchGreenButtonIntervalsForCoverageWindow utcDayGrid here; that rebases into a sparse
- * UTC tail and breaks trusted-day parity with Usage.
+ * window (same path as Usage dashboard / getActualIntervalsForRange), merged with
+ * prior-year intervals shifted forward for trailing missing days (shared adapter rules).
  */
 export async function loadGreenButtonPastProducerIntervals(args: {
   houseId: string;
@@ -38,43 +38,48 @@ export async function loadGreenButtonPastProducerIntervals(args: {
   coverageStartDate: string;
   coverageEndDate: string;
   timezone: string;
+  excludeDateKeys?: string[];
+  travelRanges?: Array<{ startDate: string; endDate: string }>;
 }): Promise<GreenButtonPastProducerLoadResult> {
   const timezone = String(args.timezone ?? "America/Chicago").trim() || "America/Chicago";
-  const { intervals } = await getActualIntervalsForRangeWithSource({
-    houseId: args.houseId,
-    esiid: args.esiid,
-    startDate: args.coverageStartDate,
-    endDate: args.coverageEndDate,
-    preferredSource: "GREEN_BUTTON",
-    homeTimezone: timezone,
+  const [{ intervals: homeLocalIntervals }, yearShift] = await Promise.all([
+    getActualIntervalsForRangeWithSource({
+      houseId: args.houseId,
+      esiid: args.esiid,
+      startDate: args.coverageStartDate,
+      endDate: args.coverageEndDate,
+      preferredSource: "GREEN_BUTTON",
+      homeTimezone: timezone,
+    }),
+    loadGreenButtonPastYearShiftedPayload({
+      houseId: args.houseId,
+      coverageStartDate: args.coverageStartDate,
+      coverageEndDate: args.coverageEndDate,
+      timezone,
+      excludeDateKeys: args.excludeDateKeys,
+      travelRanges: args.travelRanges,
+    }),
+  ]);
+
+  const engineSourceIntervals = mergeGreenButtonHomeLocalWithYearShifted({
+    homeLocalIntervals,
+    shiftedHomeIntervals: yearShift.engineSourceIntervals,
+    sourceDateByTargetDate: yearShift.sourceDateByTargetDate,
+    timezone,
   });
 
-  const sourceIntervals: GreenButtonPastProducerIntervalRow[] = intervals.map((row) => ({
-    timestamp: String(row.timestamp ?? ""),
-    kwh: Number(row.kwh) || 0,
-    homeDateKey: String(row.homeDateKey ?? "").slice(0, 10) || undefined,
-    homeSlot: typeof row.homeSlot === "number" && Number.isFinite(row.homeSlot) ? Math.trunc(row.homeSlot) : undefined,
+  const sourceIntervals: GreenButtonPastProducerIntervalRow[] = engineSourceIntervals.map((row) => ({
+    timestamp: row.timestamp,
+    kwh: row.kwh,
+    homeDateKey: row.homeDateKey,
+    homeSlot: row.homeSlot,
   }));
 
   const homeCalendar = createHomeIntervalCalendar(timezone);
-  const engineSourceIntervals =
-    sourceIntervals.length > 0 &&
-    sourceIntervals.some((row) => /^\d{4}-\d{2}-\d{2}$/.test(String(row.homeDateKey ?? "").slice(0, 10)))
-      ? sourceIntervals.map((row) => ({
-          timestamp: row.timestamp,
-          kwh: row.kwh,
-          homeDateKey: String(row.homeDateKey ?? "").slice(0, 10),
-          homeSlot:
-            typeof row.homeSlot === "number" && Number.isFinite(row.homeSlot)
-              ? row.homeSlot
-              : localSlotIndex(row.timestamp, homeCalendar),
-        }))
-      : materializeGreenButtonPastProducerIntervals({ sourceIntervals, timezone });
-
   const trustedHomeDateKeys =
     engineSourceIntervals.length > 0
       ? resolveGreenButtonPastSimTrustedHomeDateKeysForProducer({
-          trustedUtcDateKeys: [],
+          trustedUtcDateKeys: yearShift.trustedUtcDateKeys,
           sourceIntervals: engineSourceIntervals,
           timezone,
           dateKeyFromTimestamp: (ts) => {
@@ -88,19 +93,19 @@ export async function loadGreenButtonPastProducerIntervals(args: {
       : new Set<string>();
 
   const trustedSorted = Array.from(trustedHomeDateKeys).sort((left, right) => left.localeCompare(right));
-  const sourceCoverageStart = trustedSorted[0] ?? null;
-  const sourceCoverageEnd = trustedSorted[trustedSorted.length - 1] ?? null;
+  const sourceCoverageStart = yearShift.sourceCoverageStart ?? trustedSorted[0] ?? null;
+  const sourceCoverageEnd = yearShift.sourceCoverageEnd ?? trustedSorted[trustedSorted.length - 1] ?? null;
 
   return {
     sourceIntervals,
     engineSourceIntervals,
     trustedHomeDateKeys,
-    trustedUtcDateKeys: [],
-    displayWindowNote: null,
-    shiftedIntervalCount: 0,
-    shiftedDateCount: 0,
+    trustedUtcDateKeys: yearShift.trustedUtcDateKeys,
+    displayWindowNote: yearShift.displayWindowNote,
+    shiftedIntervalCount: yearShift.shiftedIntervalCount,
+    shiftedDateCount: yearShift.shiftedDateCount,
     sourceCoverageStart,
     sourceCoverageEnd,
-    sourceDateByTargetDate: {},
+    sourceDateByTargetDate: yearShift.sourceDateByTargetDate,
   };
 }

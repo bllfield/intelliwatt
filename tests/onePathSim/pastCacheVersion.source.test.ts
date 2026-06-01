@@ -4,6 +4,6 @@ import { PAST_ENGINE_VERSION } from "@/modules/onePathSim/usageSimulator/pastCac
 
 describe("One Path Past Sim cache version", () => {
   it("invalidates cached artifacts after Green Button shifted-day actual correction", () => {
-    expect(PAST_ENGINE_VERSION).toBe("production_past_stitched_v12");
+    expect(PAST_ENGINE_VERSION).toBe("production_past_stitched_v13");
   });
 });

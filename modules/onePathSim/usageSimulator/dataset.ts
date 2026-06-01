@@ -613,15 +613,25 @@ export function enrichPastDailyRowsWithSourceDetailFromMeta(
   const m = meta && typeof meta === "object" ? (meta as Record<string, unknown>) : null;
   const byDetail = m?.simulatedSourceDetailByDate as Record<string, PastSimulatedDaySourceDetail> | undefined;
   const legacyMap = options?.legacyDailyByDate;
+  const greenButtonSourceDateByTargetDate =
+    m?.greenButtonSourceDateByTargetDate &&
+    typeof m.greenButtonSourceDateByTargetDate === "object" &&
+    !Array.isArray(m.greenButtonSourceDateByTargetDate)
+      ? (m.greenButtonSourceDateByTargetDate as Record<string, unknown>)
+      : null;
+
   return daily.map((row) => {
     const dk = String(row.date).slice(0, 10);
     const isSim = String(row.source ?? "").toUpperCase() === "SIMULATED";
     if (!isSim) {
+      const shiftedSourceDate = String(greenButtonSourceDateByTargetDate?.[dk] ?? dk).slice(0, 10);
+      const isPriorYearShifted =
+        /^\d{4}-\d{2}-\d{2}$/.test(shiftedSourceDate) && shiftedSourceDate !== dk;
       return {
         date: dk,
         kwh: row.kwh,
         source: "ACTUAL" as const,
-        sourceDetail: "ACTUAL" as const,
+        sourceDetail: isPriorYearShifted ? ("ACTUAL_PRIOR_YEAR_SHIFTED" as const) : ("ACTUAL" as const),
       };
     }
     const hasMetaDetailKey =

@@ -1541,6 +1541,7 @@ export async function simulatePastUsageDataset(
             coverageStartDate: startDate,
             coverageEndDate: endDate,
             timezone: homeTimezoneForPast,
+            travelRanges,
           });
     const fetchedActualIntervals = greenButtonPastProducerLoad
       ? greenButtonPastProducerLoad.engineSourceIntervals

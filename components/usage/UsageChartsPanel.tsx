@@ -32,6 +32,7 @@ type DailyRow = {
     | "SIMULATED_DAILY_USAGE_MISSING"
     | "SIMULATED_LEADING_MISSING"
     | "SIMULATED_OTHER"
+    | "ACTUAL_PRIOR_YEAR_SHIFTED"
     | "ACTUAL_VALIDATION_TEST_DAY"
     | "ACTUAL_INTERVALS_NOT_AVAILABLE_YET"
     | "ACTUAL_INCOMPLETE_METER"
@@ -168,6 +169,9 @@ export function UsageChartsPanel(props: {
     }
     if (row.source === "SIMULATED" && row.sourceDetail === "SIMULATED_OTHER") {
       return "SIMULATED (OTHER)";
+    }
+    if (row.source === "ACTUAL" && row.sourceDetail === "ACTUAL_PRIOR_YEAR_SHIFTED") {
+      return "ACTUAL (PRIOR-YEAR SHIFTED)";
     }
     if (row.source === "ACTUAL" && row.sourceDetail === "ACTUAL_VALIDATION_TEST_DAY") {
       return "ACTUAL (VALIDATION/TEST)";
