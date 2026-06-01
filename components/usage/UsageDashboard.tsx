@@ -587,8 +587,9 @@ export const UsageDashboard: React.FC<Props> = ({
       return;
     }
     if (loading || !selectedHouseId) return;
+    const pollHouseId = selectedHouseId;
 
-    const active = houses.find((h) => h.houseId === selectedHouseId) || null;
+    const active = houses.find((h) => h.houseId === pollHouseId) || null;
     if (active?.dataset) {
       setGreenButtonIngestionPending(false);
       return;
@@ -620,7 +621,7 @@ export const UsageDashboard: React.FC<Props> = ({
       }
       try {
         const statusRes = await fetch(
-          `/api/green-button/status?homeId=${encodeURIComponent(selectedHouseId)}`,
+          `/api/green-button/status?homeId=${encodeURIComponent(pollHouseId)}`,
           { cache: "no-store" },
         );
         const statusJson = await statusRes.json().catch(() => null);
