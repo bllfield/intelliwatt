@@ -7769,17 +7769,33 @@ export async function createScenario(args: { userId: string; houseId: string; na
   const name = String(args.name ?? "").trim();
   if (!name) return { ok: false as const, error: "name_required" };
 
+  const existing = await (prisma as any).usageSimulatorScenario
+    .findFirst({
+      where: { userId: args.userId, houseId: args.houseId, name, archivedAt: null },
+      select: { id: true, name: true, createdAt: true, updatedAt: true },
+    })
+    .catch(() => null);
+  if (existing) return { ok: true as const, scenario: existing };
+
   const scenario = await (prisma as any).usageSimulatorScenario
     .create({
       data: { userId: args.userId, houseId: args.houseId, name },
       select: { id: true, name: true, createdAt: true, updatedAt: true },
     })
     .catch((e: any) => {
-      // Unique constraint on (userId, houseId, name)
       if (String(e?.code ?? "") === "P2002") return null;
       throw e;
     });
-  if (!scenario) return { ok: false as const, error: "name_not_unique" };
+  if (!scenario) {
+    const raced = await (prisma as any).usageSimulatorScenario
+      .findFirst({
+        where: { userId: args.userId, houseId: args.houseId, name, archivedAt: null },
+        select: { id: true, name: true, createdAt: true, updatedAt: true },
+      })
+      .catch(() => null);
+    if (raced) return { ok: true as const, scenario: raced };
+    return { ok: false as const, error: "name_not_unique" };
+  }
   return { ok: true as const, scenario };
 }
 

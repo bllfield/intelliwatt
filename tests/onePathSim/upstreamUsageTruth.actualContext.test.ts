@@ -47,6 +47,7 @@ describe("one path upstream usage truth actual context house", () => {
       userId: "owner-1",
       houseId: "test-home-1",
       actualContextHouseId: "source-house-1",
+      actualContextUserId: "customer-1",
       smtSourceEsiid: "esiid-src",
       seedIfMissing: false,
       preferredActualSource: "GREEN_BUTTON",

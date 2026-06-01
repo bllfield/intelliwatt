@@ -164,6 +164,7 @@ export default function GreenButtonHelpSection({
         }
       };
 
+      try {
         await uploadViaDroplet();
         await waitForGreenButtonReady();
         setStatusTone("success");
@@ -178,7 +179,7 @@ export default function GreenButtonHelpSection({
         setStatusMessage(
           typeof uploadErr?.message === "string"
             ? uploadErr.message
-            : "Upload failed. Please try again."
+            : "Upload failed. Please try again.",
         );
       }
     } catch (error) {

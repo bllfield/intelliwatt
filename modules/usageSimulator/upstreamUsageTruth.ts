@@ -199,6 +199,7 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
   userId: string;
   houseId: string;
   actualContextHouseId?: string | null;
+  actualContextUserId?: string | null;
   smtSourceEsiid?: string | null;
   seedIfMissing: boolean;
   runId?: string | null;
@@ -211,6 +212,7 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
     userId: args.userId,
     selectedHouseId: selectedHouse.id,
     actualContextHouseId: String(args.actualContextHouseId ?? args.houseId),
+    actualContextUserId: args.actualContextUserId ?? null,
   });
   const actualContextHouse = actualContextResolved.house;
   const actualContextOwnerUserId = actualContextResolved.ownerUserId;

@@ -31,9 +31,28 @@ export async function resolveActualContextHouseForSimulation(args: {
   userId: string;
   selectedHouseId: string;
   actualContextHouseId: string;
+  /** When set (One Path lab), load source-house truth under the customer who owns that home. */
+  actualContextUserId?: string | null;
 }): Promise<{ house: ResolvedSimulationHouse; ownerUserId: string }> {
   const actualContextHouseId = String(args.actualContextHouseId ?? args.selectedHouseId).trim();
   if (!actualContextHouseId) throw new Error("house_not_found");
+
+  const explicitContextUserId = String(args.actualContextUserId ?? "").trim();
+  if (explicitContextUserId && actualContextHouseId !== args.selectedHouseId) {
+    const linked = await (prisma as any).houseAddress.findFirst({
+      where: { id: actualContextHouseId, userId: explicitContextUserId, archivedAt: null },
+      select: { id: true, esiid: true },
+    });
+    if (linked) {
+      return {
+        house: {
+          id: String(linked.id),
+          esiid: linked.esiid ? String(linked.esiid) : null,
+        },
+        ownerUserId: explicitContextUserId,
+      };
+    }
+  }
 
   if (actualContextHouseId === args.selectedHouseId) {
     const house = await resolveSimulationHouseForUser({

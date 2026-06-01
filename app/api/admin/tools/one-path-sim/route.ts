@@ -1319,7 +1319,14 @@ export async function POST(request: NextRequest) {
   const effectiveUserId = onePathTestHomeState.isPinned ? ownerUserId : resolved.userId;
   const effectiveHouseId = onePathTestHomeState.isPinned ? onePathTestHomeState.testHomeHouseId : resolved.selectedHouse.id;
   /** User-site actual truth always comes from the email-selected source house, not the pinned test home. */
-  const defaultActualContextHouseId = resolved.selectedHouse.id;
+  const defaultActualContextHouseId =
+    onePathTestHomeState.isPinned && onePathTestHomeState.linkedSourceHouseId
+      ? onePathTestHomeState.linkedSourceHouseId
+      : resolved.selectedHouse.id;
+  const defaultActualContextUserId =
+    onePathTestHomeState.isPinned && onePathTestHomeState.linkedSourceUserId
+      ? onePathTestHomeState.linkedSourceUserId
+      : resolved.userId;
   if (onePathTestHomeState.isPinned && effectiveHouseId) {
     await ensureWorkspaceScenariosForHouse({ userId: effectiveUserId, houseId: effectiveHouseId }).catch(() => null);
   }
@@ -1523,6 +1530,7 @@ export async function POST(request: NextRequest) {
       userId: effectiveUserId,
       houseId: effectiveHouseId,
       actualContextHouseId: defaultActualContextHouseId,
+      actualContextUserId: defaultActualContextUserId,
       smtSourceEsiid,
       preferredActualSource:
         body?.preferredActualSource === "SMT" || body?.preferredActualSource === "GREEN_BUTTON"

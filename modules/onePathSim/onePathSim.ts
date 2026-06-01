@@ -198,6 +198,7 @@ export type IntervalRawInput = {
   userId: string;
   houseId: string;
   actualContextHouseId?: string | null;
+  actualContextUserId?: string | null;
   smtSourceEsiid?: string | null;
   preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
   scenarioId?: string | null;
@@ -1366,6 +1367,7 @@ async function loadSharedContext(args: {
   userId: string;
   houseId: string;
   actualContextHouseId?: string | null;
+  actualContextUserId?: string | null;
   smtSourceEsiid?: string | null;
   manualUsagePayload?: ManualUsagePayload | null;
   seedUsageTruthIfMissing?: boolean;
@@ -1379,6 +1381,7 @@ async function loadSharedContext(args: {
     userId: args.userId,
     houseId: args.houseId,
     actualContextHouseId: args.actualContextHouseId,
+    actualContextUserId: args.actualContextUserId ?? null,
     smtSourceEsiid: args.smtSourceEsiid ?? null,
     seedIfMissing: args.seedUsageTruthIfMissing === true,
     preferredActualSource: args.preferredActualSource ?? null,
@@ -1622,6 +1625,7 @@ export async function adaptIntervalRawInput(raw: IntervalRawInput): Promise<Cano
     userId: raw.userId,
     houseId: raw.houseId,
     actualContextHouseId: raw.actualContextHouseId,
+    actualContextUserId: raw.actualContextUserId ?? null,
     smtSourceEsiid: raw.smtSourceEsiid ?? null,
     seedUsageTruthIfMissing: true,
     weatherScoringMode: "interval",
@@ -1648,6 +1652,7 @@ export async function adaptGreenButtonRawInput(raw: IntervalRawInput): Promise<C
     userId: raw.userId,
     houseId: raw.houseId,
     actualContextHouseId: raw.actualContextHouseId,
+    actualContextUserId: raw.actualContextUserId ?? null,
     smtSourceEsiid: raw.smtSourceEsiid ?? null,
     manualUsagePayload: isBaselineGreenButtonRun ? null : undefined,
     seedUsageTruthIfMissing: false,
@@ -1782,6 +1787,7 @@ export async function adaptManualMonthlyRawInput(raw: ManualMonthlyRawInput): Pr
     userId: raw.userId,
     houseId: raw.houseId,
     actualContextHouseId: raw.actualContextHouseId,
+    actualContextUserId: raw.actualContextUserId ?? null,
     smtSourceEsiid: raw.smtSourceEsiid ?? null,
     manualUsagePayload: raw.manualUsagePayload,
     seedUsageTruthIfMissing: false,
@@ -1813,6 +1819,7 @@ export async function adaptManualAnnualRawInput(raw: ManualAnnualRawInput): Prom
     userId: raw.userId,
     houseId: raw.houseId,
     actualContextHouseId: raw.actualContextHouseId,
+    actualContextUserId: raw.actualContextUserId ?? null,
     smtSourceEsiid: raw.smtSourceEsiid ?? null,
     manualUsagePayload: raw.manualUsagePayload,
     seedUsageTruthIfMissing: false,
@@ -1840,6 +1847,7 @@ export async function adaptNewBuildRawInput(raw: NewBuildRawInput): Promise<Cano
     userId: raw.userId,
     houseId: raw.houseId,
     actualContextHouseId: raw.actualContextHouseId,
+    actualContextUserId: raw.actualContextUserId ?? null,
     smtSourceEsiid: raw.smtSourceEsiid ?? null,
     seedUsageTruthIfMissing: true,
     weatherScoringMode: "interval",
