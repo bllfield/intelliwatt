@@ -17,6 +17,20 @@ export type UpsertTdspTariffFromIngestArgs = {
 };
 
 /**
+ * AEP North/Central share one PUCT PDF (same raw sha256). The DB enforces a global
+ * unique on sourceDocSha256, so Central stores a tdsp-scoped key.
+ */
+function storedSourceDocSha256(
+  tdspCode: UpsertTdspTariffFromIngestArgs["tdspCode"],
+  rawSha256: string,
+): string {
+  if (tdspCode === "AEP_CENTRAL") {
+    return `${rawSha256}:AEP_CENTRAL`;
+  }
+  return rawSha256;
+}
+
+/**
  * Upsert TDSP tariff versions and components from an ingest source.
  *
  * - Never mutates existing versions in-place.
@@ -26,8 +40,9 @@ export type UpsertTdspTariffFromIngestArgs = {
 export async function upsertTdspTariffFromIngest(
   args: UpsertTdspTariffFromIngestArgs,
 ) {
-  const { tdspCode, effectiveStartISO, sourceUrl, sourceDocSha256, components } =
+  const { tdspCode, effectiveStartISO, sourceUrl, sourceDocSha256: rawSha256, components } =
     args;
+  const sourceDocSha256 = storedSourceDocSha256(tdspCode, rawSha256);
 
   const tdspEnum = TdspCode[tdspCode as keyof typeof TdspCode];
   if (!tdspEnum) {

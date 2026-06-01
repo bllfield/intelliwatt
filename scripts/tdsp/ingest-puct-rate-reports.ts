@@ -677,6 +677,10 @@ async function main() {
   log("PUCT ingest summary", summary);
 }
 
-void main();
+/** CLI only — importing this module (e.g. from /api/admin/tdsp/ingest) must not run ingest. */
+const isCliEntry = process.argv[1]?.includes("ingest-puct-rate-reports");
+if (isCliEntry) {
+  void main();
+}
 
 
