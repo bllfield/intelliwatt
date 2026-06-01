@@ -15,17 +15,12 @@ import {
   buildSimulatedUsageDatasetFromCurve,
   type SimulatorBuildInputsV1,
 } from "@/modules/usageSimulator/dataset";
+import { buildHomeDayGridContext, resolveHomeCalendarForActualSource } from "@/lib/time/actualIntervalCalendar";
 import {
-  buildHomeDayGridContext,
-  homeProjectedIntervalFromRecord,
-  resolveHomeCalendarForActualSource,
-} from "@/lib/time/actualIntervalCalendar";
-import { convertGreenButtonPersistedRowsToHome } from "@/lib/time/greenButtonPersistedIntervalConvert";
-import {
-  materializeGreenButtonPastProducerIntervals,
   resolveGreenButtonPastSimTrustedHomeDateKeysForProducer,
   resolvePastProducerIntervalActualSource,
 } from "@/lib/usage/greenButtonPastTrustedPool";
+import { loadGreenButtonPastProducerIntervals } from "@/lib/usage/greenButtonPastProducerLoad";
 import { enumerateLocalDateKeys, localDayBoundsUtc, localSlotIndex } from "@/lib/time/homeIntervalCalendar";
 import type { PastIntervalGrid } from "@/lib/time/pastIntervalGrid";
 import { dateKeyFromTimestamp, getDayGridTimestamps } from "@/modules/usageSimulator/pastStitchedCurve";
@@ -40,7 +35,6 @@ import { SOURCE_OF_DAY_SIMULATION_CORE } from "@/modules/simulatedUsage/pastDayS
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
-import { fetchGreenButtonIntervalsForCoverageWindow } from "@/modules/realUsageAdapter/greenButton";
 import { buildMonthKeyedDailyAverages } from "@/modules/usageShapeProfile/derive";
 import { computeUsageShapeProfileSimIdentityHash, getLatestUsageShapeProfile } from "@/modules/usageShapeProfile/repo";
 import { ensureUsageShapeProfileForUserHouse } from "@/modules/usageShapeProfile/autoBuild";
@@ -1537,47 +1531,42 @@ export async function simulatePastUsageDataset(
               (buildInputs as SimulatorBuildInputsV1).manualTravelVacantDonorPoolMode ?? null,
           }
         : null;
-    const greenButtonCoverageIntervals =
+    const homeTimezoneForPast = timezone ?? "America/Chicago";
+    const greenButtonPastProducerLoad =
       preloadedIntervals != null || isLowDataSharedPastMode || intervalActualSource !== "GREEN_BUTTON"
         ? null
-        : await fetchGreenButtonIntervalsForCoverageWindow({
-            houseId: actualHouseId,
-            coverageStartDate: startDate,
-            coverageEndDate: endDate,
-            timestampMode: "utcDayGrid",
-          });
-    const fetchedActualIntervals = greenButtonCoverageIntervals
-      ? convertGreenButtonPersistedRowsToHome(
-          greenButtonCoverageIntervals.intervals.map((row) => ({
-            timestamp: new Date(row.timestamp),
-            consumptionKwh: Number(row.kwh) || 0,
-          })),
-        ).intervals.map(homeProjectedIntervalFromRecord)
-      : preloadedIntervals
-      ? null
-      : isLowDataSharedPastMode
-        ? null
-        : await getActualIntervalsForRange({
+        : await loadGreenButtonPastProducerIntervals({
             houseId: actualHouseId,
             esiid,
-            startDate,
-            endDate,
-            preferredSource: intervalActualSource,
+            coverageStartDate: startDate,
+            coverageEndDate: endDate,
+            timezone: homeTimezoneForPast,
           });
+    const fetchedActualIntervals = greenButtonPastProducerLoad
+      ? greenButtonPastProducerLoad.engineSourceIntervals
+      : preloadedIntervals
+        ? null
+        : isLowDataSharedPastMode
+          ? null
+          : await getActualIntervalsForRange({
+              houseId: actualHouseId,
+              esiid,
+              startDate,
+              endDate,
+              preferredSource: intervalActualSource,
+            });
     const sourceActualIntervals = preloadedIntervals != null ? preloadedIntervals : fetchedActualIntervals ?? [];
-    const homeTimezoneForPast = timezone ?? "America/Chicago";
     const greenButtonTrustedUtcDateKeys =
-      greenButtonCoverageIntervals?.trustedActualDateKeys ??
+      greenButtonPastProducerLoad?.trustedUtcDateKeys ??
       (Array.isArray((buildInputs as { greenButtonTrustedUtcDateKeys?: unknown }).greenButtonTrustedUtcDateKeys)
         ? ((buildInputs as { greenButtonTrustedUtcDateKeys?: string[] }).greenButtonTrustedUtcDateKeys ?? [])
         : []);
     const engineSourceIntervals =
-      intervalActualSource === "GREEN_BUTTON" && sourceActualIntervals.length > 0
-        ? materializeGreenButtonPastProducerIntervals({
-            sourceIntervals: sourceActualIntervals,
-            timezone: homeTimezoneForPast,
-          })
-        : sourceActualIntervals;
+      intervalActualSource === "GREEN_BUTTON" && greenButtonPastProducerLoad
+        ? greenButtonPastProducerLoad.engineSourceIntervals
+        : intervalActualSource === "GREEN_BUTTON" && sourceActualIntervals.length > 0
+          ? sourceActualIntervals
+          : sourceActualIntervals;
     const actualIntervals =
       useWholeHomeOnlyLowDataFastPath || lowDataSyntheticContextBase ? [] : engineSourceIntervals;
     const sourceActualIntervalsCount = sourceActualIntervals.length;
@@ -1606,7 +1595,8 @@ export async function simulatePastUsageDataset(
       return homeDayGrid.dateKeyFromTimestamp(ts);
     };
     const greenButtonTrustedHomeDateKeys =
-      intervalActualSource === "GREEN_BUTTON" && engineSourceIntervals.length > 0
+      greenButtonPastProducerLoad?.trustedHomeDateKeys ??
+      (intervalActualSource === "GREEN_BUTTON" && engineSourceIntervals.length > 0
         ? resolveGreenButtonPastSimTrustedHomeDateKeysForProducer({
             trustedUtcDateKeys: greenButtonTrustedUtcDateKeys,
             sourceIntervals: engineSourceIntervals,
@@ -1615,7 +1605,7 @@ export async function simulatePastUsageDataset(
             homeCalendar,
             localSlotIndex,
           })
-        : new Set<string>();
+        : new Set<string>());
     const canonicalDateKeys = dateKeysFromCanonicalDayStarts(canonicalDayStartsMs, homeDayGrid);
     const canonicalDateKeyByDayStartMs = new Map<number, string>();
     for (const dateKey of enumerateLocalDateKeys(startDate, endDate, homeCalendar)) {
@@ -2487,11 +2477,11 @@ export async function simulatePastUsageDataset(
           intervalCount: Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15.length : 0,
           coverageStart: dataset?.summary?.start ?? startDate,
           coverageEnd: dataset?.summary?.end ?? endDate,
-          displayWindowNote: greenButtonCoverageIntervals?.displayWindowNote ?? undefined,
-          greenButtonSourceCoverageStart: greenButtonCoverageIntervals?.sourceCoverageStart ?? undefined,
-          greenButtonSourceCoverageEnd: greenButtonCoverageIntervals?.sourceCoverageEnd ?? undefined,
-          greenButtonShiftedIntervalCount: greenButtonCoverageIntervals?.shiftedIntervalCount ?? undefined,
-          greenButtonShiftedDateCount: greenButtonCoverageIntervals?.shiftedDateCount ?? undefined,
+          displayWindowNote: greenButtonPastProducerLoad?.displayWindowNote ?? undefined,
+          greenButtonSourceCoverageStart: greenButtonPastProducerLoad?.sourceCoverageStart ?? undefined,
+          greenButtonSourceCoverageEnd: greenButtonPastProducerLoad?.sourceCoverageEnd ?? undefined,
+          greenButtonShiftedIntervalCount: greenButtonPastProducerLoad?.shiftedIntervalCount ?? undefined,
+          greenButtonShiftedDateCount: greenButtonPastProducerLoad?.shiftedDateCount ?? undefined,
           actualSource: intervalActualSource ?? undefined,
           greenButtonTrustedHomeDateKeysLocal:
             greenButtonTrustedHomeDateKeys.size > 0

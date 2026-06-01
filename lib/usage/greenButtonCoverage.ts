@@ -40,7 +40,8 @@ export function resolveLatestCompleteOrAvailableGreenButtonDateKey<T extends Gre
 /**
  * Baseline / Usage Green Button display window: 365 inclusive local days ending on the
  * latest complete day in the uploaded file (not the SMT canonical lag window).
- * Past Sim keeps canonical window + year-shift via fetchGreenButtonIntervalsForCoverageWindow.
+ * Past Sim producer loads home-local intervals via loadGreenButtonPastProducerIntervals()
+ * (same path as getActualIntervalsForRange / Usage dashboard), not utcDayGrid rebasing.
  */
 export async function resolveGreenButtonBaselineCoverageWindow(
   houseId: string,

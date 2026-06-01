@@ -7,7 +7,7 @@ import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { buildSimulatorInputs, travelRangesToExcludeDateKeys, type BaseKind, type BuildMode } from "@/modules/usageSimulator/build";
 import { computeRequirements, type SimulatorMode } from "@/modules/usageSimulator/requirements";
 import { hasActualIntervals, resolveActualUsageSourceAnchor } from "@/modules/realUsageAdapter/actual";
-import { fetchGreenButtonIntervalsForCoverageWindow } from "@/modules/realUsageAdapter/greenButton";
+import { loadGreenButtonPastProducerIntervals } from "@/lib/usage/greenButtonPastProducerLoad";
 import { SMT_SHAPE_DERIVATION_VERSION } from "@/modules/realUsageAdapter/smt";
 import {
   getActualDailyKwhForLocalDateKeys,
@@ -21,7 +21,6 @@ import {
   resolveGreenButtonPastValidationCandidateDateKeys,
 } from "@/lib/usage/greenButtonPastValidationCandidates";
 import { resolvePastSimTravelRangesForRecalc } from "@/lib/usage/pastSimTravelRanges";
-import { redistributeGreenButtonGridZeroSamples } from "@/modules/onePathSim/greenButtonIntervalCorrections";
 import {
   resolveCanonicalPastValidationDayCount,
   resolveCanonicalPastValidationSelectionMode,
@@ -5014,19 +5013,24 @@ async function recalcSimulatorBuildImpl(args: {
       const validationSelectionStartedAt = Date.now();
       let candidateDateKeys: string[] = [];
       let intervalsForValidationWindow: Array<{ timestamp: string; kwh: number }> = [];
-      if (actualSource === "GREEN_BUTTON") {
-        const rebased = await fetchGreenButtonIntervalsForCoverageWindow({
+      const greenButtonPastProducerSource =
+        preferredActualSource === "GREEN_BUTTON" || actualSource === "GREEN_BUTTON";
+      if (greenButtonPastProducerSource) {
+        const loaded = await loadGreenButtonPastProducerIntervals({
           houseId: actualContextHouseId,
+          esiid: esiid ?? null,
           coverageStartDate: selectionStart,
           coverageEndDate: selectionEnd,
-          timestampMode: "utcDayGrid",
+          timezone: timezoneForStoredBuild,
         });
-        const corrected = redistributeGreenButtonGridZeroSamples(rebased.intervals);
-        intervalsForValidationWindow = corrected.intervals;
-        greenButtonTrustedUtcDateKeysForBuild = [...(rebased.trustedActualDateKeys ?? [])];
+        intervalsForValidationWindow = loaded.engineSourceIntervals.map((row) => ({
+          timestamp: row.timestamp,
+          kwh: row.kwh,
+        }));
+        greenButtonTrustedUtcDateKeysForBuild = [...loaded.trustedUtcDateKeys];
         candidateDateKeys = resolveGreenButtonPastValidationCandidateDateKeys({
           trustedUtcDateKeys: greenButtonTrustedUtcDateKeysForBuild,
-          intervals: corrected.intervals,
+          intervals: intervalsForValidationWindow,
           timezone: timezoneForStoredBuild,
           windowStart: selectionStart,
           windowEnd: selectionEnd,
@@ -5075,7 +5079,7 @@ async function recalcSimulatorBuildImpl(args: {
       });
       effectiveValidationOnlyDateKeysLocal = new Set(selection.selectedDateKeys);
       validationActualDailyKwhByDateLocal =
-        actualSource === "GREEN_BUTTON"
+        greenButtonPastProducerSource
           ? buildGreenButtonActualDailyKwhByHomeDateKey({
               intervals: intervalsForValidationWindow,
               dateKeysLocal: effectiveValidationOnlyDateKeysLocal,

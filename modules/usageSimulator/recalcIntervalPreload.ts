@@ -1,5 +1,5 @@
 import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
-import { fetchGreenButtonIntervalsForCoverageWindow } from "@/modules/realUsageAdapter/greenButton";
+import { loadGreenButtonPastProducerIntervals } from "@/lib/usage/greenButtonPastProducerLoad";
 import type { ActualUsageSource } from "@/modules/realUsageAdapter/actual";
 import { getMemoryRssMb, logSimPipelineEvent } from "@/modules/usageSimulator/simObservability";
 
@@ -53,12 +53,18 @@ export function createRecalcIntervalPreloadContext(args: {
     const startedAt = Date.now();
     const loadPromise =
       args.preferredSource === "GREEN_BUTTON"
-        ? fetchGreenButtonIntervalsForCoverageWindow({
+        ? loadGreenButtonPastProducerIntervals({
             houseId: args.houseId,
+            esiid: args.esiid,
             coverageStartDate: windowArgs.startDate,
             coverageEndDate: windowArgs.endDate,
-            timestampMode: "utcDayGrid",
-          }).then((out) => out.intervals)
+            timezone: "America/Chicago",
+          }).then((out) =>
+            out.engineSourceIntervals.map((row) => ({
+              timestamp: row.timestamp,
+              kwh: row.kwh,
+            }))
+          )
         : getActualIntervalsForRange({
             houseId: args.houseId,
             esiid: args.esiid,
