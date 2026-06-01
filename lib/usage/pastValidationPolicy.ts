@@ -119,7 +119,7 @@ export function shouldReconcilePastSmtValidationSelection(args: {
   const keyCount = Math.max(0, Math.floor(Number(args.storedValidationKeyCount) || 0));
 
   if (keyCount === 0) return true;
-  if (storedMode === "manual") return false;
+  if (storedMode === "manual") return keyCount !== canonical.validationDayCount;
   if (storedMode === "random_simple") return true;
   if (storedMode !== canonical.selectionMode) return true;
   if (keyCount !== canonical.validationDayCount) return true;

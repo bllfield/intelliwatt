@@ -45,6 +45,7 @@ import {
 } from "@/modules/onePathSim/usageSimulator/dataset";
 import { computeBuildInputsHash } from "@/modules/onePathSim/usageSimulator/hash";
 import { buildPastArtifactDatasetJsonForStorage } from "@/modules/onePathSim/usageSimulator/artifactStorage";
+import { mergeValidationCanonicalSimulatedTotalsIntoCompareSource } from "@/lib/usage/validationCompareCanonical";
 import { resolveWindowFromBuildInputsForPastIdentity } from "@/modules/onePathSim/usageSimulator/windowIdentity";
 import { INTRADAY_TEMPLATE_VERSION } from "@/modules/onePathSim/simulatedUsage/intradayTemplates";
 import { computeMonthlyOverlay, computePastOverlay, computeFutureOverlay } from "@/modules/usageScenario/overlay";
@@ -167,12 +168,23 @@ async function attachSelectedDailyWeatherForDataset(args: {
 }) {
   const dataset = args.dataset;
   if (!dataset || !Array.isArray(dataset.daily) || dataset.daily.length === 0) return;
-  if ((dataset as any).dailyWeather) return;
   const dateKeys = dataset.daily
     .map((row: any) => String(row?.date ?? "").slice(0, 10))
     .filter((value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value));
   if (dateKeys.length === 0) return;
   const weatherLogicMode = resolveWeatherLogicModeFromBuildInputs(args.buildInputs);
+  if ((dataset as any).dailyWeather) {
+    const { remapGreenButtonShiftedDailyWeatherOnDataset } = await import(
+      "@/lib/usage/greenButtonShiftedDisplay"
+    );
+    await remapGreenButtonShiftedDailyWeatherOnDataset({
+      dataset: dataset as Record<string, unknown>,
+      weatherHouseId: String(args.buildInputs.actualContextHouseId ?? args.fallbackHouseId),
+      weatherKind: resolveWeatherKindForLogicMode(weatherLogicMode),
+      displayDateKeys: dateKeys,
+    });
+    return;
+  }
   const weatherHouseId = String(args.buildInputs.actualContextHouseId ?? args.fallbackHouseId);
   const timezone =
     String(args.buildInputs.timezone ?? args.fallbackTimezone ?? "America/Chicago").trim() ||
@@ -1558,6 +1570,7 @@ function rehydrateValidationCompareMetaFromBuildInputsForRead(args: {
   if (validationOnlyDateKeysLocal.length === 0) return;
   const keySet = new Set(validationOnlyDateKeysLocal);
   let base = readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
+  mergeValidationCanonicalSimulatedTotalsIntoCompareSource(base, prevMeta as Record<string, unknown>, validationOnlyDateKeysLocal);
   base = augmentCanonicalArtifactSimulatedDayTotalsFromArtifactDailySimulated(dataset, base, keySet);
   const mergedMeta = dataset.meta && typeof dataset.meta === "object" ? { ...(dataset.meta as Record<string, unknown>) } : {};
   const prevCanon =

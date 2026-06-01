@@ -6,7 +6,7 @@
 import { createHash } from "crypto";
 import { usagePrisma } from "@/lib/db/usageClient";
 
-export const PAST_ENGINE_VERSION = "production_past_stitched_v13";
+export const PAST_ENGINE_VERSION = "production_past_stitched_v14";
 
 export type PastInputHashPayload = {
   engineVersion: string;

@@ -22,6 +22,7 @@ import {
   resolvePastProducerIntervalActualSource,
 } from "@/lib/usage/greenButtonPastTrustedPool";
 import { loadGreenButtonPastProducerIntervals } from "@/lib/usage/greenButtonPastProducerLoad";
+import { greenButtonShiftedTargetDateKeys } from "@/lib/usage/greenButtonPastYearShiftMerge";
 import { enumerateLocalDateKeys, localDayBoundsUtc, localSlotIndex } from "@/lib/time/homeIntervalCalendar";
 import type { PastIntervalGrid } from "@/lib/time/pastIntervalGrid";
 import { dateKeyFromTimestamp, getDayGridTimestamps } from "@/modules/onePathSim/usageSimulator/pastStitchedCurve";
@@ -1814,6 +1815,12 @@ export async function simulatePastUsageDataset(
             localSlotIndex,
           })
         : new Set<string>());
+    const greenButtonTrustedActualDateKeysForEngine = new Set(greenButtonTrustedHomeDateKeys);
+    if (greenButtonPastProducerLoad?.sourceDateByTargetDate) {
+      for (const dk of greenButtonShiftedTargetDateKeys(greenButtonPastProducerLoad.sourceDateByTargetDate)) {
+        greenButtonTrustedActualDateKeysForEngine.add(dk);
+      }
+    }
     const canonicalDateKeys = dateKeysFromCanonicalDayStarts(canonicalDayStartsMs, homeDayGrid);
     const canonicalDateKeyByDayStartMs = new Map<number, string>();
     for (const dateKey of enumerateLocalDateKeys(startDate, endDate, homeCalendar)) {
@@ -2240,7 +2247,9 @@ export async function simulatePastUsageDataset(
         ledgerIncompleteMeterDateKeys:
           ledgerIncompleteMeterDateKeys.size > 0 ? ledgerIncompleteMeterDateKeys : undefined,
         trustedActualDateKeys:
-          greenButtonTrustedHomeDateKeys.size > 0 ? greenButtonTrustedHomeDateKeys : undefined,
+          greenButtonTrustedActualDateKeysForEngine.size > 0
+            ? greenButtonTrustedActualDateKeysForEngine
+            : undefined,
         actualWxByDateKey: weatherByDateKeyForSimulation,
         _normalWxByDateKey: normalWxByDateKey,
         collectSimulatedDayResults: collectSimulatedDayResultsForDiagnostics,
@@ -2588,6 +2597,12 @@ export async function simulatePastUsageDataset(
           canonicalEndMonth: buildInputs.canonicalEndMonth,
           notes: buildInputs.notes ?? [],
           filledMonths: buildInputs.filledMonths ?? [],
+          validationOnlyDateKeysLocal: Array.isArray((buildInputs as { validationOnlyDateKeysLocal?: string[] })
+            .validationOnlyDateKeysLocal)
+            ? (buildInputs as { validationOnlyDateKeysLocal: string[] }).validationOnlyDateKeysLocal
+            : undefined,
+          validationActualDailyKwhByDateLocal: (buildInputs as { validationActualDailyKwhByDateLocal?: Record<string, number> })
+            .validationActualDailyKwhByDateLocal,
         },
         {
           timezone: timezone ?? undefined,

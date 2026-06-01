@@ -10,6 +10,10 @@ import {
   resolvePastDatasetMetaActualSource,
 } from "@/lib/usage/greenButtonPastTrustedPool";
 import {
+  greenButtonShiftedTargetDateKeysFromMeta,
+  isGreenButtonPriorYearShiftedDisplayDate,
+} from "@/lib/usage/greenButtonShiftedDisplay";
+import {
   filterSimulatedDateKeysWithoutStaleIncompleteMeter,
   incompleteMeterDateKeysFromPastMeta,
   pruneStaleIncompleteMeterFromPastDatasetMeta,
@@ -722,6 +726,12 @@ export function reconcileRestoredPastDatasetFromDecodedIntervals(args: {
     }
     return new Set<string>();
   })();
+  const shiftedTargetDateKeys = greenButtonShiftedTargetDateKeysFromMeta(meta);
+  if (shiftedTargetDateKeys.size > 0) {
+    for (const dk of Array.from(shiftedTargetDateKeys)) {
+      simDateKeys.delete(dk);
+    }
+  }
   if (greenButtonTrustedHomeDateKeys.size > 0 && meta && typeof meta === "object") {
     pruneGreenButtonTrustedDaysFromPastDatasetMeta(meta as Record<string, unknown>, greenButtonTrustedHomeDateKeys);
     simDateKeys = filterSimulatedDateKeysWithoutGreenButtonTrustedHome({
@@ -1416,6 +1426,8 @@ export function buildSimulatedUsageDatasetFromCurve(
     sharedProducerPathUsed?: boolean;
     weatherSensitivityScore?: WeatherSensitivityScore | null;
     weatherEfficiencyDerivedInput?: WeatherEfficiencyDerivedInput | null;
+    validationActualDailyKwhByDateLocal?: Record<string, number>;
+    validationOnlyDateKeysLocal?: string[];
   },
   options?: {
     excludedDateKeys?: Set<string>;
@@ -1559,6 +1571,7 @@ export function buildSimulatedUsageDatasetFromCurve(
     daily,
     seriesDaily,
     canonicalArtifactSimulatedDayTotalsByDate,
+    validationCanonicalSimulatedDayTotalsByDateLocal,
     simulatedTravelVacantDateKeysLocal,
     simulatedTestModeledDateKeysLocal,
     simulatedSourceDetailByDateRecord,
@@ -1569,9 +1582,15 @@ export function buildSimulatedUsageDatasetFromCurve(
     "daily_materialization",
     { dailyKeyCount: dailyMap.size },
     () => {
+      const validationOnlyDateKeySet = new Set(
+        (meta.validationOnlyDateKeysLocal ?? [])
+          .map((dk) => String(dk ?? "").slice(0, 10))
+          .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+      );
       const nextDaily = new Array<SimulatedUsageDataset["daily"][number]>(dailyMap.size);
       const nextSeriesDaily = new Array<SimulatedUsageDataset["series"]["daily"][number]>(dailyMap.size);
       const nextCanonicalArtifactSimulatedDayTotalsByDate: Record<string, number> = {};
+      const nextValidationCanonicalSimulatedDayTotalsByDateLocal: Record<string, number> = {};
       const nextSimulatedTravelVacantDateKeysLocal: string[] = [];
       const nextSimulatedTestModeledDateKeysLocal: string[] = [];
       const nextSimulatedSourceDetailByDateRecord: Record<string, PastSimulatedDaySourceDetail> = {};
@@ -1581,14 +1600,19 @@ export function buildSimulatedUsageDatasetFromCurve(
       const sortedEntries = Array.from(dailyMap.entries()).sort((a, b) => (a[0] < b[0] ? -1 : 1));
       for (let index = 0; index < sortedEntries.length; index += 1) {
         const [date, actualKwh] = sortedEntries[index]!;
-        const sourceDetail = simulatedSourceDetailByDate.get(date);
+        const isPriorYearShifted = isGreenButtonPriorYearShiftedDisplayDate(date, meta);
+        const sourceDetail = isPriorYearShifted ? null : simulatedSourceDetailByDate.get(date);
         const isSimulated = sourceDetail != null;
         const dailyKwh = round2(isSimulated ? simulatedDisplayByDate.get(date) ?? actualKwh : actualKwh);
         const dailyRow = {
           date,
           kwh: dailyKwh,
           source: isSimulated ? ("SIMULATED" as const) : ("ACTUAL" as const),
-          sourceDetail: isSimulated ? sourceDetail : ("ACTUAL" as const),
+          sourceDetail: isPriorYearShifted
+            ? ("ACTUAL_PRIOR_YEAR_SHIFTED" as const)
+            : isSimulated
+              ? sourceDetail
+              : ("ACTUAL" as const),
         };
         nextDaily[index] = dailyRow;
         nextSeriesDaily[index] = {
@@ -1614,10 +1638,20 @@ export function buildSimulatedUsageDatasetFromCurve(
         else nextWeekdaySum += dailyKwh;
         if (!nextPeakDay || dailyKwh > nextPeakDay.kwh) nextPeakDay = { date, kwh: dailyKwh };
       }
+      for (const dk of Array.from(validationOnlyDateKeySet)) {
+        const modeledKwh = simulatedDisplayByDate.get(dk);
+        if (modeledKwh === undefined || !Number.isFinite(Number(modeledKwh))) continue;
+        const rounded = round2(Number(modeledKwh));
+        nextValidationCanonicalSimulatedDayTotalsByDateLocal[dk] = rounded;
+        if (!Number.isFinite(Number(nextCanonicalArtifactSimulatedDayTotalsByDate[dk]))) {
+          nextCanonicalArtifactSimulatedDayTotalsByDate[dk] = rounded;
+        }
+      }
       return {
         daily: nextDaily,
         seriesDaily: nextSeriesDaily,
         canonicalArtifactSimulatedDayTotalsByDate: nextCanonicalArtifactSimulatedDayTotalsByDate,
+        validationCanonicalSimulatedDayTotalsByDateLocal: nextValidationCanonicalSimulatedDayTotalsByDateLocal,
         simulatedTravelVacantDateKeysLocal: nextSimulatedTravelVacantDateKeysLocal,
         simulatedTestModeledDateKeysLocal: nextSimulatedTestModeledDateKeysLocal,
         simulatedSourceDetailByDateRecord: nextSimulatedSourceDetailByDateRecord,
@@ -1762,6 +1796,9 @@ export function buildSimulatedUsageDatasetFromCurve(
       sharedProducerPathUsed: meta.sharedProducerPathUsed ?? false,
       weatherSensitivityScore: meta.weatherSensitivityScore ?? null,
       weatherEfficiencyDerivedInput: meta.weatherEfficiencyDerivedInput ?? null,
+      validationActualDailyKwhByDateLocal: meta.validationActualDailyKwhByDateLocal,
+      validationOnlyDateKeysLocal: meta.validationOnlyDateKeysLocal,
+      validationCanonicalSimulatedDayTotalsByDateLocal,
       canonicalArtifactSimulatedDayTotalsByDate,
       simulatedTravelVacantDateKeysLocal,
       simulatedTestModeledDateKeysLocal,

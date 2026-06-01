@@ -3,6 +3,7 @@ import { convertGreenButtonPersistedRowsToHome } from "@/lib/time/greenButtonPer
 import { homeProjectedIntervalFromRecord } from "@/lib/time/actualIntervalCalendar";
 import {
   materializeGreenButtonPastProducerIntervals,
+  pruneGreenButtonTrustedDaysFromPastDatasetMeta,
   resolveGreenButtonPastSimTrustedHomeDateKeys,
   resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals,
 } from "@/lib/usage/greenButtonPastTrustedPool";
@@ -82,5 +83,21 @@ describe("greenButtonPastTrustedPool", () => {
       timezone: "America/Chicago",
     });
     expect(trustedHome.size).toBeGreaterThan(0);
+  });
+
+  it("pruneGreenButtonTrustedDaysFromPastDatasetMeta drops incomplete-meter canonical only, not test-day compare truth", () => {
+    const meta: Record<string, unknown> = {
+      simulatedSourceDetailByDate: {
+        "2025-11-02": "SIMULATED_TEST_DAY",
+        "2026-05-14": "SIMULATED_INCOMPLETE_METER",
+      },
+      canonicalArtifactSimulatedDayTotalsByDate: {
+        "2025-11-02": 17.47,
+        "2026-05-14": 12.1,
+      },
+    };
+    pruneGreenButtonTrustedDaysFromPastDatasetMeta(meta, new Set(["2025-11-02", "2026-05-14"]));
+    expect((meta.canonicalArtifactSimulatedDayTotalsByDate as Record<string, number>)["2025-11-02"]).toBe(17.47);
+    expect((meta.canonicalArtifactSimulatedDayTotalsByDate as Record<string, number>)["2026-05-14"]).toBeUndefined();
   });
 });

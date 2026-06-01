@@ -78,6 +78,12 @@ describe("pastValidationPolicy", () => {
         storedSelectionMode: "manual",
         storedValidationKeyCount: 4,
       })
+    ).toBe(true);
+    expect(
+      shouldReconcilePastSmtValidationSelection({
+        storedSelectionMode: "manual",
+        storedValidationKeyCount: CANONICAL_PAST_SMT_VALIDATION_DAY_COUNT,
+      })
     ).toBe(false);
   });
 });

@@ -226,18 +226,21 @@ export function pruneGreenButtonTrustedDaysFromPastDatasetMeta(
   if (!trustedHomeDateKeys.size) return;
 
   const byDetail = meta.simulatedSourceDetailByDate;
+  const staleIncompleteMeterTrustedKeys = new Set<string>();
   if (byDetail && typeof byDetail === "object" && !Array.isArray(byDetail)) {
     for (const dk of Array.from(trustedHomeDateKeys)) {
-      if (String((byDetail as Record<string, unknown>)[dk] ?? "").trim() === SIMULATED_INCOMPLETE_METER_DETAIL) {
-        delete (byDetail as Record<string, unknown>)[dk];
+      if (String((byDetail as Record<string, unknown>)[dk] ?? "").trim() !== SIMULATED_INCOMPLETE_METER_DETAIL) {
+        continue;
       }
+      staleIncompleteMeterTrustedKeys.add(dk);
+      delete (byDetail as Record<string, unknown>)[dk];
     }
   }
 
   const canonicalKey = "canonicalArtifactSimulatedDayTotalsByDate";
   const canonical = meta[canonicalKey];
   if (canonical && typeof canonical === "object" && !Array.isArray(canonical)) {
-    for (const dk of Array.from(trustedHomeDateKeys)) {
+    for (const dk of staleIncompleteMeterTrustedKeys) {
       delete (canonical as Record<string, unknown>)[dk];
     }
   }

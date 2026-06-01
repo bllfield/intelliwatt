@@ -3,6 +3,7 @@ import {
   homeProjectedIntervalFromRecord,
   type HomeProjectedIntervalPoint,
 } from "@/lib/time/actualIntervalCalendar";
+import { filterOutDstAmbiguousLocalDateKeys } from "@/lib/usage/dstAmbiguousLocalDateKey";
 import { resolveGreenButtonPastSimTrustedHomeDateKeys } from "@/lib/usage/greenButtonPastTrustedPool";
 
 function asDateKey(value: unknown): string | null {
@@ -45,9 +46,10 @@ export function resolveGreenButtonPastValidationCandidateDateKeys(args: {
   });
 
   const travel = args.travelDateKeys ?? new Set<string>();
-  return Array.from(trustedHome)
-    .filter((dk) => dateKeyInRange(dk, windowStart, windowEnd) && !travel.has(dk))
-    .sort((left, right) => left.localeCompare(right));
+  return filterOutDstAmbiguousLocalDateKeys(
+    Array.from(trustedHome).filter((dk) => dateKeyInRange(dk, windowStart, windowEnd) && !travel.has(dk)),
+    args.timezone
+  );
 }
 
 /** Home-local actual daily totals for validation compare (Green Button Past). */

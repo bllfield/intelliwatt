@@ -9,7 +9,7 @@ describe("pastSimulationCoreLabel", () => {
     const label = formatSharedPastSimulationCoreLabel();
     expect(label).toContain("shared_past_day_simulator");
     expect(label).toContain("day-sim 1.1.0");
-    expect(label).toContain("engine production_past_stitched_v13");
+    expect(label).toContain("engine production_past_stitched_v14");
     expect(label).toContain("validation unified_stratified_14_v1");
   });
 

@@ -1,5 +1,6 @@
 import { dateKeyInTimezone } from "@/lib/admin/gapfillLab";
 import { isSimulatedDailySourceForCompare } from "@/lib/usage/dailySourceNotation";
+import { mergeValidationCanonicalSimulatedTotalsIntoCompareSource } from "@/lib/usage/validationCompareCanonical";
 import { DateTime } from "luxon";
 
 /** Weekday vs weekend in `zone` for a local `YYYY-MM-DD` key (matches usage daily semantics, not UTC calendar). */
@@ -470,6 +471,11 @@ export function attachValidationCompareProjection(dataset: any): any {
       ((projected as any)?.canonicalArtifactSimulatedDayTotalsByDate as Record<string, number> | undefined) ??
       {}),
   };
+  mergeValidationCanonicalSimulatedTotalsIntoCompareSource(
+    simSrc,
+    (projected as any)?.meta as Record<string, unknown> | undefined,
+    validationOnlyDateKeysLocal
+  );
   for (const dk of validationOnlyDateKeysLocal) {
     const raw = simSrc[dk];
     if (raw !== undefined && raw !== null && Number.isFinite(Number(raw))) continue;

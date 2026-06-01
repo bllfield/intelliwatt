@@ -35,4 +35,25 @@ describe("dailySourceNotation", () => {
     expect(rows[0]?.simulatedDayKwh).toBe(17.47);
     expect(rows[0]?.actualDayKwh).toBe(21.18);
   });
+
+  it("attachValidationCompareProjection uses validationCanonicalSimulatedDayTotals for ACTUAL validation stitch rows", () => {
+    const out = attachValidationCompareProjection({
+      meta: {
+        validationOnlyDateKeysLocal: ["2025-11-02"],
+        validationActualDailyKwhByDateLocal: { "2025-11-02": 21.18 },
+        validationCanonicalSimulatedDayTotalsByDateLocal: { "2025-11-02": 17.47 },
+      },
+      daily: [
+        {
+          date: "2025-11-02",
+          kwh: 21.18,
+          source: "ACTUAL",
+          sourceDetail: "ACTUAL_VALIDATION_TEST_DAY",
+        },
+      ],
+      dailyWeather: {},
+    });
+    const rows = Array.isArray(out?.meta?.validationCompareRows) ? out.meta.validationCompareRows : [];
+    expect(rows[0]?.simulatedDayKwh).toBe(17.47);
+  });
 });

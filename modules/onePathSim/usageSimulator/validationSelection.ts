@@ -1,3 +1,5 @@
+import { filterOutDstAmbiguousLocalDateKeys } from "@/lib/usage/dstAmbiguousLocalDateKey";
+
 export const VALIDATION_DAY_SELECTION_MODES = [
   "manual",
   "random_simple",
@@ -232,7 +234,10 @@ export function selectValidationDayKeys(args: {
         .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
     )
   ).sort();
-  const cleanCandidates = candidateDateKeys.filter((dk) => !args.travelDateKeysSet.has(dk));
+  const cleanCandidates = filterOutDstAmbiguousLocalDateKeys(
+    candidateDateKeys.filter((dk) => !args.travelDateKeysSet.has(dk)),
+    args.timezone
+  );
 
   if (args.mode === "manual") {
     const picked = Array.from(

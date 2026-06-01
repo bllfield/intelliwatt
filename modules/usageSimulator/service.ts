@@ -97,6 +97,7 @@ import {
   CompareTruthIncompleteError,
   projectBaselineFromCanonicalDataset,
 } from "@/modules/usageSimulator/compareProjection";
+import { mergeValidationCanonicalSimulatedTotalsIntoCompareSource } from "@/lib/usage/validationCompareCanonical";
 import {
   buildInitialPastSimLockboxInput,
   buildPastSimPerDayTrace,
@@ -161,7 +162,6 @@ async function attachSelectedDailyWeatherForDataset(args: {
 }) {
   const dataset = args.dataset;
   if (!dataset || !Array.isArray(dataset.daily) || dataset.daily.length === 0) return;
-  if ((dataset as any).dailyWeather) return;
   const dateKeys = dataset.daily
     .map((row: any) => String(row?.date ?? "").slice(0, 10))
     .filter((value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value));
@@ -171,11 +171,37 @@ async function attachSelectedDailyWeatherForDataset(args: {
   const timezone =
     String(args.buildInputs.timezone ?? args.fallbackTimezone ?? "America/Chicago").trim() ||
     "America/Chicago";
+  const sourceDateByTargetDate =
+    dataset?.meta?.greenButtonSourceDateByTargetDate &&
+    typeof dataset.meta.greenButtonSourceDateByTargetDate === "object" &&
+    !Array.isArray(dataset.meta.greenButtonSourceDateByTargetDate)
+      ? (dataset.meta.greenButtonSourceDateByTargetDate as Record<string, unknown>)
+      : null;
+  if ((dataset as any).dailyWeather) {
+    const { remapGreenButtonShiftedDailyWeatherOnDataset } = await import(
+      "@/lib/usage/greenButtonShiftedDisplay"
+    );
+    await remapGreenButtonShiftedDailyWeatherOnDataset({
+      dataset: dataset as Record<string, unknown>,
+      weatherHouseId,
+      weatherKind: resolveWeatherKindForLogicMode(weatherLogicMode),
+      displayDateKeys: dateKeys,
+    });
+    return;
+  }
+  const { buildGreenButtonWeatherLookupDateByDisplayDate } = await import(
+    "@/lib/usage/greenButtonShiftedDisplay"
+  );
+  const weatherLookupDateByDisplayDate = buildGreenButtonWeatherLookupDateByDisplayDate({
+    displayDateKeys: dateKeys,
+    sourceDateByTargetDate: sourceDateByTargetDate as Record<string, string> | null,
+  });
+  const weatherLookupDateKeys = Array.from(new Set(Array.from(weatherLookupDateByDisplayDate.values()))).sort();
   if (weatherLogicMode === "LAST_YEAR_ACTUAL_WEATHER") {
     await ensureHouseWeatherBackfill({
       houseId: weatherHouseId,
-      startDate: dateKeys[0]!,
-      endDate: dateKeys[dateKeys.length - 1]!,
+      startDate: weatherLookupDateKeys[0]!,
+      endDate: weatherLookupDateKeys[weatherLookupDateKeys.length - 1]!,
       timezone,
       allowOutsideCanonicalCoverage: true,
     }).catch(() => null);
@@ -185,14 +211,21 @@ async function attachSelectedDailyWeatherForDataset(args: {
       dateKeys,
     }).catch(() => null);
   }
-  const wxMap = await getHouseWeatherDays({
+  const lookupWxMap = await getHouseWeatherDays({
     houseId: weatherHouseId,
-    dateKeys,
+    dateKeys: weatherLookupDateKeys,
     kind: resolveWeatherKindForLogicMode(weatherLogicMode),
   }).catch(() => new Map());
-  if (!(wxMap instanceof Map) || wxMap.size === 0) return;
+  if (!(lookupWxMap instanceof Map) || lookupWxMap.size === 0) return;
+  const wxEntries: Array<[string, NonNullable<ReturnType<typeof lookupWxMap.get>>]> = [];
+  for (const dateKey of dateKeys) {
+    const lookupDateKey = weatherLookupDateByDisplayDate.get(dateKey) ?? dateKey;
+    const weather = lookupWxMap.get(lookupDateKey);
+    if (weather) wxEntries.push([dateKey, weather]);
+  }
+  if (wxEntries.length === 0) return;
   (dataset as any).dailyWeather = Object.fromEntries(
-    Array.from(wxMap.entries()).map(([dateKey, w]: [string, any]) => [
+    wxEntries.map(([dateKey, w]) => [
       dateKey,
       {
         tAvgF: Number(w?.tAvgF) || 0,
@@ -204,6 +237,18 @@ async function attachSelectedDailyWeatherForDataset(args: {
       },
     ])
   );
+  if (sourceDateByTargetDate) {
+    const shiftedWeatherDisplayDateCount = Array.from(weatherLookupDateByDisplayDate.entries()).filter(
+      ([displayDate, lookupDate]) => displayDate !== lookupDate
+    ).length;
+    if (!(dataset as any).meta || typeof (dataset as any).meta !== "object") {
+      (dataset as any).meta = {};
+    }
+    (dataset as any).meta.greenButtonShiftedWeatherDisplayDateCount =
+      shiftedWeatherDisplayDateCount || undefined;
+    (dataset as any).meta.greenButtonWeatherDisplayUsesSourceDateMap =
+      shiftedWeatherDisplayDateCount > 0 || undefined;
+  }
   if (!(dataset as any).meta || typeof (dataset as any).meta !== "object") {
     (dataset as any).meta = {};
   }
@@ -1461,6 +1506,7 @@ function rehydrateValidationCompareMetaFromBuildInputsForRead(args: {
   if (validationOnlyDateKeysLocal.length === 0) return;
   const keySet = new Set(validationOnlyDateKeysLocal);
   let base = readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
+  mergeValidationCanonicalSimulatedTotalsIntoCompareSource(base, prevMeta as Record<string, unknown>, validationOnlyDateKeysLocal);
   base = augmentCanonicalArtifactSimulatedDayTotalsFromArtifactDailySimulated(dataset, base, keySet);
   const mergedMeta = dataset.meta && typeof dataset.meta === "object" ? { ...(dataset.meta as Record<string, unknown>) } : {};
   const prevCanon =
