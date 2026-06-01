@@ -98,6 +98,12 @@ export type PastSimulatedDaySourceDetail =
   | "SIMULATED_LEADING_MISSING"
   | "SIMULATED_OTHER";
 
+/** ACTUAL-backed Past daily rows (including Green Button prior-year shift disclosure). */
+export type PastActualDaySourceDetail =
+  | "ACTUAL"
+  | "ACTUAL_PRIOR_YEAR_SHIFTED"
+  | "ACTUAL_VALIDATION_TEST_DAY";
+
 function round2(n: number): number {
   return roundDayKwhDisplay(n);
 }
@@ -608,7 +614,7 @@ export function enrichPastDailyRowsWithSourceDetailFromMeta(
   date: string;
   kwh: number;
   source: "ACTUAL" | "SIMULATED";
-  sourceDetail: PastSimulatedDaySourceDetail | "ACTUAL";
+  sourceDetail: PastSimulatedDaySourceDetail | PastActualDaySourceDetail;
 }> {
   const m = meta && typeof meta === "object" ? (meta as Record<string, unknown>) : null;
   const byDetail = m?.simulatedSourceDetailByDate as Record<string, PastSimulatedDaySourceDetail> | undefined;
