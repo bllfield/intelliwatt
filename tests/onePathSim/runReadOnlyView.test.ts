@@ -207,7 +207,7 @@ describe("buildOnePathRunReadOnlyView", () => {
       { hhmm: "17:45", avgKw: 4 },
     ]);
     expect(view?.fifteenMinuteCurveSourceOwner).toBe(
-      "resolvePastSimDisplayFifteenMinuteCurve(...).actualDayIntervals15"
+      "greenButtonPersistedIntervalConvert.buildGreenButtonLoadCurveInsightsFromSeriesRows"
     );
   });
 
@@ -253,7 +253,7 @@ describe("buildOnePathRunReadOnlyView", () => {
       { hhmm: "14:45", avgKw: 4 },
     ]);
     expect(view?.fifteenMinuteCurveSourceOwner).toBe(
-      "resolvePastSimDisplayFifteenMinuteCurve(...).actualDayIntervals15"
+      "greenButtonPersistedIntervalConvert.buildGreenButtonLoadCurveInsightsFromSeriesRows"
     );
   });
 

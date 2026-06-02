@@ -9,6 +9,13 @@ import {
   type SageActualDailyRow,
 } from "@/lib/usage/sageActualDailyTruth";
 import { smtPendingIntervalDateKeysFromMeta } from "@/lib/usage/smtDayCoverageLedger";
+import {
+  buildGreenButtonLoadCurveInsightsFromSeriesRows,
+  convertGreenButtonSeriesRowsToHome,
+  isGreenButtonBackedDatasetMeta,
+  resolveGreenButtonIntervalDeliveryFromMeta,
+} from "@/lib/time/greenButtonPersistedIntervalConvert";
+import { buildLoadCurveInsightsFromIntervalRows } from "@/lib/usage/fifteenMinuteLoadCurve";
 import { resolvePastSimDisplayFifteenMinuteCurve } from "@/lib/usage/pastSimDisplayFifteenMinuteCurve";
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
 import { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
@@ -63,29 +70,10 @@ function dateKeyFromUtcGridTimestamp(timestamp: string): string | null {
   return ts.toISOString().slice(0, 10);
 }
 
-function isGreenButtonBackedDatasetMeta(meta: Record<string, unknown> | null): boolean {
-  if (!meta) return false;
-  if (meta.actualSource === "GREEN_BUTTON") return true;
-  if (typeof meta.greenButtonCoverageIntervalCount === "number") return true;
-  if (meta.greenButtonIntervalTimestampMode === "utcDayGrid") return true;
-  return Boolean(
-    meta.greenButtonSourceDateByTargetDate &&
-      typeof meta.greenButtonSourceDateByTargetDate === "object" &&
-      !Array.isArray(meta.greenButtonSourceDateByTargetDate)
-  );
-}
-
 function resolveIntervalTimestampMode(meta: Record<string, unknown> | null): "timezone" | "utcDayGrid" {
-  if (meta?.greenButtonIntervalTimestampMode === "utcDayGrid") return "utcDayGrid";
-  if (
-    meta?.greenButtonSourceDateByTargetDate &&
-    typeof meta.greenButtonSourceDateByTargetDate === "object" &&
-    !Array.isArray(meta.greenButtonSourceDateByTargetDate) &&
-    (meta.actualSource === "GREEN_BUTTON" || typeof meta.greenButtonCoverageIntervalCount === "number")
-  ) {
-    return "utcDayGrid";
-  }
-  return "timezone";
+  return resolveGreenButtonIntervalDeliveryFromMeta(meta).encoding === "utc_day_grid"
+    ? "utcDayGrid"
+    : "timezone";
 }
 
 function asStitchedMonthRecord(
@@ -131,39 +119,26 @@ function asStitchedMonthRecord(
 function buildFifteenMinuteAveragesFromIntervals15(
   value: unknown,
   timezone: string,
-  timestampMode: "timezone" | "utcDayGrid" = "timezone",
+  meta: Record<string, unknown> | null,
   options?: { redistributeZeroKwhSamples?: boolean }
 ): Array<{ hhmm: string; avgKw: number }> {
-  const buckets = new Map<string, { sumKw: number; count: number }>();
-  const rows = asArray<Record<string, unknown>>(value)
+  let rows = asArray<Record<string, unknown>>(value)
     .map((row) => {
       const timestamp = String(row.timestamp ?? "");
       const kwh = Number(row.kwh ?? row.consumption_kwh);
       return timestamp && Number.isFinite(kwh) ? { timestamp, kwh } : null;
     })
     .filter((row): row is { timestamp: string; kwh: number } => row != null);
-  const rowsForAverage =
-    options?.redistributeZeroKwhSamples && timestampMode === "utcDayGrid"
-      ? redistributeGreenButtonGridZeroSamples(rows).intervals
-      : rows;
-
-  for (const row of rowsForAverage) {
-    const timestamp = row.timestamp;
-    const hhmm =
-      timestampMode === "utcDayGrid" ? hhmmFromUtcGridTimestamp(timestamp) : hhmmInTimezone(timestamp, timezone);
-    if (!hhmm) continue;
-    const kwh = row.kwh;
-    const current = buckets.get(hhmm) ?? { sumKw: 0, count: 0 };
-    current.sumKw += kwh * 4;
-    current.count += 1;
-    buckets.set(hhmm, current);
+  if (
+    options?.redistributeZeroKwhSamples &&
+    resolveGreenButtonIntervalDeliveryFromMeta(meta).encoding === "utc_day_grid"
+  ) {
+    rows = redistributeGreenButtonGridZeroSamples(rows).intervals;
   }
-  return Array.from(buckets.entries())
-    .map(([hhmm, bucket]) => ({
-      hhmm,
-      avgKw: bucket.count > 0 ? round2(bucket.sumKw / bucket.count) : 0,
-    }))
-    .sort((left, right) => (left.hhmm < right.hhmm ? -1 : left.hhmm > right.hhmm ? 1 : 0));
+  return buildGreenButtonLoadCurveInsightsFromSeriesRows(rows, {
+    homeTimezone: timezone,
+    meta,
+  }).fifteenMinuteAverages;
 }
 
 export type OnePathPastScenarioVariable = {
@@ -261,6 +236,7 @@ function buildDisplayDailyRows(
 function buildLocalDailyRowsFromIntervals15(args: {
   intervals15: unknown;
   timezone: string;
+  meta?: Record<string, unknown> | null;
   timestampMode?: "timezone" | "utcDayGrid";
   coverageStart: string | null;
   coverageEnd: string | null;
@@ -272,16 +248,34 @@ function buildLocalDailyRowsFromIntervals15(args: {
   const coverageEnd = asDateKey(args.coverageEnd);
   if (!args.timezone.trim()) return [];
   const sumsByDate = new Map<string, number>();
-  for (const row of asArray<Record<string, unknown>>(args.intervals15)) {
-    const timestamp = String(row?.timestamp ?? "");
-    if (!timestamp) continue;
-    const date = asDateKey(
-      args.timestampMode === "utcDayGrid" ? dateKeyFromUtcGridTimestamp(timestamp) : dateKeyInTimezone(timestamp, args.timezone)
-    );
-    if (!date) continue;
-    if (coverageStart && date < coverageStart) continue;
-    if (coverageEnd && date > coverageEnd) continue;
-    sumsByDate.set(date, (sumsByDate.get(date) ?? 0) + (Number(row?.kwh ?? row?.consumption_kwh) || 0));
+  const seriesRows = asArray<Record<string, unknown>>(args.intervals15).map((row) => ({
+    timestamp: String(row?.timestamp ?? ""),
+    kwh: Number(row?.kwh ?? row?.consumption_kwh) || 0,
+  }));
+  const homeRecords = isGreenButtonBackedDatasetMeta(args.meta)
+    ? convertGreenButtonSeriesRowsToHome(seriesRows, { homeTimezone: args.timezone, meta: args.meta })
+    : null;
+  if (homeRecords) {
+    for (const row of homeRecords) {
+      const date = row.homeDateKey;
+      if (coverageStart && date < coverageStart) continue;
+      if (coverageEnd && date > coverageEnd) continue;
+      sumsByDate.set(date, (sumsByDate.get(date) ?? 0) + row.kwh);
+    }
+  } else {
+    for (const row of seriesRows) {
+      const timestamp = row.timestamp;
+      if (!timestamp) continue;
+      const date = asDateKey(
+        args.timestampMode === "utcDayGrid"
+          ? dateKeyFromUtcGridTimestamp(timestamp)
+          : dateKeyInTimezone(timestamp, args.timezone)
+      );
+      if (!date) continue;
+      if (coverageStart && date < coverageStart) continue;
+      if (coverageEnd && date > coverageEnd) continue;
+      sumsByDate.set(date, (sumsByDate.get(date) ?? 0) + row.kwh);
+    }
   }
   if (sumsByDate.size === 0) return [];
   const pendingSmtDateKeys = new Set(
@@ -433,7 +427,6 @@ export function buildOnePathRunReadOnlyView(args: {
   if (isBaselinePassthrough) {
     dailyRows = viewModel.derived.daily;
     const timezone = typeof meta?.timezone === "string" && meta.timezone.trim() ? meta.timezone : "America/Chicago";
-    const intervalTimestampMode = resolveIntervalTimestampMode(meta);
     const passthroughInsightsFifteen = asArray<Record<string, unknown>>(datasetInsights.fifteenMinuteAverages)
       .map((row) => ({
         hhmm: String(row?.hhmm ?? ""),
@@ -441,15 +434,18 @@ export function buildOnePathRunReadOnlyView(args: {
       }))
       .filter((row) => /^\d{2}:\d{2}$/.test(row.hhmm));
     const shouldIgnoreGreenButtonGridZeroSamples =
-      intervalTimestampMode === "utcDayGrid" &&
+      resolveIntervalTimestampMode(meta) === "utcDayGrid" &&
       Number(meta?.greenButtonPaddedIntervalCount ?? 0) > 0 &&
       Number(meta?.greenButtonZeroRedistributedIntervalCount ?? 0) <= 0;
-    const rebuiltFifteenMinuteAverages = buildFifteenMinuteAveragesFromIntervals15(
-      asRecord(dataset.series)?.intervals15,
-      timezone,
-      intervalTimestampMode,
-      { redistributeZeroKwhSamples: shouldIgnoreGreenButtonGridZeroSamples }
-    );
+    const intervalRows = asArray<Record<string, unknown>>(asRecord(dataset.series)?.intervals15).map((row) => ({
+      timestamp: String(row?.timestamp ?? ""),
+      kwh: Number(row?.kwh ?? row?.consumption_kwh) || 0,
+    }));
+    const rebuiltFifteenMinuteAverages = isGreenButtonBackedDatasetMeta(meta)
+      ? buildFifteenMinuteAveragesFromIntervals15(intervalRows, timezone, meta, {
+          redistributeZeroKwhSamples: shouldIgnoreGreenButtonGridZeroSamples,
+        })
+      : buildLoadCurveInsightsFromIntervalRows(intervalRows, timezone).fifteenMinuteAverages;
     fifteenMinuteAverages = passthroughInsightsFifteen.length
       ? passthroughInsightsFifteen
       : rebuiltFifteenMinuteAverages.length
@@ -469,7 +465,8 @@ export function buildOnePathRunReadOnlyView(args: {
     const intervalBackedLocalDailyRows = buildLocalDailyRowsFromIntervals15({
       intervals15: asRecord(dataset.series)?.intervals15,
       timezone,
-      timestampMode: intervalTimestampMode,
+      meta,
+      timestampMode: resolveIntervalTimestampMode(meta),
       coverageStart: canonicalCoverageWindow.startDate,
       coverageEnd: canonicalCoverageWindow.endDate,
       existingRows: datasetDailyRows,
@@ -513,6 +510,7 @@ export function buildOnePathRunReadOnlyView(args: {
       timezone,
       coverageStart: viewModel.coverage.start,
       coverageEnd: viewModel.coverage.end,
+      meta,
     });
     fifteenMinuteAverages = pastFifteenCurve.fifteenMinuteAverages;
     fifteenMinuteCurveSourceOwner = pastFifteenCurve.sourceOwner;

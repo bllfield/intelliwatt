@@ -45,7 +45,7 @@ describe("resolvePastSimDisplayFifteenMinuteCurve", () => {
 
     expect(viewModel?.derived.fifteenCurve).toEqual(adminView?.fifteenMinuteAverages);
     expect(adminView?.fifteenMinuteCurveSourceOwner).toBe(
-      "resolvePastSimDisplayFifteenMinuteCurve(...).actualDayIntervals15"
+      "greenButtonPersistedIntervalConvert.buildGreenButtonLoadCurveInsightsFromSeriesRows"
     );
     expect(viewModel?.derived.fifteenCurve.find((row) => row.hhmm === "12:00")?.avgKw).toBe(8);
   });

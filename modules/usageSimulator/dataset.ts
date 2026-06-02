@@ -19,6 +19,10 @@ import {
   pruneStaleIncompleteMeterFromPastDatasetMeta,
 } from "@/lib/usage/pastSimStaleIncompleteMeter";
 import {
+  buildGreenButtonLoadCurveInsightsFromSeriesRows,
+  isGreenButtonBackedDatasetMeta,
+} from "@/lib/time/greenButtonPersistedIntervalConvert";
+import {
   buildLoadCurveInsightsFromIntervalRows,
   filterIntervalRowsToActualDailyDates,
   normalizeHomeTimezoneForLoadCurve,
@@ -839,15 +843,18 @@ export function reconcileRestoredPastDatasetFromDecodedIntervals(args: {
       timestamp: String(iv?.timestamp ?? ""),
       consumption_kwh: Number(iv?.consumption_kwh ?? iv?.kwh ?? 0) || 0,
     }));
-    const actualDayIntervalRows = filterIntervalRowsToActualDailyDates(
-      intervalRowsForInsights,
-      enrichedDaily,
-      homeTimezone
-    );
-    const loadCurveInsights = buildLoadCurveInsightsFromIntervalRows(
-      actualDayIntervalRows,
-      homeTimezone
-    );
+    const datasetMeta = (dataset as { meta?: Record<string, unknown> }).meta ?? null;
+    const loadCurveInsights = isGreenButtonBackedDatasetMeta(datasetMeta)
+      ? buildGreenButtonLoadCurveInsightsFromSeriesRows(intervalRowsForInsights, {
+          homeTimezone,
+          meta: datasetMeta,
+          displayDaily: enrichedDaily,
+          filterToActualDailyDates: true,
+        })
+      : buildLoadCurveInsightsFromIntervalRows(
+          filterIntervalRowsToActualDailyDates(intervalRowsForInsights, enrichedDaily, homeTimezone),
+          homeTimezone
+        );
     (dataset.insights as any).fifteenMinuteAverages = loadCurveInsights.fifteenMinuteAverages;
     (dataset.insights as any).timeOfDayBuckets = loadCurveInsights.timeOfDayBuckets;
   }

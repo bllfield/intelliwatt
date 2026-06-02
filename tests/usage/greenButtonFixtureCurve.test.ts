@@ -4,7 +4,11 @@ import path from "path";
 import { describe, expect, it } from "vitest";
 
 import { createHomeIntervalCalendar, localDateKey } from "@/lib/time/homeIntervalCalendar";
-import { resolveLatestCompleteOrAvailableGreenButtonDateKey } from "@/lib/usage/greenButtonCoverage";
+import { buildGreenButtonLoadCurveInsightsFromSeriesRows } from "@/lib/time/greenButtonPersistedIntervalConvert";
+import {
+  countDistinctLocalSlotsByDateKey,
+  resolveLatestCompleteGreenButtonDateKeyFromSlotCounts,
+} from "@/lib/usage/greenButtonLocalSlot";
 import { coverageWindowEndingOnDateKey } from "@/lib/usage/canonicalMetadataWindow";
 import { normalizeGreenButtonReadingsTo15Min } from "@/lib/usage/greenButtonNormalize";
 import { extractEspiReadingsFromXmlForTest } from "@/tests/time/helpers/espiXmlTestExtract";
@@ -45,8 +49,8 @@ describe("GreenButtonDatanew.xml fixture integrity", () => {
     }
     expect(byHhmm.size).toBeGreaterThanOrEqual(90);
 
-    const anchor = resolveLatestCompleteOrAvailableGreenButtonDateKey(
-      normalized.map((row) => ({ timestamp: new Date(row.timestamp) })),
+    const anchor = resolveLatestCompleteGreenButtonDateKeyFromSlotCounts(
+      countDistinctLocalSlotsByDateKey(normalized.map((row) => ({ timestamp: new Date(row.timestamp) })))
     );
     expect(anchor).not.toBe("2026-03-08");
     const window = anchor ? coverageWindowEndingOnDateKey(anchor, 365) : null;
@@ -61,5 +65,25 @@ describe("GreenButtonDatanew.xml fixture integrity", () => {
       daysInWindow.add(dateKey);
     }
     expect(daysInWindow.size).toBe(365);
+
+    const inWindowRows = normalized
+      .filter((row) => {
+        const dk = localDateKey(new Date(row.timestamp).toISOString(), home);
+        return dk && dk >= window.startDate && dk <= window.endDate;
+      })
+      .map((row) => ({
+        timestamp: new Date(row.timestamp).toISOString(),
+        kwh: row.consumptionKwh,
+      }));
+    const sharedDisplayCurve = buildGreenButtonLoadCurveInsightsFromSeriesRows(inWindowRows, {
+      homeTimezone: "America/Chicago",
+      meta: { greenButtonIntervalTimestampMode: "home_local", actualSource: "GREEN_BUTTON" },
+    }).fifteenMinuteAverages;
+    const slot00 = sharedDisplayCurve.find((row) => row.hhmm === "00:00")?.avgKw;
+    const slot05 = sharedDisplayCurve.find((row) => row.hhmm === "05:00")?.avgKw;
+    expect(slot00).toBeGreaterThan(0.9);
+    expect(slot00).toBeLessThan(1.4);
+    expect(slot05).toBeGreaterThan(1);
+    expect(sharedDisplayCurve.length).toBeGreaterThanOrEqual(90);
   }, 120_000);
 });

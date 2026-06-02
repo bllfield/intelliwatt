@@ -324,6 +324,7 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
     timezone,
     coverageStart,
     coverageEnd,
+    meta,
   }).fifteenMinuteAverages;
   const totalsFromApi = dataset?.totals;
   const totalsFromSeries =
