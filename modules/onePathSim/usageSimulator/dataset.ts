@@ -900,14 +900,14 @@ function computeFifteenMinuteAverages(
   intervals: Array<{ timestamp: string; consumption_kwh: number }>,
   timezone: string
 ) {
-  return buildFifteenMinuteAveragesFromIntervalRows(intervals, timezone);
+  return buildLoadCurveInsightsFromIntervalRows(intervals, timezone).fifteenMinuteAverages;
 }
 
 function computeTimeOfDayBuckets(
   intervals: Array<{ timestamp: string; consumption_kwh: number }>,
   timezone: string
 ) {
-  return buildTimeOfDayBucketsFromIntervalRows(intervals, timezone);
+  return buildLoadCurveInsightsFromIntervalRows(intervals, timezone).timeOfDayBuckets;
 }
 
 function excludedDateKeysFromTravelRanges(
