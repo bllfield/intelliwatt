@@ -13,6 +13,7 @@ import {
   convertGreenButtonSeriesRowsToHome,
   isGreenButtonBackedDatasetMeta,
   resolveGreenButtonIntervalDeliveryFromMeta,
+  resolveGreenButtonPastDisplayMeta,
 } from "@/lib/time/greenButtonPersistedIntervalConvert";
 import { resolvePastSimDisplayFifteenMinuteCurve } from "@/lib/usage/pastSimDisplayFifteenMinuteCurve";
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
@@ -382,7 +383,11 @@ export function buildOnePathRunReadOnlyView(args: {
     : [];
   const compareProjection = asRecord(readModel.compareProjection) ?? {};
   const tuningSummary = asRecord(readModel.tuningSummary) ?? {};
-  const compareRowsPrimary = asCompareRows(compareProjection.rows);
+  const datasetMetaCompareRows = Array.isArray((meta as { validationCompareRows?: unknown })?.validationCompareRows)
+    ? asCompareRows((meta as { validationCompareRows: unknown[] }).validationCompareRows)
+    : [];
+  const compareRowsPrimary =
+    datasetMetaCompareRows.length > 0 ? datasetMetaCompareRows : asCompareRows(compareProjection.rows);
   const selectedValidationRows = asArray<Record<string, unknown>>(tuningSummary.selectedValidationRows);
   let compareRows = compareRowsPrimary.length ? compareRowsPrimary : asCompareRows(selectedValidationRows);
   const sageByDate =
@@ -443,6 +448,28 @@ export function buildOnePathRunReadOnlyView(args: {
           : viewModel.derived.daily,
       smtPendingDateKeys
     );
+    const displayDailyForCurve = dailyRows.map((row) => ({
+      date: row.date,
+      source: row.source,
+      sourceDetail: row.sourceDetail,
+    }));
+    const sageIntervals15 = asArray(asRecord(args.sageActualDataset)?.intervals15);
+    const sageBackedGreenButtonCurve =
+      isGreenButtonBackedDatasetMeta(meta) && sageIntervals15.length > 0
+        ? resolvePastSimDisplayFifteenMinuteCurve({
+            insightsFifteenMinuteAverages: [],
+            intervals15: sageIntervals15,
+            hasSimulatedFill: Boolean(viewModel.coverage.hasSimulatedFill),
+            displayDaily: displayDailyForCurve,
+            timezone,
+            coverageStart: viewModel.coverage.start,
+            coverageEnd: viewModel.coverage.end,
+            meta: resolveGreenButtonPastDisplayMeta({
+              actualSource: "GREEN_BUTTON",
+              greenButtonIntervalTimestampMode: "home_local",
+            }),
+          })
+        : null;
     const pastFifteenCurve = resolvePastSimDisplayFifteenMinuteCurve({
       insightsFifteenMinuteAverages: datasetInsights.fifteenMinuteAverages as Array<{
         hhmm?: string;
@@ -450,14 +477,20 @@ export function buildOnePathRunReadOnlyView(args: {
       }>,
       intervals15: asArray(asRecord(dataset.series)?.intervals15),
       hasSimulatedFill: Boolean(viewModel.coverage.hasSimulatedFill),
-      displayDaily: viewModel.derived.daily,
+      displayDaily: displayDailyForCurve,
       timezone,
       coverageStart: viewModel.coverage.start,
       coverageEnd: viewModel.coverage.end,
       meta,
     });
-    fifteenMinuteAverages = pastFifteenCurve.fifteenMinuteAverages;
-    fifteenMinuteCurveSourceOwner = pastFifteenCurve.sourceOwner;
+    if (sageBackedGreenButtonCurve && sageBackedGreenButtonCurve.fifteenMinuteAverages.length > 0) {
+      fifteenMinuteAverages = sageBackedGreenButtonCurve.fifteenMinuteAverages;
+      fifteenMinuteCurveSourceOwner =
+        "resolvePastSimDisplayFifteenMinuteCurve(sage actual intervals, GB Past display parity)";
+    } else {
+      fifteenMinuteAverages = pastFifteenCurve.fifteenMinuteAverages;
+      fifteenMinuteCurveSourceOwner = pastFifteenCurve.sourceOwner;
+    }
     if (sageByDate.size > 0 || (args.smtSlotCompleteDateKeys?.size ?? 0) > 0) {
       dailyRows = applyPastSimDisplayTruthOverlay(dailyRows, {
         sageByDate,

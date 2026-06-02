@@ -34,6 +34,10 @@ function MetricCard(props: { label: string; value: string; note?: string }) {
   );
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
 function isRenderableRunReadOnlyView(value: unknown): value is OnePathRunReadOnlyModel {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const candidate = value as Record<string, unknown>;
@@ -58,17 +62,25 @@ export function OnePathRunReadOnlyView(props: {
   const [dailyView, setDailyView] = useState<"chart" | "table">("chart");
   const [compareExpanded, setCompareExpanded] = useState(PAST_VALIDATION_COMPARE_DEFAULT_EXPANDED);
   const isBaselinePassthrough = props.runType === "BASELINE_PASSTHROUGH";
+  const readModel = asRecord(props.readModel) ?? {};
   const derivedView = useMemo(
     () =>
       buildOnePathRunReadOnlyView({
         dataset: props.dataset ?? null,
         engineInput: props.engineInput ?? null,
         readModel: props.readModel ?? null,
+        sageActualDataset:
+          readModel.sageActualDataset && typeof readModel.sageActualDataset === "object"
+            ? (readModel.sageActualDataset as Record<string, unknown>)
+            : null,
+        sageActualDaily: Array.isArray(readModel.sageActualDaily)
+          ? (readModel.sageActualDaily as Array<{ date: string; kwh: number }>)
+          : null,
       }),
-    [props.dataset, props.engineInput, props.readModel]
+    [props.dataset, props.engineInput, props.readModel, readModel.sageActualDataset, readModel.sageActualDaily]
   );
   const suppliedView = isRenderableRunReadOnlyView(props.view) ? props.view : null;
-  const view = suppliedView ?? derivedView;
+  const view = props.dataset && props.readModel ? (derivedView ?? suppliedView) : (suppliedView ?? derivedView);
 
   if (!view) return null;
 

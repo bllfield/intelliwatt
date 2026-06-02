@@ -73,6 +73,7 @@ import { buildOnePathManualUsagePastSimReadResult } from "@/modules/onePathSim/m
 import { buildOnePathManualStageOnePreview, buildOnePathManualStageOneView } from "@/modules/onePathSim/manualStageView";
 import { buildOnePathRunReadOnlyView } from "@/modules/onePathSim/runReadOnlyView";
 import type { ManualUsagePayload } from "@/modules/onePathSim/simulatedUsage/types";
+import { loadPastSimBuildInputsForRead } from "@/lib/usage/loadPastSimBuildInputsForRead";
 import { resolveValidationCompareProjectionForRead } from "@/lib/usage/pastSimValidationCompareRead";
 import { createSimCorrelationId, getMemoryRssMb, logSimPipelineEvent } from "@/modules/onePathSim/usageSimulator/simObservability";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/onePathSim/usageSimulator/metadataWindow";
@@ -709,10 +710,16 @@ async function buildPastSimRunReadbackResponse(args: {
     preferredActualSource:
       args.preferredActualSource ?? args.smtPostSimHealing?.preferredActualSource ?? null,
   });
+  const buildInputsForCompare = await loadPastSimBuildInputsForRead({
+    userId: args.userId,
+    houseId: args.houseId,
+    scenarioId: args.scenarioId,
+  });
   const compareProjection = resolveValidationCompareProjectionForRead({
     dataset: readback.dataset,
     actualDataset: sageTruthForCompare?.dataset ?? null,
     displayDataset: readback.dataset,
+    buildInputs: buildInputsForCompare,
   });
   logSimPipelineEvent("one_path_admin_past_compare_sidecar_success", {
     correlationId: args.correlationId ?? null,
@@ -802,13 +809,17 @@ async function buildPastSimRunReadbackResponse(args: {
     manualStageOneView: null,
     runDisplayView: compactRunDisplayView,
     artifact: null,
-    readModel: buildCompactSimulationReadModel({
-      artifact: null,
-      artifactDataset: asRecord(readback.dataset),
-      artifactDatasetMeta: asRecord(asRecord(readback.dataset)?.meta),
-      runDisplayView: compactRunDisplayView,
-      compareProjection,
-    }),
+    readModel: {
+      ...buildCompactSimulationReadModel({
+        artifact: null,
+        artifactDataset: asRecord(readback.dataset),
+        artifactDatasetMeta: asRecord(asRecord(readback.dataset)?.meta),
+        runDisplayView: compactRunDisplayView,
+        compareProjection,
+      }),
+      sageActualDataset: sageTruth?.dataset ?? null,
+      sageActualDaily: sageDisplayArgs.sageActualDaily ?? null,
+    },
   };
 }
 
@@ -2005,10 +2016,17 @@ export async function POST(request: NextRequest) {
         smtSourceEsiid,
       });
       if (shouldReturnCompactPastResponse) {
+        const buildInputsForCompare = await loadPastSimBuildInputsForRead({
+          userId: effectiveUserId,
+          houseId: effectiveHouseId,
+          scenarioId: String(effectiveRawInputBase.scenarioId ?? ""),
+        });
         const compareProjectionForPast = resolveValidationCompareProjectionForRead({
           dataset: artifactDataset,
           actualDataset: sageTruthForPastDisplay?.dataset ?? null,
           displayDataset: artifactDataset,
+          buildInputs: buildInputsForCompare,
+          engineInput: asRecord(engineInput),
         });
         const compactRunDisplayView =
           buildOnePathRunReadOnlyView({
@@ -2017,13 +2035,17 @@ export async function POST(request: NextRequest) {
             readModel: { compareProjection: compareProjectionForPast },
             ...sageDisplayArgsForPast,
           }) ?? null;
-        const compactReadModel = buildCompactSimulationReadModel({
-          artifact: asRecord(artifact),
-          artifactDataset,
-          artifactDatasetMeta,
-          runDisplayView: compactRunDisplayView,
-          compareProjection: compareProjectionForPast,
-        });
+        const compactReadModel = {
+          ...buildCompactSimulationReadModel({
+            artifact: asRecord(artifact),
+            artifactDataset,
+            artifactDatasetMeta,
+            runDisplayView: compactRunDisplayView,
+            compareProjection: compareProjectionForPast,
+          }),
+          sageActualDataset: sageTruthForPastDisplay?.dataset ?? null,
+          sageActualDaily: sageDisplayArgsForPast.sageActualDaily ?? null,
+        };
         return NextResponse.json({
           ok: true,
           debugDiagnosticsIncluded: false,

@@ -29,6 +29,18 @@ describe("greenButtonPastTrustedPool", () => {
     }
   });
 
+  it("uses producer trustedHomeDateKeys when provided (home-local Past producer pool)", () => {
+    const candidates = resolveGreenButtonPastValidationCandidateDateKeys({
+      trustedUtcDateKeys: [],
+      trustedHomeDateKeys: new Set(["2026-05-14", "2026-05-15", "2026-05-16"]),
+      intervals: [],
+      timezone: "America/Chicago",
+      windowStart: "2026-05-14",
+      windowEnd: "2026-05-16",
+    });
+    expect(candidates).toEqual(["2026-05-14", "2026-05-15", "2026-05-16"]);
+  });
+
   it("builds a validation candidate pool larger than Chicago 96/96 on raw UTC timestamps", () => {
     const utcGridIntervals = Array.from({ length: 96 * 3 }, (_, index) => {
       const dayOffset = Math.floor(index / 96);

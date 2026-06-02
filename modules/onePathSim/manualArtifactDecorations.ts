@@ -5,6 +5,7 @@ import {
 } from "@/modules/onePathSim/manualReadModel";
 import { buildOnePathManualStageOneView } from "@/modules/onePathSim/manualStageView";
 import type { ManualUsagePayload } from "@/modules/onePathSim/simulatedUsage/types";
+import { loadPastSimBuildInputsForRead } from "@/lib/usage/loadPastSimBuildInputsForRead";
 import { resolveValidationCompareProjectionForRead } from "@/lib/usage/pastSimValidationCompareRead";
 import {
   buildSharedPastSimDiagnostics,
@@ -183,10 +184,19 @@ export async function buildOnePathManualArtifactDecorations(args: {
     args.manualUsagePayload !== undefined
       ? { payload: args.manualUsagePayload }
       : await getManualUsageInputForUserHouse({ userId: args.userId, houseId: args.houseId });
+  const buildInputs =
+    args.scenarioId != null
+      ? await loadPastSimBuildInputsForRead({
+          userId: args.userId,
+          houseId: args.houseId,
+          scenarioId: args.scenarioId,
+        })
+      : null;
   const compareProjection = resolveValidationCompareProjectionForRead({
     dataset: args.dataset,
     actualDataset: args.actualDataset,
     displayDataset: args.displayDataset,
+    buildInputs,
   });
   const manualReadModel = buildManualUsageReadModel({
     payload: manualUsageRecord.payload,

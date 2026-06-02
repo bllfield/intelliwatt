@@ -5250,10 +5250,12 @@ async function recalcSimulatorBuildImpl(args: {
         intervalsForValidationWindow = loaded.engineSourceIntervals.map((row) => ({
           timestamp: row.timestamp,
           kwh: row.kwh,
+          homeDateKey: row.homeDateKey,
         }));
         greenButtonTrustedUtcDateKeysForBuild = [...loaded.trustedUtcDateKeys];
         candidateDateKeys = resolveGreenButtonPastValidationCandidateDateKeys({
           trustedUtcDateKeys: greenButtonTrustedUtcDateKeysForBuild,
+          trustedHomeDateKeys: loaded.trustedHomeDateKeys,
           intervals: intervalsForValidationWindow,
           timezone: timezoneForStoredBuild,
           windowStart: selectionStart,
@@ -5328,6 +5330,8 @@ async function recalcSimulatorBuildImpl(args: {
         preloadWindowEnd: selectionEnd,
         preloadWindowSource: sharedPastRecalcWindow?.source ?? "canonical_coverage_fallback",
         validationSelectionUsesSharedPreloadWindow: Boolean(sharedPastRecalcWindow),
+        validationCandidateDateKeyCount: candidateDateKeys.length,
+        validationSelectedDateKeyCount: effectiveValidationOnlyDateKeysLocal.size,
         durationMs: Date.now() - validationSelectionStartedAt,
         preloadFetchCount: preloadStats?.fetchCount,
         preloadReuseCount: preloadStats?.reuseCount,
@@ -5911,6 +5915,12 @@ async function recalcSimulatorBuildImpl(args: {
     validationOnlyDateKeysLocal: Array.isArray((buildInputs as any).validationOnlyDateKeysLocal)
       ? ((buildInputs as any).validationOnlyDateKeysLocal as string[])
       : [],
+    validationActualDailyKwhByDateLocal:
+      (buildInputs as any).validationActualDailyKwhByDateLocal &&
+      typeof (buildInputs as any).validationActualDailyKwhByDateLocal === "object"
+        ? (buildInputs as any).validationActualDailyKwhByDateLocal
+        : (dataset as any)?.meta?.validationActualDailyKwhByDateLocal,
+    effectiveValidationSelectionMode: (buildInputs as any).effectiveValidationSelectionMode ?? null,
     monthlyTargetConstructionDiagnostics: built.monthlyTargetConstructionDiagnostics ?? null,
     manualMonthlyInputState: built.manualMonthlyInputState ?? null,
     manualBillPeriods: built.manualBillPeriods ?? [],

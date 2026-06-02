@@ -96,6 +96,14 @@ export function hasGreenButtonSourceDateShiftMap(
  * Past/read display: producer-shifted GB Past stores UTC instants (home_local) but legacy
  * artifacts may still carry utcDayGrid. Use home_local for display bucketing in that case.
  */
+function isGreenButtonPastSimArtifactMeta(meta: Record<string, unknown>): boolean {
+  if (meta.datasetKind === "SIMULATED") return true;
+  if (String(meta.scenarioKey ?? "").trim() === "PAST") return true;
+  if (meta.artifactSource != null || meta.artifactReadMode != null) return true;
+  if (meta.greenButtonPastProducer === true) return true;
+  return false;
+}
+
 export function resolveGreenButtonPastDisplayMeta(
   meta: Record<string, unknown> | null | undefined
 ): Record<string, unknown> | null | undefined {
@@ -103,7 +111,7 @@ export function resolveGreenButtonPastDisplayMeta(
   if (meta.actualSource !== "GREEN_BUTTON") return meta;
   const mode = String(meta.greenButtonIntervalTimestampMode ?? "").trim();
   if (mode === "home_local") return meta;
-  if (hasGreenButtonSourceDateShiftMap(meta)) {
+  if (hasGreenButtonSourceDateShiftMap(meta) || isGreenButtonPastSimArtifactMeta(meta)) {
     return { ...meta, greenButtonIntervalTimestampMode: "home_local" };
   }
   return meta;

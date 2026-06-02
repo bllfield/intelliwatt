@@ -30,9 +30,20 @@ function validationOnlyDateKeysFromMeta(meta: Record<string, unknown> | null | u
 /**
  * Merge build-input validation keys and sage/actual daily totals before attach (shared read path).
  */
+function validationKeysFromRecord(record: Record<string, unknown> | null | undefined): string[] {
+  if (!record) return [];
+  const raw = Array.isArray(record.validationOnlyDateKeysLocal)
+    ? (record.validationOnlyDateKeysLocal as unknown[])
+    : [];
+  return raw
+    .map((v) => String(v ?? "").slice(0, 10))
+    .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk));
+}
+
 export function enrichPastDatasetValidationCompareMetaForRead(args: {
   dataset: any;
   buildInputs?: Record<string, unknown> | null;
+  engineInput?: Record<string, unknown> | null;
   actualDataset?: any | null;
 }): any {
   const dataset = args.dataset;
@@ -42,23 +53,26 @@ export function enrichPastDatasetValidationCompareMetaForRead(args: {
       ? ({ ...(dataset.meta as Record<string, unknown>) } as Record<string, unknown>)
       : {};
 
-  const fromBuild =
-    args.buildInputs &&
-    typeof args.buildInputs === "object" &&
-    Array.isArray((args.buildInputs as { validationOnlyDateKeysLocal?: unknown }).validationOnlyDateKeysLocal)
-      ? ((args.buildInputs as { validationOnlyDateKeysLocal: unknown[] }).validationOnlyDateKeysLocal)
-          .map((v) => String(v ?? "").slice(0, 10))
-          .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
-      : [];
-
+  const fromBuild = validationKeysFromRecord(
+    args.buildInputs && typeof args.buildInputs === "object" ? args.buildInputs : null
+  );
+  const fromEngine = validationKeysFromRecord(
+    args.engineInput && typeof args.engineInput === "object" ? args.engineInput : null
+  );
   const existingKeys = validationOnlyDateKeysFromMeta(prevMeta);
-  if (fromBuild.length > 0 && existingKeys.length === 0) {
-    prevMeta.validationOnlyDateKeysLocal = fromBuild;
+  const mergedKeys = existingKeys.length > 0 ? existingKeys : fromBuild.length > 0 ? fromBuild : fromEngine;
+  if (mergedKeys.length > 0 && existingKeys.length === 0) {
+    prevMeta.validationOnlyDateKeysLocal = mergedKeys;
   }
 
   const buildActualDaily =
     args.buildInputs && typeof args.buildInputs === "object"
       ? ((args.buildInputs as { validationActualDailyKwhByDateLocal?: Record<string, unknown> })
+          .validationActualDailyKwhByDateLocal as Record<string, unknown> | undefined)
+      : undefined;
+  const engineActualDaily =
+    args.engineInput && typeof args.engineInput === "object"
+      ? ((args.engineInput as { validationActualDailyKwhByDateLocal?: Record<string, unknown> })
           .validationActualDailyKwhByDateLocal as Record<string, unknown> | undefined)
       : undefined;
   const persistedActual: Record<string, number> = {};
@@ -73,6 +87,7 @@ export function enrichPastDatasetValidationCompareMetaForRead(args: {
     prevMeta.validationActualDailyKwhByDateLocal as Record<string, unknown> | undefined
   );
   mergeActualDailyKwh(buildActualDaily);
+  mergeActualDailyKwh(engineActualDaily);
 
   const keys = validationOnlyDateKeysFromMeta(prevMeta);
   if (args.actualDataset && keys.length > 0) {
@@ -99,12 +114,21 @@ export function resolveValidationCompareProjectionForRead(args: {
   actualDataset?: any | null;
   displayDataset?: any | null;
   buildInputs?: Record<string, unknown> | null;
+  engineInput?: Record<string, unknown> | null;
 }): ValidationCompareProjectionSidecar {
   let working = enrichPastDatasetValidationCompareMetaForRead({
     dataset: args.dataset,
     buildInputs: args.buildInputs ?? null,
+    engineInput: args.engineInput ?? null,
     actualDataset: args.actualDataset ?? null,
   });
+
+  const persistedRows = Array.isArray((working as { meta?: { validationCompareRows?: unknown } })?.meta?.validationCompareRows)
+    ? ((working as { meta: { validationCompareRows: unknown[] } }).meta.validationCompareRows)
+    : [];
+  if (persistedRows.length > 0) {
+    return buildValidationCompareProjectionSidecar(working);
+  }
 
   try {
     const attached = attachValidationCompareProjection(working);
