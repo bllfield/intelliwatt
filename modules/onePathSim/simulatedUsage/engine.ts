@@ -2117,22 +2117,40 @@ export function buildPastSimulatedBaselineV1(args: {
       const profileWd = profileMonthFallback(ym, "weekday");
       const profileWe = profileMonthFallback(ym, "weekend");
       const refIdx = pastProfile.monthKeys.indexOf(ym);
+      const refWdCount = pastProfile.weekdayCountByMonth[ym] ?? 0;
+      const refWeCount = pastProfile.weekendCountByMonth[ym] ?? 0;
+      const refWdAvg = refIdx >= 0 ? pastProfile.avgKwhPerDayWeekdayByMonth[refIdx] : undefined;
+      const refWeAvg = refIdx >= 0 ? pastProfile.avgKwhPerDayWeekendByMonth[refIdx] : undefined;
+      const refWdPoolEligible =
+        refWdCount >= MIN_DAYS_FOR_PROFILE_USE &&
+        refWdAvg != null &&
+        Number.isFinite(refWdAvg) &&
+        refWdAvg > 0;
+      const refWePoolEligible =
+        refWeCount >= MIN_DAYS_FOR_PROFILE_USE &&
+        refWeAvg != null &&
+        Number.isFinite(refWeAvg) &&
+        refWeAvg > 0;
       const hasProfileValue =
         (profileWd != null && Number.isFinite(profileWd) && profileWd > 0) ||
         (profileWe != null && Number.isFinite(profileWe) && profileWe > 0);
       if (hasProfileValue) {
-        wdByMonth[i] =
-          profileWd != null && Number.isFinite(profileWd) && profileWd > 0
+        wdByMonth[i] = refWdPoolEligible
+          ? refWdAvg!
+          : profileWd != null && Number.isFinite(profileWd) && profileWd > 0
             ? profileWd
             : (refIdx >= 0 ? pastProfile.avgKwhPerDayWeekdayByMonth[refIdx] : 0) ?? 0;
-        weByMonth[i] =
-          profileWe != null && Number.isFinite(profileWe) && profileWe > 0
+        weByMonth[i] = refWePoolEligible
+          ? refWeAvg!
+          : profileWe != null && Number.isFinite(profileWe) && profileWe > 0
             ? profileWe
             : (refIdx >= 0 ? pastProfile.avgKwhPerDayWeekendByMonth[refIdx] : 0) ?? 0;
-        const useWdCount = profileWd != null && Number.isFinite(profileWd) && profileWd > 0;
-        const useWeCount = profileWe != null && Number.isFinite(profileWe) && profileWe > 0;
-        wdCount[ym] = useWdCount ? MIN_DAYS_FOR_PROFILE_USE : (pastProfile.weekdayCountByMonth[ym] ?? 0);
-        weCount[ym] = useWeCount ? MIN_DAYS_FOR_PROFILE_USE : (pastProfile.weekendCountByMonth[ym] ?? 0);
+        const useWdCount =
+          !refWdPoolEligible && profileWd != null && Number.isFinite(profileWd) && profileWd > 0;
+        const useWeCount =
+          !refWePoolEligible && profileWe != null && Number.isFinite(profileWe) && profileWe > 0;
+        wdCount[ym] = refWdPoolEligible ? refWdCount : useWdCount ? MIN_DAYS_FOR_PROFILE_USE : (pastProfile.weekdayCountByMonth[ym] ?? 0);
+        weCount[ym] = refWePoolEligible ? refWeCount : useWeCount ? MIN_DAYS_FOR_PROFILE_USE : (pastProfile.weekendCountByMonth[ym] ?? 0);
         monthOverallCount[ym] = wdCount[ym]! + weCount[ym]!;
         monthOverallAvg[ym] =
           monthOverallCount[ym]! > 0

@@ -277,6 +277,53 @@ describe("buildPastSimulatedBaselineV1 resolvedSimFingerprint consumption", () =
     expect(l1).toBeGreaterThan(0.05);
   });
 
+  it("weather_donor_first models validation keep-ref from hot reference donors (not usage-shape anchor)", () => {
+    const home = resolveHomeCalendarForActualSource("GREEN_BUTTON", "America/Chicago");
+    const gridCtx = buildHomeDayGridContext({
+      startDateKey: "2026-05-10",
+      endDateKey: "2026-05-17",
+      home,
+    });
+    const validationDate = "2026-05-15";
+    const kwhPerSlot = 0.95;
+    const actualIntervals: Array<{ timestamp: string; kwh: number }> = [];
+    for (const dayStartMs of gridCtx.canonicalDayStartsMs) {
+      for (const ts of gridCtx.getDayGridTimestamps(dayStartMs)) {
+        actualIntervals.push({ timestamp: ts, kwh: kwhPerSlot });
+      }
+    }
+    const hotWx = { tAvgF: 88, tMinF: 78, tMaxF: 98, hdd65: 0, cdd65: 22 };
+    const actualWxByDateKey = new Map(
+      gridCtx.canonicalDayStartsMs.map((ms) => {
+        const dk = gridCtx.dateKeyFromTimestamp(gridCtx.getDayGridTimestamps(ms)[0]!);
+        return [dk, hotWx] as const;
+      })
+    );
+    const weatherRun = buildPastSimulatedBaselineV1({
+      actualIntervals,
+      canonicalDayStartsMs: gridCtx.canonicalDayStartsMs,
+      excludedDateKeys: new Set<string>(),
+      dateKeyFromTimestamp: gridCtx.dateKeyFromTimestamp,
+      getDayGridTimestamps: gridCtx.getDayGridTimestamps,
+      intervalTrustedSource: "GREEN_BUTTON",
+      timezoneForProfile: "America/Chicago",
+      homeProfile: { squareFeet: 2400 },
+      usageShapeProfile: {
+        weekdayAvgByMonthKey: { "2026-05": 52 },
+        weekendAvgByMonthKey: { "2026-05": 50 },
+      },
+      actualWxByDateKey,
+      collectSimulatedDayResults: true,
+      forceModeledOutputKeepReferencePoolDateKeys: new Set([validationDate]),
+      modeledDaySelectionStrategy: "weather_donor_first",
+      resolvedSimFingerprint: baseResolved({ blendMode: "usage_only", usageBlendWeight: 1 }),
+    });
+    const wxDay = weatherRun.dayResults.find((r) => String(r.localDate).slice(0, 10) === validationDate);
+    expect(wxDay?.finalDayKwh).toBeDefined();
+    expect(wxDay!.finalDayKwh!).toBeGreaterThan(75);
+    expect(wxDay?.donorSelectionModeUsed).not.toBe("calendar_fallback");
+  });
+
   it("validation keep-ref keeps scored day actuals in the weather donor pool", () => {
     const home = resolveHomeCalendarForActualSource("GREEN_BUTTON", "America/Chicago");
     const gridCtx = buildHomeDayGridContext({
