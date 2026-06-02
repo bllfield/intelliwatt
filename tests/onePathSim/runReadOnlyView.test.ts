@@ -158,9 +158,7 @@ describe("buildOnePathRunReadOnlyView", () => {
       { hhmm: "19:00", avgKw: 2 },
       { hhmm: "19:15", avgKw: 3 },
     ]);
-    expect(view?.fifteenMinuteCurveSourceOwner).toBe(
-      "resolvePastSimDisplayFifteenMinuteCurve(...).intervals15Fallback"
-    );
+    expect(view?.fifteenMinuteCurveSourceOwner).toContain("buildUserUsageDashboardViewModel");
   });
 
   it("prefers current run intervals over stored 15-minute insights to avoid stale display curves", () => {
@@ -206,9 +204,7 @@ describe("buildOnePathRunReadOnlyView", () => {
       { hhmm: "17:30", avgKw: 3 },
       { hhmm: "17:45", avgKw: 4 },
     ]);
-    expect(view?.fifteenMinuteCurveSourceOwner).toBe(
-      "greenButtonPersistedIntervalConvert.buildGreenButtonLoadCurveInsightsFromSeriesRows"
-    );
+    expect(view?.fifteenMinuteCurveSourceOwner).toContain("buildUserUsageDashboardViewModel");
   });
 
   it("buckets Green Button Past intervals in home-local time (same as user Usage dashboard)", () => {
@@ -252,9 +248,7 @@ describe("buildOnePathRunReadOnlyView", () => {
       { hhmm: "14:30", avgKw: 3 },
       { hhmm: "14:45", avgKw: 4 },
     ]);
-    expect(view?.fifteenMinuteCurveSourceOwner).toBe(
-      "greenButtonPersistedIntervalConvert.buildGreenButtonLoadCurveInsightsFromSeriesRows"
-    );
+    expect(view?.fifteenMinuteCurveSourceOwner).toContain("buildUserUsageDashboardViewModel");
   });
 
   it("rebuilds Green Button Past curves from intervals when cached artifacts omit explicit grid metadata", () => {

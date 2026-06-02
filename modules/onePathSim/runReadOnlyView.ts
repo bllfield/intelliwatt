@@ -15,7 +15,6 @@ import {
   resolveGreenButtonIntervalDeliveryFromMeta,
   resolveGreenButtonPastDisplayMeta,
 } from "@/lib/time/greenButtonPersistedIntervalConvert";
-import { resolvePastSimDisplayFifteenMinuteCurve } from "@/lib/usage/pastSimDisplayFifteenMinuteCurve";
 import {
   isGreenButtonUsageDataset,
   shouldUseGreenButtonPersistedValidationActualForCompare,
@@ -455,30 +454,11 @@ export function buildOnePathRunReadOnlyView(args: {
           : viewModel.derived.daily,
       smtPendingDateKeys
     );
-    const displayDailyForCurve = dailyRows.map((row) => ({
-      date: row.date,
-      source: row.source,
-      sourceDetail: row.sourceDetail,
-    }));
-    const sageIntervals15 = asArray<Interval15SeriesRow>(asRecord(args.sageActualDataset)?.intervals15);
-    const sageIsGreenButtonActual =
-      isGreenButtonBackedDatasetMeta(meta) && isGreenButtonUsageDataset(args.sageActualDataset);
-    const pastFifteenCurve = resolvePastSimDisplayFifteenMinuteCurve({
-      insightsFifteenMinuteAverages: datasetInsights.fifteenMinuteAverages as Array<{
-        hhmm?: string;
-        avgKw?: number;
-      }>,
-      intervals15: asArray<Interval15SeriesRow>(asRecord(dataset.series)?.intervals15),
-      upstreamIntervals15: sageIsGreenButtonActual ? sageIntervals15 : [],
-      hasSimulatedFill: Boolean(viewModel.coverage.hasSimulatedFill),
-      displayDaily: displayDailyForCurve,
-      timezone,
-      coverageStart: viewModel.coverage.start,
-      coverageEnd: viewModel.coverage.end,
-      meta,
-    });
-    fifteenMinuteAverages = pastFifteenCurve.fifteenMinuteAverages;
-    fifteenMinuteCurveSourceOwner = pastFifteenCurve.sourceOwner;
+    // Past sim 15-minute curve: same inputs as user Usage (`buildUserUsageDashboardViewModel`).
+    // Do not rebuild from sage upstream or interval-backed daily relabeling — that diverged GB Past curves.
+    fifteenMinuteAverages = viewModel.derived.fifteenCurve;
+    fifteenMinuteCurveSourceOwner =
+      "buildUserUsageDashboardViewModel(...).derived.fifteenCurve (shared Past sim display parity)";
     if (sageByDate.size > 0 || (args.smtSlotCompleteDateKeys?.size ?? 0) > 0) {
       dailyRows = applyPastSimDisplayTruthOverlay(dailyRows, {
         sageByDate,

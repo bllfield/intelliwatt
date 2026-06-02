@@ -44,9 +44,7 @@ describe("resolvePastSimDisplayFifteenMinuteCurve", () => {
     const adminView = buildOnePathRunReadOnlyView({ dataset });
 
     expect(viewModel?.derived.fifteenCurve).toEqual(adminView?.fifteenMinuteAverages);
-    expect(adminView?.fifteenMinuteCurveSourceOwner).toBe(
-      "greenButtonPersistedIntervalConvert.buildGreenButtonLoadCurveInsightsFromSeriesRows"
-    );
+    expect(adminView?.fifteenMinuteCurveSourceOwner).toContain("buildUserUsageDashboardViewModel");
     expect(viewModel?.derived.fifteenCurve.find((row) => row.hhmm === "12:00")?.avgKw).toBe(8);
   });
 
@@ -71,6 +69,43 @@ describe("resolvePastSimDisplayFifteenMinuteCurve", () => {
     });
 
     expect(result.fifteenMinuteAverages.find((row) => row.hhmm === "12:00")?.avgKw).toBe(8);
+  });
+
+  it("Past simulated fill ignores upstream sage GB intervals (artifact series only)", () => {
+    const timezone = "America/Chicago";
+    const dataset = {
+      daily: [
+        { date: "2026-06-01", kwh: 40, source: "ACTUAL" },
+        { date: "2026-06-02", kwh: 40, source: "ACTUAL" },
+        { date: "2026-06-03", kwh: 20, source: "SIMULATED", sourceDetail: "SIMULATED (TRAVEL/VACANT)" },
+      ],
+      series: {
+        intervals15: [
+          { timestamp: "2026-06-01T17:00:00.000Z", kwh: 2 },
+          { timestamp: "2026-06-02T17:00:00.000Z", kwh: 2 },
+          { timestamp: "2026-06-03T17:00:00.000Z", kwh: 0.1 },
+        ],
+      },
+      insights: { fifteenMinuteAverages: [{ hhmm: "12:00", avgKw: 0.4 }] },
+      meta: {
+        datasetKind: "SIMULATED",
+        actualSource: "GREEN_BUTTON",
+        monthProvenanceByMonth: { "2026-06": "SIMULATED" },
+        timezone,
+        coverageStart: "2026-06-01",
+        coverageEnd: "2026-06-03",
+      },
+    };
+    const viewModel = buildUserUsageDashboardViewModel({ dataset, datasetError: null });
+    const adminView = buildOnePathRunReadOnlyView({
+      dataset,
+      sageActualDataset: {
+        intervals15: [{ timestamp: "2026-06-01T17:00:00.000Z", kwh: 0.05 }],
+        meta: { actualSource: "GREEN_BUTTON" },
+      },
+    });
+    expect(adminView?.fifteenMinuteAverages).toEqual(viewModel?.derived.fifteenCurve);
+    expect(adminView?.fifteenMinuteCurveSourceOwner).not.toContain("upstream GB actual");
   });
 
   it("prefers shared Green Button series curve over stale insights for ACTUAL usage", () => {

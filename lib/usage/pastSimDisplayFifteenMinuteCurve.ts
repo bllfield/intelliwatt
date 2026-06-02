@@ -18,7 +18,10 @@ import {
 export type PastSimDisplayFifteenMinuteCurveInput = {
   insightsFifteenMinuteAverages?: Array<{ hhmm?: string; avgKw?: number }> | null;
   intervals15?: Array<{ timestamp?: string; kwh?: number; consumption_kwh?: number }> | null;
-  /** Unshifted GB actual intervals (Usage dashboard parity); preferred over artifact series for Past display. */
+  /**
+   * Unshifted GB actual intervals from sage/usage read (baseline ACTUAL only).
+   * Past simulated-fill curves must use artifact `intervals15` — same as the user Usage page.
+   */
   upstreamIntervals15?: Array<{ timestamp?: string; kwh?: number; consumption_kwh?: number }> | null;
   hasSimulatedFill: boolean;
   displayDaily: Array<{ date?: string; source?: string; sourceDetail?: string }>;
@@ -193,10 +196,10 @@ export function resolvePastSimDisplayFifteenMinuteCurve(
       upstreamIntervals15.length === 0;
     const upstreamGreenButtonPast = greenButtonBacked && upstreamIntervals15.length > 0;
 
-    if (upstreamGreenButtonPast && greenButtonSeriesCurve.length > 0) {
+    if (upstreamGreenButtonPast && greenButtonSeriesCurve.length > 0 && !input.hasSimulatedFill) {
       return {
         fifteenMinuteAverages: greenButtonSeriesCurve,
-        sourceOwner: `${GREEN_BUTTON_CURVE_OWNER} (upstream GB actual intervals, Usage dashboard parity)`,
+        sourceOwner: `${GREEN_BUTTON_CURVE_OWNER} (upstream GB actual intervals, baseline ACTUAL parity)`,
       };
     }
 
