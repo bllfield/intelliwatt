@@ -175,6 +175,8 @@ function asArray<T = unknown>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
 }
 
+type Interval15SeriesRow = { timestamp?: string; kwh?: number; consumption_kwh?: number };
+
 function applySmtPendingLabelsToDailyRows(
   rows: Array<ReturnType<typeof dailyRowFieldsFromSourceRow>>,
   pendingSmtDateKeys: Set<string>
@@ -458,7 +460,7 @@ export function buildOnePathRunReadOnlyView(args: {
       source: row.source,
       sourceDetail: row.sourceDetail,
     }));
-    const sageIntervals15 = asArray(asRecord(args.sageActualDataset)?.intervals15);
+    const sageIntervals15 = asArray<Interval15SeriesRow>(asRecord(args.sageActualDataset)?.intervals15);
     const sageBackedGreenButtonCurve =
       isGreenButtonBackedDatasetMeta(meta) && sageIntervals15.length > 0
         ? resolvePastSimDisplayFifteenMinuteCurve({
@@ -480,7 +482,7 @@ export function buildOnePathRunReadOnlyView(args: {
         hhmm?: string;
         avgKw?: number;
       }>,
-      intervals15: asArray(asRecord(dataset.series)?.intervals15),
+      intervals15: asArray<Interval15SeriesRow>(asRecord(dataset.series)?.intervals15),
       hasSimulatedFill: Boolean(viewModel.coverage.hasSimulatedFill),
       displayDaily: displayDailyForCurve,
       timezone,
