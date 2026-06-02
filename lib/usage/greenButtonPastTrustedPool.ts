@@ -213,7 +213,7 @@ export function expandGreenButtonPastTrustedHomeDateKeysWithShiftedTargets(
   sourceDateByTargetDate?: Record<string, string> | null
 ): Set<string> {
   const out = new Set(trustedHome);
-  for (const dk of greenButtonShiftedTargetDateKeys(sourceDateByTargetDate ?? {})) {
+  for (const dk of Array.from(greenButtonShiftedTargetDateKeys(sourceDateByTargetDate ?? {}))) {
     out.add(dk);
   }
   return out;
