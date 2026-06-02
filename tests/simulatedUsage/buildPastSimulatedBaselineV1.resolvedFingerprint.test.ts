@@ -277,7 +277,7 @@ describe("buildPastSimulatedBaselineV1 resolvedSimFingerprint consumption", () =
     expect(l1).toBeGreaterThan(0.05);
   });
 
-  it("Green Button trusted actual-backed days join the weather donor reference pool", () => {
+  it("validation keep-ref keeps scored day actuals in the weather donor pool", () => {
     const home = resolveHomeCalendarForActualSource("GREEN_BUTTON", "America/Chicago");
     const gridCtx = buildHomeDayGridContext({
       startDateKey: "2026-05-14",
@@ -302,34 +302,40 @@ describe("buildPastSimulatedBaselineV1 resolvedSimFingerprint consumption", () =
     const actualWxByDateKey = new Map(
       ["2026-05-14", "2026-05-15", "2026-05-16"].map((dk) => [dk, wx] as const)
     );
-    const dbg: {
-      referenceDaysUsed?: number;
-      excludedDailyUsageMissingFingerprintDayCount?: number;
-      dayDiagnostics?: Array<{ dateKey?: string; dayType?: string }>;
-    } = {};
-    buildPastSimulatedBaselineV1({
+    const usageShapeProfile = {
+      weekdayAvgByMonthKey: { "2026-05": 45 },
+      weekendAvgByMonthKey: { "2026-05": 36 },
+    };
+    const common = {
       actualIntervals,
       canonicalDayStartsMs: gridCtx.canonicalDayStartsMs,
       canonicalDateKeyByDayStartMs,
       excludedDateKeys: new Set<string>(),
       dateKeyFromTimestamp: gridCtx.dateKeyFromTimestamp,
       getDayGridTimestamps: gridCtx.getDayGridTimestamps,
-      intervalTrustedSource: "GREEN_BUTTON",
+      intervalTrustedSource: "GREEN_BUTTON" as const,
       trustedActualDateKeys,
-      forceSimulateDateKeys: new Set([validationDate]),
       timezoneForProfile: "America/Chicago",
       homeProfile: { squareFeet: 2400 },
-      usageShapeProfile: {
-        weekdayAvgByMonthKey: { "2026-05": 45 },
-        weekendAvgByMonthKey: { "2026-05": 36 },
-      },
+      usageShapeProfile,
       actualWxByDateKey,
-      debug: { out: dbg as any, collectDayDiagnostics: true, maxDayDiagnostics: 10 },
+      collectSimulatedDayResults: true,
+    };
+    const forceExcludeDbg: { referenceDaysUsed?: number } = {};
+    buildPastSimulatedBaselineV1({
+      ...common,
+      forceSimulateDateKeys: new Set([validationDate]),
+      debug: { out: forceExcludeDbg as any },
     });
-    expect(dbg.referenceDaysUsed).toBe(2);
-    expect(dbg.excludedDailyUsageMissingFingerprintDayCount).toBe(0);
-    const forcedDiag = (dbg.dayDiagnostics ?? []).find((d) => d.dateKey === validationDate);
-    expect(forcedDiag?.dayType).toBe("SIMULATED");
+    const keepRefDbg: { referenceDaysUsed?: number } = {};
+    const keepRefRun = buildPastSimulatedBaselineV1({
+      ...common,
+      forceModeledOutputKeepReferencePoolDateKeys: new Set([validationDate]),
+      debug: { out: keepRefDbg as any },
+    });
+    expect(forceExcludeDbg.referenceDaysUsed).toBe(2);
+    expect(keepRefDbg.referenceDaysUsed).toBe(3);
+    expect(keepRefRun.dayResults.length).toBeGreaterThan(0);
   });
 
   it("trusted actual-backed days stay pool-eligible when per-day slot filter is empty", () => {

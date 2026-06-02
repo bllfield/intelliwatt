@@ -965,8 +965,8 @@ export async function rebuildGapfillSharedPastArtifact(args: {
     | { ok: true; artifactSourceNote: string | null }
     | { ok: false; error: string; message: string }
   > {
-    const validationForceSimulateDateKeysLocal =
-      resolveProducerValidationForceSimulateDateKeysFromBuildInputs({
+    const validationModeledKeepRefDateKeysLocal =
+      resolveProducerValidationModeledKeepRefDateKeysFromBuildInputs({
         buildInputs,
         startDate: identityWindowResolved.startDate,
         endDate: identityWindowResolved.endDate,
@@ -982,8 +982,8 @@ export async function rebuildGapfillSharedPastArtifact(args: {
       endDate: identityWindowResolved.endDate,
       timezone,
       buildPathKind: "recalc",
-      forceSimulateDateKeysLocal:
-        validationForceSimulateDateKeysLocal.size > 0 ? validationForceSimulateDateKeysLocal : undefined,
+      forceModeledOutputKeepReferencePoolDateKeysLocal:
+        validationModeledKeepRefDateKeysLocal.size > 0 ? validationModeledKeepRefDateKeysLocal : undefined,
       includeSimulatedDayResults: true,
     });
     if (pastResult.dataset === null) {
@@ -2008,8 +2008,8 @@ export async function buildGapfillCompareSimShared(args: {
     status: number;
     body: Record<string, unknown>;
   }> {
-    const validationForceSimulateDateKeysLocal =
-      resolveProducerValidationForceSimulateDateKeysFromBuildInputs({
+    const validationModeledKeepRefDateKeysLocal =
+      resolveProducerValidationModeledKeepRefDateKeysFromBuildInputs({
         buildInputs,
         startDate: identityWindowResolved.startDate,
         endDate: identityWindowResolved.endDate,
@@ -2024,8 +2024,8 @@ export async function buildGapfillCompareSimShared(args: {
       endDate: identityWindowResolved.endDate,
       timezone,
       buildPathKind: "recalc",
-      forceSimulateDateKeysLocal:
-        validationForceSimulateDateKeysLocal.size > 0 ? validationForceSimulateDateKeysLocal : undefined,
+      forceModeledOutputKeepReferencePoolDateKeysLocal:
+        validationModeledKeepRefDateKeysLocal.size > 0 ? validationModeledKeepRefDateKeysLocal : undefined,
       // Exact artifact parity depends on canonical simulated-day totals from the shared build.
       includeSimulatedDayResults: true,
       correlationId: compareSharedCorrelationId,
@@ -2612,7 +2612,7 @@ export async function buildGapfillCompareSimShared(args: {
         // ~365×96 interval rows here was a major compare_core OOM source on Vercel when
         // compareFreshMode === "full_window".
         emitAllIntervals: false,
-        forceSimulateDateKeysLocal:
+        forceModeledOutputKeepReferencePoolDateKeysLocal:
           boundedTestDateKeysLocal.size > 0 ? boundedTestDateKeysLocal : undefined,
         ...(actualIntervalsForSharedPastSim != null ? { actualIntervals: actualIntervalsForSharedPastSim } : {}),
       });
@@ -2695,7 +2695,7 @@ export async function buildGapfillCompareSimShared(args: {
           buildPathKind: "lab_validation",
           selectedDateKeysLocal,
           retainSimulatedDayResultDateKeysLocal: boundedTestDateKeysLocal,
-          forceSimulateDateKeysLocal:
+          forceModeledOutputKeepReferencePoolDateKeysLocal:
             boundedTestDateKeysLocal.size > 0 ? boundedTestDateKeysLocal : undefined,
           ...(actualIntervalsForSharedPastSim != null ? { actualIntervals: actualIntervalsForSharedPastSim } : {}),
         });
@@ -5589,7 +5589,7 @@ async function recalcSimulatorBuildImpl(args: {
         travelRanges: allTravelRanges,
         buildInputs: recalcBuildInputs,
         buildPathKind: producerBuildPathKind,
-        forceSimulateDateKeysLocal:
+        forceModeledOutputKeepReferencePoolDateKeysLocal:
           boundedValidationOnlyDateKeysLocal.size > 0 ? boundedValidationOnlyDateKeysLocal : undefined,
         correlationId: args.correlationId,
         ...(preloadedActualIntervalsForSim != null ? { actualIntervals: preloadedActualIntervalsForSim } : {}),
@@ -6734,8 +6734,8 @@ export type SimulatedUsageHouseRow = {
   } | null;
 };
 
-/** Gap-Fill validation scored days: force simulate and exclude from the reference pool (no keep-ref). */
-function resolveProducerValidationForceSimulateDateKeysFromBuildInputs(args: {
+/** Validation scored days: modeled output via keep-ref (actual intervals remain in the donor pool). */
+function resolveProducerValidationModeledKeepRefDateKeysFromBuildInputs(args: {
   buildInputs: SimulatorBuildInputsV1;
   startDate: string;
   endDate: string;
@@ -7939,8 +7939,8 @@ export async function getSimulatedUsageForHouseScenario(args: {
               (dataset.meta as any).coverageEnd = dataset?.summary?.end ?? endDate;
             }
           } else {
-            const validationForceSimulateDateKeysLocal =
-              resolveProducerValidationForceSimulateDateKeysFromBuildInputs({
+            const validationModeledKeepRefDateKeysLocal =
+              resolveProducerValidationModeledKeepRefDateKeysFromBuildInputs({
                 buildInputs,
                 startDate,
                 endDate,
@@ -7958,9 +7958,9 @@ export async function getSimulatedUsageForHouseScenario(args: {
               endDate,
               timezone,
               buildPathKind: "recalc",
-              forceSimulateDateKeysLocal:
-                validationForceSimulateDateKeysLocal.size > 0
-                  ? validationForceSimulateDateKeysLocal
+              forceModeledOutputKeepReferencePoolDateKeysLocal:
+                validationModeledKeepRefDateKeysLocal.size > 0
+                  ? validationModeledKeepRefDateKeysLocal
                   : undefined,
               correlationId: args.correlationId,
             });
