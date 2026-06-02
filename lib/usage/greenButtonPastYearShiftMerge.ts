@@ -44,6 +44,20 @@ export function greenButtonShiftedTargetDateKeys(
   return out;
 }
 
+/** Exclude prior-year shifted target days from Past 15-minute load-curve averaging (Usage/GB parity). */
+export function filterDisplayDailyExcludingGreenButtonShiftedTargets<
+  T extends { date?: string; source?: string; sourceDetail?: string }
+>(displayDaily: T[], meta: Record<string, unknown> | null | undefined): T[] {
+  const shiftMap = meta?.greenButtonSourceDateByTargetDate;
+  if (!shiftMap || typeof shiftMap !== "object" || Array.isArray(shiftMap)) return displayDaily;
+  const shifted = greenButtonShiftedTargetDateKeys(shiftMap as Record<string, string>);
+  if (shifted.size === 0) return displayDaily;
+  return displayDaily.filter((row) => {
+    const dk = asDateKey(row.date);
+    return dk ? !shifted.has(dk) : true;
+  });
+}
+
 export function toGreenButtonPastEngineIntervals(
   intervals: ReadonlyArray<{
     timestamp: string;

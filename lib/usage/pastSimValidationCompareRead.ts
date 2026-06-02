@@ -1,4 +1,5 @@
 import { isGreenButtonBackedDatasetMeta } from "@/lib/time/greenButtonPersistedIntervalConvert";
+import { resolveGreenButtonPastValidationOnlyDateKeysAtRead } from "@/lib/usage/greenButtonPastValidationCandidates";
 import {
   attachValidationCompareProjection,
   buildValidationCompareProjectionFromDatasets,
@@ -135,7 +136,22 @@ export function enrichPastDatasetValidationCompareMetaForRead(args: {
     args.engineInput && typeof args.engineInput === "object" ? args.engineInput : null
   );
   const existingKeys = validationOnlyDateKeysFromMeta(prevMeta);
-  const mergedKeys = existingKeys.length > 0 ? existingKeys : fromBuild.length > 0 ? fromBuild : fromEngine;
+  let mergedKeys = existingKeys.length > 0 ? existingKeys : fromBuild.length > 0 ? fromBuild : fromEngine;
+  if (mergedKeys.length === 0 && isGreenButtonBackedDatasetMeta(prevMeta)) {
+    mergedKeys = resolveGreenButtonPastValidationOnlyDateKeysAtRead({
+      existingKeys: mergedKeys,
+      meta: prevMeta,
+      buildInputs: args.buildInputs ?? null,
+      engineInput: args.engineInput ?? null,
+      houseId:
+        typeof prevMeta.actualContextHouseId === "string"
+          ? prevMeta.actualContextHouseId
+          : typeof args.buildInputs?.actualContextHouseId === "string"
+            ? (args.buildInputs.actualContextHouseId as string)
+            : undefined,
+      timezone: typeof prevMeta.timezone === "string" ? prevMeta.timezone : undefined,
+    });
+  }
   if (mergedKeys.length > 0 && existingKeys.length === 0) {
     prevMeta.validationOnlyDateKeysLocal = mergedKeys;
   }

@@ -76,6 +76,37 @@ describe("pastSimValidationCompareRead", () => {
     ).toBe(true);
   });
 
+  it("rehydrates GB validation keys from trusted home pool when build omitted keys", () => {
+    const enriched = enrichPastDatasetValidationCompareMetaForRead({
+      dataset: {
+        meta: {
+          actualSource: "GREEN_BUTTON",
+          timezone: "America/Chicago",
+          greenButtonTrustedHomeDateKeysLocal: [
+            "2026-04-10",
+            "2026-04-11",
+            "2026-04-12",
+            "2026-04-13",
+            "2026-04-14",
+            "2026-04-15",
+            "2026-04-16",
+            "2026-04-17",
+            "2026-04-18",
+            "2026-04-19",
+            "2026-04-20",
+            "2026-04-21",
+            "2026-04-22",
+            "2026-04-23",
+          ],
+        },
+      },
+      buildInputs: {},
+      engineInput: {},
+    });
+    const keys = (enriched.meta as { validationOnlyDateKeysLocal?: string[] }).validationOnlyDateKeysLocal ?? [];
+    expect(keys.length).toBe(14);
+  });
+
   it("resolvePastSimPreferredActualSource keeps explicit SMT over artifact meta", () => {
     expect(
       resolvePastSimPreferredActualSource({

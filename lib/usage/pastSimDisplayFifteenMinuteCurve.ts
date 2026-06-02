@@ -9,6 +9,7 @@ import {
   resolveGreenButtonPastDisplayMeta,
   shouldRebuildGreenButtonFifteenMinuteCurveFromSeries,
 } from "@/lib/time/greenButtonPersistedIntervalConvert";
+import { filterDisplayDailyExcludingGreenButtonShiftedTargets } from "@/lib/usage/greenButtonPastYearShiftMerge";
 import {
   buildLoadCurveInsightsFromIntervalRows,
   filterIntervalRowsToActualDailyDates,
@@ -17,6 +18,8 @@ import {
 export type PastSimDisplayFifteenMinuteCurveInput = {
   insightsFifteenMinuteAverages?: Array<{ hhmm?: string; avgKw?: number }> | null;
   intervals15?: Array<{ timestamp?: string; kwh?: number; consumption_kwh?: number }> | null;
+  /** Unshifted GB actual intervals (Usage dashboard parity); preferred over artifact series for Past display. */
+  upstreamIntervals15?: Array<{ timestamp?: string; kwh?: number; consumption_kwh?: number }> | null;
   hasSimulatedFill: boolean;
   displayDaily: Array<{ date?: string; source?: string; sourceDetail?: string }>;
   timezone: string;
@@ -103,7 +106,7 @@ function buildActualDayLoadCurve(input: PastSimDisplayFifteenMinuteCurveInput): 
     return buildGreenButtonLoadCurveInsightsFromSeriesRows(intervals15, {
       homeTimezone: input.timezone,
       meta: resolveGreenButtonPastDisplayMeta(input.meta ?? null),
-      displayDaily: input.displayDaily,
+      displayDaily: greenButtonDisplayDailyForLoadCurve(input),
       filterToActualDailyDates: true,
     }).fifteenMinuteAverages;
   }
@@ -138,6 +141,15 @@ function greenButtonInsightsStaleVsSeries(
   return false;
 }
 
+function greenButtonDisplayDailyForLoadCurve(
+  input: PastSimDisplayFifteenMinuteCurveInput
+): Array<{ date?: string; source?: string; sourceDetail?: string }> {
+  if (!input.hasSimulatedFill || !hasGreenButtonSourceDateShiftMap(input.meta ?? null)) {
+    return input.displayDaily;
+  }
+  return filterDisplayDailyExcludingGreenButtonShiftedTargets(input.displayDaily, input.meta ?? null);
+}
+
 function buildGreenButtonSeriesFifteenCurve(
   input: PastSimDisplayFifteenMinuteCurveInput,
   intervals15: Array<{ timestamp?: string; kwh?: number; consumption_kwh?: number }>
@@ -148,7 +160,7 @@ function buildGreenButtonSeriesFifteenCurve(
     buildGreenButtonLoadCurveInsightsFromSeriesRows(intervals15, {
       homeTimezone: String(input.timezone ?? "").trim() || "America/Chicago",
       meta: displayMeta,
-      displayDaily: input.displayDaily,
+      displayDaily: greenButtonDisplayDailyForLoadCurve(input),
       filterToActualDailyDates: input.hasSimulatedFill,
     }).fifteenMinuteAverages
   );
@@ -158,8 +170,11 @@ export function resolvePastSimDisplayFifteenMinuteCurve(
   input: PastSimDisplayFifteenMinuteCurveInput
 ): PastSimDisplayFifteenMinuteCurveResult {
   const timezone = String(input.timezone ?? "").trim() || "America/Chicago";
+  const upstreamIntervals15 = Array.isArray(input.upstreamIntervals15) ? input.upstreamIntervals15 : [];
   const intervals15 = Array.isArray(input.intervals15) ? input.intervals15 : [];
   const greenButtonBacked = isGreenButtonBackedDatasetMeta(input.meta);
+  const seriesIntervalsForGreenButton =
+    greenButtonBacked && upstreamIntervals15.length > 0 ? upstreamIntervals15 : intervals15;
 
   const insightFifteenCurve = sortFifteenCurve(
     (input.insightsFifteenMinuteAverages ?? [])
@@ -170,10 +185,20 @@ export function resolvePastSimDisplayFifteenMinuteCurve(
       .filter((row) => /^\d{2}:\d{2}$/.test(row.hhmm))
   );
 
-  if (greenButtonBacked && intervals15.length > 0) {
-    const greenButtonSeriesCurve = buildGreenButtonSeriesFifteenCurve(input, intervals15);
+  if (greenButtonBacked && seriesIntervalsForGreenButton.length > 0) {
+    const greenButtonSeriesCurve = buildGreenButtonSeriesFifteenCurve(input, seriesIntervalsForGreenButton);
     const shiftedGreenButtonPast =
-      input.hasSimulatedFill && hasGreenButtonSourceDateShiftMap(input.meta ?? null);
+      input.hasSimulatedFill &&
+      hasGreenButtonSourceDateShiftMap(input.meta ?? null) &&
+      upstreamIntervals15.length === 0;
+    const upstreamGreenButtonPast = greenButtonBacked && upstreamIntervals15.length > 0;
+
+    if (upstreamGreenButtonPast && greenButtonSeriesCurve.length > 0) {
+      return {
+        fifteenMinuteAverages: greenButtonSeriesCurve,
+        sourceOwner: `${GREEN_BUTTON_CURVE_OWNER} (upstream GB actual intervals, Usage dashboard parity)`,
+      };
+    }
 
     if (shiftedGreenButtonPast && greenButtonSeriesCurve.length > 0) {
       return {
@@ -212,11 +237,11 @@ export function resolvePastSimDisplayFifteenMinuteCurve(
     greenButtonBacked &&
     shouldRebuildGreenButtonFifteenMinuteCurveFromSeries({
       meta: input.meta,
-      intervals15Count: intervals15.length,
+      intervals15Count: seriesIntervalsForGreenButton.length,
       hasSimulatedFill: input.hasSimulatedFill,
     })
   ) {
-    const greenButtonCurve = buildGreenButtonSeriesFifteenCurve(input, intervals15);
+    const greenButtonCurve = buildGreenButtonSeriesFifteenCurve(input, seriesIntervalsForGreenButton);
     if (greenButtonCurve.length > 0) {
       return {
         fifteenMinuteAverages: greenButtonCurve,

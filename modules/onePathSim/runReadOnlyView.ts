@@ -461,28 +461,15 @@ export function buildOnePathRunReadOnlyView(args: {
       sourceDetail: row.sourceDetail,
     }));
     const sageIntervals15 = asArray<Interval15SeriesRow>(asRecord(args.sageActualDataset)?.intervals15);
-    const sageBackedGreenButtonCurve =
-      isGreenButtonBackedDatasetMeta(meta) && sageIntervals15.length > 0
-        ? resolvePastSimDisplayFifteenMinuteCurve({
-            insightsFifteenMinuteAverages: [],
-            intervals15: sageIntervals15,
-            hasSimulatedFill: Boolean(viewModel.coverage.hasSimulatedFill),
-            displayDaily: displayDailyForCurve,
-            timezone,
-            coverageStart: viewModel.coverage.start,
-            coverageEnd: viewModel.coverage.end,
-            meta: resolveGreenButtonPastDisplayMeta({
-              actualSource: "GREEN_BUTTON",
-              greenButtonIntervalTimestampMode: "home_local",
-            }),
-          })
-        : null;
+    const sageIsGreenButtonActual =
+      isGreenButtonBackedDatasetMeta(meta) && isGreenButtonUsageDataset(args.sageActualDataset);
     const pastFifteenCurve = resolvePastSimDisplayFifteenMinuteCurve({
       insightsFifteenMinuteAverages: datasetInsights.fifteenMinuteAverages as Array<{
         hhmm?: string;
         avgKw?: number;
       }>,
       intervals15: asArray<Interval15SeriesRow>(asRecord(dataset.series)?.intervals15),
+      upstreamIntervals15: sageIsGreenButtonActual ? sageIntervals15 : [],
       hasSimulatedFill: Boolean(viewModel.coverage.hasSimulatedFill),
       displayDaily: displayDailyForCurve,
       timezone,
@@ -490,14 +477,8 @@ export function buildOnePathRunReadOnlyView(args: {
       coverageEnd: viewModel.coverage.end,
       meta,
     });
-    if (sageBackedGreenButtonCurve && sageBackedGreenButtonCurve.fifteenMinuteAverages.length > 0) {
-      fifteenMinuteAverages = sageBackedGreenButtonCurve.fifteenMinuteAverages;
-      fifteenMinuteCurveSourceOwner =
-        "resolvePastSimDisplayFifteenMinuteCurve(sage actual intervals, GB Past display parity)";
-    } else {
-      fifteenMinuteAverages = pastFifteenCurve.fifteenMinuteAverages;
-      fifteenMinuteCurveSourceOwner = pastFifteenCurve.sourceOwner;
-    }
+    fifteenMinuteAverages = pastFifteenCurve.fifteenMinuteAverages;
+    fifteenMinuteCurveSourceOwner = pastFifteenCurve.sourceOwner;
     if (sageByDate.size > 0 || (args.smtSlotCompleteDateKeys?.size ?? 0) > 0) {
       dailyRows = applyPastSimDisplayTruthOverlay(dailyRows, {
         sageByDate,

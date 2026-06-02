@@ -28,6 +28,7 @@ import {
   resolvePastSmtValidationPolicy,
   shouldReconcilePastSmtValidationSelection,
 } from "@/lib/usage/pastValidationPolicy";
+import { isPastScenarioValidationBackfillEligible } from "@/lib/usage/pastSimValidationReadBackfill";
 import { upsertSimulatedUsageBuckets } from "@/lib/usage/simulatedUsageBuckets";
 import { usagePrisma } from "@/lib/db/usageClient";
 import {
@@ -6939,9 +6940,72 @@ export async function getSimulatedUsageForHouseScenario(args: {
         };
       }
 
-      const buildInputs = normalizeLegacyWeatherEfficiencyBuildInputs(
+      let buildInputs = normalizeLegacyWeatherEfficiencyBuildInputs(
         buildRec.buildInputs as Record<string, unknown>
       );
+      const artifactOnlyValidationKeys = Array.isArray((buildInputs as any)?.validationOnlyDateKeysLocal)
+        ? ((buildInputs as any).validationOnlyDateKeysLocal as unknown[])
+            .map((v) => String(v ?? "").slice(0, 10))
+            .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+        : [];
+      const artifactOnlyValidationMode =
+        (buildInputs as any)?.effectiveValidationSelectionMode ??
+        (buildInputs as any)?.validationSelectionMode ??
+        null;
+      if (
+        isPastScenarioValidationBackfillEligible({
+          scenarioId,
+          buildInputs: buildInputs as Record<string, unknown>,
+          storedValidationKeyCount: artifactOnlyValidationKeys.length,
+          storedSelectionMode: artifactOnlyValidationMode,
+        })
+      ) {
+        const weatherPreferenceRaw = String((buildInputs as any)?.weatherPreference ?? "NONE");
+        const weatherPreference: WeatherPreference =
+          weatherPreferenceRaw === "NONE" ||
+          weatherPreferenceRaw === "LAST_YEAR_WEATHER" ||
+          weatherPreferenceRaw === "LONG_TERM_AVERAGE"
+            ? (weatherPreferenceRaw as WeatherPreference)
+            : "NONE";
+        const validationBackfillPolicy = resolvePastSmtValidationPolicy({ surface: "user_site" });
+        const backfillRecalc = await recalcSimulatorBuild({
+          userId: args.userId,
+          houseId: args.houseId,
+          esiid: house.esiid ?? null,
+          mode: "SMT_BASELINE",
+          scenarioId,
+          weatherPreference,
+          persistPastSimBaseline: true,
+          validationDaySelectionMode: validationBackfillPolicy.selectionMode,
+          validationDayCount: validationBackfillPolicy.validationDayCount,
+          runContext: {
+            callerLabel:
+              artifactOnlyValidationKeys.length === 0
+                ? "validation_backfill_artifact_only"
+                : "validation_policy_reconcile_artifact_only",
+            buildPathKind: "recalc",
+            persistRequested: true,
+          },
+        });
+        if (!backfillRecalc.ok) {
+          return {
+            ok: false,
+            code: "INTERNAL_ERROR",
+            message: backfillRecalc.error ?? "Failed to backfill validation-day compare for Past scenario.",
+          };
+        }
+        const buildRecAfterBackfill = await (prisma as any).usageSimulatorBuild
+          .findUnique({
+            where: { userId_houseId_scenarioKey: { userId: args.userId, houseId: args.houseId, scenarioKey } },
+            select: { buildInputs: true },
+          })
+          .catch(() => null);
+        if (buildRecAfterBackfill?.buildInputs) {
+          buildInputs = normalizeLegacyWeatherEfficiencyBuildInputs(
+            buildRecAfterBackfill.buildInputs as Record<string, unknown>
+          );
+        }
+      }
       const window = resolveWindowFromBuildInputsForPastIdentity(buildInputs);
       if (!window) {
         return {
@@ -7210,14 +7274,12 @@ export async function getSimulatedUsageForHouseScenario(args: {
       null;
     const buildMode = String((buildInputs as any)?.mode ?? "");
     const buildPreferredActualSource = resolvePreferredActualSourceFromBuildInputs(buildInputs);
-    const isPastScenarioForValidationBackfill =
-      Boolean(scenarioId) &&
-      scenarioRow?.name === WORKSPACE_PAST_NAME &&
-      (buildMode === "SMT_BASELINE" || buildPreferredActualSource === "GREEN_BUTTON") &&
-      shouldReconcilePastSmtValidationSelection({
-        storedSelectionMode: storedValidationSelectionMode,
-        storedValidationKeyCount: buildValidationKeys.length,
-      });
+    const isPastScenarioForValidationBackfill = isPastScenarioValidationBackfillEligible({
+      scenarioId,
+      buildInputs: buildInputs as Record<string, unknown>,
+      storedValidationKeyCount: buildValidationKeys.length,
+      storedSelectionMode: storedValidationSelectionMode,
+    });
     if (isPastScenarioForValidationBackfill) {
       const weatherPreferenceRaw = String((buildInputs as any)?.weatherPreference ?? "NONE");
       const weatherPreference: WeatherPreference =
