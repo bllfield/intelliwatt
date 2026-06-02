@@ -61,15 +61,18 @@ export function enrichPastDatasetValidationCompareMetaForRead(args: {
       ? ((args.buildInputs as { validationActualDailyKwhByDateLocal?: Record<string, unknown> })
           .validationActualDailyKwhByDateLocal as Record<string, unknown> | undefined)
       : undefined;
-  const persistedActual: Record<string, number> = {
-    ...((prevMeta.validationActualDailyKwhByDateLocal as Record<string, unknown> | undefined) ?? {}),
-  };
-  if (buildActualDaily && typeof buildActualDaily === "object") {
-    for (const [dk, raw] of Object.entries(buildActualDaily)) {
+  const persistedActual: Record<string, number> = {};
+  const mergeActualDailyKwh = (source: Record<string, unknown> | undefined) => {
+    if (!source || typeof source !== "object") return;
+    for (const [dk, raw] of Object.entries(source)) {
       const kwh = Number(raw);
       if (/^\d{4}-\d{2}-\d{2}$/.test(dk) && Number.isFinite(kwh)) persistedActual[dk] = kwh;
     }
-  }
+  };
+  mergeActualDailyKwh(
+    prevMeta.validationActualDailyKwhByDateLocal as Record<string, unknown> | undefined
+  );
+  mergeActualDailyKwh(buildActualDaily);
 
   const keys = validationOnlyDateKeysFromMeta(prevMeta);
   if (args.actualDataset && keys.length > 0) {
