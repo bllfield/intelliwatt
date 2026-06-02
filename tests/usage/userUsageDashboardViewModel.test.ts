@@ -315,4 +315,48 @@ describe("user usage dashboard view model", () => {
       "Green Button disclosure: usage intervals from 2025-01-01 - 2025-01-02 were shifted to display on 2026-01-01 - 2026-01-02; the interval usage and weather shown are real historical records from the original source dates."
     );
   });
+
+  it("Past simulated fill uses actual-day intervals for the 15-minute load curve (Usage parity)", () => {
+    const timezone = "America/Chicago";
+    const actualOnly = [
+      { timestamp: "2026-06-01T17:00:00.000Z", kwh: 2 },
+      { timestamp: "2026-06-02T17:00:00.000Z", kwh: 2 },
+    ];
+    const simOnly = [{ timestamp: "2026-06-03T17:00:00.000Z", kwh: 0.1 }];
+    const viewModel = buildUserUsageDashboardViewModel({
+      dataset: {
+        summary: {
+          source: "GREEN_BUTTON",
+          intervalsCount: 3,
+          totalKwh: 100,
+          start: "2026-06-01",
+          end: "2026-06-03",
+        },
+        totals: { importKwh: 100, exportKwh: 0, netKwh: 100 },
+        daily: [
+          { date: "2026-06-01", kwh: 40, source: "ACTUAL" },
+          { date: "2026-06-02", kwh: 40, source: "ACTUAL" },
+          { date: "2026-06-03", kwh: 20, source: "SIMULATED", sourceDetail: "SIMULATED (TRAVEL/VACANT)" },
+        ],
+        series: {
+          intervals15: [...actualOnly, ...simOnly],
+        },
+        insights: {
+          fifteenMinuteAverages: [{ hhmm: "12:00", avgKw: 0.4 }],
+        },
+        meta: {
+          datasetKind: "SIMULATED",
+          actualSource: "GREEN_BUTTON",
+          monthProvenanceByMonth: { "2026-06": "SIMULATED" },
+          timezone,
+          coverageStart: "2026-06-01",
+          coverageEnd: "2026-06-03",
+        },
+      },
+      datasetError: null,
+    });
+
+    expect(viewModel?.derived.fifteenCurve.find((row) => row.hhmm === "12:00")?.avgKw).toBe(8);
+    expect(viewModel?.derived.fifteenCurve.find((row) => row.hhmm === "12:00")?.avgKw).not.toBe(0.4);
+  });
 });

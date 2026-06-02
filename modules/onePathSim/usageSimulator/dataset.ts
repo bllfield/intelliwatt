@@ -22,6 +22,7 @@ import { computeHomeBaseloadKw } from "@/lib/usage/computeHomeBaseloadKw";
 import { buildSimulatedHomeDateKeysExcludedFromBaseload } from "@/lib/usage/simulatedBaseloadExclusions";
 import {
   buildLoadCurveInsightsFromIntervalRows,
+  filterIntervalRowsToActualDailyDates,
   normalizeHomeTimezoneForLoadCurve,
 } from "@/lib/usage/fifteenMinuteLoadCurve";
 import { buildDisplayedMonthlyRows } from "@/modules/usageSimulator/monthlyCompareRows";
@@ -846,21 +847,21 @@ export function reconcileRestoredPastDatasetFromDecodedIntervals(args: {
     const homeTimezone = normalizeHomeTimezoneForLoadCurve(
       String((dataset as any)?.meta?.timezone ?? "America/Chicago")
     );
-    const existingFifteenMinute = (dataset.insights as any).fifteenMinuteAverages;
-    const hasPersistedLoadCurveInsights =
-      Array.isArray(existingFifteenMinute) && existingFifteenMinute.length > 0;
-    if (!hasPersistedLoadCurveInsights) {
-      const intervalRowsForInsights = decodedIntervals.map((iv) => ({
-        timestamp: String(iv?.timestamp ?? ""),
-        consumption_kwh: Number(iv?.consumption_kwh ?? iv?.kwh ?? 0) || 0,
-      }));
-      const loadCurveInsights = buildLoadCurveInsightsFromIntervalRows(
-        intervalRowsForInsights,
-        homeTimezone
-      );
-      (dataset.insights as any).fifteenMinuteAverages = loadCurveInsights.fifteenMinuteAverages;
-      (dataset.insights as any).timeOfDayBuckets = loadCurveInsights.timeOfDayBuckets;
-    }
+    const intervalRowsForInsights = decodedIntervals.map((iv) => ({
+      timestamp: String(iv?.timestamp ?? ""),
+      consumption_kwh: Number(iv?.consumption_kwh ?? iv?.kwh ?? 0) || 0,
+    }));
+    const actualDayIntervalRows = filterIntervalRowsToActualDailyDates(
+      intervalRowsForInsights,
+      enrichedDaily,
+      homeTimezone
+    );
+    const loadCurveInsights = buildLoadCurveInsightsFromIntervalRows(
+      actualDayIntervalRows,
+      homeTimezone
+    );
+    (dataset.insights as any).fifteenMinuteAverages = loadCurveInsights.fifteenMinuteAverages;
+    (dataset.insights as any).timeOfDayBuckets = loadCurveInsights.timeOfDayBuckets;
   }
 
   if (!dataset.summary || typeof dataset.summary !== "object") (dataset as any).summary = {};

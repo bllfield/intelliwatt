@@ -27,6 +27,7 @@ vi.mock("server-only", () => ({}));
 const {
   cookiesMock,
   prisma,
+  readOnePathSimulatedUsageScenario,
   getSimulatedUsageForHouseScenario,
   buildValidationCompareProjectionSidecar,
   resolveIntervalsLayer,
@@ -39,7 +40,9 @@ const {
     user: { findUnique: vi.fn() },
     manualUsageInput: { findUnique: vi.fn() },
     houseAddress: { findFirst: vi.fn() },
+    usageSimulatorScenario: { findFirst: vi.fn() },
   } as any,
+  readOnePathSimulatedUsageScenario: vi.fn(),
   getSimulatedUsageForHouseScenario: vi.fn(),
   buildValidationCompareProjectionSidecar: vi.fn((dataset: any) => ({
     rows: Array.isArray(dataset?.meta?.validationCompareRows) ? dataset.meta.validationCompareRows : [],
@@ -60,12 +63,30 @@ vi.mock("next/headers", () => ({
 
 vi.mock("@/lib/db", () => ({ prisma }));
 
+vi.mock("@/modules/onePathSim/serviceBridge", () => ({
+  readOnePathSimulatedUsageScenario: (...args: any[]) => readOnePathSimulatedUsageScenario(...args),
+}));
+
+vi.mock("@/modules/onePathSim/runtime", () => ({
+  resolveOnePathUpstreamUsageTruthForSimulation: vi.fn().mockResolvedValue(null),
+}));
+
+vi.mock("@/lib/usage/pastSimStaleIncompleteMeter", () => ({
+  applyPastSimDisplayTruthToDataset: vi.fn(),
+  resolveStaleIncompleteMeterSlotCompleteDateKeys: vi.fn().mockResolvedValue(new Set()),
+}));
+
 vi.mock("@/modules/usageSimulator/service", () => ({
   getSimulatedUsageForHouseScenario: (...args: any[]) => getSimulatedUsageForHouseScenario(...args),
 }));
-vi.mock("@/modules/usageSimulator/compareProjection", () => ({
-  buildValidationCompareProjectionSidecar: (dataset: any) => buildValidationCompareProjectionSidecar(dataset),
-}));
+vi.mock("@/modules/usageSimulator/compareProjection", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/modules/usageSimulator/compareProjection")>();
+  return {
+    ...actual,
+    buildValidationCompareProjectionSidecar: (dataset: any) =>
+      buildValidationCompareProjectionSidecar(dataset),
+  };
+});
 
 vi.mock("@/lib/usage/resolveIntervalsLayer", () => ({
   resolveIntervalsLayer: (...args: any[]) => resolveIntervalsLayer(...args),
@@ -102,18 +123,27 @@ describe("user simulated house compare projection", () => {
     prisma.user.findUnique.mockResolvedValue({ id: "u1" });
     prisma.manualUsageInput.findUnique.mockResolvedValue(null);
     prisma.houseAddress.findFirst.mockResolvedValue({ id: "h1", esiid: "esiid-1" });
-    resolveIntervalsLayer.mockResolvedValue({ dataset: { summary: { source: "ACTUAL" }, daily: [], series: { intervals15: [] } } });
+    prisma.usageSimulatorScenario.findFirst.mockResolvedValue({ name: "Past (Corrected)" });
+    resolveIntervalsLayer.mockResolvedValue({
+      dataset: {
+        summary: { source: "GREEN_BUTTON" },
+        daily: [{ date: "2025-04-10", kwh: 10, source: "ACTUAL" }],
+        series: { intervals15: [] },
+      },
+    });
     getHomeProfileSimulatedByUserHouse.mockResolvedValue(null);
     getApplianceProfileSimulatedByUserHouse.mockResolvedValue({ appliancesJson: null });
     resolveSharedWeatherSensitivityEnvelope.mockResolvedValue({ score: null, derivedInput: null });
-    getSimulatedUsageForHouseScenario.mockResolvedValue({
+    readOnePathSimulatedUsageScenario.mockResolvedValue({
       ok: true,
       houseId: "h1",
       scenarioKey: "past-s1",
       scenarioId: "past-s1",
       dataset: {
         summary: { source: "SIMULATED" },
+        daily: [{ date: "2025-04-10", kwh: 9, source: "SIMULATED", sourceDetail: "SIMULATED_TEST_DAY" }],
         meta: {
+          validationOnlyDateKeysLocal: ["2025-04-10"],
           validationCompareRows: [
             {
               localDate: "2025-04-10",
@@ -205,12 +235,12 @@ describe("user simulated house compare projection", () => {
     expect(body.ok).toBe(true);
     expect(Array.isArray(body.compareProjection?.rows)).toBe(true);
     expect(body.compareProjection.rows[0]?.localDate).toBe("2025-04-10");
-    expect(body.compareProjection.rows[0]?.weather?.tAvgF).toBe(62);
-    expect(body.compareProjection.rows[0]?.weather?.weatherMissing).toBe(false);
+    expect(body.compareProjection.rows[0]?.actualDayKwh).toBe(10);
+    expect(body.compareProjection.rows[0]?.simulatedDayKwh).toBe(9);
     expect(body.compareProjection.metrics?.wape).toBe(10);
     expect(body.sharedDiagnostics?.identityContext?.callerType).toBe("user_past");
     expect(body.sharedDiagnostics?.projectionReadSummary?.validationRowsCount).toBe(1);
-    expect(buildValidationCompareProjectionSidecar).toHaveBeenCalledTimes(1);
+    expect(readOnePathSimulatedUsageScenario).toHaveBeenCalled();
   });
 
   it("returns manual monthly statement-range reconciliation for monthly-manual Past runs", async () => {
@@ -223,7 +253,7 @@ describe("user simulated house compare projection", () => {
       },
       updatedAt: new Date("2025-05-01T00:00:00.000Z"),
     });
-    getSimulatedUsageForHouseScenario.mockResolvedValueOnce({
+    readOnePathSimulatedUsageScenario.mockResolvedValueOnce({
       ok: true,
       houseId: "h1",
       scenarioKey: "past-s1",

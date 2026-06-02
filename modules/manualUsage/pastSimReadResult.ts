@@ -12,6 +12,7 @@ import {
   type SharedDiagnosticsCallerType,
 } from "@/modules/usageSimulator/sharedDiagnostics";
 import { getMemoryRssMb, logSimPipelineEvent } from "@/modules/usageSimulator/simObservability";
+import { resolveManualCompareActualDataset } from "@/lib/usage/manualCompareActualDataset";
 import { getSimulatedUsageForHouseScenario } from "@/modules/usageSimulator/service";
 
 export type ManualUsagePastSimReadResult =
@@ -288,21 +289,6 @@ async function loadManualUsageRawDisplayDataset(args: {
     },
   });
   return raw.ok ? raw.dataset : args.fallbackDataset;
-}
-
-async function resolveManualCompareActualDataset(args: {
-  actualDataset?: any;
-  actualReference?:
-    | {
-        userId: string;
-        houseId: string;
-        scenarioId: string | null;
-      }
-    | null;
-  correlationId?: string | null;
-}) {
-  if (args.actualDataset !== undefined) return args.actualDataset ?? null;
-  return null;
 }
 
 function compactTravelRanges(value: unknown): Array<{ startDate: string; endDate: string }> {

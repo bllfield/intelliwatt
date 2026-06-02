@@ -1,3 +1,4 @@
+import { resolvePastSimDisplayFifteenMinuteCurve } from "@/lib/usage/pastSimDisplayFifteenMinuteCurve";
 import { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
 import { enumerateDateKeysInclusive } from "@/lib/time/chicago";
 import { fillCanonicalDailyTotals, resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
@@ -170,46 +171,6 @@ function deriveWeekdayWeekendFromDaily(rows: DailyRow[]) {
   };
 }
 
-function deriveFifteenMinuteAveragesFromIntervals(
-  rows: Array<{ timestamp?: unknown; kwh?: unknown; consumption_kwh?: unknown }>,
-  options?: { start?: string | null; end?: string | null; timezone?: string }
-): Array<{ hhmm: string; avgKw: number }> {
-  const timezone = options?.timezone?.trim() ? options.timezone.trim() : "America/Chicago";
-  const buckets = new Map<string, { sumKw: number; count: number }>();
-  for (const row of rows) {
-    const timestamp = String(row?.timestamp ?? "");
-    if (!timestamp) continue;
-    const dateKey = asDateKey(timestamp);
-    if (!dateKey) continue;
-    if (options?.start && dateKey < options.start) continue;
-    if (options?.end && dateKey > options.end) continue;
-    const ts = new Date(timestamp);
-    if (!Number.isFinite(ts.getTime())) continue;
-    const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone: timezone,
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-      hourCycle: "h23",
-    }).formatToParts(ts);
-    const hour = parts.find((part) => part.type === "hour")?.value ?? "";
-    const minute = parts.find((part) => part.type === "minute")?.value ?? "";
-    const hhmm = `${hour.padStart(2, "0")}:${minute.padStart(2, "0")}`;
-    if (!/^\d{2}:\d{2}$/.test(hhmm)) continue;
-    const kwh = Number(row?.kwh ?? row?.consumption_kwh ?? 0) || 0;
-    const current = buckets.get(hhmm) ?? { sumKw: 0, count: 0 };
-    current.sumKw += kwh * 4;
-    current.count += 1;
-    buckets.set(hhmm, current);
-  }
-  return Array.from(buckets.entries())
-    .map(([hhmm, bucket]) => ({
-      hhmm,
-      avgKw: bucket.count > 0 ? Number((bucket.sumKw / bucket.count).toFixed(2)) : 0,
-    }))
-    .sort((left, right) => (left.hhmm < right.hhmm ? -1 : left.hhmm > right.hhmm ? 1 : 0));
-}
-
 function deriveTimeOfDayBucketsFromIntervals(
   rows: Array<{ timestamp?: unknown; kwh?: unknown; consumption_kwh?: unknown }>,
   options?: { start?: string | null; end?: string | null; timezone?: string }
@@ -354,22 +315,15 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
       : fallbackDaily;
 
   const intervals = dataset?.intervals ?? [];
-  const insightFifteenCurve = (dataset?.insights?.fifteenMinuteAverages ?? []).slice().sort((left: any, right: any) => {
-    const toMinutes = (hhmm: string) => {
-      const [hour, minute] = hhmm.split(":").map(Number);
-      return hour * 60 + minute;
-    };
-    return toMinutes(left.hhmm) - toMinutes(right.hhmm);
-  });
-  const rebuiltFifteenCurve =
-    insightFifteenCurve.length > 0
-      ? []
-      : deriveFifteenMinuteAveragesFromIntervals(dataset?.series?.intervals15 ?? [], {
-          start: coverageStart,
-          end: coverageEnd,
-          timezone,
-        });
-  const fifteenCurve = insightFifteenCurve.length > 0 ? insightFifteenCurve : rebuiltFifteenCurve;
+  const fifteenCurve = resolvePastSimDisplayFifteenMinuteCurve({
+    insightsFifteenMinuteAverages: dataset?.insights?.fifteenMinuteAverages,
+    intervals15: dataset?.series?.intervals15,
+    hasSimulatedFill,
+    displayDaily,
+    timezone,
+    coverageStart,
+    coverageEnd,
+  }).fifteenMinuteAverages;
   const totalsFromApi = dataset?.totals;
   const totalsFromSeries =
     fallbackDaily.length

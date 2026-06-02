@@ -187,6 +187,24 @@ export async function GET(request: NextRequest) {
     const cacheControl = scenarioId ? "private, no-store" : "private, max-age=30";
     if (out.ok) {
       const datasetAny = (out as any)?.dataset ?? {};
+      const okHeaders = new Headers({ "Cache-Control": cacheControl });
+      okHeaders.set("X-Correlation-Id", correlationId);
+      const house = await prisma.houseAddress.findFirst({
+        where: { id: houseId, userId: u.user.id, archivedAt: null },
+        select: { id: true, esiid: true },
+      });
+      const actualDatasetForCompare =
+        house?.id != null
+          ? (
+              await resolveIntervalsLayer({
+                userId: u.user.id,
+                houseId: house.id,
+                layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
+                scenarioId: null,
+                esiid: house.esiid ?? null,
+              }).catch(() => null)
+            )?.dataset ?? null
+          : null;
       const {
         compareProjection,
         manualReadModel,
@@ -200,12 +218,8 @@ export async function GET(request: NextRequest) {
         callerType: "user_past",
         correlationId,
         readMode: readModeUsed,
-      });
-      const okHeaders = new Headers({ "Cache-Control": cacheControl });
-      okHeaders.set("X-Correlation-Id", correlationId);
-      const house = await prisma.houseAddress.findFirst({
-        where: { id: houseId, userId: u.user.id, archivedAt: null },
-        select: { id: true, esiid: true },
+        actualDataset: actualDatasetForCompare,
+        displayDataset: datasetAny,
       });
       const [homeProfile, applianceProfileRec, manualUsageRec, sageTruth, smtSlotCompleteDateKeys] = await Promise.all([
         getHomeProfileSimulatedByUserHouse({ userId: u.user.id, houseId }),

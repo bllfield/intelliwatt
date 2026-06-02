@@ -115,3 +115,43 @@ export function buildTimeOfDayBucketsFromIntervalRows(
 ): Array<{ key: string; label: string; kwh: number }> {
   return buildLoadCurveInsightsFromIntervalRows(rows, timezone).timeOfDayBuckets;
 }
+
+/** True when a persisted daily row counts as actual (not travel/vacant or other simulated fill). */
+export function countsAsActualDailySourceForLoadCurve(
+  source: unknown,
+  sourceDetail?: unknown
+): boolean {
+  const src = String(source ?? "").trim().toUpperCase();
+  if (!src || src.startsWith("SIMULATED")) return false;
+  const detail = String(sourceDetail ?? "").trim().toUpperCase();
+  if (detail.includes("SIMULATED")) return false;
+  if (src === "ACTUAL" || src.includes("ACTUAL")) return true;
+  return detail.includes("ACTUAL");
+}
+
+export function localDateKeyInHomeTimezone(timestamp: string, timezone: string): string | null {
+  const dt = homeDateTimeFromTimestamp(timestamp, timezone);
+  if (!dt) return null;
+  const key = dt.toFormat("yyyy-MM-dd");
+  return /^\d{4}-\d{2}-\d{2}$/.test(key) ? key : null;
+}
+
+/** Restrict load-curve bucketing to calendar days marked ACTUAL on the Past daily table. */
+export function filterIntervalRowsToActualDailyDates(
+  rows: Array<{ timestamp?: string; kwh?: number; consumption_kwh?: number }>,
+  daily: Array<{ date?: string; source?: string; sourceDetail?: string }>,
+  timezone: string
+): Array<{ timestamp: string; kwh?: number; consumption_kwh?: number }> {
+  const actualDates = new Set(
+    (daily ?? [])
+      .filter((row) => countsAsActualDailySourceForLoadCurve(row.source, row.sourceDetail))
+      .map((row) => String(row.date ?? "").slice(0, 10))
+      .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+  );
+  if (actualDates.size === 0) return rows;
+  const filtered = rows.filter((row) => {
+    const dk = localDateKeyInHomeTimezone(String(row.timestamp ?? ""), timezone);
+    return dk != null && actualDates.has(dk);
+  });
+  return filtered.length > 0 ? filtered : rows;
+}

@@ -158,7 +158,9 @@ describe("buildOnePathRunReadOnlyView", () => {
       { hhmm: "19:00", avgKw: 2 },
       { hhmm: "19:15", avgKw: 3 },
     ]);
-    expect(view?.fifteenMinuteCurveSourceOwner).toBe("buildOnePathRunReadOnlyView(...).dataset.series.intervals15");
+    expect(view?.fifteenMinuteCurveSourceOwner).toBe(
+      "resolvePastSimDisplayFifteenMinuteCurve(...).intervals15Fallback"
+    );
   });
 
   it("prefers current run intervals over stored 15-minute insights to avoid stale display curves", () => {
@@ -193,6 +195,7 @@ describe("buildOnePathRunReadOnlyView", () => {
           datasetKind: "SIMULATED",
           actualSource: "GREEN_BUTTON",
           timezone: "America/Chicago",
+          monthProvenanceByMonth: { "2026-01": "SIMULATED" },
         },
       },
     });
@@ -203,10 +206,12 @@ describe("buildOnePathRunReadOnlyView", () => {
       { hhmm: "17:30", avgKw: 3 },
       { hhmm: "17:45", avgKw: 4 },
     ]);
-    expect(view?.fifteenMinuteCurveSourceOwner).toBe("buildOnePathRunReadOnlyView(...).dataset.series.intervals15");
+    expect(view?.fifteenMinuteCurveSourceOwner).toBe(
+      "resolvePastSimDisplayFifteenMinuteCurve(...).actualDayIntervals15"
+    );
   });
 
-  it("keeps Green Button UTC day-grid intervals on their preserved local HH:mm slots", () => {
+  it("buckets Green Button Past intervals in home-local time (same as user Usage dashboard)", () => {
     const view = buildOnePathRunReadOnlyView({
       dataset: {
         summary: {
@@ -216,7 +221,7 @@ describe("buildOnePathRunReadOnlyView", () => {
         daily: [{ date: "2026-05-12", kwh: 2.5, source: "ACTUAL" }],
         monthly: [{ month: "2026-05", kwh: 2.5 }],
         insights: {
-          fifteenMinuteAverages: [{ hhmm: "14:00", avgKw: 99 }],
+          fifteenMinuteAverages: [],
           weekdayVsWeekend: { weekday: 2.5, weekend: 0 },
           timeOfDayBuckets: [],
           peakDay: null,
@@ -236,20 +241,23 @@ describe("buildOnePathRunReadOnlyView", () => {
           actualSource: "GREEN_BUTTON",
           timezone: "America/Chicago",
           greenButtonIntervalTimestampMode: "utcDayGrid",
+          monthProvenanceByMonth: { "2026-05": "SIMULATED" },
         },
       },
     });
 
     expect(view?.fifteenMinuteAverages).toEqual([
-      { hhmm: "19:00", avgKw: 1 },
-      { hhmm: "19:15", avgKw: 2 },
-      { hhmm: "19:30", avgKw: 3 },
-      { hhmm: "19:45", avgKw: 4 },
+      { hhmm: "14:00", avgKw: 1 },
+      { hhmm: "14:15", avgKw: 2 },
+      { hhmm: "14:30", avgKw: 3 },
+      { hhmm: "14:45", avgKw: 4 },
     ]);
-    expect(view?.fifteenMinuteCurveSourceOwner).toBe("buildOnePathRunReadOnlyView(...).dataset.series.intervals15");
+    expect(view?.fifteenMinuteCurveSourceOwner).toBe(
+      "resolvePastSimDisplayFifteenMinuteCurve(...).actualDayIntervals15"
+    );
   });
 
-  it("infers Green Button UTC day-grid mode for cached artifacts created before the explicit metadata flag", () => {
+  it("rebuilds Green Button Past curves from intervals when cached artifacts omit explicit grid metadata", () => {
     const view = buildOnePathRunReadOnlyView({
       dataset: {
         summary: {
@@ -280,17 +288,18 @@ describe("buildOnePathRunReadOnlyView", () => {
           greenButtonSourceDateByTargetDate: {
             "2026-05-12": "2025-05-12",
           },
+          monthProvenanceByMonth: { "2026-05": "SIMULATED" },
         },
       },
     });
 
     expect(view?.fifteenMinuteAverages).toEqual([
-      { hhmm: "19:00", avgKw: 1 },
-      { hhmm: "19:15", avgKw: 2 },
+      { hhmm: "14:00", avgKw: 1 },
+      { hhmm: "14:15", avgKw: 2 },
     ]);
   });
 
-  it("splits the next Green Button interval into padded zero slots so the displayed curve keeps day energy", () => {
+  it("averages padded Green Button slots in home-local time without admin-only redistribution", () => {
     const view = buildOnePathRunReadOnlyView({
       dataset: {
         summary: {
@@ -321,17 +330,18 @@ describe("buildOnePathRunReadOnlyView", () => {
           timezone: "America/Chicago",
           greenButtonIntervalTimestampMode: "utcDayGrid",
           greenButtonPaddedIntervalCount: 1,
+          monthProvenanceByMonth: { "2026-05": "SIMULATED" },
         },
       },
     });
 
     expect(view?.fifteenMinuteAverages).toEqual([
-      { hhmm: "19:15", avgKw: 1.25 },
-      { hhmm: "19:30", avgKw: 1.75 },
+      { hhmm: "14:15", avgKw: 0 },
+      { hhmm: "14:30", avgKw: 1 },
     ]);
   });
 
-  it("splits the previous Green Button dump into a padded zero slot when the duplicated energy lands before the gap", () => {
+  it("averages cross-day padded Green Button dumps in home-local slots", () => {
     const view = buildOnePathRunReadOnlyView({
       dataset: {
         summary: {
@@ -367,18 +377,19 @@ describe("buildOnePathRunReadOnlyView", () => {
           timezone: "America/Chicago",
           greenButtonIntervalTimestampMode: "utcDayGrid",
           greenButtonPaddedIntervalCount: 1,
+          monthProvenanceByMonth: { "2026-05": "SIMULATED" },
         },
       },
     });
 
     expect(view?.fifteenMinuteAverages).toEqual([
-      { hhmm: "19:00", avgKw: 1.5 },
-      { hhmm: "19:15", avgKw: 2 },
-      { hhmm: "19:30", avgKw: 1 },
+      { hhmm: "14:00", avgKw: 2.5 },
+      { hhmm: "14:15", avgKw: 1 },
+      { hhmm: "14:30", avgKw: 1 },
     ]);
   });
 
-  it("does not apply display redistribution again when the simulation pool already corrected Green Button intervals", () => {
+  it("uses pool-corrected Green Button intervals as-is for the shared Past display curve", () => {
     const view = buildOnePathRunReadOnlyView({
       dataset: {
         summary: {
@@ -409,14 +420,15 @@ describe("buildOnePathRunReadOnlyView", () => {
           greenButtonIntervalTimestampMode: "utcDayGrid",
           greenButtonPaddedIntervalCount: 1,
           greenButtonZeroRedistributedIntervalCount: 1,
+          monthProvenanceByMonth: { "2026-05": "SIMULATED" },
         },
       },
     });
 
     expect(view?.fifteenMinuteAverages).toEqual([
-      { hhmm: "19:00", avgKw: 1 },
-      { hhmm: "19:15", avgKw: 2 },
-      { hhmm: "19:30", avgKw: 2 },
+      { hhmm: "14:00", avgKw: 1 },
+      { hhmm: "14:15", avgKw: 2 },
+      { hhmm: "14:30", avgKw: 2 },
     ]);
   });
 

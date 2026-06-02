@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildFifteenMinuteAveragesFromIntervalRows,
   buildLoadCurveInsightsFromIntervalRows,
+  filterIntervalRowsToActualDailyDates,
   hhmmInHomeTimezone,
 } from "@/lib/usage/fifteenMinuteLoadCurve";
 
@@ -31,6 +32,21 @@ describe("fifteenMinuteLoadCurve", () => {
     const sixAm = curve.find((row) => row.hhmm === "06:00");
     expect(sixAm?.avgKw).toBe(2);
     expect(curve.find((row) => row.hhmm === "05:00")).toBeUndefined();
+  });
+
+  it("filterIntervalRowsToActualDailyDates drops simulated travel/vacant days", () => {
+    const timezone = "America/Chicago";
+    const rows = [
+      { timestamp: "2026-06-01T12:00:00.000Z", kwh: 10 },
+      { timestamp: "2026-06-02T12:00:00.000Z", kwh: 1 },
+    ];
+    const daily = [
+      { date: "2026-06-01", source: "ACTUAL" },
+      { date: "2026-06-02", source: "SIMULATED", sourceDetail: "SIMULATED (TRAVEL/VACANT)" },
+    ];
+    const filtered = filterIntervalRowsToActualDailyDates(rows, daily, timezone);
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]?.kwh).toBe(10);
   });
 
   it("buildLoadCurveInsightsFromIntervalRows matches separate 15m and time-of-day builders", () => {

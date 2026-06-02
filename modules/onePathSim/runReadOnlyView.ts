@@ -9,6 +9,7 @@ import {
   type SageActualDailyRow,
 } from "@/lib/usage/sageActualDailyTruth";
 import { smtPendingIntervalDateKeysFromMeta } from "@/lib/usage/smtDayCoverageLedger";
+import { resolvePastSimDisplayFifteenMinuteCurve } from "@/lib/usage/pastSimDisplayFifteenMinuteCurve";
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
 import { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
 import type { ValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
@@ -501,22 +502,20 @@ export function buildOnePathRunReadOnlyView(args: {
           : viewModel.derived.daily,
       smtPendingDateKeys
     );
-    const shouldIgnoreGreenButtonGridZeroSamples =
-      intervalTimestampMode === "utcDayGrid" &&
-      Number(meta?.greenButtonPaddedIntervalCount ?? 0) > 0 &&
-      Number(meta?.greenButtonZeroRedistributedIntervalCount ?? 0) <= 0;
-    const rebuiltFifteenMinuteAverages = buildFifteenMinuteAveragesFromIntervals15(
-      asRecord(dataset.series)?.intervals15,
+    const pastFifteenCurve = resolvePastSimDisplayFifteenMinuteCurve({
+      insightsFifteenMinuteAverages: datasetInsights.fifteenMinuteAverages as Array<{
+        hhmm?: string;
+        avgKw?: number;
+      }>,
+      intervals15: asArray(asRecord(dataset.series)?.intervals15),
+      hasSimulatedFill: Boolean(viewModel.coverage.hasSimulatedFill),
+      displayDaily: viewModel.derived.daily,
       timezone,
-      intervalTimestampMode,
-      { redistributeZeroKwhSamples: shouldIgnoreGreenButtonGridZeroSamples }
-    );
-    fifteenMinuteAverages = rebuiltFifteenMinuteAverages.length
-      ? rebuiltFifteenMinuteAverages
-      : viewModel.derived.fifteenCurve;
-    fifteenMinuteCurveSourceOwner = rebuiltFifteenMinuteAverages.length
-      ? "buildOnePathRunReadOnlyView(...).dataset.series.intervals15"
-      : "buildUserUsageDashboardViewModel(...).derived.fifteenCurve";
+      coverageStart: viewModel.coverage.start,
+      coverageEnd: viewModel.coverage.end,
+    });
+    fifteenMinuteAverages = pastFifteenCurve.fifteenMinuteAverages;
+    fifteenMinuteCurveSourceOwner = pastFifteenCurve.sourceOwner;
     if (sageByDate.size > 0 || (args.smtSlotCompleteDateKeys?.size ?? 0) > 0) {
       dailyRows = applyPastSimDisplayTruthOverlay(dailyRows, {
         sageByDate,

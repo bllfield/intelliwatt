@@ -1,4 +1,5 @@
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
+import { resolveManualCompareActualDataset } from "@/lib/usage/manualCompareActualDataset";
 import { buildManualMonthlyReconciliation } from "@/modules/manualUsage/reconciliation";
 import { buildManualUsageReadModel, type ManualUsageReadModel } from "@/modules/manualUsage/readModel";
 import { getManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
@@ -245,21 +246,6 @@ export async function buildOnePathManualUsagePastSimReadResult(args: {
     sharedDiagnostics,
     manualParitySummary,
   };
-}
-
-async function resolveManualCompareActualDataset(args: {
-  actualDataset?: any;
-  actualReference?:
-    | {
-        userId: string;
-        houseId: string;
-        scenarioId: string | null;
-      }
-    | null;
-  correlationId?: string | null;
-}) {
-  if (args.actualDataset !== undefined) return args.actualDataset ?? null;
-  return null;
 }
 
 function compactTravelRanges(value: unknown): Array<{ startDate: string; endDate: string }> {

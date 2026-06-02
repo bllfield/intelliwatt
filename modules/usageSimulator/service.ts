@@ -7204,10 +7204,12 @@ export async function getSimulatedUsageForHouseScenario(args: {
       (buildInputs as any)?.effectiveValidationSelectionMode ??
       (buildInputs as any)?.validationSelectionMode ??
       null;
+    const buildMode = String((buildInputs as any)?.mode ?? "");
+    const buildPreferredActualSource = resolvePreferredActualSourceFromBuildInputs(buildInputs);
     const isPastScenarioForValidationBackfill =
       Boolean(scenarioId) &&
       scenarioRow?.name === WORKSPACE_PAST_NAME &&
-      String((buildInputs as any)?.mode ?? "") === "SMT_BASELINE" &&
+      (buildMode === "SMT_BASELINE" || buildPreferredActualSource === "GREEN_BUTTON") &&
       shouldReconcilePastSmtValidationSelection({
         storedSelectionMode: storedValidationSelectionMode,
         storedValidationKeyCount: buildValidationKeys.length,
@@ -7225,7 +7227,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
         userId: args.userId,
         houseId: args.houseId,
         esiid: house.esiid ?? null,
-        mode: "SMT_BASELINE",
+        mode: buildMode === "MANUAL_TOTALS" ? "MANUAL_TOTALS" : "SMT_BASELINE",
         scenarioId,
         weatherPreference,
         persistPastSimBaseline: true,
