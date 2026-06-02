@@ -44,6 +44,35 @@ describe("greenButtonPastTrustedPool", () => {
     expect(candidates).toEqual(["2026-05-14", "2026-05-15", "2026-05-16"]);
   });
 
+  it("includes year-shifted target days in post-sim validation selection", () => {
+    const utcGridIntervals = Array.from({ length: 96 * 3 }, (_, index) => {
+      const dayOffset = Math.floor(index / 96);
+      const slot = index % 96;
+      const day = String(10 + dayOffset).padStart(2, "0");
+      return {
+        timestamp: new Date(`2026-04-${day}T${String(Math.floor((slot * 15) / 60)).padStart(2, "0")}:${String((slot * 15) % 60).padStart(2, "0")}:00.000Z`).toISOString(),
+        kwh: 0.25,
+      };
+    });
+    const selection = resolveGreenButtonPastValidationSelectionAfterSim({
+      existingSelectedKeys: [],
+      datasetMeta: {
+        actualSource: "GREEN_BUTTON",
+        timezone: "America/Chicago",
+        greenButtonSourceDateByTargetDate: {
+          "2026-04-12": "2025-04-12",
+          "2026-04-13": "2025-04-13",
+        },
+      },
+      decodedIntervals15: utcGridIntervals,
+      timezone: "America/Chicago",
+      houseId: "house-1",
+      validationDayCount: 14,
+    });
+    expect(selection).not.toBeNull();
+    expect(selection?.validationOnlyDateKeysLocal.length).toBeGreaterThan(0);
+  });
+
   it("builds a validation candidate pool larger than Chicago 96/96 on raw UTC timestamps", () => {
     const utcGridIntervals = Array.from({ length: 96 * 3 }, (_, index) => {
       const dayOffset = Math.floor(index / 96);

@@ -11,6 +11,7 @@ import {
   type HomeIntervalCalendar,
 } from "@/lib/time/homeIntervalCalendar";
 import { mapGreenButtonUtcTrustedDateKeysToHome } from "@/lib/time/greenButtonUtcTrustedDateKeys";
+import { greenButtonShiftedTargetDateKeys } from "@/lib/usage/greenButtonPastYearShiftMerge";
 
 const SIMULATED_INCOMPLETE_METER_DETAIL = "SIMULATED_INCOMPLETE_METER";
 
@@ -204,6 +205,18 @@ export function resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals(args: 
       localSlotIndex,
     })
   );
+}
+
+/** Align validation pool with Past sim: home-local trusted days plus year-shifted target days. */
+export function expandGreenButtonPastTrustedHomeDateKeysWithShiftedTargets(
+  trustedHome: ReadonlySet<string>,
+  sourceDateByTargetDate?: Record<string, string> | null
+): Set<string> {
+  const out = new Set(trustedHome);
+  for (const dk of greenButtonShiftedTargetDateKeys(sourceDateByTargetDate ?? {})) {
+    out.add(dk);
+  }
+  return out;
 }
 
 export function readGreenButtonTrustedHomeDateKeysFromPastMeta(meta: unknown): Set<string> {

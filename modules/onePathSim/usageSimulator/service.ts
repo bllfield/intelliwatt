@@ -23,7 +23,10 @@ import {
   resolveGreenButtonPastValidationCandidateDateKeys,
   resolveGreenButtonPastValidationSelectionAfterSim,
 } from "@/lib/usage/greenButtonPastValidationCandidates";
-import { resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals } from "@/lib/usage/greenButtonPastTrustedPool";
+import {
+  expandGreenButtonPastTrustedHomeDateKeysWithShiftedTargets,
+  resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals,
+} from "@/lib/usage/greenButtonPastTrustedPool";
 import { resolvePastSimTravelRangesForRecalc } from "@/lib/usage/pastSimTravelRanges";
 import {
   resolveCanonicalPastValidationDayCount,
@@ -5271,6 +5274,10 @@ async function recalcSimulatorBuildImpl(args: {
             timezone: timezoneForStoredBuild,
           });
         }
+        trustedHomeForValidation = expandGreenButtonPastTrustedHomeDateKeysWithShiftedTargets(
+          trustedHomeForValidation,
+          loaded.sourceDateByTargetDate
+        );
         if (trustedHomeForValidation.size > 0) {
           greenButtonTrustedHomeDateKeysForBuild = Array.from(trustedHomeForValidation).sort();
         }
@@ -7254,6 +7261,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
         (buildInputs as any)?.effectiveValidationSelectionMode ??
         (buildInputs as any)?.validationSelectionMode ??
         null;
+      let pastValidationBackfillRotatedArtifact = false;
       if (
         isPastScenarioValidationBackfillEligible({
           scenarioId,
@@ -7300,6 +7308,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
             message: backfillRecalc.error ?? "Failed to backfill validation-day compare for Past scenario.",
           };
         }
+        pastValidationBackfillRotatedArtifact = true;
         const buildRecAfterBackfill = await (prisma as any).usageSimulatorBuild
           .findUnique({
             where: { userId_houseId_scenarioKey: { userId: args.userId, houseId: args.houseId, scenarioKey } },
@@ -7338,11 +7347,15 @@ export async function getSimulatedUsageForHouseScenario(args: {
         requestHouseEsiid: house.esiid ?? null,
         buildInputs,
       });
-      const requestedExactArtifactInputHash =
+      let requestedExactArtifactInputHash =
         typeof args.exactArtifactInputHash === "string" && args.exactArtifactInputHash.trim()
           ? args.exactArtifactInputHash.trim()
           : null;
-      const requireExactArtifactMatch = args.requireExactArtifactMatch === true;
+      if (pastValidationBackfillRotatedArtifact) {
+        requestedExactArtifactInputHash = null;
+      }
+      const requireExactArtifactMatch =
+        args.requireExactArtifactMatch === true && !pastValidationBackfillRotatedArtifact;
       let resolvedInputHash = requestedExactArtifactInputHash ?? "";
       if (!resolvedInputHash) {
         const intervalDataFingerprint = await getIntervalDataFingerprint({

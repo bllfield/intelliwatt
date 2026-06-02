@@ -2126,7 +2126,6 @@ export async function runSharedSimulation(
   return buildArtifactFromEngineInput({
     engineInput,
     callerType: "user_past",
-    exactArtifactInputHash: result.canonicalArtifactInputHash ?? null,
   });
 }
 

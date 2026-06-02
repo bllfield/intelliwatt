@@ -17,9 +17,11 @@ import {
   type ValidationDaySelectionMode,
 } from "@/modules/usageSimulator/validationSelection";
 import {
+  expandGreenButtonPastTrustedHomeDateKeysWithShiftedTargets,
   readGreenButtonTrustedHomeDateKeysFromPastMeta,
   resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals,
 } from "@/lib/usage/greenButtonPastTrustedPool";
+import { readGreenButtonSourceDateByTargetDateFromMeta } from "@/lib/usage/greenButtonShiftedDisplay";
 
 function asDateKey(value: unknown): string | null {
   const text = String(value ?? "").slice(0, 10);
@@ -279,6 +281,10 @@ export function resolveGreenButtonPastValidationSelectionAfterSim(args: {
       timezone,
     });
   }
+  trustedHome = expandGreenButtonPastTrustedHomeDateKeysWithShiftedTargets(
+    trustedHome,
+    readGreenButtonSourceDateByTargetDateFromMeta(meta)
+  );
   if (trustedHome.size === 0) return null;
 
   const intervalsForValidation = args.decodedIntervals15.map((row) => ({
