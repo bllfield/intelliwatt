@@ -53,7 +53,8 @@ export function shouldRebuildGreenButtonFifteenMinuteCurveFromSeries(args: {
   hasSimulatedFill?: boolean;
 }): boolean {
   if (args.intervals15Count <= 0) return false;
-  if (args.hasSimulatedFill) return true;
+  // Past sim artifacts rebuild GB curves on decode; do not replace with a second series pass.
+  if (args.hasSimulatedFill) return false;
   if (args.intervals15Count >= GREEN_BUTTON_MIN_INTERVALS_FOR_SERIES_CURVE) return true;
   return args.meta?.greenButtonFullYearIntervals15 === true;
 }
@@ -76,15 +77,6 @@ export function resolveGreenButtonIntervalDeliveryFromMeta(
 ): IntervalDelivery {
   const mode = String(meta?.greenButtonIntervalTimestampMode ?? "").trim();
   if (mode === "utcDayGrid") return GREEN_BUTTON_LEGACY_UTC_DAY_GRID_DELIVERY;
-  if (mode === "home_local") return GREEN_BUTTON_PERSISTED_INTERVAL_DELIVERY;
-  if (
-    meta?.greenButtonSourceDateByTargetDate &&
-    typeof meta.greenButtonSourceDateByTargetDate === "object" &&
-    !Array.isArray(meta.greenButtonSourceDateByTargetDate) &&
-    (meta.actualSource === "GREEN_BUTTON" || typeof meta.greenButtonCoverageIntervalCount === "number")
-  ) {
-    return GREEN_BUTTON_LEGACY_UTC_DAY_GRID_DELIVERY;
-  }
   return GREEN_BUTTON_PERSISTED_INTERVAL_DELIVERY;
 }
 

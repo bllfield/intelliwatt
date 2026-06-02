@@ -73,7 +73,7 @@ import { buildOnePathManualUsagePastSimReadResult } from "@/modules/onePathSim/m
 import { buildOnePathManualStageOnePreview, buildOnePathManualStageOneView } from "@/modules/onePathSim/manualStageView";
 import { buildOnePathRunReadOnlyView } from "@/modules/onePathSim/runReadOnlyView";
 import type { ManualUsagePayload } from "@/modules/onePathSim/simulatedUsage/types";
-import { buildValidationCompareProjectionSidecar } from "@/modules/onePathSim/usageSimulator/compareProjection";
+import { resolveValidationCompareProjectionForRead } from "@/lib/usage/pastSimValidationCompareRead";
 import { createSimCorrelationId, getMemoryRssMb, logSimPipelineEvent } from "@/modules/onePathSim/usageSimulator/simObservability";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/onePathSim/usageSimulator/metadataWindow";
 import { chicagoPullDateKey } from "@/lib/usage/smtDayCoverageLedger";
@@ -700,7 +700,20 @@ async function buildPastSimRunReadbackResponse(args: {
     memoryRssMb: getMemoryRssMb(),
   });
   const sidecarStartedAt = Date.now();
-  const compareProjection = buildValidationCompareProjectionSidecar(readback.dataset);
+  const sageTruthForCompare = await resolveSageActualTruthForRunDisplay({
+    userId: args.userId,
+    houseId: args.houseId,
+    actualContextHouseId:
+      args.actualContextHouseId ?? args.smtPostSimHealing?.actualContextHouseId ?? args.houseId,
+    smtSourceEsiid: args.smtSourceEsiid ?? args.smtPostSimHealing?.sourceEsiid ?? null,
+    preferredActualSource:
+      args.preferredActualSource ?? args.smtPostSimHealing?.preferredActualSource ?? null,
+  });
+  const compareProjection = resolveValidationCompareProjectionForRead({
+    dataset: readback.dataset,
+    actualDataset: sageTruthForCompare?.dataset ?? null,
+    displayDataset: readback.dataset,
+  });
   logSimPipelineEvent("one_path_admin_past_compare_sidecar_success", {
     correlationId: args.correlationId ?? null,
     houseId: args.houseId,
