@@ -14,6 +14,7 @@ import { localDateKeysInRange } from "@/lib/admin/gapfillLab";
 import {
   selectValidationDayKeys,
   type ValidationDaySelectionDiagnostics,
+  type ValidationDaySelectionMode,
 } from "@/modules/usageSimulator/validationSelection";
 import {
   readGreenButtonTrustedHomeDateKeysFromPastMeta,
