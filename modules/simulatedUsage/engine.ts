@@ -35,7 +35,6 @@ import {
   DEFAULT_SIMULATION_VARIABLE_POLICY,
   type SimulationVariablePolicy,
 } from "@/modules/usageSimulator/simulationVariablePolicy";
-import { chicagoSlot96FromTs } from "@/lib/time/chicago";
 
 /** Map shared simulator fallback level to engine diagnostic enum. */
 function pastDayFallbackToEngineLevel(level: PastDayFallbackLevel): PastFallbackLevel {
@@ -817,20 +816,11 @@ function countPresentSlotsForDay(
   trustedSource: "SMT" | "GREEN_BUTTON" = "SMT",
   dateKey?: string,
 ): number {
-  if (trustedSource === "SMT") {
-    return countPresentUnitsForIntervalDay({ intervals, dateKey, source: "SMT" });
-  }
-  if (intervals.some((row) => typeof row.homeSlot === "number")) {
-    return countPresentUnitsForIntervalDay({ intervals, dateKey, source: "GREEN_BUTTON" });
-  }
-  const slots = new Set<number>();
-  for (const p of intervals) {
-    const ts = new Date(p.timestamp);
-    if (!Number.isFinite(ts.getTime())) continue;
-    const slot = chicagoSlot96FromTs(ts);
-    if (slot != null) slots.add(slot);
-  }
-  return slots.size;
+  return countPresentUnitsForIntervalDay({
+    intervals,
+    dateKey,
+    source: trustedSource,
+  });
 }
 
 /**

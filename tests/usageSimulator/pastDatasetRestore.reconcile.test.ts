@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { buildDisplayedMonthlyRows } from "@/modules/usageSimulator/monthlyCompareRows";
 import {
   enrichPastDailyRowsWithSourceDetailFromMeta,
   reconcileRestoredPastDatasetFromDecodedIntervals,
@@ -303,5 +304,40 @@ describe("reconcileRestoredPastDatasetFromDecodedIntervals", () => {
     expect(byDate["2020-06-03"].source).toBe("ACTUAL");
     expect(byDate["2020-06-03"].sourceDetail).toBe("ACTUAL");
     expect(dataset.meta.simulatedSourceDetailByDate["2020-06-03"]).toBeUndefined();
+  });
+
+  it("keeps PRIOR_YEAR_TAIL stitched monthly on restore instead of splitting May across two year-months", () => {
+    const intervals = [
+      { timestamp: "2026-05-10T12:00:00.000Z", kwh: 10 },
+      { timestamp: "2026-05-18T12:00:00.000Z", kwh: 8 },
+      { timestamp: "2025-05-20T12:00:00.000Z", kwh: 3 },
+      { timestamp: "2025-05-31T12:00:00.000Z", kwh: 4 },
+    ];
+    const dataset: any = {
+      summary: { end: "2026-05-18" },
+      meta: {},
+      daily: [],
+      monthly: [
+        { month: "2025-05", kwh: 7 },
+        { month: "2026-05", kwh: 18 },
+      ],
+      series: { daily: [], monthly: [], annual: [] },
+      insights: { weekdayVsWeekend: { weekday: 0, weekend: 0 }, peakDay: null, stitchedMonth: null },
+      totals: {},
+    };
+
+    reconcileRestoredPastDatasetFromDecodedIntervals({
+      dataset,
+      decodedIntervals: intervals,
+      fallbackEndDate: "2026-05-18",
+    });
+
+    expect(dataset.insights.stitchedMonth?.mode).toBe("PRIOR_YEAR_TAIL");
+    expect(dataset.insights.stitchedMonth?.yearMonth).toBe("2026-05");
+    expect(dataset.insights.stitchedMonth?.borrowedFromYearMonth).toBe("2025-05");
+    const displayed = buildDisplayedMonthlyRows(dataset);
+    expect(displayed.map((row) => row.month)).not.toContain("2025-05");
+    const may2026 = displayed.find((row) => row.month === "2026-05");
+    expect(may2026?.kwh).toBe(25);
   });
 });

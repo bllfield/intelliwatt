@@ -25,6 +25,7 @@ if (existsSync(envLocalPath)) {
   }
 }
 
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import {
   addDateKeyDays,
@@ -87,6 +88,25 @@ async function main() {
   const missingSlots = missingChicagoSlotsFromFilledSlots(filledSlots);
   const duplicateSlots = [...filledSlots].filter((s) => (slots.get(s)?.length ?? 0) > 1);
 
+  const sumRawKwh = onTargetDate.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0);
+  const sumMaxPerTsKwh = [...slots.values()].reduce((sum, entries) => {
+    const slotKwh = entries.reduce((s, e) => s + Math.max(0, Number(e.kwh) || 0), 0);
+    return sum + slotKwh;
+  }, 0);
+  const smtLoc = Prisma.sql`"ts" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Chicago'`;
+  const usageDailyRows = await prisma.$queryRaw<Array<{ kwh: number; interval_count: number }>>(Prisma.sql`
+    WITH iv AS (
+      SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh
+      FROM "SmtInterval"
+      WHERE "esiid" = ${esiid}
+        AND to_char((${smtLoc})::date, 'YYYY-MM-DD') = ${dateKey}
+      GROUP BY "ts"
+    )
+    SELECT COALESCE(SUM("kwh"), 0)::float AS kwh, COUNT(*)::int AS interval_count
+    FROM iv
+  `);
+  const usageSqlDailyKwh = Number(usageDailyRows[0]?.kwh ?? 0) || 0;
+
   const coverage = await loadSmtDateCoverage({ esiid, dateKeys: [dateKey] });
   const ledgerStatus = await loadSmtDayLedgerStatusForDate({ esiid, dateKey });
   const ledger = await reconcileSmtIntervalDayLedger({ esiid }).catch(() => null);
@@ -118,6 +138,11 @@ async function main() {
   console.log("persistedStatus:", ledgerStatus ?? "(no row)");
   console.log("reconcile.byDate:", ledger?.byDate[dateKey] ?? "(n/a)");
   console.log("intervalCountAtLastCheck would use:", coverage.countsByDate[dateKey]);
+  console.log("");
+  console.log("--- Daily kWh (Usage / compare actual source) ---");
+  console.log("usageSqlDailyKwh (getActualDailyKwhForLocalDateKeys path):", Math.round(usageSqlDailyKwh * 100) / 100);
+  console.log("sumRawRowKwh (all rows, no ts dedupe):", Math.round(sumRawKwh * 100) / 100);
+  console.log("sumByChicagoSlot (max kwh per slot):", Math.round(sumMaxPerTsKwh * 100) / 100);
 
   const spillover = rows
     .filter((r) => smtCoverageDateKey(r.ts) !== dateKey)

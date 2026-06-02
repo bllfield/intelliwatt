@@ -18,6 +18,12 @@ import {
   incompleteMeterDateKeysFromPastMeta,
   pruneStaleIncompleteMeterFromPastDatasetMeta,
 } from "@/lib/usage/pastSimStaleIncompleteMeter";
+import {
+  buildFifteenMinuteAveragesFromIntervalRows,
+  buildTimeOfDayBucketsFromIntervalRows,
+  normalizeHomeTimezoneForLoadCurve,
+} from "@/lib/usage/fifteenMinuteLoadCurve";
+import { buildDisplayedMonthlyRows } from "@/modules/usageSimulator/monthlyCompareRows";
 import { getMemoryRssMb, logSimPipelineEvent } from "@/modules/usageSimulator/simObservability";
 import { generateSimulatedCurve } from "@/modules/simulatedUsage/engine";
 import { roundDayKwhDisplay } from "@/modules/simulatedUsage/pastDaySimulator";
@@ -765,11 +771,27 @@ export function reconcileRestoredPastDatasetFromDecodedIntervals(args: {
     legacyDailyByDate,
   });
   const monthlyFromDaily = buildMonthlyFromDailyRows(enrichedDaily);
+  const stitchedMonth = recomputed.stitchedMonth;
+  const borrowedYearMonth = String(stitchedMonth?.borrowedFromYearMonth ?? "").slice(0, 7);
+  const hasBorrowedMonthTruth =
+    /^\d{4}-\d{2}$/.test(borrowedYearMonth) &&
+    ((recomputed.monthly.find((row) => row.month === borrowedYearMonth)?.kwh ?? 0) > 0 ||
+      (monthlyFromDaily.find((row) => row.month === borrowedYearMonth)?.kwh ?? 0) > 0);
+  const monthlyForDisplay =
+    stitchedMonth && hasBorrowedMonthTruth
+      ? buildDisplayedMonthlyRows({
+          monthly: recomputed.monthly,
+          insights: { stitchedMonth },
+        })
+      : monthlyFromDaily.length > 0
+        ? monthlyFromDaily
+        : recomputed.monthly;
+  const usageBucketsForDisplay = usageBucketsByMonthFromSimulatedMonthly(monthlyForDisplay);
 
   (dataset as any).daily = enrichedDaily;
-  if (monthlyFromDaily.length > 0) {
-    (dataset as any).monthly = monthlyFromDaily;
-    (dataset as any).usageBucketsByMonth = usageBucketsByMonthFromSimulatedMonthly(monthlyFromDaily);
+  if (monthlyForDisplay.length > 0) {
+    (dataset as any).monthly = monthlyForDisplay;
+    (dataset as any).usageBucketsByMonth = usageBucketsForDisplay;
   }
 
   (dataset as any).series.daily = enrichedDaily.map((d) => ({
@@ -778,15 +800,15 @@ export function reconcileRestoredPastDatasetFromDecodedIntervals(args: {
     source: d.source,
     sourceDetail: d.sourceDetail,
   }));
-  if (monthlyFromDaily.length > 0) {
-    (dataset as any).series.monthly = monthlyFromDaily.map((m) => ({
+  if (monthlyForDisplay.length > 0) {
+    (dataset as any).series.monthly = monthlyForDisplay.map((m) => ({
       timestamp: `${m.month}-01T00:00:00.000Z`,
       kwh: Number(m.kwh) || 0,
     }));
     (dataset as any).series.annual = [
       {
         timestamp: `${curveEnd.slice(0, 4)}-01-01T00:00:00.000Z`,
-        kwh: round2(monthlyFromDaily.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0)),
+        kwh: round2(monthlyForDisplay.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0)),
       },
     ];
   }
@@ -808,6 +830,21 @@ export function reconcileRestoredPastDatasetFromDecodedIntervals(args: {
     if (recomputed.stitchedMonth !== undefined) {
       (dataset.insights as any).stitchedMonth = recomputed.stitchedMonth;
     }
+    const homeTimezone = normalizeHomeTimezoneForLoadCurve(
+      String((dataset as any)?.meta?.timezone ?? "America/Chicago")
+    );
+    const intervalRowsForInsights = decodedIntervals.map((iv) => ({
+      timestamp: String(iv?.timestamp ?? ""),
+      consumption_kwh: Number(iv?.consumption_kwh ?? iv?.kwh ?? 0) || 0,
+    }));
+    (dataset.insights as any).fifteenMinuteAverages = buildFifteenMinuteAveragesFromIntervalRows(
+      intervalRowsForInsights,
+      homeTimezone
+    );
+    (dataset.insights as any).timeOfDayBuckets = buildTimeOfDayBucketsFromIntervalRows(
+      intervalRowsForInsights,
+      homeTimezone
+    );
   }
 
   if (!dataset.summary || typeof dataset.summary !== "object") (dataset as any).summary = {};
@@ -843,58 +880,18 @@ function buildMonthlyTotalsFromIntervals(intervals: Array<{ timestamp: string; c
     .sort((a, b) => (a.month < b.month ? -1 : 1));
 }
 
-function computeFifteenMinuteAverages(intervals: Array<{ timestamp: string; consumption_kwh: number }>) {
-  const buckets = new Map<string, { sumKw: number; count: number }>();
-  for (let i = 0; i < intervals.length; i++) {
-    const ts = intervals[i].timestamp;
-    const hhmm = ts.slice(11, 16);
-    const kwh = Number(intervals[i].consumption_kwh) || 0;
-    const kw = kwh * 4;
-    const cur = buckets.get(hhmm) ?? { sumKw: 0, count: 0 };
-    cur.sumKw += kw;
-    cur.count += 1;
-    buckets.set(hhmm, cur);
-  }
-  return Array.from(buckets.entries())
-    .map(([hhmm, v]) => ({ hhmm, avgKw: v.count > 0 ? round2(v.sumKw / v.count) : 0 }))
-    .sort((a, b) => (a.hhmm < b.hhmm ? -1 : 1));
+function computeFifteenMinuteAverages(
+  intervals: Array<{ timestamp: string; consumption_kwh: number }>,
+  timezone: string
+) {
+  return buildFifteenMinuteAveragesFromIntervalRows(intervals, timezone);
 }
 
-function chicagoHour(ts: Date): number | null {
-  try {
-    const fmt = new Intl.DateTimeFormat("en-US", {
-      timeZone: "America/Chicago",
-      hour: "numeric",
-      hour12: false,
-    });
-    const parts = fmt.formatToParts(ts);
-    const hour = Number(parts.find((p) => p.type === "hour")?.value ?? "");
-    if (!Number.isFinite(hour) || hour < 0 || hour > 23) return null;
-    return hour;
-  } catch {
-    return null;
-  }
-}
-
-function computeTimeOfDayBuckets(intervals: Array<{ timestamp: string; consumption_kwh: number }>) {
-  const sums = { overnight: 0, morning: 0, afternoon: 0, evening: 0 };
-  for (const iv of intervals ?? []) {
-    const ts = new Date(String(iv?.timestamp ?? ""));
-    if (!Number.isFinite(ts.getTime())) continue;
-    const hour = chicagoHour(ts);
-    if (hour == null) continue;
-    const kwh = Number(iv?.consumption_kwh) || 0;
-    if (hour < 6) sums.overnight += kwh;
-    else if (hour < 12) sums.morning += kwh;
-    else if (hour < 18) sums.afternoon += kwh;
-    else sums.evening += kwh;
-  }
-  return [
-    { key: "overnight", label: "Overnight (12am–6am)", kwh: round2(sums.overnight) },
-    { key: "morning", label: "Morning (6am–12pm)", kwh: round2(sums.morning) },
-    { key: "afternoon", label: "Afternoon (12pm–6pm)", kwh: round2(sums.afternoon) },
-    { key: "evening", label: "Evening (6pm–12am)", kwh: round2(sums.evening) },
-  ];
+function computeTimeOfDayBuckets(
+  intervals: Array<{ timestamp: string; consumption_kwh: number }>,
+  timezone: string
+) {
+  return buildTimeOfDayBucketsFromIntervalRows(intervals, timezone);
 }
 
 function excludedDateKeysFromTravelRanges(
@@ -1272,8 +1269,11 @@ export function buildSimulatedUsageDatasetFromBuildInputs(
   const seriesMonthly: UsageSeriesPoint[] = monthly.map((m) => ({ timestamp: `${m.month}-01T00:00:00.000Z`, kwh: m.kwh }));
   const seriesAnnual: UsageSeriesPoint[] = [{ timestamp: curve.end.slice(0, 4) + "-01-01T00:00:00.000Z", kwh: totalFromMonthly }];
 
-  const fifteenMinuteAverages = computeFifteenMinuteAverages(curve.intervals);
-  const timeOfDayBuckets = computeTimeOfDayBuckets(curve.intervals);
+  const insightTimezone = normalizeHomeTimezoneForLoadCurve(
+    (buildInputs as { timezone?: string }).timezone
+  );
+  const fifteenMinuteAverages = computeFifteenMinuteAverages(curve.intervals, insightTimezone);
+  const timeOfDayBuckets = computeTimeOfDayBuckets(curve.intervals, insightTimezone);
 
   let weekdaySum = 0;
   let weekendSum = 0;
@@ -1533,10 +1533,15 @@ export function buildSimulatedUsageDatasetFromCurve(
       const nextSimulatedDisplayByDate = new Map<string, number>();
       const nextSimulatedSourceDetailByDate = new Map<string, PastSimulatedDaySourceDetail>();
       const trustedHome = options?.greenButtonTrustedHomeDateKeys ?? new Set<string>();
+      const validationOnlyDateKeySet = new Set(
+        (meta.validationOnlyDateKeysLocal ?? [])
+          .map((dk) => String(dk ?? "").slice(0, 10))
+          .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+      );
       for (const row of options?.simulatedDayResults ?? []) {
         const dk = String(row?.localDate ?? "").slice(0, 10);
         if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
-        if (trustedHome.has(dk)) continue;
+        if (trustedHome.has(dk) && !validationOnlyDateKeySet.has(dk)) continue;
         nextSimulatedDisplayByDate.set(
           dk,
           Number(row.displayDayKwh ?? row.intervalSumKwh ?? row.finalDayKwh) || 0
@@ -1640,8 +1645,16 @@ export function buildSimulatedUsageDatasetFromCurve(
         else nextWeekdaySum += dailyKwh;
         if (!nextPeakDay || dailyKwh > nextPeakDay.kwh) nextPeakDay = { date, kwh: dailyKwh };
       }
+      const modeledKwhByValidationDate = new Map<string, number>();
+      for (const row of options?.simulatedDayResults ?? []) {
+        const dk = String(row?.localDate ?? "").slice(0, 10);
+        if (!validationOnlyDateKeySet.has(dk)) continue;
+        const modeledKwh = Number(row.displayDayKwh ?? row.intervalSumKwh ?? row.finalDayKwh);
+        if (!Number.isFinite(modeledKwh)) continue;
+        modeledKwhByValidationDate.set(dk, modeledKwh);
+      }
       for (const dk of Array.from(validationOnlyDateKeySet)) {
-        const modeledKwh = simulatedDisplayByDate.get(dk);
+        const modeledKwh = simulatedDisplayByDate.get(dk) ?? modeledKwhByValidationDate.get(dk);
         if (modeledKwh === undefined || !Number.isFinite(Number(modeledKwh))) continue;
         const rounded = round2(Number(modeledKwh));
         nextValidationCanonicalSimulatedDayTotalsByDateLocal[dk] = rounded;
@@ -1705,12 +1718,18 @@ export function buildSimulatedUsageDatasetFromCurve(
     "insights",
     { skipHeavyInsights, intervalCount: curve.intervals.length },
     () => {
-      const nextFifteenMinuteAverages = skipHeavyInsights ? [] : computeFifteenMinuteAverages(curve.intervals);
-      const nextTimeOfDayBuckets = skipHeavyInsights ? [] : computeTimeOfDayBuckets(curve.intervals);
+      const homeTimezone = normalizeHomeTimezoneForLoadCurve(
+        options?.homeTimezone ?? options?.timezone ?? meta.timezone
+      );
+      const nextFifteenMinuteAverages = skipHeavyInsights
+        ? []
+        : computeFifteenMinuteAverages(curve.intervals, homeTimezone);
+      const nextTimeOfDayBuckets = skipHeavyInsights
+        ? []
+        : computeTimeOfDayBuckets(curve.intervals, homeTimezone);
       const simulatedHomeDateKeys = buildSimulatedHomeDateKeysExcludedFromBaseload(
         options?.simulatedDayResults
       );
-      const homeTimezone = String(options?.homeTimezone ?? options?.timezone ?? "America/Chicago");
       const nextBaseloadComputed = skipHeavyInsights
         ? { baseloadKw: null as number | null, fallbackUsed: true, debugNote: "sparse_curve_lab_skip" as string | null }
         : computeBaseloadKwFromCurveIntervals(curve.intervals, {
