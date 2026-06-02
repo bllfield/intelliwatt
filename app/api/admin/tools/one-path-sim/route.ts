@@ -652,38 +652,46 @@ async function buildPastSimRunReadbackResponse(args: {
   preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
   smtSourceEsiid?: string | null;
 }) {
-  const readMode = args.readMode ?? "artifact_only";
   const startedAt = Date.now();
-  logSimPipelineEvent("one_path_admin_past_readback_start", {
-    correlationId: args.correlationId ?? null,
-    houseId: args.houseId,
-    scenarioId: args.scenarioId,
-    readMode,
-    source: "buildPastSimRunReadbackResponse",
-    memoryRssMb: getMemoryRssMb(),
-  });
-  const readScenarioDataset = (forceRebuildArtifact = false) =>
+  const readScenarioDataset = (
+    mode: "artifact_only" | "allow_rebuild",
+    forceRebuildArtifact = false
+  ) =>
     readOnePathSimulatedUsageScenario({
       userId: args.userId,
       houseId: args.houseId,
       scenarioId: args.scenarioId,
-      readMode,
+      readMode: mode,
       forceRebuildArtifact,
       projectionMode: "baseline",
       readContext: {
-        artifactReadMode: readMode,
+        artifactReadMode: mode,
         projectionMode: "baseline",
         compareSidecarRequest: true,
       },
     });
 
-  let readback = await readScenarioDataset();
+  let readModeUsed: "artifact_only" | "allow_rebuild" = args.readMode ?? "artifact_only";
+  logSimPipelineEvent("one_path_admin_past_readback_start", {
+    correlationId: args.correlationId ?? null,
+    houseId: args.houseId,
+    scenarioId: args.scenarioId,
+    readMode: readModeUsed,
+    source: "buildPastSimRunReadbackResponse",
+    memoryRssMb: getMemoryRssMb(),
+  });
+
+  let readback = await readScenarioDataset(readModeUsed);
+  if (!readback.ok && readback.code === "ARTIFACT_MISSING" && readModeUsed === "artifact_only") {
+    readModeUsed = "allow_rebuild";
+    readback = await readScenarioDataset("allow_rebuild");
+  }
   if (!readback.ok) {
     logSimPipelineEvent("one_path_admin_past_readback_failure", {
       correlationId: args.correlationId ?? null,
       houseId: args.houseId,
       scenarioId: args.scenarioId,
-      readMode,
+      readMode: readModeUsed,
       code: readback.code,
       durationMs: Date.now() - startedAt,
       source: "buildPastSimRunReadbackResponse",
@@ -700,7 +708,7 @@ async function buildPastSimRunReadbackResponse(args: {
     correlationId: args.correlationId ?? null,
     houseId: args.houseId,
     scenarioId: args.scenarioId,
-    readMode,
+    readMode: readModeUsed,
     durationMs: Date.now() - startedAt,
     source: "buildPastSimRunReadbackResponse",
     memoryRssMb: getMemoryRssMb(),
@@ -1842,7 +1850,6 @@ export async function POST(request: NextRequest) {
           houseId: effectiveHouseId,
           scenarioId: effectiveRawInputBase.scenarioId,
           correlationId,
-          readMode: "allow_rebuild",
           actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
           preferredActualSource: effectiveRawInputBase.preferredActualSource,
           smtSourceEsiid,

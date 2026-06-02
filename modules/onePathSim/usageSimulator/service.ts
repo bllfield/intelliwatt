@@ -38,6 +38,7 @@ import {
   isPastScenarioValidationBackfillEligible,
   preferredActualSourceFromPastBuildInputs,
 } from "@/lib/usage/pastSimValidationReadBackfill";
+import { resolvePastArtifactIdentity } from "@/lib/usage/pastArtifactIdentity";
 import {
   isolateBuildInputsForUserSite,
   isUserSiteSimulationCaller,
@@ -6029,6 +6030,17 @@ async function recalcSimulatorBuildImpl(args: {
     memoryRssMb: getMemoryRssMb(),
   });
 
+  if (isUserSiteCaller) {
+    buildInputs = await applyUserSiteBuildInputsIsolationIfNeeded({
+      userSiteIsolation: true,
+      userId,
+      houseId,
+      esiid: esiid ?? null,
+      buildInputs: buildInputs as SimulatorBuildInputsV1,
+      correlationId: args.correlationId,
+    });
+  }
+
   const persistBuildStartedAt = Date.now();
   logSimPipelineEvent("recalc_persist_build_start", {
     correlationId: args.correlationId,
@@ -6162,51 +6174,39 @@ async function recalcSimulatorBuildImpl(args: {
       memoryRssMb: getMemoryRssMb(),
     });
     try {
-      const canonicalActualIdentity = await resolveCanonicalActualIdentityForBuild({
+      const pastArtifactIdentity = await resolvePastArtifactIdentity({
         userId,
         requestHouseId: houseId,
         requestHouseEsiid: esiid ?? null,
         buildInputs: buildInputs as Record<string, unknown>,
       });
-      const intervalDataFingerprint = await getIntervalDataFingerprint({
-        houseId: canonicalActualIdentity.houseId,
-        esiid: canonicalActualIdentity.esiid,
-        startDate: identityWindow.startDate,
-        endDate: identityWindow.endDate,
-        preferredSource: resolvePreferredActualSourceFromBuildInputs(buildInputs),
-      });
-      const usageShapeProfileIdentity = isLeanManualTotalsMode(simMode)
-        ? {
-            usageShapeProfileId: null,
-            usageShapeProfileVersion: null,
-            usageShapeProfileDerivedAt: null,
-            usageShapeProfileSimHash: null,
-          }
-        : await getUsageShapeProfileIdentityForPast(houseId);
-      const weatherIdentity = await computePastWeatherIdentity({
-        houseId: canonicalActualIdentity.houseId,
-        startDate: identityWindow.startDate,
-        endDate: identityWindow.endDate,
-        weatherLogicMode: resolveWeatherLogicModeFromBuildInputs(buildInputs as Record<string, unknown>),
-      });
-      const artifactInputHash = computePastInputHash({
-        engineVersion: PAST_ENGINE_VERSION,
-        windowStartUtc: identityWindow.startDate,
-        windowEndUtc: identityWindow.endDate,
-        timezone: String((buildInputs as any)?.timezone ?? "America/Chicago"),
-        travelRanges: (Array.isArray((buildInputs as any)?.travelRanges) ? (buildInputs as any).travelRanges : []) as Array<{
-          startDate: string;
-          endDate: string;
-        }>,
-        buildInputs: buildInputs as Record<string, unknown>,
-        intervalDataFingerprint,
-        usageShapeProfileId: usageShapeProfileIdentity.usageShapeProfileId,
-        usageShapeProfileVersion: usageShapeProfileIdentity.usageShapeProfileVersion,
-        usageShapeProfileDerivedAt: usageShapeProfileIdentity.usageShapeProfileDerivedAt,
-        usageShapeProfileSimHash: usageShapeProfileIdentity.usageShapeProfileSimHash,
-        weatherIdentity,
-      });
+      if (!pastArtifactIdentity) {
+        logSimPipelineEvent("recalc_artifact_persist_failure", {
+          correlationId: args.correlationId,
+          houseId,
+          sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+          scenarioId,
+          mode: simMode,
+          failureMessage: "Canonical artifact identity could not be resolved from recalc build inputs.",
+          source: "recalcSimulatorBuildImpl",
+          memoryRssMb: getMemoryRssMb(),
+        });
+        return {
+          ok: false,
+          error: "artifact_persist_failed",
+          missingItems: ["Canonical artifact identity could not be resolved from recalc build inputs."],
+        };
+      }
+      const artifactInputHash = pastArtifactIdentity.inputHash;
       canonicalArtifactInputHash = artifactInputHash;
+      const intervalDataFingerprint = pastArtifactIdentity.intervalDataFingerprint;
+      const usageShapeProfileIdentity = {
+        usageShapeProfileId: pastArtifactIdentity.usageShapeProfileId,
+        usageShapeProfileVersion: pastArtifactIdentity.usageShapeProfileVersion,
+        usageShapeProfileDerivedAt: pastArtifactIdentity.usageShapeProfileDerivedAt,
+        usageShapeProfileSimHash: pastArtifactIdentity.usageShapeProfileSimHash,
+      };
+      const weatherIdentity = pastArtifactIdentity.weatherIdentity;
       applyCanonicalCoverageMetadataForNonBaseline(dataset, scenarioKey, { buildInputs });
       const canonicalArtifactSimulatedDayTotalsByDate = readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
       const { bytes } = encodeIntervalsV1(intervals15);
@@ -7329,8 +7329,14 @@ export async function getSimulatedUsageForHouseScenario(args: {
           });
         }
       }
-      const window = resolveWindowFromBuildInputsForPastIdentity(buildInputs);
-      if (!window) {
+      const sharedCoverageWindow = resolveCanonicalUsage365CoverageWindow();
+      const pastArtifactIdentity = await resolvePastArtifactIdentity({
+        userId: args.userId,
+        requestHouseId: args.houseId,
+        requestHouseEsiid: house.esiid ?? null,
+        buildInputs: buildInputs as Record<string, unknown>,
+      });
+      if (!pastArtifactIdentity) {
         return {
           ok: false,
           code: "ARTIFACT_MISSING",
@@ -7338,15 +7344,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
           engineVersion: PAST_ENGINE_VERSION,
         };
       }
-      const travelRanges = (Array.isArray((buildInputs as any)?.travelRanges) ? (buildInputs as any).travelRanges : []) as Array<{ startDate: string; endDate: string }>;
-      const timezone = String((buildInputs as any)?.timezone ?? "America/Chicago");
-      const sharedCoverageWindow = resolveCanonicalUsage365CoverageWindow();
-      const canonicalActualIdentity = await resolveCanonicalActualIdentityForBuild({
-        userId: args.userId,
-        requestHouseId: args.houseId,
-        requestHouseEsiid: house.esiid ?? null,
-        buildInputs,
-      });
+      const window = pastArtifactIdentity.window;
       let requestedExactArtifactInputHash =
         typeof args.exactArtifactInputHash === "string" && args.exactArtifactInputHash.trim()
           ? args.exactArtifactInputHash.trim()
@@ -7356,37 +7354,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
       }
       const requireExactArtifactMatch =
         args.requireExactArtifactMatch === true && !pastValidationBackfillRotatedArtifact;
-      let resolvedInputHash = requestedExactArtifactInputHash ?? "";
-      if (!resolvedInputHash) {
-        const intervalDataFingerprint = await getIntervalDataFingerprint({
-          houseId: canonicalActualIdentity.houseId,
-          esiid: canonicalActualIdentity.esiid,
-          startDate: window.startDate,
-          endDate: window.endDate,
-          preferredSource: resolvePreferredActualSourceFromBuildInputs(buildInputs),
-        });
-        const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(args.houseId);
-        const weatherIdentity = await computePastWeatherIdentity({
-          houseId: canonicalActualIdentity.houseId,
-          startDate: window.startDate,
-          endDate: window.endDate,
-          weatherLogicMode: resolveWeatherLogicModeFromBuildInputs(buildInputs as Record<string, unknown>),
-        });
-        resolvedInputHash = computePastInputHash({
-          engineVersion: PAST_ENGINE_VERSION,
-          windowStartUtc: window.startDate,
-          windowEndUtc: window.endDate,
-          timezone,
-          travelRanges,
-          buildInputs: buildInputs as Record<string, unknown>,
-          intervalDataFingerprint,
-          usageShapeProfileId: usageShapeProfileIdentity.usageShapeProfileId,
-          usageShapeProfileVersion: usageShapeProfileIdentity.usageShapeProfileVersion,
-          usageShapeProfileDerivedAt: usageShapeProfileIdentity.usageShapeProfileDerivedAt,
-          usageShapeProfileSimHash: usageShapeProfileIdentity.usageShapeProfileSimHash,
-          weatherIdentity,
-        });
-      }
+      const resolvedInputHash = requestedExactArtifactInputHash ?? pastArtifactIdentity.inputHash;
 
       let exactCached = await getCachedPastDataset({
         houseId: args.houseId,
@@ -7674,6 +7642,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
       (scenarioRow?.name === WORKSPACE_FUTURE_NAME || snapshotScenarioName === WORKSPACE_FUTURE_NAME);
     // Treat any non-baseline, non-future scenario as Past to avoid brittle name-only gating.
     const isPastScenario = Boolean(scenarioId) && !isFutureWorkspaceScenario;
+    const artifactIdentityBuildInputs = { ...(buildInputs as Record<string, unknown>) };
     if (isPastScenario) {
       const liveScenarioEvents = await (prisma as any).usageSimulatorScenarioEvent
         .findMany({
@@ -7879,61 +7848,31 @@ export async function getSimulatedUsageForHouseScenario(args: {
             /* keep canonicalMonths from build or baseline */
           }
         }
-        const window = canonicalWindowDateRange(canonicalMonths);
-        const parityWindow = resolveSharedPastRecalcWindow({
-          mode: mode === "MANUAL_TOTALS" ? "MANUAL_TOTALS" : "SMT_BASELINE",
-          canonicalMonths,
-          smtAnchorPeriods: periodsForStitch,
+        const pastArtifactIdentity = await resolvePastArtifactIdentity({
+          userId: args.userId,
+          requestHouseId: args.houseId,
+          requestHouseEsiid: house.esiid ?? null,
+          buildInputs: artifactIdentityBuildInputs,
         });
-        const startDate = parityWindow.startDate ?? periodsForStitch?.[0]?.startDate ?? window?.start;
-        const endDate = parityWindow.endDate ?? periodsForStitch?.[periodsForStitch.length - 1]?.endDate ?? window?.end;
+        const startDate = pastArtifactIdentity?.window.startDate;
+        const endDate = pastArtifactIdentity?.window.endDate;
         const pastWindowDiag = {
           canonicalMonthsLen: canonicalMonths.length,
           firstMonth: canonicalMonths[0] ?? null,
           lastMonth: canonicalMonths.length > 0 ? canonicalMonths[canonicalMonths.length - 1] ?? null : null,
           windowStartUtc: startDate ?? null,
           windowEndUtc: endDate ?? null,
-          sourceOfWindow: parityWindow.source,
+          sourceOfWindow: "past_artifact_identity",
         };
-        if (startDate && endDate) {
-          const travelRanges = ((buildInputs as any).travelRanges ?? []) as Array<{ startDate: string; endDate: string }>;
-          const timezone = (buildInputs as any).timezone ?? "America/Chicago";
-          const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(args.houseId);
-          const sourceHouseIdForWeather = String((buildInputs as any)?.actualContextHouseId ?? args.houseId);
-          const weatherIdentity = await computePastWeatherIdentity({
-            houseId: sourceHouseIdForWeather,
-            startDate,
-            endDate,
-            weatherLogicMode: resolveWeatherLogicModeFromBuildInputs(buildInputs as Record<string, unknown>),
-          });
-          const intervalDataFingerprint = await getIntervalDataFingerprint({
-            houseId: args.houseId,
-            esiid: house.esiid ?? null,
-            startDate,
-            endDate,
-            preferredSource: resolvePreferredActualSourceFromBuildInputs(buildInputs),
-          });
-          const inputHash = computePastInputHash({
-            engineVersion: PAST_ENGINE_VERSION,
-            windowStartUtc: startDate,
-            windowEndUtc: endDate,
-            timezone,
-            travelRanges,
-            buildInputs: buildInputs as Record<string, unknown>,
-            intervalDataFingerprint,
-            usageShapeProfileId: usageShapeProfileIdentity.usageShapeProfileId,
-            usageShapeProfileVersion: usageShapeProfileIdentity.usageShapeProfileVersion,
-            usageShapeProfileDerivedAt: usageShapeProfileIdentity.usageShapeProfileDerivedAt,
-            usageShapeProfileSimHash: usageShapeProfileIdentity.usageShapeProfileSimHash,
-            weatherIdentity,
-          });
+        if (startDate && endDate && pastArtifactIdentity) {
+          const inputHash = pastArtifactIdentity.inputHash;
           const scenarioIdForCache = scenarioId ?? "BASELINE";
           const cacheKeyDiag = {
             inputHash,
             engineVersion: PAST_ENGINE_VERSION,
-            intervalDataFingerprint,
-            usageShapeProfileId: usageShapeProfileIdentity.usageShapeProfileId,
-            usageShapeProfileVersion: usageShapeProfileIdentity.usageShapeProfileVersion,
+            intervalDataFingerprint: pastArtifactIdentity.intervalDataFingerprint,
+            usageShapeProfileId: pastArtifactIdentity.usageShapeProfileId,
+            usageShapeProfileVersion: pastArtifactIdentity.usageShapeProfileVersion,
             scenarioId: scenarioIdForCache,
           };
           const cached = forceRebuildArtifact
