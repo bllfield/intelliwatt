@@ -6173,7 +6173,7 @@ async function recalcSimulatorBuildImpl(args: {
         esiid: canonicalActualIdentity.esiid,
         startDate: identityWindow.startDate,
         endDate: identityWindow.endDate,
-        preferredSource: preferredActualSource ?? null,
+        preferredSource: resolvePreferredActualSourceFromBuildInputs(buildInputs),
       });
       const usageShapeProfileIdentity = isLeanManualTotalsMode(simMode)
         ? {
