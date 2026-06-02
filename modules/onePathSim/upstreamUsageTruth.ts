@@ -264,6 +264,42 @@ async function readPersistedUsageTruth(args: {
   );
 }
 
+/** Full-year home-local GB intervals for Past display parity (Usage dashboard curve). */
+async function enrichGreenButtonFullYearIntervalsForDisplay(args: {
+  dataset: Record<string, unknown>;
+  houseId: string;
+  esiid: string | null;
+}): Promise<Record<string, unknown>> {
+  const coverage = resolveCanonicalUsage365CoverageWindow();
+  const meta =
+    args.dataset.meta && typeof args.dataset.meta === "object" && !Array.isArray(args.dataset.meta)
+      ? (args.dataset.meta as Record<string, unknown>)
+      : {};
+  const timezone = String(meta.timezone ?? "America/Chicago").trim() || "America/Chicago";
+  const loaded = await loadGreenButtonPastProducerIntervals({
+    houseId: args.houseId,
+    esiid: args.esiid,
+    coverageStartDate: coverage.startDate,
+    coverageEndDate: coverage.endDate,
+    timezone,
+  });
+  if (!loaded.engineSourceIntervals.length) return args.dataset;
+  const series =
+    args.dataset.series && typeof args.dataset.series === "object" && !Array.isArray(args.dataset.series)
+      ? (args.dataset.series as Record<string, unknown>)
+      : {};
+  return {
+    ...args.dataset,
+    series: {
+      ...series,
+      intervals15: loaded.engineSourceIntervals.map((row) => ({
+        timestamp: row.timestamp,
+        kwh: row.kwh,
+      })),
+    },
+  };
+}
+
 /** Same GB load path as the user usage dashboard when interval-layer read returns empty. */
 async function readGreenButtonUsageTruthFallback(args: {
   userId: string;
