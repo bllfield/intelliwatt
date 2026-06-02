@@ -168,7 +168,6 @@ export async function buildManualUsagePastSimReadResult(args: {
   const resolvedActualDataset = await resolveManualCompareActualDataset({
     actualDataset: args.actualDataset,
     actualReference: args.actualReference ?? null,
-    correlationId: args.correlationId ?? null,
   });
   emit("manual_readback_actual_dataset_ready", {
     stepDurationMs: Date.now() - stepStartedAt,

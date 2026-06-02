@@ -141,7 +141,7 @@ export function filterIntervalRowsToActualDailyDates(
   rows: Array<{ timestamp?: string; kwh?: number; consumption_kwh?: number }>,
   daily: Array<{ date?: string; source?: string; sourceDetail?: string }>,
   timezone: string
-): Array<{ timestamp: string; kwh?: number; consumption_kwh?: number }> {
+): Array<{ timestamp?: string; kwh?: number; consumption_kwh?: number }> {
   const actualDates = new Set(
     (daily ?? [])
       .filter((row) => countsAsActualDailySourceForLoadCurve(row.source, row.sourceDetail))

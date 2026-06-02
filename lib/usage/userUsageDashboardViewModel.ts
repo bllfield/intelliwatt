@@ -238,11 +238,12 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
   const provenance = meta.monthProvenanceByMonth as Record<string, string> | undefined;
   const actualSource = meta.actualSource as string | undefined;
   const timezone = typeof meta.timezone === "string" ? meta.timezone : "America/Chicago";
-  const hasSimulatedFill =
+  const hasSimulatedFill = Boolean(
     datasetKind === "SIMULATED" &&
-    actualSource &&
-    provenance &&
-    Object.values(provenance).some((value) => value === "SIMULATED");
+      actualSource &&
+      provenance &&
+      Object.values(provenance).some((value) => value === "SIMULATED")
+  );
   const coverage = {
     source:
       hasSimulatedFill && actualSource
