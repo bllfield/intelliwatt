@@ -7,7 +7,10 @@ import {
   resolveGreenButtonPastSimTrustedHomeDateKeys,
   resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals,
 } from "@/lib/usage/greenButtonPastTrustedPool";
-import { resolveGreenButtonPastValidationCandidateDateKeys } from "@/lib/usage/greenButtonPastValidationCandidates";
+import {
+  resolveGreenButtonPastValidationCandidateDateKeys,
+  resolveGreenButtonPastValidationSelectionAfterSim,
+} from "@/lib/usage/greenButtonPastValidationCandidates";
 
 describe("greenButtonPastTrustedPool", () => {
   it("maps UTC trusted keys to home-local keys for Past Sim", () => {
@@ -95,6 +98,32 @@ describe("greenButtonPastTrustedPool", () => {
       timezone: "America/Chicago",
     });
     expect(trustedHome.size).toBeGreaterThan(0);
+  });
+
+  it("resolveGreenButtonPastValidationSelectionAfterSim picks keys from decoded artifact intervals", () => {
+    const utcGridIntervals = Array.from({ length: 96 * 14 }, (_, index) => {
+      const dayOffset = Math.floor(index / 96);
+      const slot = index % 96;
+      const day = String(10 + dayOffset).padStart(2, "0");
+      return {
+        timestamp: new Date(`2026-04-${day}T${String(Math.floor((slot * 15) / 60)).padStart(2, "0")}:${String((slot * 15) % 60).padStart(2, "0")}:00.000Z`).toISOString(),
+        kwh: 0.25,
+      };
+    });
+    const selection = resolveGreenButtonPastValidationSelectionAfterSim({
+      existingSelectedKeys: [],
+      datasetMeta: { actualSource: "GREEN_BUTTON", timezone: "America/Chicago" },
+      decodedIntervals15: utcGridIntervals,
+      timezone: "America/Chicago",
+      houseId: "house-1",
+      validationDayCount: 14,
+    });
+    expect(selection).not.toBeNull();
+    expect(selection?.validationOnlyDateKeysLocal.length).toBeGreaterThan(0);
+    expect(selection?.validationOnlyDateKeysLocal.length).toBeLessThanOrEqual(14);
+    expect(Object.keys(selection?.validationActualDailyKwhByDateLocal ?? {}).length).toBe(
+      selection?.validationOnlyDateKeysLocal.length
+    );
   });
 
   it("pruneGreenButtonTrustedDaysFromPastDatasetMeta drops incomplete-meter canonical only, not test-day compare truth", () => {

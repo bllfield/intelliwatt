@@ -596,6 +596,7 @@ async function resolveSageActualTruthForRunDisplay(args: {
   actualContextHouseId?: string | null;
   smtSourceEsiid?: string | null;
   preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
+  greenButtonFullYearIntervalsForDisplay?: boolean;
 }) {
   return resolveOnePathUpstreamUsageTruthForSimulation({
     userId: args.userId,
@@ -604,6 +605,7 @@ async function resolveSageActualTruthForRunDisplay(args: {
     smtSourceEsiid: args.smtSourceEsiid ?? null,
     seedIfMissing: false,
     preferredActualSource: args.preferredActualSource ?? null,
+    greenButtonFullYearIntervalsForDisplay: args.greenButtonFullYearIntervalsForDisplay === true,
   }).catch(() => null);
 }
 
@@ -715,6 +717,8 @@ async function buildPastSimRunReadbackResponse(args: {
     dataset: readback.dataset,
     buildInputs: buildInputsForCompare,
   });
+  const sageGbFullIntervals =
+    preferredActualSourceForCompare === "GREEN_BUTTON";
   const sageTruthForCompare = await resolveSageActualTruthForRunDisplay({
     userId: args.userId,
     houseId: args.houseId,
@@ -722,6 +726,7 @@ async function buildPastSimRunReadbackResponse(args: {
       args.actualContextHouseId ?? args.smtPostSimHealing?.actualContextHouseId ?? args.houseId,
     smtSourceEsiid: args.smtSourceEsiid ?? args.smtPostSimHealing?.sourceEsiid ?? null,
     preferredActualSource: preferredActualSourceForCompare,
+    greenButtonFullYearIntervalsForDisplay: sageGbFullIntervals,
   });
   const compareProjection = resolveValidationCompareProjectionForRead({
     dataset: readback.dataset,
@@ -762,6 +767,7 @@ async function buildPastSimRunReadbackResponse(args: {
       args.actualContextHouseId ?? args.smtPostSimHealing?.actualContextHouseId ?? args.houseId,
     smtSourceEsiid: args.smtSourceEsiid ?? args.smtPostSimHealing?.sourceEsiid ?? null,
     preferredActualSource: preferredActualSourceForCompare,
+    greenButtonFullYearIntervalsForDisplay: sageGbFullIntervals,
   });
   const sageDisplayArgs = await sageAndStaleIncompleteDisplayArgs({
     sageDataset: sageTruth?.dataset,
@@ -2026,6 +2032,7 @@ export async function POST(request: NextRequest) {
         actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
         smtSourceEsiid,
         preferredActualSource: preferredActualSourceForPast,
+        greenButtonFullYearIntervalsForDisplay: preferredActualSourceForPast === "GREEN_BUTTON",
       });
       const sageDisplayArgsForPast = await sageAndStaleIncompleteDisplayArgs({
         sageDataset: sageTruthForPastDisplay?.dataset,

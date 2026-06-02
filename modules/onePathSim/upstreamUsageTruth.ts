@@ -1,4 +1,5 @@
 import { getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
+import { loadGreenButtonPastProducerIntervals } from "@/lib/usage/greenButtonPastProducerLoad";
 import { resolveIntervalsLayer } from "@/lib/usage/resolveIntervalsLayer";
 import {
   resolveActualContextHouseForSimulation,
@@ -292,6 +293,8 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
   preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
   skipLightweightInsightRecompute?: boolean;
   runId?: string | null;
+  /** Past readback: load full GB interval rows for 15-minute display parity (not lightweight empty series). */
+  greenButtonFullYearIntervalsForDisplay?: boolean;
 }): Promise<UpstreamUsageTruthResult> {
   const selectedHouse = await resolveSimulationHouseForUser({
     userId: args.userId,
@@ -346,6 +349,21 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
         alternatives: gbFallback.alternatives ?? { smt: null, greenButton: null },
       };
     }
+  }
+  if (
+    resolved?.dataset &&
+    args.greenButtonFullYearIntervalsForDisplay === true &&
+    args.preferredActualSource === "GREEN_BUTTON"
+  ) {
+    const enriched = await enrichGreenButtonFullYearIntervalsForDisplay({
+      dataset: resolved.dataset as Record<string, unknown>,
+      houseId: actualContextHouse.id,
+      esiid: actualContextHouseWithEffectiveEsiid.esiid,
+    });
+    resolved = {
+      ...resolved,
+      dataset: enriched,
+    };
   }
   if (resolved?.dataset) {
     const greenButtonOnlyMode = args.preferredActualSource === "GREEN_BUTTON" || isGreenButtonPrimaryDataset(resolved.dataset);

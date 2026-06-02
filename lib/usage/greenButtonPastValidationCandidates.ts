@@ -11,7 +11,14 @@ import {
   resolvePastSmtValidationPolicy,
 } from "@/lib/usage/pastValidationPolicy";
 import { localDateKeysInRange } from "@/lib/admin/gapfillLab";
-import { selectValidationDayKeys } from "@/modules/usageSimulator/validationSelection";
+import {
+  selectValidationDayKeys,
+  type ValidationDaySelectionDiagnostics,
+} from "@/modules/usageSimulator/validationSelection";
+import {
+  readGreenButtonTrustedHomeDateKeysFromPastMeta,
+  resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals,
+} from "@/lib/usage/greenButtonPastTrustedPool";
 
 function asDateKey(value: unknown): string | null {
   const text = String(value ?? "").slice(0, 10);
@@ -216,4 +223,105 @@ export function resolveGreenButtonPastValidationOnlyDateKeysAtRead(args: {
     manualDateKeys: manualKeys.map((v) => String(v ?? "").slice(0, 10)),
   });
   return selection.selectedDateKeys;
+}
+
+export type GreenButtonPastValidationSelectionResult = {
+  validationOnlyDateKeysLocal: string[];
+  validationActualDailyKwhByDateLocal: Record<string, number>;
+  effectiveValidationSelectionMode: string;
+  validationSelectionDiagnostics: ValidationDaySelectionDiagnostics;
+  greenButtonTrustedHomeDateKeysLocal: string[];
+};
+
+/**
+ * After Past sim when pre-recalc validation selection produced zero candidates: derive trusted
+ * home-local days from artifact meta / stitched intervals, then select validation compare keys.
+ */
+export function resolveGreenButtonPastValidationSelectionAfterSim(args: {
+  existingSelectedKeys: readonly string[];
+  datasetMeta: Record<string, unknown> | null | undefined;
+  decodedIntervals15: ReadonlyArray<{
+    timestamp: string;
+    kwh?: number;
+    consumption_kwh?: number;
+    homeDateKey?: string;
+  }>;
+  timezone: string;
+  houseId: string;
+  travelRanges?: Array<{ startDate: string; endDate: string }>;
+  validationDayCount?: number | null;
+  validationSelectionMode?: string | null;
+  trustedUtcDateKeys?: readonly string[];
+}): GreenButtonPastValidationSelectionResult | null {
+  if (args.existingSelectedKeys.length > 0) return null;
+  const meta = args.datasetMeta ?? null;
+  if (meta?.actualSource !== "GREEN_BUTTON") return null;
+  if (!args.decodedIntervals15.length) return null;
+
+  const coverage = resolveCanonicalUsage365CoverageWindow();
+  const timezone =
+    String(args.timezone ?? meta?.timezone ?? "America/Chicago").trim() || "America/Chicago";
+  const travelDateKeys = new Set(
+    (args.travelRanges ?? []).flatMap((range) =>
+      localDateKeysInRange(String(range.startDate ?? ""), String(range.endDate ?? ""), timezone)
+    )
+  );
+
+  let trustedHome = readGreenButtonTrustedHomeDateKeysFromPastMeta(meta);
+  if (trustedHome.size === 0) {
+    trustedHome = resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals({
+      decodedIntervals: args.decodedIntervals15.map((row) => ({
+        timestamp: String(row.timestamp ?? ""),
+        kwh: Number(row.kwh ?? row.consumption_kwh) || 0,
+      })),
+      trustedUtcDateKeys: args.trustedUtcDateKeys ?? [],
+      timezone,
+    });
+  }
+  if (trustedHome.size === 0) return null;
+
+  const intervalsForValidation = args.decodedIntervals15.map((row) => ({
+    timestamp: String(row.timestamp ?? ""),
+    kwh: Number(row.kwh ?? row.consumption_kwh) || 0,
+    homeDateKey: String(row.homeDateKey ?? "").slice(0, 10) || undefined,
+  }));
+
+  const candidates = resolveGreenButtonPastValidationCandidateDateKeys({
+    trustedUtcDateKeys: args.trustedUtcDateKeys ?? [],
+    trustedHomeDateKeys: trustedHome,
+    intervals: intervalsForValidation,
+    timezone,
+    windowStart: coverage.startDate,
+    windowEnd: coverage.endDate,
+    travelDateKeys,
+  });
+  if (candidates.length === 0) return null;
+
+  const policy = resolvePastSmtValidationPolicy({
+    surface: "user_site",
+    validationSelectionMode: args.validationSelectionMode ?? null,
+    validationDayCount: args.validationDayCount ?? null,
+  });
+  const selection = selectValidationDayKeys({
+    mode: policy.selectionMode,
+    targetCount: resolveCanonicalPastValidationDayCount(policy.validationDayCount),
+    candidateDateKeys: candidates,
+    travelDateKeysSet: travelDateKeys,
+    timezone,
+    seed: `${String(args.houseId ?? "house")}-${coverage.endDate}`,
+  });
+  if (selection.selectedDateKeys.length === 0) return null;
+
+  const selectedSet = new Set(selection.selectedDateKeys);
+  return {
+    validationOnlyDateKeysLocal: selection.selectedDateKeys,
+    validationActualDailyKwhByDateLocal: buildGreenButtonActualDailyKwhByHomeDateKey({
+      intervals: intervalsForValidation,
+      dateKeysLocal: selectedSet,
+      timezone,
+    }),
+    effectiveValidationSelectionMode: policy.selectionMode,
+    validationSelectionDiagnostics: selection.diagnostics,
+    greenButtonTrustedHomeDateKeysLocal: Array.from(trustedHome).sort(),
+  };
 }

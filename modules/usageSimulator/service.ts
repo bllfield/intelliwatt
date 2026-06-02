@@ -20,7 +20,9 @@ import { resolveStaleIncompleteMeterSlotCompleteDateKeys } from "@/lib/usage/pas
 import {
   buildGreenButtonActualDailyKwhByHomeDateKey,
   resolveGreenButtonPastValidationCandidateDateKeys,
+  resolveGreenButtonPastValidationSelectionAfterSim,
 } from "@/lib/usage/greenButtonPastValidationCandidates";
+import { resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals } from "@/lib/usage/greenButtonPastTrustedPool";
 import { resolvePastSimTravelRangesForRecalc } from "@/lib/usage/pastSimTravelRanges";
 import {
   resolveCanonicalPastValidationDayCount,
@@ -5043,6 +5045,7 @@ async function recalcSimulatorBuildImpl(args: {
   let validationSelectionPreloadWindowEnd: string | null = null;
   let validationActualDailyKwhByDateLocal: Record<string, number> | undefined;
   let greenButtonTrustedUtcDateKeysForBuild: string[] | undefined;
+  let greenButtonTrustedHomeDateKeysForBuild: string[] | undefined;
   let effectiveValidationOnlyDateKeysLocal = new Set<string>(requestedValidationOnlyDateKeysLocal);
   if (
     effectiveValidationOnlyDateKeysLocal.size === 0 &&
@@ -5077,9 +5080,23 @@ async function recalcSimulatorBuildImpl(args: {
           homeDateKey: row.homeDateKey,
         }));
         greenButtonTrustedUtcDateKeysForBuild = [...loaded.trustedUtcDateKeys];
+        let trustedHomeForValidation = loaded.trustedHomeDateKeys;
+        if (trustedHomeForValidation.size === 0 && loaded.engineSourceIntervals.length > 0) {
+          trustedHomeForValidation = resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals({
+            decodedIntervals: loaded.engineSourceIntervals.map((row) => ({
+              timestamp: row.timestamp,
+              kwh: row.kwh,
+            })),
+            trustedUtcDateKeys: loaded.trustedUtcDateKeys,
+            timezone: timezoneForStoredBuild,
+          });
+        }
+        if (trustedHomeForValidation.size > 0) {
+          greenButtonTrustedHomeDateKeysForBuild = Array.from(trustedHomeForValidation).sort();
+        }
         candidateDateKeys = resolveGreenButtonPastValidationCandidateDateKeys({
           trustedUtcDateKeys: greenButtonTrustedUtcDateKeysForBuild,
-          trustedHomeDateKeys: loaded.trustedHomeDateKeys,
+          trustedHomeDateKeys: trustedHomeForValidation,
           intervals: intervalsForValidationWindow,
           timezone: timezoneForStoredBuild,
           windowStart: selectionStart,
@@ -5154,6 +5171,11 @@ async function recalcSimulatorBuildImpl(args: {
         preloadWindowEnd: selectionEnd,
         preloadWindowSource: sharedPastRecalcWindow?.source ?? "canonical_coverage_fallback",
         validationSelectionUsesSharedPreloadWindow: Boolean(sharedPastRecalcWindow),
+        greenButtonPastProducerSource,
+        preferredActualSource: preferredActualSource ?? null,
+        actualSource: actualSource ?? null,
+        engineSourceIntervalsCount: intervalsForValidationWindow.length,
+        trustedHomeDateKeysCount: greenButtonTrustedHomeDateKeysForBuild?.length ?? 0,
         validationCandidateDateKeyCount: candidateDateKeys.length,
         validationSelectedDateKeyCount: effectiveValidationOnlyDateKeysLocal.size,
         durationMs: Date.now() - validationSelectionStartedAt,
@@ -5214,7 +5236,7 @@ async function recalcSimulatorBuildImpl(args: {
       source: "recalcSimulatorBuildImpl",
     });
   }
-  const boundedValidationOnlyDateKeysLocal = boundDateKeysToCoverageWindow(
+  let boundedValidationOnlyDateKeysLocal = boundDateKeysToCoverageWindow(
     effectiveValidationOnlyDateKeysLocal,
     resolveCanonicalUsage365CoverageWindow()
   );
@@ -5428,6 +5450,50 @@ async function recalcSimulatorBuildImpl(args: {
             ? "Manual monthly: shared Past producer built the normalized artifact."
             : "Past: baseline patched for excluded + leading-missing days"
         );
+        if (
+          boundedValidationOnlyDateKeysLocal.size === 0 &&
+          simMode === "SMT_BASELINE" &&
+          scenario?.name === WORKSPACE_PAST_NAME &&
+          (preferredActualSource === "GREEN_BUTTON" || actualSource === "GREEN_BUTTON")
+        ) {
+          const postSimValidation = resolveGreenButtonPastValidationSelectionAfterSim({
+            existingSelectedKeys: [],
+            datasetMeta:
+              pastPatchedDataset && typeof pastPatchedDataset === "object"
+                ? ((pastPatchedDataset as { meta?: Record<string, unknown> }).meta ?? null)
+                : null,
+            decodedIntervals15: Array.isArray((pastPatchedDataset as { series?: { intervals15?: unknown } })?.series?.intervals15)
+              ? ((pastPatchedDataset as { series: { intervals15: Array<{ timestamp: string; kwh?: number; homeDateKey?: string }> } })
+                  .series.intervals15)
+              : [],
+            timezone: timezoneForStoredBuild,
+            houseId: actualContextHouseId,
+            travelRanges: allTravelRanges,
+            validationDayCount: args.validationDayCount ?? null,
+            validationSelectionMode: effectiveValidationSelectionMode ?? null,
+            trustedUtcDateKeys: greenButtonTrustedUtcDateKeysForBuild,
+          });
+          if (postSimValidation) {
+            effectiveValidationOnlyDateKeysLocal = new Set(postSimValidation.validationOnlyDateKeysLocal);
+            validationActualDailyKwhByDateLocal = postSimValidation.validationActualDailyKwhByDateLocal;
+            effectiveValidationSelectionMode = postSimValidation.effectiveValidationSelectionMode;
+            validationSelectionDiagnostics = postSimValidation.validationSelectionDiagnostics;
+            greenButtonTrustedHomeDateKeysForBuild = postSimValidation.greenButtonTrustedHomeDateKeysLocal;
+            boundedValidationOnlyDateKeysLocal = boundDateKeysToCoverageWindow(
+              effectiveValidationOnlyDateKeysLocal,
+              resolveCanonicalUsage365CoverageWindow()
+            );
+            logSimPipelineEvent("recalc_validation_selection_post_sim_green_button", {
+              correlationId: args.correlationId,
+              houseId,
+              sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+              validationCandidateDateKeyCount: postSimValidation.greenButtonTrustedHomeDateKeysLocal.length,
+              validationSelectedDateKeyCount: postSimValidation.validationOnlyDateKeysLocal.length,
+              source: "recalcSimulatorBuildImpl",
+              memoryRssMb: getMemoryRssMb(),
+            });
+          }
+        }
       } else if (simMode === "MANUAL_TOTALS") {
         const producerError =
           "error" in result && typeof result.error === "string"
@@ -5537,6 +5603,9 @@ async function recalcSimulatorBuildImpl(args: {
         : {}),
     } as any,
     ...(resolvedSimFingerprint ? { resolvedSimFingerprint } : {}),
+    ...(greenButtonTrustedHomeDateKeysForBuild?.length
+      ? { greenButtonTrustedHomeDateKeysLocal: greenButtonTrustedHomeDateKeysForBuild }
+      : {}),
     scenarioKey,
     scenarioId,
     versions,
@@ -6968,6 +7037,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
             ? (weatherPreferenceRaw as WeatherPreference)
             : "NONE";
         const validationBackfillPolicy = resolvePastSmtValidationPolicy({ surface: "user_site" });
+        const backfillPreferredActualSource = resolvePreferredActualSourceFromBuildInputs(buildInputs);
         const backfillRecalc = await recalcSimulatorBuild({
           userId: args.userId,
           houseId: args.houseId,
@@ -6985,6 +7055,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
                 : "validation_policy_reconcile_artifact_only",
             buildPathKind: "recalc",
             persistRequested: true,
+            preferredActualSource: backfillPreferredActualSource ?? undefined,
           },
         });
         if (!backfillRecalc.ok) {
@@ -7289,6 +7360,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
           ? (weatherPreferenceRaw as WeatherPreference)
           : "NONE";
       const validationBackfillPolicy = resolvePastSmtValidationPolicy({ surface: "user_site" });
+      const backfillPreferredActualSource = resolvePreferredActualSourceFromBuildInputs(buildInputs);
       const backfillRecalc = await recalcSimulatorBuild({
         userId: args.userId,
         houseId: args.houseId,
@@ -7304,6 +7376,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
             buildValidationKeys.length === 0 ? "validation_backfill" : "validation_policy_reconcile",
           buildPathKind: "recalc",
           persistRequested: true,
+          preferredActualSource: backfillPreferredActualSource ?? undefined,
         },
       });
       if (!backfillRecalc.ok) {
