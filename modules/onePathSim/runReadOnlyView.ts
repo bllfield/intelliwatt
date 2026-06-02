@@ -16,6 +16,10 @@ import {
   resolveGreenButtonPastDisplayMeta,
 } from "@/lib/time/greenButtonPersistedIntervalConvert";
 import { resolvePastSimDisplayFifteenMinuteCurve } from "@/lib/usage/pastSimDisplayFifteenMinuteCurve";
+import {
+  isGreenButtonUsageDataset,
+  validationActualDailyKwhMapFromMeta,
+} from "@/lib/usage/pastSimValidationCompareRead";
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
 import { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
 import type { ValidationCompareProjectionSidecar } from "@/lib/usage/validationCompareProjection";
@@ -499,8 +503,16 @@ export function buildOnePathRunReadOnlyView(args: {
     }
     dailyRows = clampDailyRowsToCanonicalCoverageWindow(dailyRows, canonicalCoverageWindow);
   }
-  if (!isBaselinePassthrough && sageByDate.size > 0 && compareRows.length > 0) {
-    compareRows = applySageActualDailyTruthToCompareRows(compareRows, sageByDate);
+  if (!isBaselinePassthrough && compareRows.length > 0) {
+    const persistedValidationActual = validationActualDailyKwhMapFromMeta(meta);
+    if (isGreenButtonBackedDatasetMeta(meta) && persistedValidationActual.size > 0) {
+      compareRows = applySageActualDailyTruthToCompareRows(compareRows, persistedValidationActual);
+    } else if (
+      sageByDate.size > 0 &&
+      (!isGreenButtonBackedDatasetMeta(meta) || isGreenButtonUsageDataset(args.sageActualDataset))
+    ) {
+      compareRows = applySageActualDailyTruthToCompareRows(compareRows, sageByDate);
+    }
   }
   const displayCoverageWindow = isBaselinePassthrough
     ? { startDate: viewModel.coverage.start, endDate: viewModel.coverage.end }

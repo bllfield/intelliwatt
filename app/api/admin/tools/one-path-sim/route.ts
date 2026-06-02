@@ -74,7 +74,10 @@ import { buildOnePathManualStageOnePreview, buildOnePathManualStageOneView } fro
 import { buildOnePathRunReadOnlyView } from "@/modules/onePathSim/runReadOnlyView";
 import type { ManualUsagePayload } from "@/modules/onePathSim/simulatedUsage/types";
 import { loadPastSimBuildInputsForRead } from "@/lib/usage/loadPastSimBuildInputsForRead";
-import { resolveValidationCompareProjectionForRead } from "@/lib/usage/pastSimValidationCompareRead";
+import {
+  resolvePastSimPreferredActualSource,
+  resolveValidationCompareProjectionForRead,
+} from "@/lib/usage/pastSimValidationCompareRead";
 import { createSimCorrelationId, getMemoryRssMb, logSimPipelineEvent } from "@/modules/onePathSim/usageSimulator/simObservability";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/onePathSim/usageSimulator/metadataWindow";
 import { chicagoPullDateKey } from "@/lib/usage/smtDayCoverageLedger";
@@ -701,19 +704,24 @@ async function buildPastSimRunReadbackResponse(args: {
     memoryRssMb: getMemoryRssMb(),
   });
   const sidecarStartedAt = Date.now();
+  const buildInputsForCompare = await loadPastSimBuildInputsForRead({
+    userId: args.userId,
+    houseId: args.houseId,
+    scenarioId: args.scenarioId,
+  });
+  const preferredActualSourceForCompare = resolvePastSimPreferredActualSource({
+    preferredActualSource:
+      args.preferredActualSource ?? args.smtPostSimHealing?.preferredActualSource ?? null,
+    dataset: readback.dataset,
+    buildInputs: buildInputsForCompare,
+  });
   const sageTruthForCompare = await resolveSageActualTruthForRunDisplay({
     userId: args.userId,
     houseId: args.houseId,
     actualContextHouseId:
       args.actualContextHouseId ?? args.smtPostSimHealing?.actualContextHouseId ?? args.houseId,
     smtSourceEsiid: args.smtSourceEsiid ?? args.smtPostSimHealing?.sourceEsiid ?? null,
-    preferredActualSource:
-      args.preferredActualSource ?? args.smtPostSimHealing?.preferredActualSource ?? null,
-  });
-  const buildInputsForCompare = await loadPastSimBuildInputsForRead({
-    userId: args.userId,
-    houseId: args.houseId,
-    scenarioId: args.scenarioId,
+    preferredActualSource: preferredActualSourceForCompare,
   });
   const compareProjection = resolveValidationCompareProjectionForRead({
     dataset: readback.dataset,
@@ -753,8 +761,7 @@ async function buildPastSimRunReadbackResponse(args: {
     actualContextHouseId:
       args.actualContextHouseId ?? args.smtPostSimHealing?.actualContextHouseId ?? args.houseId,
     smtSourceEsiid: args.smtSourceEsiid ?? args.smtPostSimHealing?.sourceEsiid ?? null,
-    preferredActualSource:
-      args.preferredActualSource ?? args.smtPostSimHealing?.preferredActualSource ?? null,
+    preferredActualSource: preferredActualSourceForCompare,
   });
   const sageDisplayArgs = await sageAndStaleIncompleteDisplayArgs({
     sageDataset: sageTruth?.dataset,
@@ -2003,12 +2010,22 @@ export async function POST(request: NextRequest) {
         });
       }
       const shouldReturnCompactPastResponse = Boolean(effectiveRawInputBase.scenarioId && !isManualMode);
+      const buildInputsForCompare = await loadPastSimBuildInputsForRead({
+        userId: effectiveUserId,
+        houseId: effectiveHouseId,
+        scenarioId: String(effectiveRawInputBase.scenarioId ?? ""),
+      });
+      const preferredActualSourceForPast = resolvePastSimPreferredActualSource({
+        preferredActualSource: effectiveRawInputBase.preferredActualSource,
+        dataset: artifactDataset,
+        buildInputs: buildInputsForCompare,
+      });
       const sageTruthForPastDisplay = await resolveSageActualTruthForRunDisplay({
         userId: effectiveUserId,
         houseId: effectiveHouseId,
         actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
         smtSourceEsiid,
-        preferredActualSource: effectiveRawInputBase.preferredActualSource,
+        preferredActualSource: preferredActualSourceForPast,
       });
       const sageDisplayArgsForPast = await sageAndStaleIncompleteDisplayArgs({
         sageDataset: sageTruthForPastDisplay?.dataset,
@@ -2016,11 +2033,6 @@ export async function POST(request: NextRequest) {
         smtSourceEsiid,
       });
       if (shouldReturnCompactPastResponse) {
-        const buildInputsForCompare = await loadPastSimBuildInputsForRead({
-          userId: effectiveUserId,
-          houseId: effectiveHouseId,
-          scenarioId: String(effectiveRawInputBase.scenarioId ?? ""),
-        });
         const compareProjectionForPast = resolveValidationCompareProjectionForRead({
           dataset: artifactDataset,
           actualDataset: sageTruthForPastDisplay?.dataset ?? null,

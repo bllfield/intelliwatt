@@ -1,3 +1,4 @@
+import { isGreenButtonBackedDatasetMeta } from "@/lib/time/greenButtonPersistedIntervalConvert";
 import {
   attachValidationCompareProjection,
   buildValidationCompareProjectionFromDatasets,
@@ -5,6 +6,69 @@ import {
   CompareTruthIncompleteError,
   type ValidationCompareProjectionSidecar,
 } from "@/lib/usage/validationCompareProjection";
+import { sageActualDailyKwhByDateFromRows } from "@/lib/usage/sageActualDailyTruth";
+
+export type PastSimActualSource = "SMT" | "GREEN_BUTTON";
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+/** Whether a dataset row (meta or summary) is Green Button actual usage. */
+export function isGreenButtonUsageDataset(dataset: unknown): boolean {
+  const rec = asRecord(dataset);
+  if (!rec) return false;
+  if (isGreenButtonBackedDatasetMeta(asRecord(rec.meta))) return true;
+  const summarySource = String(asRecord(rec.summary)?.source ?? "").trim().toUpperCase();
+  return summarySource === "GREEN_BUTTON";
+}
+
+/** Preferred actual source for validation compare (GB Past must not fall back to SMT). */
+export function resolvePastSimPreferredActualSource(args: {
+  preferredActualSource?: PastSimActualSource | null;
+  dataset?: unknown;
+  buildInputs?: Record<string, unknown> | null;
+}): PastSimActualSource | null {
+  if (args.preferredActualSource === "SMT" || args.preferredActualSource === "GREEN_BUTTON") {
+    return args.preferredActualSource;
+  }
+  const meta = asRecord(asRecord(args.dataset)?.meta);
+  const lockbox = asRecord(meta?.lockboxRunContext);
+  const lockboxPreferred = lockbox?.preferredActualSource;
+  if (lockboxPreferred === "SMT" || lockboxPreferred === "GREEN_BUTTON") {
+    return lockboxPreferred;
+  }
+  const metaActual = meta?.actualSource;
+  if (metaActual === "SMT" || metaActual === "GREEN_BUTTON") return metaActual;
+  const snapshots = asRecord(args.buildInputs)?.snapshots;
+  const snapshotSource = asRecord(snapshots)?.actualSource;
+  if (snapshotSource === "SMT" || snapshotSource === "GREEN_BUTTON") return snapshotSource;
+  if (isGreenButtonUsageDataset(args.dataset)) return "GREEN_BUTTON";
+  return null;
+}
+
+/** GB Past compare actuals must come from GB intervals (persisted at build), not SMT sage daily. */
+export function pastValidationCompareMayUseActualDataset(args: {
+  simulatedDataset: unknown;
+  actualDataset: unknown;
+}): boolean {
+  if (!args.actualDataset) return false;
+  if (!isGreenButtonUsageDataset(args.simulatedDataset)) return true;
+  return isGreenButtonUsageDataset(args.actualDataset);
+}
+
+export function validationActualDailyKwhMapFromMeta(
+  meta: Record<string, unknown> | null | undefined
+): Map<string, number> {
+  const raw = meta?.validationActualDailyKwhByDateLocal;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return new Map();
+  const rows: Array<{ date: string; kwh: number }> = [];
+  for (const [date, value] of Object.entries(raw as Record<string, unknown>)) {
+    const kwh = Number(value);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isFinite(kwh)) rows.push({ date, kwh });
+  }
+  return sageActualDailyKwhByDateFromRows(rows);
+}
 
 function dailyKwhByDateFromDataset(dataset: unknown): Map<string, number> {
   const byDate = new Map<string, number>();
@@ -90,7 +154,13 @@ export function enrichPastDatasetValidationCompareMetaForRead(args: {
   mergeActualDailyKwh(engineActualDaily);
 
   const keys = validationOnlyDateKeysFromMeta(prevMeta);
-  if (args.actualDataset && keys.length > 0) {
+  if (
+    keys.length > 0 &&
+    pastValidationCompareMayUseActualDataset({
+      simulatedDataset: dataset,
+      actualDataset: args.actualDataset,
+    })
+  ) {
     const actualByDate = dailyKwhByDateFromDataset(args.actualDataset);
     for (const dk of keys) {
       if (persistedActual[dk] == null && actualByDate.has(dk)) {
@@ -143,7 +213,14 @@ export function resolveValidationCompareProjectionForRead(args: {
     }
   }
 
-  if (args.actualDataset && args.displayDataset) {
+  if (
+    args.actualDataset &&
+    args.displayDataset &&
+    pastValidationCompareMayUseActualDataset({
+      simulatedDataset: working,
+      actualDataset: args.actualDataset,
+    })
+  ) {
     try {
       return buildValidationCompareProjectionFromDatasets({
         validationSourceDataset: working,
