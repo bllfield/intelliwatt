@@ -229,7 +229,7 @@ export function resolveGreenButtonPastValidationOnlyDateKeysAtRead(args: {
 export type GreenButtonPastValidationSelectionResult = {
   validationOnlyDateKeysLocal: string[];
   validationActualDailyKwhByDateLocal: Record<string, number>;
-  effectiveValidationSelectionMode: string;
+  effectiveValidationSelectionMode: ValidationDaySelectionMode;
   validationSelectionDiagnostics: ValidationDaySelectionDiagnostics;
   greenButtonTrustedHomeDateKeysLocal: string[];
 };
