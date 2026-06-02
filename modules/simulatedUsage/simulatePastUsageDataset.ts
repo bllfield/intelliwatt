@@ -1928,7 +1928,9 @@ export async function simulatePastUsageDataset(
     const compactSimulatedDayResults =
       buildInputs.mode === "MANUAL_TOTALS" && buildPathKind === "recalc" && retainedResultUtcDateKeys.size === 0;
     const collectSimulatedDayResultsDateKeys =
-      retainedResultUtcDateKeys.size > 0 ? retainedResultUtcDateKeys : undefined;
+      retainedSimulatedDayResultDateKeysLocal.size > 0
+        ? retainedSimulatedDayResultDateKeysLocal
+        : undefined;
     const pastDayCounts: {
       totalDays?: number;
       excludedDays?: number;
@@ -2027,9 +2029,10 @@ export async function simulatePastUsageDataset(
         collectSimulatedDayResults: collectSimulatedDayResultsForDiagnostics,
         compactSimulatedDayResults,
         collectSimulatedDayResultsDateKeys,
-        forceSimulateDateKeys: forcedUtcDateKeys.size > 0 ? forcedUtcDateKeys : undefined,
+        forceSimulateDateKeys:
+          forcedSimulateDateKeysLocal.size > 0 ? forcedSimulateDateKeysLocal : undefined,
         forceModeledOutputKeepReferencePoolDateKeys:
-          keepRefUtcDateKeys.size > 0 ? keepRefUtcDateKeys : undefined,
+          mergedKeepRefLocalDateKeys.size > 0 ? mergedKeepRefLocalDateKeys : undefined,
         emitAllIntervals,
         modeledKeepRefReasonCode: buildInputs.mode === "MANUAL_TOTALS" ? "MANUAL_CONSTRAINED_DAY" : "TEST_MODELED_KEEP_REF",
         defaultModeledReasonCode: buildInputs.mode === "MANUAL_TOTALS" ? "MANUAL_CONSTRAINED_DAY" : "INCOMPLETE_METER_DAY",

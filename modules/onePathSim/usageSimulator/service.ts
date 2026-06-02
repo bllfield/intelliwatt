@@ -5709,7 +5709,7 @@ async function recalcSimulatorBuildImpl(args: {
     }
   }
 
-  const buildInputs: SimulatorBuildInputsV1 & {
+  let buildInputs: SimulatorBuildInputsV1 & {
     scenarioKey?: string;
     scenarioId?: string | null;
     versions?: typeof versions;
@@ -7945,6 +7945,9 @@ export async function getSimulatedUsageForHouseScenario(args: {
                 startDate,
                 endDate,
               });
+            const travelRanges = normalizePreLockboxTravelRanges(
+              (buildInputs as any)?.travelRanges
+            ) as Array<{ startDate: string; endDate: string }>;
             const pastResult = await getPastSimulatedDatasetForHouse({
               userId: args.userId,
               houseId: args.houseId,

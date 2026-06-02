@@ -1,4 +1,8 @@
 import { describe, expect, it } from "vitest";
+import {
+  buildHomeDayGridContext,
+  resolveHomeCalendarForActualSource,
+} from "@/lib/time/actualIntervalCalendar";
 import { buildPastSimulatedBaselineV1 } from "@/modules/simulatedUsage/engine";
 import { dateKeyFromTimestamp, getDayGridTimestamps } from "@/modules/usageSimulator/pastStitchedCurve";
 import { RESOLVED_SIM_FINGERPRINT_VERSION } from "@/modules/usageSimulator/resolveSimFingerprint";
@@ -271,6 +275,92 @@ describe("buildPastSimulatedBaselineV1 resolvedSimFingerprint consumption", () =
     const b = outB.dayResults.find((r) => String(r.localDate).slice(0, 10) === excludedDate);
     const l1 = (a?.shape96Used ?? []).reduce((s, v, i) => s + Math.abs(v - (b?.shape96Used?.[i] ?? 0)), 0);
     expect(l1).toBeGreaterThan(0.05);
+  });
+
+  it("Green Button trusted actual-backed days join the weather donor reference pool", () => {
+    const home = resolveHomeCalendarForActualSource("GREEN_BUTTON", "America/Chicago");
+    const gridCtx = buildHomeDayGridContext({
+      startDateKey: "2026-05-14",
+      endDateKey: "2026-05-16",
+      home,
+    });
+    const canonicalDateKeyByDayStartMs = new Map<number, string>();
+    for (const dayStartMs of gridCtx.canonicalDayStartsMs) {
+      const gridTs = gridCtx.getDayGridTimestamps(dayStartMs);
+      if (!gridTs.length) continue;
+      canonicalDateKeyByDayStartMs.set(dayStartMs, gridCtx.dateKeyFromTimestamp(gridTs[0]!));
+    }
+    const validationDate = "2026-05-15";
+    const trustedActualDateKeys = new Set(["2026-05-14", "2026-05-16"]);
+    const actualIntervals: Array<{ timestamp: string; kwh: number }> = [];
+    for (const dayStartMs of gridCtx.canonicalDayStartsMs) {
+      for (const ts of gridCtx.getDayGridTimestamps(dayStartMs)) {
+        actualIntervals.push({ timestamp: ts, kwh: 1.25 });
+      }
+    }
+    const wx = { tAvgF: 82, tMinF: 72, tMaxF: 92, hdd65: 0, cdd65: 10 };
+    const actualWxByDateKey = new Map(
+      ["2026-05-14", "2026-05-15", "2026-05-16"].map((dk) => [dk, wx] as const)
+    );
+    const dbg: {
+      referenceDaysUsed?: number;
+      excludedDailyUsageMissingFingerprintDayCount?: number;
+      dayDiagnostics?: Array<{ dateKey?: string; dayType?: string }>;
+    } = {};
+    buildPastSimulatedBaselineV1({
+      actualIntervals,
+      canonicalDayStartsMs: gridCtx.canonicalDayStartsMs,
+      canonicalDateKeyByDayStartMs,
+      excludedDateKeys: new Set<string>(),
+      dateKeyFromTimestamp: gridCtx.dateKeyFromTimestamp,
+      getDayGridTimestamps: gridCtx.getDayGridTimestamps,
+      intervalTrustedSource: "GREEN_BUTTON",
+      trustedActualDateKeys,
+      forceSimulateDateKeys: new Set([validationDate]),
+      timezoneForProfile: "America/Chicago",
+      homeProfile: { squareFeet: 2400 },
+      usageShapeProfile: {
+        weekdayAvgByMonthKey: { "2026-05": 45 },
+        weekendAvgByMonthKey: { "2026-05": 36 },
+      },
+      actualWxByDateKey,
+      debug: { out: dbg as any, collectDayDiagnostics: true, maxDayDiagnostics: 10 },
+    });
+    expect(dbg.referenceDaysUsed).toBe(2);
+    expect(dbg.excludedDailyUsageMissingFingerprintDayCount).toBe(0);
+    const forcedDiag = (dbg.dayDiagnostics ?? []).find((d) => d.dateKey === validationDate);
+    expect(forcedDiag?.dayType).toBe("SIMULATED");
+  });
+
+  it("trusted actual-backed days stay pool-eligible when per-day slot filter is empty", () => {
+    const home = resolveHomeCalendarForActualSource("GREEN_BUTTON", "America/Chicago");
+    const gridCtx = buildHomeDayGridContext({
+      startDateKey: "2026-05-14",
+      endDateKey: "2026-05-14",
+      home,
+    });
+    const dayStartMs = gridCtx.canonicalDayStartsMs[0]!;
+    const gridTs = gridCtx.getDayGridTimestamps(dayStartMs);
+    const dateKey = gridCtx.dateKeyFromTimestamp(gridTs[0]!);
+    const dbg: { referenceDaysUsed?: number } = {};
+    buildPastSimulatedBaselineV1({
+      actualIntervals: [],
+      canonicalDayStartsMs: [dayStartMs],
+      canonicalDateKeyByDayStartMs: new Map([[dayStartMs, dateKey]]),
+      excludedDateKeys: new Set<string>(),
+      dateKeyFromTimestamp: gridCtx.dateKeyFromTimestamp,
+      getDayGridTimestamps: gridCtx.getDayGridTimestamps,
+      intervalTrustedSource: "GREEN_BUTTON",
+      trustedActualDateKeys: new Set([dateKey]),
+      timezoneForProfile: "America/Chicago",
+      homeProfile: { squareFeet: 2400 },
+      usageShapeProfile: {
+        weekdayAvgByMonthKey: { "2026-05": 45 },
+        weekendAvgByMonthKey: { "2026-05": 36 },
+      },
+      debug: { out: dbg as any },
+    });
+    expect(dbg.referenceDaysUsed).toBe(1);
   });
 
   it("keep-ref full-window runs simulatePastDay for every day (no ACTUAL passthrough dominance)", () => {

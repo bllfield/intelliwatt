@@ -1799,10 +1799,12 @@ export function buildPastSimulatedBaselineV1(args: {
       !dayIsLeadingMissing &&
       !dayIsForcedSimulate &&
       !dayIsForceModeledKeepRef;
+    const dayCountsAsActualBacked = dayIsTrustedActual || dayMeetsTrustedCompleteness;
     const dayIsDailyUsageMissing =
       !dayIsLowDataSyntheticModeled &&
       !dayIsExcluded &&
       !dayIsLeadingMissing &&
+      !dayCountsAsActualBacked &&
       presentSlotCount === 0;
     const dayIsIncomplete =
       !dayIsLowDataSyntheticModeled &&
@@ -1813,7 +1815,6 @@ export function buildPastSimulatedBaselineV1(args: {
       !dayMeetsTrustedCompleteness &&
       presentSlotCount > 0 &&
       presentSlotCount < trustedThreshold;
-    const dayCountsAsActualBacked = dayIsTrustedActual || dayMeetsTrustedCompleteness;
     const shouldSimulateDay =
       dayIsForcedSimulate ||
       dayIsPendingSmtIntervals ||
