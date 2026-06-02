@@ -20,6 +20,7 @@ import {
   shouldUseGreenButtonPersistedValidationActualForCompare,
   validationActualDailyKwhMapFromMeta,
 } from "@/lib/usage/pastSimValidationCompareRead";
+import { resolvePastSimFifteenMinuteCurveFromDataset } from "@/lib/usage/pastSimDisplayFromDataset";
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
 import { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
 import type { ValidationCompareProjectionSidecar } from "@/lib/usage/validationCompareProjection";
@@ -454,11 +455,15 @@ export function buildOnePathRunReadOnlyView(args: {
           : viewModel.derived.daily,
       smtPendingDateKeys
     );
-    // Past sim 15-minute curve: same inputs as user Usage (`buildUserUsageDashboardViewModel`).
-    // Do not rebuild from sage upstream or interval-backed daily relabeling — that diverged GB Past curves.
-    fifteenMinuteAverages = viewModel.derived.fifteenCurve;
-    fifteenMinuteCurveSourceOwner =
-      "buildUserUsageDashboardViewModel(...).derived.fifteenCurve (shared Past sim display parity)";
+    const pastFifteenMinuteDisplay = resolvePastSimFifteenMinuteCurveFromDataset({
+      meta,
+      summary: asRecord(dataset.summary) ?? undefined,
+      daily: asArray<Record<string, unknown>>(dataset.daily),
+      series: asRecord(dataset.series) ?? undefined,
+      insights: datasetInsights,
+    });
+    fifteenMinuteAverages = pastFifteenMinuteDisplay.fifteenMinuteAverages;
+    fifteenMinuteCurveSourceOwner = `resolvePastSimFifteenMinuteCurveFromDataset → ${pastFifteenMinuteDisplay.sourceOwner}`;
     if (sageByDate.size > 0 || (args.smtSlotCompleteDateKeys?.size ?? 0) > 0) {
       dailyRows = applyPastSimDisplayTruthOverlay(dailyRows, {
         sageByDate,

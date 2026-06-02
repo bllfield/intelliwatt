@@ -1,7 +1,10 @@
-import { resolvePastSimDisplayFifteenMinuteCurve } from "@/lib/usage/pastSimDisplayFifteenMinuteCurve";
-import { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
+import {
+  type PastSimDisplayDailyRow,
+  readPastSimHasSimulatedFillFromDataset,
+  resolvePastSimFifteenMinuteCurveFromDataset,
+} from "@/lib/usage/pastSimDisplayFromDataset";
 import { enumerateDateKeysInclusive } from "@/lib/time/chicago";
-import { fillCanonicalDailyTotals, resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
+import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
 import { readPastValidationPolicyRevisionFromMeta } from "@/lib/usage/pastSimulationCoreLabel";
 import { buildDisplayedMonthlyRows } from "@/modules/usageSimulator/monthlyCompareRows";
 import type { UserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
@@ -11,12 +14,7 @@ type UserUsageDashboardHouseLike = Pick<UserUsageHouseContract, "dataset"> & {
   datasetError?: { code?: string; explanation?: string } | null;
 };
 
-type DailyRow = {
-  date: string;
-  kwh: number;
-  source?: string;
-  sourceDetail?: string;
-};
+type DailyRow = PastSimDisplayDailyRow;
 
 function getWeatherBasisLabel(meta: Record<string, unknown>): string | null {
   const summary = meta.weatherSourceSummary as string | undefined;
@@ -91,10 +89,6 @@ function deriveTotalsFromRows(rows: Array<{ kwh: number }>) {
     exportKwh,
     netKwh: importKwh - exportKwh,
   };
-}
-
-function toDateKeyFromTimestamp(timestamp: string): string {
-  return timestamp.slice(0, 10);
 }
 
 function asDateKey(value: unknown): string | null {
@@ -238,12 +232,13 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
   const provenance = meta.monthProvenanceByMonth as Record<string, string> | undefined;
   const actualSource = meta.actualSource as string | undefined;
   const timezone = typeof meta.timezone === "string" ? meta.timezone : "America/Chicago";
-  const hasSimulatedFill = Boolean(
-    datasetKind === "SIMULATED" &&
-      actualSource &&
-      provenance &&
-      Object.values(provenance).some((value) => value === "SIMULATED")
-  );
+  const hasSimulatedFill = readPastSimHasSimulatedFillFromDataset({
+    meta,
+    summary: dataset?.summary,
+    daily: dataset?.daily,
+    series: dataset?.series,
+    insights: dataset?.insights,
+  });
   const coverage = {
     source:
       hasSimulatedFill && actualSource
@@ -263,73 +258,20 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
   };
 
   const monthly = dataset?.monthly ?? dataset?.insights?.monthlyTotals ?? [];
-  const daily = dataset?.daily ?? [];
-  const fallbackDailyRaw = daily.length
-    ? daily
-    : (dataset?.series?.daily ?? []).map((row: any) =>
-        dailyRowFieldsFromSourceRow({
-          date: toDateKeyFromTimestamp(row.timestamp),
-          kwh: row.kwh,
-          source: row.source,
-          sourceDetail: row.sourceDetail,
-        })
-      );
-  const dateInRange = (date: string) => (!coverageStart || date >= coverageStart) && (!coverageEnd || date <= coverageEnd);
-  const seen = new Set<string>();
-  const fallbackDaily = fallbackDailyRaw
-    .filter((row: any) => {
-      const date = String(row?.date ?? "").slice(0, 10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
-      if (seen.has(date)) return false;
-      seen.add(date);
-      return dateInRange(date);
-    })
-    .map(
-      (row: any): DailyRow =>
-        dailyRowFieldsFromSourceRow({
-          date: String(row.date),
-          kwh: row.kwh,
-          source: row.source,
-          sourceDetail: row.sourceDetail,
-        })
-    )
-    .sort((left: DailyRow, right: DailyRow) => (left.date < right.date ? -1 : 1));
-  const displayDaily =
-    greenButtonActual && coverageStart && coverageEnd
-      ? (() => {
-          const dailyByDate = new Map<string, DailyRow>(
-            fallbackDaily.map((row: DailyRow) => [row.date, row] as const)
-          );
-          return fillCanonicalDailyTotals(
-            fallbackDaily.map((row: DailyRow) => ({ date: row.date, kwh: row.kwh })),
-            { startDate: coverageStart, endDate: coverageEnd }
-          ).map((row) => {
-            const existing = dailyByDate.get(row.date);
-            return dailyRowFieldsFromSourceRow({
-              date: row.date,
-              kwh: row.kwh,
-              source: existing?.source ?? "ACTUAL",
-              sourceDetail: existing?.sourceDetail,
-            });
-          });
-        })()
-      : fallbackDaily;
-
-  const intervals = dataset?.intervals ?? [];
-  const fifteenCurve = resolvePastSimDisplayFifteenMinuteCurve({
-    insightsFifteenMinuteAverages: dataset?.insights?.fifteenMinuteAverages,
-    intervals15: dataset?.series?.intervals15,
-    hasSimulatedFill,
-    displayDaily,
-    timezone,
-    coverageStart,
-    coverageEnd,
+  const pastDisplay = resolvePastSimFifteenMinuteCurveFromDataset({
     meta,
-  }).fifteenMinuteAverages;
+    summary: dataset?.summary,
+    daily: dataset?.daily,
+    series: dataset?.series,
+    insights: dataset?.insights,
+  });
+  const displayDaily = pastDisplay.displayDaily;
+  const intervals = dataset?.intervals ?? [];
+  const fifteenCurve = pastDisplay.fifteenMinuteAverages;
   const totalsFromApi = dataset?.totals;
   const totalsFromSeries =
-    fallbackDaily.length
-      ? deriveTotalsFromRows(fallbackDaily)
+    displayDaily.length
+      ? deriveTotalsFromRows(displayDaily)
       : intervals.length
         ? deriveTotalsFromRows(intervals.map((row: any) => ({ kwh: row.kwh })))
         : { importKwh: 0, exportKwh: 0, netKwh: 0 };

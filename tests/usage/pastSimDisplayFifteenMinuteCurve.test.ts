@@ -44,7 +44,7 @@ describe("resolvePastSimDisplayFifteenMinuteCurve", () => {
     const adminView = buildOnePathRunReadOnlyView({ dataset });
 
     expect(viewModel?.derived.fifteenCurve).toEqual(adminView?.fifteenMinuteAverages);
-    expect(adminView?.fifteenMinuteCurveSourceOwner).toContain("buildUserUsageDashboardViewModel");
+    expect(adminView?.fifteenMinuteCurveSourceOwner).toContain("resolvePastSimFifteenMinuteCurveFromDataset");
     expect(viewModel?.derived.fifteenCurve.find((row) => row.hhmm === "12:00")?.avgKw).toBe(8);
   });
 
@@ -105,6 +105,7 @@ describe("resolvePastSimDisplayFifteenMinuteCurve", () => {
       },
     });
     expect(adminView?.fifteenMinuteAverages).toEqual(viewModel?.derived.fifteenCurve);
+    expect(adminView?.fifteenMinuteCurveSourceOwner).toContain("resolvePastSimFifteenMinuteCurveFromDataset");
     expect(adminView?.fifteenMinuteCurveSourceOwner).not.toContain("upstream GB actual");
   });
 

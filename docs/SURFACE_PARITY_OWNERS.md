@@ -71,6 +71,7 @@ Two parallel module trees exist for historical reasons. **Any Past Sim parity fi
 - **SMT trusted pool / Past Sim:** 96/96 Chicago slots (`smtWindowStatus`). Incomplete-meter ledger days filtered by slot completeness (DST fall-back).
 - **Green Button trusted pool:** `trustedIntervalThresholdForDateKey` (92/96/100). `trustedActualDateKeys` from GB coverage fetch passed into Past engine.
 - **Validation days:** `forceModeledOutputKeepReferencePoolDateKeysLocal` (keep-ref) — scored validation actuals stay in the donor pool; output is still modeled for compare.
+- **Past 15-minute load curve (display):** `lib/usage/pastSimDisplayFromDataset.ts` → `resolvePastSimFifteenMinuteCurveFromDataset()` — User Usage and One Path must both call this; no sage upstream or local rebuilds.
 
 ---
 

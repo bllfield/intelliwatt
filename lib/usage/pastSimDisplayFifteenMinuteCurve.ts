@@ -1,5 +1,7 @@
 /**
- * Single owner for Past / simulated-fill 15-minute load curves on user Usage and One Path read-only views.
+ * Low-level 15-minute curve bucketing (GB home calendar, actual-day filters).
+ * Surfaces must call `resolvePastSimFifteenMinuteCurveFromDataset` in `pastSimDisplayFromDataset.ts`
+ * so Usage and One Path pass identical inputs — do not call this directly from routes/views.
  */
 
 import {
