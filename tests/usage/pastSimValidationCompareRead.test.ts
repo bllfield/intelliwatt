@@ -34,6 +34,24 @@ describe("pastSimValidationCompareRead", () => {
     });
   });
 
+  it("SMT Past still merges validation actuals from SMT sage actualDataset", () => {
+    const enriched = enrichPastDatasetValidationCompareMetaForRead({
+      dataset: {
+        meta: {
+          actualSource: "SMT",
+          validationOnlyDateKeysLocal: ["2026-04-16"],
+        },
+      },
+      actualDataset: {
+        summary: { source: "SMT" },
+        daily: [{ date: "2026-04-16", kwh: 30.79 }],
+      },
+    });
+    expect(
+      (enriched.meta as { validationActualDailyKwhByDateLocal?: Record<string, number> }).validationActualDailyKwhByDateLocal
+    ).toEqual({ "2026-04-16": 30.79 });
+  });
+
   it("pastValidationCompareMayUseActualDataset blocks SMT sage under GB Past", () => {
     expect(
       pastValidationCompareMayUseActualDataset({
@@ -47,5 +65,23 @@ describe("pastSimValidationCompareRead", () => {
         actualDataset: { meta: { actualSource: "GREEN_BUTTON" }, daily: [] },
       })
     ).toBe(true);
+  });
+
+  it("pastValidationCompareMayUseActualDataset allows SMT Past with SMT sage (unchanged)", () => {
+    expect(
+      pastValidationCompareMayUseActualDataset({
+        simulatedDataset: { meta: { actualSource: "SMT" } },
+        actualDataset: { summary: { source: "SMT" }, daily: [] },
+      })
+    ).toBe(true);
+  });
+
+  it("resolvePastSimPreferredActualSource keeps explicit SMT over artifact meta", () => {
+    expect(
+      resolvePastSimPreferredActualSource({
+        preferredActualSource: "SMT",
+        dataset: { meta: { actualSource: "GREEN_BUTTON" } },
+      })
+    ).toBe("SMT");
   });
 });

@@ -18,6 +18,7 @@ import {
 import { resolvePastSimDisplayFifteenMinuteCurve } from "@/lib/usage/pastSimDisplayFifteenMinuteCurve";
 import {
   isGreenButtonUsageDataset,
+  shouldUseGreenButtonPersistedValidationActualForCompare,
   validationActualDailyKwhMapFromMeta,
 } from "@/lib/usage/pastSimValidationCompareRead";
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
@@ -503,14 +504,16 @@ export function buildOnePathRunReadOnlyView(args: {
     }
     dailyRows = clampDailyRowsToCanonicalCoverageWindow(dailyRows, canonicalCoverageWindow);
   }
+  // SMT Past: unchanged — sage SMT daily truth overlays compare rows when present.
+  // Green Button Past only: prefer build-time GB interval totals; never overlay SMT sage onto GB compare.
   if (!isBaselinePassthrough && compareRows.length > 0) {
-    const persistedValidationActual = validationActualDailyKwhMapFromMeta(meta);
-    if (isGreenButtonBackedDatasetMeta(meta) && persistedValidationActual.size > 0) {
+    const greenButtonPastSim = shouldUseGreenButtonPersistedValidationActualForCompare(meta);
+    const persistedValidationActual = greenButtonPastSim
+      ? validationActualDailyKwhMapFromMeta(meta)
+      : new Map<string, number>();
+    if (greenButtonPastSim && persistedValidationActual.size > 0) {
       compareRows = applySageActualDailyTruthToCompareRows(compareRows, persistedValidationActual);
-    } else if (
-      sageByDate.size > 0 &&
-      (!isGreenButtonBackedDatasetMeta(meta) || isGreenButtonUsageDataset(args.sageActualDataset))
-    ) {
+    } else if (sageByDate.size > 0 && (!greenButtonPastSim || isGreenButtonUsageDataset(args.sageActualDataset))) {
       compareRows = applySageActualDailyTruthToCompareRows(compareRows, sageByDate);
     }
   }

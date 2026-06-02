@@ -47,14 +47,25 @@ export function resolvePastSimPreferredActualSource(args: {
   return null;
 }
 
-/** GB Past compare actuals must come from GB intervals (persisted at build), not SMT sage daily. */
+/**
+ * Whether sage/actualDataset daily rows may fill validation compare gaps on read.
+ * SMT Past: always allowed (unchanged). Green Button Past: only when sage is also GB.
+ */
 export function pastValidationCompareMayUseActualDataset(args: {
   simulatedDataset: unknown;
   actualDataset: unknown;
 }): boolean {
   if (!args.actualDataset) return false;
-  if (!isGreenButtonUsageDataset(args.simulatedDataset)) return true;
+  const greenButtonPastSim = isGreenButtonUsageDataset(args.simulatedDataset);
+  if (!greenButtonPastSim) return true;
   return isGreenButtonUsageDataset(args.actualDataset);
+}
+
+/** Green Button Past only: persisted validation actuals from GB intervals at build time. */
+export function shouldUseGreenButtonPersistedValidationActualForCompare(
+  meta: Record<string, unknown> | null | undefined
+): boolean {
+  return isGreenButtonBackedDatasetMeta(meta);
 }
 
 export function validationActualDailyKwhMapFromMeta(
