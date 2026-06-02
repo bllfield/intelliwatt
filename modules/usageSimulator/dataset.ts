@@ -1,4 +1,4 @@
-import { dateKeyInTimezone } from "@/lib/admin/gapfillLab";
+import { createHomeIntervalCalendar, localDateKey } from "@/lib/time/homeIntervalCalendar";
 import { resolveHomeTimezone } from "@/lib/time/resolveHomeTimezone";
 import { computeHomeBaseloadKw } from "@/lib/usage/computeHomeBaseloadKw";
 import { buildSimulatedHomeDateKeysExcludedFromBaseload } from "@/lib/usage/simulatedBaseloadExclusions";
@@ -19,8 +19,7 @@ import {
   pruneStaleIncompleteMeterFromPastDatasetMeta,
 } from "@/lib/usage/pastSimStaleIncompleteMeter";
 import {
-  buildFifteenMinuteAveragesFromIntervalRows,
-  buildTimeOfDayBucketsFromIntervalRows,
+  buildLoadCurveInsightsFromIntervalRows,
   normalizeHomeTimezoneForLoadCurve,
 } from "@/lib/usage/fifteenMinuteLoadCurve";
 import { buildDisplayedMonthlyRows } from "@/modules/usageSimulator/monthlyCompareRows";
@@ -147,12 +146,13 @@ function computeBaseloadKwFromCurveIntervals(
   options: BaseloadFromCurveOptions
 ): { baseloadKw: number | null; fallbackUsed: boolean; debugNote: string | null } {
   const homeTimezone = resolveHomeTimezone({ timezone: options.homeTimezone });
+  const home = createHomeIntervalCalendar(homeTimezone);
   const rows: Array<{ tsIso: string; kwh: number; homeDateKey: string }> = [];
   for (const row of intervals ?? []) {
     const tsIso = String(row?.timestamp ?? "");
     const kwh = Number(row?.consumption_kwh);
     if (!tsIso || !Number.isFinite(kwh)) continue;
-    const homeDateKey = dateKeyInTimezone(tsIso, homeTimezone);
+    const homeDateKey = localDateKey(tsIso, home);
     if (options.excludedDateKeys?.has(homeDateKey)) continue;
     if (options.simulatedHomeDateKeys?.has(homeDateKey)) continue;
     rows.push({ tsIso, kwh, homeDateKey });
@@ -170,11 +170,12 @@ function computeBaseloadKwFromSimpleIntervals(
   options: BaseloadOptions = {}
 ): { baseloadKw: number | null; fallbackUsed: boolean; debugNote: string | null } {
   const tz = resolveHomeTimezone({ timezone: homeTimezone });
+  const home = createHomeIntervalCalendar(tz);
   return computeHomeBaseloadKw(
     intervals.map((row) => ({
       tsIso: String(row.tsIso ?? ""),
       kwh: Number(row.kwh) || 0,
-      homeDateKey: dateKeyInTimezone(String(row.tsIso ?? ""), tz),
+      homeDateKey: localDateKey(String(row.tsIso ?? ""), home),
     })),
     tz,
     options
@@ -833,18 +834,21 @@ export function reconcileRestoredPastDatasetFromDecodedIntervals(args: {
     const homeTimezone = normalizeHomeTimezoneForLoadCurve(
       String((dataset as any)?.meta?.timezone ?? "America/Chicago")
     );
-    const intervalRowsForInsights = decodedIntervals.map((iv) => ({
-      timestamp: String(iv?.timestamp ?? ""),
-      consumption_kwh: Number(iv?.consumption_kwh ?? iv?.kwh ?? 0) || 0,
-    }));
-    (dataset.insights as any).fifteenMinuteAverages = buildFifteenMinuteAveragesFromIntervalRows(
-      intervalRowsForInsights,
-      homeTimezone
-    );
-    (dataset.insights as any).timeOfDayBuckets = buildTimeOfDayBucketsFromIntervalRows(
-      intervalRowsForInsights,
-      homeTimezone
-    );
+    const existingFifteenMinute = (dataset.insights as any).fifteenMinuteAverages;
+    const hasPersistedLoadCurveInsights =
+      Array.isArray(existingFifteenMinute) && existingFifteenMinute.length > 0;
+    if (!hasPersistedLoadCurveInsights) {
+      const intervalRowsForInsights = decodedIntervals.map((iv) => ({
+        timestamp: String(iv?.timestamp ?? ""),
+        consumption_kwh: Number(iv?.consumption_kwh ?? iv?.kwh ?? 0) || 0,
+      }));
+      const loadCurveInsights = buildLoadCurveInsightsFromIntervalRows(
+        intervalRowsForInsights,
+        homeTimezone
+      );
+      (dataset.insights as any).fifteenMinuteAverages = loadCurveInsights.fifteenMinuteAverages;
+      (dataset.insights as any).timeOfDayBuckets = loadCurveInsights.timeOfDayBuckets;
+    }
   }
 
   if (!dataset.summary || typeof dataset.summary !== "object") (dataset as any).summary = {};
@@ -884,14 +888,14 @@ function computeFifteenMinuteAverages(
   intervals: Array<{ timestamp: string; consumption_kwh: number }>,
   timezone: string
 ) {
-  return buildFifteenMinuteAveragesFromIntervalRows(intervals, timezone);
+  return buildLoadCurveInsightsFromIntervalRows(intervals, timezone).fifteenMinuteAverages;
 }
 
 function computeTimeOfDayBuckets(
   intervals: Array<{ timestamp: string; consumption_kwh: number }>,
   timezone: string
 ) {
-  return buildTimeOfDayBucketsFromIntervalRows(intervals, timezone);
+  return buildLoadCurveInsightsFromIntervalRows(intervals, timezone).timeOfDayBuckets;
 }
 
 function excludedDateKeysFromTravelRanges(
@@ -1721,12 +1725,11 @@ export function buildSimulatedUsageDatasetFromCurve(
       const homeTimezone = normalizeHomeTimezoneForLoadCurve(
         options?.homeTimezone ?? options?.timezone
       );
-      const nextFifteenMinuteAverages = skipHeavyInsights
-        ? []
-        : computeFifteenMinuteAverages(curve.intervals, homeTimezone);
-      const nextTimeOfDayBuckets = skipHeavyInsights
-        ? []
-        : computeTimeOfDayBuckets(curve.intervals, homeTimezone);
+      const loadCurveInsights = skipHeavyInsights
+        ? { fifteenMinuteAverages: [] as Array<{ hhmm: string; avgKw: number }>, timeOfDayBuckets: [] as Array<{ key: string; label: string; kwh: number }> }
+        : buildLoadCurveInsightsFromIntervalRows(curve.intervals, homeTimezone);
+      const nextFifteenMinuteAverages = loadCurveInsights.fifteenMinuteAverages;
+      const nextTimeOfDayBuckets = loadCurveInsights.timeOfDayBuckets;
       const simulatedHomeDateKeys = buildSimulatedHomeDateKeysExcludedFromBaseload(
         options?.simulatedDayResults
       );
