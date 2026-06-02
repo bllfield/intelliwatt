@@ -53,12 +53,13 @@ export function mergeGreenButtonChartInsightsOntoPassthroughDataset(args: {
     passthrough.insights != null && typeof passthrough.insights === "object"
       ? (passthrough.insights as Record<string, unknown>)
       : {};
-  const fifteenMinuteAverages = hasNonEmptyInsightArray(passthroughInsights.fifteenMinuteAverages)
-    ? passthroughInsights.fifteenMinuteAverages
-    : resolvedInsights.fifteenMinuteAverages;
-  const timeOfDayBuckets = hasNonEmptyInsightArray(passthroughInsights.timeOfDayBuckets)
-    ? passthroughInsights.timeOfDayBuckets
-    : resolvedInsights.timeOfDayBuckets;
+  // Full actual-layer insights (SQL + home calendar) win over One Path passthrough stubs.
+  const fifteenMinuteAverages = hasNonEmptyInsightArray(resolvedInsights.fifteenMinuteAverages)
+    ? resolvedInsights.fifteenMinuteAverages
+    : passthroughInsights.fifteenMinuteAverages;
+  const timeOfDayBuckets = hasNonEmptyInsightArray(resolvedInsights.timeOfDayBuckets)
+    ? resolvedInsights.timeOfDayBuckets
+    : passthroughInsights.timeOfDayBuckets;
   const peakHour =
     passthroughInsights.peakHour != null ? passthroughInsights.peakHour : resolvedInsights.peakHour ?? null;
   const baseload =

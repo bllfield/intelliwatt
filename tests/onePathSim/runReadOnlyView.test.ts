@@ -660,7 +660,7 @@ describe("buildOnePathRunReadOnlyView", () => {
       { hhmm: "12:00", avgKw: 1.5 },
     ]);
     expect(view?.fifteenMinuteCurveSourceOwner).toBe(
-      "buildOnePathRunReadOnlyView(...).dataset.insights.fifteenMinuteAverages"
+      "buildUserUsageDashboardViewModel(...).derived.fifteenCurve"
     );
     expect(view?.summary.baseload).toBe(0.2);
   });
@@ -705,7 +705,9 @@ describe("buildOnePathRunReadOnlyView", () => {
     });
 
     expect(view?.fifteenMinuteAverages.length).toBeGreaterThan(0);
-    expect(view?.fifteenMinuteCurveSourceOwner).toBe("buildOnePathRunReadOnlyView(...).dataset.series.intervals15");
+    expect(view?.fifteenMinuteCurveSourceOwner).toBe(
+      "buildUserUsageDashboardViewModel(...).derived.fifteenCurve"
+    );
   });
 
   it("binds validation compare rows and metrics from the persisted read model", () => {

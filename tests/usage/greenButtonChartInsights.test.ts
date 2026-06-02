@@ -47,7 +47,7 @@ describe("mergeGreenButtonChartInsightsOntoPassthroughDataset", () => {
     });
   });
 
-  it("keeps passthrough curve when passthrough already has points", () => {
+  it("prefers resolved actual-layer curve over passthrough when both have points", () => {
     const merged = mergeGreenButtonChartInsightsOntoPassthroughDataset({
       passthroughDataset: {
         insights: {
@@ -62,7 +62,7 @@ describe("mergeGreenButtonChartInsightsOntoPassthroughDataset", () => {
     });
 
     expect((merged.insights as { fifteenMinuteAverages: unknown[] }).fifteenMinuteAverages).toEqual([
-      { hhmm: "12:00", avgKw: 9.9 },
+      { hhmm: "00:00", avgKw: 1.1 },
     ]);
   });
 });

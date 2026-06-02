@@ -44,6 +44,20 @@ function round2(value: number): number {
   return Math.round((Number(value) || 0) * 100) / 100;
 }
 
+/** Minimum 15m rows to rebuild a year-shaped curve from series (avoids tail-only Usage loads). */
+export const GREEN_BUTTON_MIN_INTERVALS_FOR_SERIES_CURVE = 96 * 30;
+
+export function shouldRebuildGreenButtonFifteenMinuteCurveFromSeries(args: {
+  meta?: Record<string, unknown> | null;
+  intervals15Count: number;
+  hasSimulatedFill?: boolean;
+}): boolean {
+  if (args.intervals15Count <= 0) return false;
+  if (args.hasSimulatedFill) return true;
+  if (args.intervals15Count >= GREEN_BUTTON_MIN_INTERVALS_FOR_SERIES_CURVE) return true;
+  return args.meta?.greenButtonFullYearIntervals15 === true;
+}
+
 export function isGreenButtonBackedDatasetMeta(meta: Record<string, unknown> | null | undefined): boolean {
   if (!meta) return false;
   if (meta.actualSource === "GREEN_BUTTON") return true;

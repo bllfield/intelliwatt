@@ -72,4 +72,26 @@ describe("resolvePastSimDisplayFifteenMinuteCurve", () => {
 
     expect(result.fifteenMinuteAverages.find((row) => row.hhmm === "12:00")?.avgKw).toBe(8);
   });
+
+  it("prefers shared Green Button series curve over stale insights for ACTUAL usage", () => {
+    const intervals15 = Array.from({ length: 96 * 31 }, () => ({
+      timestamp: "2026-06-01T05:00:00.000Z",
+      kwh: 1,
+    }));
+    const result = resolvePastSimDisplayFifteenMinuteCurve({
+      insightsFifteenMinuteAverages: [{ hhmm: "00:00", avgKw: 9.9 }],
+      intervals15,
+      hasSimulatedFill: false,
+      displayDaily: [{ date: "2026-06-01", source: "ACTUAL" }],
+      timezone: "America/Chicago",
+      coverageStart: "2026-06-01",
+      coverageEnd: "2026-06-30",
+      meta: { actualSource: "GREEN_BUTTON", greenButtonIntervalTimestampMode: "home_local" },
+    });
+
+    expect(result.sourceOwner).toBe(
+      "greenButtonPersistedIntervalConvert.buildGreenButtonLoadCurveInsightsFromSeriesRows"
+    );
+    expect(result.fifteenMinuteAverages.find((row) => row.hhmm === "00:00")?.avgKw).toBe(4);
+  });
 });

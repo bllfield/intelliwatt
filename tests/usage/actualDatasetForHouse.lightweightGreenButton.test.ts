@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.hoisted(() => {
+  process.env.USAGE_DATABASE_URL = "postgres://example.test/db";
+});
+
 vi.mock("server-only", () => ({}));
 
 const greenButtonAggregate = vi.fn();

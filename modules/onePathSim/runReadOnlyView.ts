@@ -10,18 +10,15 @@ import {
 } from "@/lib/usage/sageActualDailyTruth";
 import { smtPendingIntervalDateKeysFromMeta } from "@/lib/usage/smtDayCoverageLedger";
 import {
-  buildGreenButtonLoadCurveInsightsFromSeriesRows,
   convertGreenButtonSeriesRowsToHome,
   isGreenButtonBackedDatasetMeta,
   resolveGreenButtonIntervalDeliveryFromMeta,
 } from "@/lib/time/greenButtonPersistedIntervalConvert";
-import { buildLoadCurveInsightsFromIntervalRows } from "@/lib/usage/fifteenMinuteLoadCurve";
 import { resolvePastSimDisplayFifteenMinuteCurve } from "@/lib/usage/pastSimDisplayFifteenMinuteCurve";
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
 import { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
 import type { ValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
 import type { WeatherSensitivityScore } from "@/modules/weatherSensitivity/shared";
-import { redistributeGreenButtonGridZeroSamples } from "@/modules/onePathSim/greenButtonIntervalCorrections";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
@@ -114,31 +111,6 @@ function asStitchedMonthRecord(
     borrowedFromYearMonth,
     completenessRule: String(item?.completenessRule ?? ""),
   };
-}
-
-function buildFifteenMinuteAveragesFromIntervals15(
-  value: unknown,
-  timezone: string,
-  meta: Record<string, unknown> | null,
-  options?: { redistributeZeroKwhSamples?: boolean }
-): Array<{ hhmm: string; avgKw: number }> {
-  let rows = asArray<Record<string, unknown>>(value)
-    .map((row) => {
-      const timestamp = String(row.timestamp ?? "");
-      const kwh = Number(row.kwh ?? row.consumption_kwh);
-      return timestamp && Number.isFinite(kwh) ? { timestamp, kwh } : null;
-    })
-    .filter((row): row is { timestamp: string; kwh: number } => row != null);
-  if (
-    options?.redistributeZeroKwhSamples &&
-    resolveGreenButtonIntervalDeliveryFromMeta(meta).encoding === "utc_day_grid"
-  ) {
-    rows = redistributeGreenButtonGridZeroSamples(rows).intervals;
-  }
-  return buildGreenButtonLoadCurveInsightsFromSeriesRows(rows, {
-    homeTimezone: timezone,
-    meta,
-  }).fifteenMinuteAverages;
 }
 
 export type OnePathPastScenarioVariable = {
@@ -426,36 +398,8 @@ export function buildOnePathRunReadOnlyView(args: {
 
   if (isBaselinePassthrough) {
     dailyRows = viewModel.derived.daily;
-    const timezone = typeof meta?.timezone === "string" && meta.timezone.trim() ? meta.timezone : "America/Chicago";
-    const passthroughInsightsFifteen = asArray<Record<string, unknown>>(datasetInsights.fifteenMinuteAverages)
-      .map((row) => ({
-        hhmm: String(row?.hhmm ?? ""),
-        avgKw: Number(row?.avgKw ?? 0) || 0,
-      }))
-      .filter((row) => /^\d{2}:\d{2}$/.test(row.hhmm));
-    const shouldIgnoreGreenButtonGridZeroSamples =
-      resolveIntervalTimestampMode(meta) === "utcDayGrid" &&
-      Number(meta?.greenButtonPaddedIntervalCount ?? 0) > 0 &&
-      Number(meta?.greenButtonZeroRedistributedIntervalCount ?? 0) <= 0;
-    const intervalRows = asArray<Record<string, unknown>>(asRecord(dataset.series)?.intervals15).map((row) => ({
-      timestamp: String(row?.timestamp ?? ""),
-      kwh: Number(row?.kwh ?? row?.consumption_kwh) || 0,
-    }));
-    const rebuiltFifteenMinuteAverages = isGreenButtonBackedDatasetMeta(meta)
-      ? buildFifteenMinuteAveragesFromIntervals15(intervalRows, timezone, meta, {
-          redistributeZeroKwhSamples: shouldIgnoreGreenButtonGridZeroSamples,
-        })
-      : buildLoadCurveInsightsFromIntervalRows(intervalRows, timezone).fifteenMinuteAverages;
-    fifteenMinuteAverages = passthroughInsightsFifteen.length
-      ? passthroughInsightsFifteen
-      : rebuiltFifteenMinuteAverages.length
-        ? rebuiltFifteenMinuteAverages
-        : viewModel.derived.fifteenCurve;
-    fifteenMinuteCurveSourceOwner = passthroughInsightsFifteen.length
-      ? "buildOnePathRunReadOnlyView(...).dataset.insights.fifteenMinuteAverages"
-      : rebuiltFifteenMinuteAverages.length
-        ? "buildOnePathRunReadOnlyView(...).dataset.series.intervals15"
-        : "buildUserUsageDashboardViewModel(...).derived.fifteenCurve";
+    fifteenMinuteAverages = viewModel.derived.fifteenCurve;
+    fifteenMinuteCurveSourceOwner = "buildUserUsageDashboardViewModel(...).derived.fifteenCurve";
   } else {
     const canonicalCoverageWindow = resolveCanonicalUsage365CoverageWindow();
     const smtPendingDateKeys = smtPendingIntervalDateKeysFromMeta(meta);

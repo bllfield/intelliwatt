@@ -4,9 +4,27 @@ import {
   buildGreenButtonLoadCurveInsightsFromSeriesRows,
   convertGreenButtonSeriesRowsToHome,
   resolveGreenButtonIntervalDeliveryFromMeta,
+  shouldRebuildGreenButtonFifteenMinuteCurveFromSeries,
 } from "@/lib/time/greenButtonPersistedIntervalConvert";
 
 describe("greenButtonPersistedIntervalConvert display curve", () => {
+  it("rebuilds curve from series when Past has full-year intervals15", () => {
+    expect(
+      shouldRebuildGreenButtonFifteenMinuteCurveFromSeries({
+        meta: { greenButtonFullYearIntervals15: true },
+        intervals15Count: 96,
+        hasSimulatedFill: false,
+      })
+    ).toBe(true);
+    expect(
+      shouldRebuildGreenButtonFifteenMinuteCurveFromSeries({
+        meta: { actualSource: "GREEN_BUTTON" },
+        intervals15Count: 192,
+        hasSimulatedFill: false,
+      })
+    ).toBe(false);
+  });
+
   it("uses home_local delivery for producer-style persisted instants", () => {
     const rows = [{ timestamp: "2026-06-01T05:00:00.000Z", kwh: 1 }];
     const delivery = resolveGreenButtonIntervalDeliveryFromMeta({

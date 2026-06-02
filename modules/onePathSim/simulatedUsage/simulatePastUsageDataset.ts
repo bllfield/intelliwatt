@@ -2728,6 +2728,7 @@ export async function simulatePastUsageDataset(
           coverageEnd: dataset?.summary?.end ?? endDate,
           displayWindowNote: greenButtonPastProducerLoad?.displayWindowNote ?? undefined,
           greenButtonIntervalTimestampMode: greenButtonPastProducerLoad ? "home_local" : undefined,
+          greenButtonFullYearIntervals15: greenButtonPastProducerLoad ? true : undefined,
           greenButtonSourceCoverageStart: greenButtonPastProducerLoad?.sourceCoverageStart ?? undefined,
           greenButtonSourceCoverageEnd: greenButtonPastProducerLoad?.sourceCoverageEnd ?? undefined,
           greenButtonCoverageIntervalCount: greenButtonPastProducerLoad?.engineSourceIntervals.length ?? undefined,

@@ -5,6 +5,7 @@
 import {
   buildGreenButtonLoadCurveInsightsFromSeriesRows,
   isGreenButtonBackedDatasetMeta,
+  shouldRebuildGreenButtonFifteenMinuteCurveFromSeries,
 } from "@/lib/time/greenButtonPersistedIntervalConvert";
 import {
   buildLoadCurveInsightsFromIntervalRows,
@@ -111,11 +112,39 @@ function buildActualDayLoadCurve(input: PastSimDisplayFifteenMinuteCurveInput): 
   ).fifteenMinuteAverages;
 }
 
+const GREEN_BUTTON_CURVE_OWNER =
+  "greenButtonPersistedIntervalConvert.buildGreenButtonLoadCurveInsightsFromSeriesRows";
+
 export function resolvePastSimDisplayFifteenMinuteCurve(
   input: PastSimDisplayFifteenMinuteCurveInput
 ): PastSimDisplayFifteenMinuteCurveResult {
   const timezone = String(input.timezone ?? "").trim() || "America/Chicago";
   const intervals15 = Array.isArray(input.intervals15) ? input.intervals15 : [];
+  const greenButtonBacked = isGreenButtonBackedDatasetMeta(input.meta);
+
+  if (
+    greenButtonBacked &&
+    shouldRebuildGreenButtonFifteenMinuteCurveFromSeries({
+      meta: input.meta,
+      intervals15Count: intervals15.length,
+      hasSimulatedFill: input.hasSimulatedFill,
+    })
+  ) {
+    const greenButtonCurve = sortFifteenCurve(
+      buildGreenButtonLoadCurveInsightsFromSeriesRows(intervals15, {
+        homeTimezone: timezone,
+        meta: input.meta,
+        displayDaily: input.displayDaily,
+        filterToActualDailyDates: input.hasSimulatedFill,
+      }).fifteenMinuteAverages
+    );
+    if (greenButtonCurve.length > 0) {
+      return {
+        fifteenMinuteAverages: greenButtonCurve,
+        sourceOwner: GREEN_BUTTON_CURVE_OWNER,
+      };
+    }
+  }
 
   const insightFifteenCurve = sortFifteenCurve(
     (input.insightsFifteenMinuteAverages ?? [])
@@ -127,7 +156,9 @@ export function resolvePastSimDisplayFifteenMinuteCurve(
   );
 
   const actualDayLoadCurve =
-    input.hasSimulatedFill && intervals15.length > 0 ? sortFifteenCurve(buildActualDayLoadCurve(input)) : [];
+    input.hasSimulatedFill && intervals15.length > 0 && !greenButtonBacked
+      ? sortFifteenCurve(buildActualDayLoadCurve(input))
+      : [];
 
   const rebuiltFifteenCurve =
     insightFifteenCurve.length > 0 || actualDayLoadCurve.length > 0
@@ -143,15 +174,15 @@ export function resolvePastSimDisplayFifteenMinuteCurve(
   if (actualDayLoadCurve.length > 0) {
     return {
       fifteenMinuteAverages: actualDayLoadCurve,
-      sourceOwner: isGreenButtonBackedDatasetMeta(input.meta)
-        ? "greenButtonPersistedIntervalConvert.buildGreenButtonLoadCurveInsightsFromSeriesRows"
-        : "resolvePastSimDisplayFifteenMinuteCurve(...).actualDayIntervals15",
+      sourceOwner: "resolvePastSimDisplayFifteenMinuteCurve(...).actualDayIntervals15",
     };
   }
   if (insightFifteenCurve.length > 0) {
     return {
       fifteenMinuteAverages: insightFifteenCurve,
-      sourceOwner: "resolvePastSimDisplayFifteenMinuteCurve(...).insights.fifteenMinuteAverages",
+      sourceOwner: greenButtonBacked
+        ? "resolvePastSimDisplayFifteenMinuteCurve(...).insights.fifteenMinuteAverages (SQL/DB)"
+        : "resolvePastSimDisplayFifteenMinuteCurve(...).insights.fifteenMinuteAverages",
     };
   }
   return {
