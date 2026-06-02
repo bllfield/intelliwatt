@@ -4,7 +4,9 @@
 
 import {
   buildGreenButtonLoadCurveInsightsFromSeriesRows,
+  hasGreenButtonSourceDateShiftMap,
   isGreenButtonBackedDatasetMeta,
+  resolveGreenButtonPastDisplayMeta,
   shouldRebuildGreenButtonFifteenMinuteCurveFromSeries,
 } from "@/lib/time/greenButtonPersistedIntervalConvert";
 import {
@@ -100,7 +102,7 @@ function buildActualDayLoadCurve(input: PastSimDisplayFifteenMinuteCurveInput): 
   if (isGreenButtonBackedDatasetMeta(input.meta)) {
     return buildGreenButtonLoadCurveInsightsFromSeriesRows(intervals15, {
       homeTimezone: input.timezone,
-      meta: input.meta,
+      meta: resolveGreenButtonPastDisplayMeta(input.meta ?? null),
       displayDaily: input.displayDaily,
       filterToActualDailyDates: true,
     }).fifteenMinuteAverages;
@@ -141,10 +143,11 @@ function buildGreenButtonSeriesFifteenCurve(
   intervals15: Array<{ timestamp?: string; kwh?: number; consumption_kwh?: number }>
 ): Array<{ hhmm: string; avgKw: number }> {
   if (!intervals15.length) return [];
+  const displayMeta = resolveGreenButtonPastDisplayMeta(input.meta ?? null);
   return sortFifteenCurve(
     buildGreenButtonLoadCurveInsightsFromSeriesRows(intervals15, {
       homeTimezone: String(input.timezone ?? "").trim() || "America/Chicago",
-      meta: input.meta,
+      meta: displayMeta,
       displayDaily: input.displayDaily,
       filterToActualDailyDates: input.hasSimulatedFill,
     }).fifteenMinuteAverages
@@ -169,6 +172,15 @@ export function resolvePastSimDisplayFifteenMinuteCurve(
 
   if (greenButtonBacked && intervals15.length > 0) {
     const greenButtonSeriesCurve = buildGreenButtonSeriesFifteenCurve(input, intervals15);
+    const shiftedGreenButtonPast =
+      input.hasSimulatedFill && hasGreenButtonSourceDateShiftMap(input.meta ?? null);
+
+    if (shiftedGreenButtonPast && greenButtonSeriesCurve.length > 0) {
+      return {
+        fifteenMinuteAverages: greenButtonSeriesCurve,
+        sourceOwner: `${GREEN_BUTTON_CURVE_OWNER} (home_local display meta for shifted GB Past)`,
+      };
+    }
 
     if (insightFifteenCurve.length === 0 && greenButtonSeriesCurve.length > 0) {
       return {
@@ -178,20 +190,16 @@ export function resolvePastSimDisplayFifteenMinuteCurve(
     }
 
     if (insightFifteenCurve.length > 0) {
-      if (
-        input.hasSimulatedFill &&
-        !greenButtonInsightsStaleVsSeries(insightFifteenCurve, greenButtonSeriesCurve)
-      ) {
-        return {
-          fifteenMinuteAverages: insightFifteenCurve,
-          sourceOwner: GREEN_BUTTON_INSIGHTS_OWNER,
-        };
-      }
       if (greenButtonSeriesCurve.length > 0) {
-        return {
-          fifteenMinuteAverages: greenButtonSeriesCurve,
-          sourceOwner: GREEN_BUTTON_CURVE_OWNER,
-        };
+        const preferSeries =
+          input.hasSimulatedFill ||
+          greenButtonInsightsStaleVsSeries(insightFifteenCurve, greenButtonSeriesCurve);
+        if (preferSeries) {
+          return {
+            fifteenMinuteAverages: greenButtonSeriesCurve,
+            sourceOwner: GREEN_BUTTON_CURVE_OWNER,
+          };
+        }
       }
       return {
         fifteenMinuteAverages: insightFifteenCurve,

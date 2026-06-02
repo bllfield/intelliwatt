@@ -2005,11 +2005,16 @@ export async function POST(request: NextRequest) {
         smtSourceEsiid,
       });
       if (shouldReturnCompactPastResponse) {
+        const compareProjectionForPast = resolveValidationCompareProjectionForRead({
+          dataset: artifactDataset,
+          actualDataset: sageTruthForPastDisplay?.dataset ?? null,
+          displayDataset: artifactDataset,
+        });
         const compactRunDisplayView =
           buildOnePathRunReadOnlyView({
             dataset: artifactDataset,
             engineInput: asRecord(engineInput),
-            readModel: { compareProjection: artifact.compareProjection },
+            readModel: { compareProjection: compareProjectionForPast },
             ...sageDisplayArgsForPast,
           }) ?? null;
         const compactReadModel = buildCompactSimulationReadModel({
@@ -2017,7 +2022,7 @@ export async function POST(request: NextRequest) {
           artifactDataset,
           artifactDatasetMeta,
           runDisplayView: compactRunDisplayView,
-          compareProjection: artifact.compareProjection,
+          compareProjection: compareProjectionForPast,
         });
         return NextResponse.json({
           ok: true,

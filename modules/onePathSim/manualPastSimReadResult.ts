@@ -3,10 +3,7 @@ import { resolveManualCompareActualDataset } from "@/lib/usage/manualCompareActu
 import { buildManualMonthlyReconciliation } from "@/modules/manualUsage/reconciliation";
 import { buildManualUsageReadModel, type ManualUsageReadModel } from "@/modules/manualUsage/readModel";
 import { getManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
-import {
-  buildValidationCompareProjectionFromDatasets,
-  buildValidationCompareProjectionSidecar,
-} from "@/modules/usageSimulator/compareProjection";
+import { resolveValidationCompareProjectionForRead } from "@/lib/usage/pastSimValidationCompareRead";
 import { buildDailyCurveComparePayload } from "@/modules/usageSimulator/dailyCurveCompareSummary";
 import {
   buildSharedPastSimDiagnostics,
@@ -421,14 +418,11 @@ async function buildManualUsageReadDecorations(args: {
     args.manualUsagePayload !== undefined
       ? { payload: args.manualUsagePayload }
       : await getManualUsageInputForUserHouse({ userId: args.userId, houseId: args.houseId });
-  const compareProjection =
-    args.actualDataset && args.displayDataset
-      ? buildValidationCompareProjectionFromDatasets({
-          validationSourceDataset: args.dataset,
-          actualDataset: args.actualDataset,
-          simulatedDataset: args.displayDataset,
-        })
-      : buildValidationCompareProjectionSidecar(args.dataset);
+  const compareProjection = resolveValidationCompareProjectionForRead({
+    dataset: args.dataset,
+    actualDataset: args.actualDataset ?? null,
+    displayDataset: args.displayDataset ?? null,
+  });
   const manualReadModel = buildManualUsageReadModel({
     payload: manualUsageRecord.payload,
     dataset: args.dataset,

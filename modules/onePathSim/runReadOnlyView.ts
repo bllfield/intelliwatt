@@ -17,7 +17,7 @@ import {
 import { resolvePastSimDisplayFifteenMinuteCurve } from "@/lib/usage/pastSimDisplayFifteenMinuteCurve";
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
 import { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
-import type { ValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
+import type { ValidationCompareProjectionSidecar } from "@/lib/usage/validationCompareProjection";
 import type { WeatherSensitivityScore } from "@/modules/weatherSensitivity/shared";
 
 function asRecord(value: unknown): Record<string, unknown> | null {

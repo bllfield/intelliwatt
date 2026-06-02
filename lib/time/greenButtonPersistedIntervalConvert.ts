@@ -75,9 +75,38 @@ export function isGreenButtonBackedDatasetMeta(meta: Record<string, unknown> | n
 export function resolveGreenButtonIntervalDeliveryFromMeta(
   meta: Record<string, unknown> | null | undefined
 ): IntervalDelivery {
-  const mode = String(meta?.greenButtonIntervalTimestampMode ?? "").trim();
+  const normalized = resolveGreenButtonPastDisplayMeta(meta);
+  const mode = String(normalized?.greenButtonIntervalTimestampMode ?? "").trim();
   if (mode === "utcDayGrid") return GREEN_BUTTON_LEGACY_UTC_DAY_GRID_DELIVERY;
   return GREEN_BUTTON_PERSISTED_INTERVAL_DELIVERY;
+}
+
+export function hasGreenButtonSourceDateShiftMap(
+  meta: Record<string, unknown> | null | undefined
+): boolean {
+  return Boolean(
+    meta?.greenButtonSourceDateByTargetDate &&
+      typeof meta.greenButtonSourceDateByTargetDate === "object" &&
+      !Array.isArray(meta.greenButtonSourceDateByTargetDate) &&
+      Object.keys(meta.greenButtonSourceDateByTargetDate as Record<string, unknown>).length > 0
+  );
+}
+
+/**
+ * Past/read display: producer-shifted GB Past stores UTC instants (home_local) but legacy
+ * artifacts may still carry utcDayGrid. Use home_local for display bucketing in that case.
+ */
+export function resolveGreenButtonPastDisplayMeta(
+  meta: Record<string, unknown> | null | undefined
+): Record<string, unknown> | null | undefined {
+  if (!meta) return meta;
+  if (meta.actualSource !== "GREEN_BUTTON") return meta;
+  const mode = String(meta.greenButtonIntervalTimestampMode ?? "").trim();
+  if (mode === "home_local") return meta;
+  if (hasGreenButtonSourceDateShiftMap(meta)) {
+    return { ...meta, greenButtonIntervalTimestampMode: "home_local" };
+  }
+  return meta;
 }
 
 export function convertGreenButtonSeriesRowsToHome(
@@ -177,9 +206,10 @@ export function buildGreenButtonLoadCurveInsightsFromSeriesRows(
     filterToActualDailyDates?: boolean;
   }
 ): GreenButtonLoadCurveInsights {
+  const displayMeta = resolveGreenButtonPastDisplayMeta(options?.meta ?? null);
   let homeRecords = convertGreenButtonSeriesRowsToHome(rows, {
     homeTimezone: options?.homeTimezone,
-    meta: options?.meta,
+    meta: displayMeta,
   });
   if (options?.filterToActualDailyDates && options.displayDaily?.length) {
     homeRecords = filterHomeIntervalRecordsToActualDailyDates(homeRecords, options.displayDaily);

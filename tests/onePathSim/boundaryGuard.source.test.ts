@@ -65,7 +65,7 @@ describe("one path boundary guard source", () => {
     expect(routeSource).toContain('from "@/modules/applianceProfile/repo"');
     expect(routeSource).toContain("resolveOnePathUpstreamUsageTruthForSimulation");
     expect(runViewSource).toContain('from "@/modules/usageSimulator/dailyRowFieldsFromDisplay"');
-    expect(runViewSource).toContain('import type { ValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection"');
+    expect(runViewSource).toContain('import type { ValidationCompareProjectionSidecar } from "@/lib/usage/validationCompareProjection"');
     expect(runViewSource).toContain('import type { WeatherSensitivityScore } from "@/modules/weatherSensitivity/shared"');
     expect(totalsAuditSource).toContain('from "@/modules/usageSimulator/monthlyCompareRows"');
   });

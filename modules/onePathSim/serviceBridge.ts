@@ -5,7 +5,7 @@ import {
   type RecalcSimulatorBuildArgs,
 } from "@/modules/onePathSim/usageSimulator/service";
 
-export type { ValidationCompareProjectionSidecar } from "@/modules/onePathSim/usageSimulator/compareProjection";
+export type { ValidationCompareProjectionSidecar } from "@/lib/usage/validationCompareProjection";
 export type { SharedDiagnosticsCallerType } from "@/modules/onePathSim/usageSimulator/sharedDiagnostics";
 export type { RecalcSimulatorBuildArgs };
 

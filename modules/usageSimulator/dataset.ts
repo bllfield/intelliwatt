@@ -21,6 +21,7 @@ import {
 import {
   buildGreenButtonLoadCurveInsightsFromSeriesRows,
   isGreenButtonBackedDatasetMeta,
+  resolveGreenButtonPastDisplayMeta,
 } from "@/lib/time/greenButtonPersistedIntervalConvert";
 import {
   buildLoadCurveInsightsFromIntervalRows,
@@ -847,7 +848,7 @@ export function reconcileRestoredPastDatasetFromDecodedIntervals(args: {
     const loadCurveInsights = isGreenButtonBackedDatasetMeta(datasetMeta)
       ? buildGreenButtonLoadCurveInsightsFromSeriesRows(intervalRowsForInsights, {
           homeTimezone,
-          meta: datasetMeta,
+          meta: resolveGreenButtonPastDisplayMeta(datasetMeta),
           displayDaily: enrichedDaily,
           filterToActualDailyDates: true,
         })
