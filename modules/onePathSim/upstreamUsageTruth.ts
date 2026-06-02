@@ -1,4 +1,4 @@
-import { getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
+import { getActualUsageDatasetForHouse, type ActualHouseDataset } from "@/lib/usage/actualDatasetForHouse";
 import { loadGreenButtonPastProducerIntervals } from "@/lib/usage/greenButtonPastProducerLoad";
 import { resolveIntervalsLayer } from "@/lib/usage/resolveIntervalsLayer";
 import {
@@ -266,15 +266,12 @@ async function readPersistedUsageTruth(args: {
 
 /** Full-year home-local GB intervals for Past display parity (Usage dashboard curve). */
 async function enrichGreenButtonFullYearIntervalsForDisplay(args: {
-  dataset: Record<string, unknown>;
+  dataset: ActualHouseDataset;
   houseId: string;
   esiid: string | null;
-}): Promise<Record<string, unknown>> {
+}): Promise<ActualHouseDataset> {
   const coverage = resolveCanonicalUsage365CoverageWindow();
-  const meta =
-    args.dataset.meta && typeof args.dataset.meta === "object" && !Array.isArray(args.dataset.meta)
-      ? (args.dataset.meta as Record<string, unknown>)
-      : {};
+  const meta = args.dataset.meta ?? {};
   const timezone = String(meta.timezone ?? "America/Chicago").trim() || "America/Chicago";
   const loaded = await loadGreenButtonPastProducerIntervals({
     houseId: args.houseId,
@@ -284,14 +281,10 @@ async function enrichGreenButtonFullYearIntervalsForDisplay(args: {
     timezone,
   });
   if (!loaded.engineSourceIntervals.length) return args.dataset;
-  const series =
-    args.dataset.series && typeof args.dataset.series === "object" && !Array.isArray(args.dataset.series)
-      ? (args.dataset.series as Record<string, unknown>)
-      : {};
   return {
     ...args.dataset,
     series: {
-      ...series,
+      ...args.dataset.series,
       intervals15: loaded.engineSourceIntervals.map((row) => ({
         timestamp: row.timestamp,
         kwh: row.kwh,
@@ -391,14 +384,15 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
     args.greenButtonFullYearIntervalsForDisplay === true &&
     args.preferredActualSource === "GREEN_BUTTON"
   ) {
+    const priorDataset = resolved.dataset;
     const enriched = await enrichGreenButtonFullYearIntervalsForDisplay({
-      dataset: resolved.dataset as Record<string, unknown>,
+      dataset: priorDataset as ActualHouseDataset,
       houseId: actualContextHouse.id,
       esiid: actualContextHouseWithEffectiveEsiid.esiid,
     });
     resolved = {
       ...resolved,
-      dataset: enriched,
+      dataset: enriched as typeof priorDataset,
     };
   }
   if (resolved?.dataset) {
