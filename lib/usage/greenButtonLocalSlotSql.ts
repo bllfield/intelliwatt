@@ -12,8 +12,11 @@ export function greenButtonChicagoLocalSlotSql(): Prisma.Sql {
       FLOOR(
         EXTRACT(
           EPOCH FROM (
-            ("timestamp" AT TIME ZONE 'America/Chicago')
-            - date_trunc('day', "timestamp" AT TIME ZONE 'America/Chicago')
+            (("timestamp" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')
+            - date_trunc(
+                'day',
+                (("timestamp" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')
+              )
           )
         ) / 900
       )::int

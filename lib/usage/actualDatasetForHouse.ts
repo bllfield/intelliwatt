@@ -66,8 +66,11 @@ function prismaSmtLocalTs(homeTz: string): Prisma.Sql {
   return Prisma.raw(`(("ts" AT TIME ZONE 'UTC') AT TIME ZONE '${sqlIanaTimezoneLiteral(homeTz)}')`);
 }
 
+/** GreenButtonInterval.timestamp is TIMESTAMP(3) (naive UTC wall clock from ingest). Match SMT ts handling. */
 function prismaGbLocalTs(homeTz: string): Prisma.Sql {
-  return Prisma.raw(`("timestamp" AT TIME ZONE '${sqlIanaTimezoneLiteral(homeTz)}')`);
+  return Prisma.raw(
+    `(("timestamp" AT TIME ZONE 'UTC') AT TIME ZONE '${sqlIanaTimezoneLiteral(homeTz)}')`,
+  );
 }
 
 function normalizeDateKey(value: unknown): string | null {
