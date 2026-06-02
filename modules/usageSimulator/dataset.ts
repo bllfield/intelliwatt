@@ -1719,7 +1719,7 @@ export function buildSimulatedUsageDatasetFromCurve(
     { skipHeavyInsights, intervalCount: curve.intervals.length },
     () => {
       const homeTimezone = normalizeHomeTimezoneForLoadCurve(
-        options?.homeTimezone ?? options?.timezone ?? meta.timezone
+        options?.homeTimezone ?? options?.timezone
       );
       const nextFifteenMinuteAverages = skipHeavyInsights
         ? []

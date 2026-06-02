@@ -1734,12 +1734,18 @@ export function buildSimulatedUsageDatasetFromCurve(
     "insights",
     { skipHeavyInsights, intervalCount: curve.intervals.length },
     () => {
-      const nextFifteenMinuteAverages = skipHeavyInsights ? [] : computeFifteenMinuteAverages(curve.intervals);
-      const nextTimeOfDayBuckets = skipHeavyInsights ? [] : computeTimeOfDayBuckets(curve.intervals);
+      const homeTimezone = normalizeHomeTimezoneForLoadCurve(
+        options?.homeTimezone ?? options?.timezone
+      );
+      const nextFifteenMinuteAverages = skipHeavyInsights
+        ? []
+        : computeFifteenMinuteAverages(curve.intervals, homeTimezone);
+      const nextTimeOfDayBuckets = skipHeavyInsights
+        ? []
+        : computeTimeOfDayBuckets(curve.intervals, homeTimezone);
       const simulatedHomeDateKeys = buildSimulatedHomeDateKeysExcludedFromBaseload(
         options?.simulatedDayResults
       );
-      const homeTimezone = String(options?.homeTimezone ?? options?.timezone ?? "America/Chicago");
       const nextBaseloadComputed = skipHeavyInsights
         ? { baseloadKw: null as number | null, fallbackUsed: true, debugNote: "sparse_curve_lab_skip" as string | null }
         : computeBaseloadKwFromCurveIntervals(curve.intervals, {
