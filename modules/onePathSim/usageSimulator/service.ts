@@ -4504,12 +4504,26 @@ async function recalcSimulatorBuildImpl(args: {
       greenButtonAnchorEndDate: resolvedActualSourceAnchor.greenButtonAnchorEndDate,
     };
   }
-  if (!preferredActualSource && actualSourceAnchor.source) {
+  let actualSource: "SMT" | "GREEN_BUTTON" | null;
+  if (preferredActualSource === "GREEN_BUTTON") {
+    if (actualSourceAnchor.source !== "GREEN_BUTTON") {
+      return {
+        ok: false,
+        error: "green_button_usage_missing",
+        missingItems: [
+          "Green Button usage is not persisted for this Past run house. Upload Green Button on the One Path test home before running.",
+        ],
+      };
+    }
+    actualSource = "GREEN_BUTTON";
+  } else if (!preferredActualSource && actualSourceAnchor.source) {
     preferredActualSource = actualSourceAnchor.source;
     (runContext as { preferredActualSource?: "SMT" | "GREEN_BUTTON" }).preferredActualSource =
       preferredActualSource;
+    actualSource = actualSourceAnchor.source;
+  } else {
+    actualSource = actualSourceAnchor.source;
   }
-  let actualSource = actualSourceAnchor.source;
   const canonical = canonicalMonthsForRecalc({
     mode,
     manualUsagePayload,
@@ -5497,7 +5511,12 @@ async function recalcSimulatorBuildImpl(args: {
   let pastPatchedCurve: SimulatedCurve | null = null;
   let pastPatchedDataset: ReturnType<typeof buildSimulatedUsageDatasetFromBuildInputs> | null = null;
   let pastSimulatedDayResults: SimulatedDayResult[] | undefined;
-  const failClosedPastSharedProducer = shouldUseSharedPastProducer && simMode === "SMT_BASELINE";
+  const firmGreenButtonPastRun =
+    preferredActualSource === "GREEN_BUTTON" || actualSource === "GREEN_BUTTON";
+  const failClosedPastSharedProducer =
+    shouldUseSharedPastProducer && simMode === "SMT_BASELINE" && !firmGreenButtonPastRun;
+  const failClosedGreenButtonPastProducer =
+    shouldUseSharedPastProducer && simMode === "SMT_BASELINE" && firmGreenButtonPastRun;
   const producerBuildPathKind =
     runContext.buildPathKind === "cache_restore" ? "recalc" : runContext.buildPathKind;
   if (shouldUseSharedPastProducer) {
@@ -5700,24 +5719,34 @@ async function recalcSimulatorBuildImpl(args: {
             });
           }
         }
-      } else if (simMode === "MANUAL_TOTALS" || failClosedPastSharedProducer) {
+      } else if (simMode === "MANUAL_TOTALS" || failClosedPastSharedProducer || failClosedGreenButtonPastProducer) {
         const producerError =
           "error" in result && typeof result.error === "string"
             ? result.error
-            : failClosedPastSharedProducer
-              ? "Shared Past producer returned no dataset."
-              : "Shared MANUAL_TOTALS producer returned no dataset.";
+            : failClosedGreenButtonPastProducer
+              ? "Green Button Past producer returned no dataset."
+              : failClosedPastSharedProducer
+                ? "Shared Past producer returned no dataset."
+                : "Shared MANUAL_TOTALS producer returned no dataset.";
         return {
           ok: false,
-          error: failClosedPastSharedProducer ? "past_shared_producer_no_dataset" : "manual_monthly_shared_producer_no_dataset",
+          error: failClosedGreenButtonPastProducer
+            ? "green_button_past_producer_no_dataset"
+            : failClosedPastSharedProducer
+              ? "past_shared_producer_no_dataset"
+              : "manual_monthly_shared_producer_no_dataset",
           missingItems: [producerError],
         };
       }
     } catch (e) {
-      if (simMode === "MANUAL_TOTALS" || failClosedPastSharedProducer) {
+      if (simMode === "MANUAL_TOTALS" || failClosedPastSharedProducer || failClosedGreenButtonPastProducer) {
         return {
           ok: false,
-          error: failClosedPastSharedProducer ? "past_shared_producer_no_dataset" : "manual_monthly_shared_producer_no_dataset",
+          error: failClosedGreenButtonPastProducer
+            ? "green_button_past_producer_no_dataset"
+            : failClosedPastSharedProducer
+              ? "past_shared_producer_no_dataset"
+              : "manual_monthly_shared_producer_no_dataset",
           missingItems: [e instanceof Error ? e.message : String(e)],
         };
       }

@@ -14,6 +14,18 @@ import {
 } from "@/lib/usage/greenButtonPastValidationCandidates";
 
 describe("greenButtonPastTrustedPool", () => {
+  it("locks Past producer to GREEN_BUTTON for one_path_admin_gb_past_run caller", () => {
+    expect(
+      resolvePastProducerIntervalActualSource({
+        snapshots: { actualSource: "SMT" },
+        lockboxRunContext: {
+          callerLabel: "one_path_admin_gb_past_run",
+          preferredActualSource: "GREEN_BUTTON",
+        },
+      })
+    ).toBe("GREEN_BUTTON");
+  });
+
   it("prefers lockbox preferredActualSource over stale SMT snapshot for Past producer load", () => {
     expect(
       resolvePastProducerIntervalActualSource({

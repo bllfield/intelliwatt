@@ -1,6 +1,31 @@
 import { dateKeyFromIntervalPoint } from "@/lib/time/actualIntervalCalendar";
 import { createHomeIntervalCalendar, localDateKey, localSlotIndex } from "@/lib/time/homeIntervalCalendar";
-import { materializeGreenButtonPastProducerIntervals } from "@/lib/usage/greenButtonPastTrustedPool";
+import { isGreenButtonBackedDatasetMeta } from "@/lib/time/greenButtonPersistedIntervalConvert";
+import {
+  materializeGreenButtonPastProducerIntervals,
+  readGreenButtonTrustedHomeDateKeysFromPastMeta,
+  resolvePastDatasetMetaActualSource,
+} from "@/lib/usage/greenButtonPastTrustedPool";
+import { isOnePathAdminGbPastRunCaller } from "@/lib/usage/userSiteSimulationIsolation";
+
+/** Never assume SMT for GB admin/restored artifacts when meta is ambiguous. */
+export function resolvePastDatasetRestoreActualSource(meta: unknown): "SMT" | "GREEN_BUTTON" {
+  const explicit = resolvePastDatasetMetaActualSource(meta);
+  if (explicit) return explicit;
+  if (meta && typeof meta === "object" && !Array.isArray(meta)) {
+    const lockbox = (meta as Record<string, unknown>).lockboxRunContext;
+    if (
+      lockbox &&
+      typeof lockbox === "object" &&
+      isOnePathAdminGbPastRunCaller((lockbox as Record<string, unknown>).callerLabel)
+    ) {
+      return "GREEN_BUTTON";
+    }
+    if (readGreenButtonTrustedHomeDateKeysFromPastMeta(meta).size > 0) return "GREEN_BUTTON";
+  }
+  if (isGreenButtonBackedDatasetMeta(meta)) return "GREEN_BUTTON";
+  return "SMT";
+}
 
 export type PastIntervalDailyKeyRow = {
   timestamp: string;

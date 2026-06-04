@@ -12,6 +12,10 @@ import {
 } from "@/lib/time/homeIntervalCalendar";
 import { mapGreenButtonUtcTrustedDateKeysToHome } from "@/lib/time/greenButtonUtcTrustedDateKeys";
 import { greenButtonShiftedTargetDateKeys } from "@/lib/usage/greenButtonPastYearShiftMerge";
+import {
+  isOnePathAdminGbPastRunCaller,
+  isOnePathAdminSmtPastRunCaller,
+} from "@/lib/usage/userSiteSimulationIsolation";
 
 const SIMULATED_INCOMPLETE_METER_DETAIL = "SIMULATED_INCOMPLETE_METER";
 
@@ -60,10 +64,13 @@ export function resolveGreenButtonPastSimTrustedHomeDateKeys(args: {
 
 export function resolvePastProducerIntervalActualSource(buildInputs: {
   snapshots?: { actualSource?: unknown };
-  lockboxRunContext?: { preferredActualSource?: unknown };
+  lockboxRunContext?: { preferredActualSource?: unknown; callerLabel?: unknown };
   actualSource?: unknown;
   preferredActualSource?: unknown;
 }): "SMT" | "GREEN_BUTTON" | null {
+  const callerLabel = buildInputs.lockboxRunContext?.callerLabel;
+  if (isOnePathAdminGbPastRunCaller(callerLabel)) return "GREEN_BUTTON";
+  if (isOnePathAdminSmtPastRunCaller(callerLabel)) return "SMT";
   // Active recalc lockbox wins over persisted snapshot (One Path GB vs mirrored SMT snapshot).
   const lockboxSource = buildInputs.lockboxRunContext?.preferredActualSource;
   if (lockboxSource === "GREEN_BUTTON" || lockboxSource === "SMT") return lockboxSource;

@@ -1635,7 +1635,12 @@ function buildCanonicalEngineInput(args: {
       validationDaySelectionMode: args.validationSelectionMode ?? null,
       validationDayCount: args.validationDayCount ?? null,
       runContext: {
-        callerLabel: "one_path_sim_admin",
+        callerLabel:
+          args.preferredActualSource === "GREEN_BUTTON"
+            ? "one_path_admin_gb_past_run"
+            : args.preferredActualSource === "SMT"
+              ? "one_path_admin_past_run"
+              : "one_path_sim_admin",
         ...(args.preferredActualSource ? { preferredActualSource: args.preferredActualSource } : {}),
       },
     },
@@ -2113,7 +2118,13 @@ export async function runSharedSimulation(
     validationDayCount: engineInput.runtime.validationDayCount ?? undefined,
     runContext: {
       ...(engineInput.runtime.runContext ?? {}),
-      callerLabel: "one_path_sim_admin",
+      callerLabel:
+        engineInput.runtime.runContext?.callerLabel ??
+        (engineInput.runtime.preferredActualSource === "GREEN_BUTTON"
+          ? "one_path_admin_gb_past_run"
+          : engineInput.runtime.preferredActualSource === "SMT"
+            ? "one_path_admin_past_run"
+            : "one_path_sim_admin"),
     },
   };
   const result = await runOnePathSimulatorBuild(recalcArgs);

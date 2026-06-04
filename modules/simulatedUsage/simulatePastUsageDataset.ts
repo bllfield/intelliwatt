@@ -1509,11 +1509,12 @@ export async function simulatePastUsageDataset(
     const intervalActualSource = resolvePastProducerIntervalActualSource(
       buildInputs as {
         snapshots?: { actualSource?: unknown };
-        lockboxRunContext?: { preferredActualSource?: unknown };
+        lockboxRunContext?: { preferredActualSource?: unknown; callerLabel?: unknown };
         actualSource?: unknown;
         preferredActualSource?: unknown;
       }
     );
+    const firmGreenButtonPastProducer = intervalActualSource === "GREEN_BUTTON";
     const eligibleManualBillPeriods = manualBillPeriods.filter((period) => period.eligibleForConstraint);
     const canonicalMonths = ((buildInputs as any).canonicalMonths ?? []) as string[];
     const lowDataSyntheticContextBase: {
@@ -1535,7 +1536,7 @@ export async function simulatePastUsageDataset(
         : null;
     const homeTimezoneForPast = timezone ?? "America/Chicago";
     const greenButtonPastProducerLoad =
-      preloadedIntervals != null || isLowDataSharedPastMode || intervalActualSource !== "GREEN_BUTTON"
+      preloadedIntervals != null || isLowDataSharedPastMode || !firmGreenButtonPastProducer
         ? null
         : await loadGreenButtonPastProducerIntervals({
             houseId: actualHouseId,
@@ -1545,19 +1546,27 @@ export async function simulatePastUsageDataset(
             timezone: homeTimezoneForPast,
             travelRanges,
           });
+    if (firmGreenButtonPastProducer && !preloadedIntervals && !isLowDataSharedPastMode) {
+      const gbIntervalCount = greenButtonPastProducerLoad?.engineSourceIntervals.length ?? 0;
+      if (gbIntervalCount === 0) {
+        throw new Error("green_button_past_producer_no_intervals");
+      }
+    }
     const fetchedActualIntervals = greenButtonPastProducerLoad
       ? greenButtonPastProducerLoad.engineSourceIntervals
       : preloadedIntervals
         ? null
         : isLowDataSharedPastMode
           ? null
-          : await getActualIntervalsForRange({
-              houseId: actualHouseId,
-              esiid,
-              startDate,
-              endDate,
-              preferredSource: intervalActualSource,
-            });
+          : firmGreenButtonPastProducer
+            ? null
+            : await getActualIntervalsForRange({
+                houseId: actualHouseId,
+                esiid,
+                startDate,
+                endDate,
+                preferredSource: intervalActualSource,
+              });
     const sourceActualIntervals = preloadedIntervals != null ? preloadedIntervals : fetchedActualIntervals ?? [];
     const greenButtonTrustedUtcDateKeys =
       greenButtonPastProducerLoad?.trustedUtcDateKeys ??

@@ -4,6 +4,7 @@ import { dateKeyFromIntervalPoint } from "@/lib/time/actualIntervalCalendar";
 import {
   enrichPastDisplayIntervalsWithHomeDateKeys,
   pastDailyDateKeyFromInterval,
+  resolvePastDatasetRestoreActualSource,
 } from "@/lib/usage/pastIntervalDailyKey";
 import { resolveHomeTimezone } from "@/lib/time/resolveHomeTimezone";
 import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
@@ -771,16 +772,11 @@ export function reconcileRestoredPastDatasetFromDecodedIntervals(args: {
   }
 
   const timezoneForRestore = String((meta as Record<string, unknown> | undefined)?.timezone ?? "America/Chicago");
-  const intervalsForRecompute =
-    meta && typeof meta === "object" && resolvePastDatasetMetaActualSource(meta) === "GREEN_BUTTON"
-      ? enrichPastDisplayIntervalsWithHomeDateKeys(decodedIntervals, {
-          timezone: timezoneForRestore,
-          actualSource: "GREEN_BUTTON",
-        })
-      : enrichPastDisplayIntervalsWithHomeDateKeys(decodedIntervals, {
-          timezone: timezoneForRestore,
-          actualSource: resolvePastDatasetMetaActualSource(meta) ?? "SMT",
-        });
+  const restoreActualSource = resolvePastDatasetRestoreActualSource(meta);
+  const intervalsForRecompute = enrichPastDisplayIntervalsWithHomeDateKeys(decodedIntervals, {
+    timezone: timezoneForRestore,
+    actualSource: restoreActualSource,
+  });
   if (pastMetaHasExplicitSimulatedDayFields(meta) && simDateKeys.size === 0) {
     simDateKeys = simulatedDateKeysUnionFromPastDatasetMeta(meta);
     if (greenButtonTrustedHomeDateKeys.size > 0) {

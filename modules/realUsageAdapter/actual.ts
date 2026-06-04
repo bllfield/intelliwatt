@@ -54,8 +54,9 @@ export async function resolveActualUsageSourceAnchor(args: {
       : 0;
   const preferred = args.preferredSource ?? null;
   let source: ActualUsageSource | null = null;
-  if (preferred === "GREEN_BUTTON" && gbMs > 0) source = "GREEN_BUTTON";
-  else if (preferred === "SMT" && smtMs > 0) source = "SMT";
+  // Firm admin/user preference: never cross-fallback to the other source.
+  if (preferred === "GREEN_BUTTON") source = gbMs > 0 ? "GREEN_BUTTON" : null;
+  else if (preferred === "SMT") source = smtMs > 0 ? "SMT" : null;
   else if (smtMs > 0) source = "SMT";
   else if (gbMs > 0) source = "GREEN_BUTTON";
   else source = null;

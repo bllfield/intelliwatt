@@ -422,6 +422,20 @@ async function mirrorOnePathPastBuildInputsFromSourceInternal(args: {
   callerLabel?: string | null;
   weatherPreference?: import("@/modules/weatherNormalization/normalizer").WeatherPreference;
 }): Promise<OnePathPastParitySyncResult> {
+  if (args.preferredActualSource === "GREEN_BUTTON") {
+    const { assertOnePathGreenButtonPersistedUsage } = await import("@/lib/usage/onePathGreenButtonUsageGate");
+    const gbGate = await assertOnePathGreenButtonPersistedUsage({
+      houseId: args.testHomeHouseId,
+      contextLabel: "Past build-input mirror",
+    });
+    if (!gbGate.ok) {
+      return {
+        ok: false,
+        code: "GREEN_BUTTON_USAGE_MISSING",
+        message: gbGate.message,
+      };
+    }
+  }
   const sourceScenarioId = await findPastScenarioId({
     userId: args.sourceUserId,
     houseId: args.sourceHouseId,
