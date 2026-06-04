@@ -26,7 +26,7 @@ server {
     # CORS on nginx errors (504 without this shows as "CORS blocked" in the browser).
     add_header Access-Control-Allow-Origin "https://intelliwatt.com" always;
     add_header Access-Control-Allow-Methods "GET, POST, OPTIONS" always;
-    add_header Access-Control-Allow-Headers "Content-Type" always;
+    add_header Access-Control-Allow-Headers "Content-Type, X-Green-Button-Payload, X-Green-Button-Signature" always;
     add_header Vary "Origin" always;
 
     if ($request_method = OPTIONS) {
@@ -35,6 +35,12 @@ server {
 
     location / {
         proxy_pass http://127.0.0.1:8091;
+
+        # Node also sets CORS; hide upstream so only one Allow-Origin is sent (browser rejects duplicates).
+        proxy_hide_header Access-Control-Allow-Origin;
+        proxy_hide_header Access-Control-Allow-Methods;
+        proxy_hide_header Access-Control-Allow-Headers;
+        proxy_hide_header Vary;
 
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;

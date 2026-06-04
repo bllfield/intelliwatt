@@ -491,18 +491,6 @@ function roundDownTo15Minutes(d: Date): Date {
   return new Date(bucketMs);
 }
 
-function setCorsHeaders(res: Response, origin: string | undefined) {
-  if (origin && origin === ALLOW_ORIGIN) {
-    res.header("Access-Control-Allow-Origin", origin);
-    res.header("Vary", "Origin");
-  }
-  res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.header(
-    "Access-Control-Allow-Headers",
-    "Content-Type, X-Green-Button-Payload, X-Green-Button-Signature",
-  );
-}
-
 type GreenButtonIngestJobArgs = {
   buffer: Buffer;
   filename: string;
@@ -966,7 +954,6 @@ app.use(
     _next: NextFunction,
   ) => {
     console.error("[green-button-upload] unhandled error", err);
-    setCorsHeaders(res, req.headers.origin as string | undefined);
     if (res.headersSent) {
       return;
     }
