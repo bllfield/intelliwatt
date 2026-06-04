@@ -5,7 +5,11 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import { PrismaClient as UsagePrismaClient } from "../../.prisma/usage-client";
 import { XMLParser } from "fast-xml-parser";
 import { awardGreenButtonUsageEntry } from "../../lib/usage/awardGreenButtonUsageEntry";
-import { createManyGreenButtonIntervalsInBatches } from "../../lib/usage/greenButtonIntervalPersist";
+import {
+  GREEN_BUTTON_INTERVAL_CREATE_BATCH_SIZE,
+  GREEN_BUTTON_INTERVAL_CREATE_PARALLEL,
+  createManyGreenButtonIntervalsInBatches,
+} from "../../lib/usage/greenButtonIntervalPersist";
 import { runGreenButtonUsagePipeline } from "../../lib/usage/greenButtonUsagePipeline";
 
 const PORT = Number(process.env.GREEN_BUTTON_UPLOAD_PORT || "8091");
@@ -584,7 +588,15 @@ async function runGreenButtonIngestJob(args: GreenButtonIngestJobArgs): Promise<
   const ingestStartedAt = Date.now();
   const stageMs: Record<string, number> = {};
   try {
+    logEvent("ingest.job_start", {
+      uploadRecordId,
+      houseId: house.id,
+      bytes: buffer.length,
+      filename,
+    });
+
     let stageStart = Date.now();
+    logEvent("ingest.stage_start", { uploadRecordId, stage: "pipeline" });
     const pipelineResult = runGreenButtonUsagePipeline({
       buffer,
       filename,
@@ -604,8 +616,15 @@ async function runGreenButtonIngestJob(args: GreenButtonIngestJobArgs): Promise<
     }
     const { trimmed, summary, parsed, earliest, latest } = pipelineResult;
     stageMs.pipeline = Date.now() - stageStart;
+    logEvent("ingest.stage_complete", {
+      uploadRecordId,
+      stage: "pipeline",
+      ms: stageMs.pipeline,
+      intervals: trimmed.length,
+    });
 
     stageStart = Date.now();
+    logEvent("ingest.stage_start", { uploadRecordId, stage: "raw_persist" });
     const persisted = await persistRawGreenButton({
       buffer,
       house,
@@ -617,6 +636,13 @@ async function runGreenButtonIngestJob(args: GreenButtonIngestJobArgs): Promise<
     rawRecordId = persisted.rawRecordId;
     previousRawHomeId = persisted.previousRawHomeId;
     stageMs.rawPersist = Date.now() - stageStart;
+    logEvent("ingest.stage_complete", {
+      uploadRecordId,
+      stage: "raw_persist",
+      ms: stageMs.rawPersist,
+      rawRecordId,
+      sha256: persisted.sha256,
+    });
 
     const storageKey = `usage:raw_green_button:${rawRecordId}`;
     await (prisma as any).greenButtonUpload.update({
@@ -625,6 +651,7 @@ async function runGreenButtonIngestJob(args: GreenButtonIngestJobArgs): Promise<
     });
 
     stageStart = Date.now();
+    logEvent("ingest.stage_start", { uploadRecordId, stage: "cleanup_deletes" });
     await Promise.all([
       usagePrisma.greenButtonInterval.deleteMany({ where: { homeId: house.id, rawId: { not: rawRecordId } } }),
       usagePrisma.rawGreenButton.deleteMany({ where: { homeId: house.id, NOT: { id: rawRecordId } } }),
@@ -653,9 +680,32 @@ async function runGreenButtonIngestJob(args: GreenButtonIngestJobArgs): Promise<
     }));
 
     stageStart = Date.now();
-    const insertStats = await createManyGreenButtonIntervalsInBatches(usagePrisma, intervalData);
+    logEvent("ingest.stage_start", {
+      uploadRecordId,
+      stage: "interval_insert",
+      rows: intervalData.length,
+      batchSize: GREEN_BUTTON_INTERVAL_CREATE_BATCH_SIZE,
+      parallelPerWave: GREEN_BUTTON_INTERVAL_CREATE_PARALLEL,
+    });
+    const insertStats = await createManyGreenButtonIntervalsInBatches(usagePrisma, intervalData, {
+      onProgress: (progress) => {
+        logEvent("ingest.interval_insert_progress", {
+          uploadRecordId,
+          ...progress,
+        });
+      },
+    });
     stageMs.intervalInsert = Date.now() - stageStart;
     stageMs.intervalInsertBatches = insertStats.batches;
+    stageMs.intervalInsertWaves = insertStats.waves;
+    logEvent("ingest.stage_complete", {
+      uploadRecordId,
+      stage: "interval_insert",
+      ms: stageMs.intervalInsert,
+      batches: insertStats.batches,
+      waves: insertStats.waves,
+      rows: insertStats.rows,
+    });
 
     stageStart = Date.now();
     await (prisma as any).greenButtonUpload.update({
