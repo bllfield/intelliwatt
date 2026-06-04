@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { enumerateDateKeysInclusive } from "@/lib/time/chicago";
+import { enumerateDateKeysInclusive, smtCoverageDateKey } from "@/lib/time/chicago";
 import {
   enumerateExpectedLocalSlotsForDate,
   expectedSlotsForLocalDate,

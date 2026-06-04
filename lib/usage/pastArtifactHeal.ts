@@ -1,7 +1,9 @@
 /**
  * Heal stale Past cache rows when build identity hash no longer matches persisted cache.
  */
+import { preferredActualSourceFromPastBuildInputs } from "@/lib/usage/pastSimValidationReadBackfill";
 import { getLatestCachedPastDatasetByScenario } from "@/modules/usageSimulator/pastCache";
+import type { SimulatorMode } from "@/modules/usageSimulator/requirements";
 import { recalcSimulatorBuild as recalcSimulatorBuildUserSite } from "@/modules/usageSimulator/service";
 import type { WeatherPreference } from "@/modules/weatherNormalization/normalizer";
 
@@ -15,9 +17,11 @@ function weatherPreferenceFromBuildInputs(
   return "NONE";
 }
 
-function simulatorModeFromBuildInputs(buildInputs: Record<string, unknown>): "SMT_BASELINE" | "GREEN_BUTTON" | "MANUAL_TOTALS" {
-  const mode = String(buildInputs.mode ?? "").toUpperCase();
-  if (mode === "GREEN_BUTTON" || mode === "MANUAL_TOTALS") return mode as "GREEN_BUTTON" | "MANUAL_TOTALS";
+function simulatorModeFromBuildInputs(buildInputs: Record<string, unknown>): SimulatorMode {
+  const mode = String(buildInputs.mode ?? "");
+  if (mode === "MANUAL_TOTALS" || mode === "NEW_BUILD_ESTIMATE" || mode === "SMT_BASELINE") {
+    return mode;
+  }
   return "SMT_BASELINE";
 }
 
@@ -51,6 +55,7 @@ export async function healPastArtifactIfIdentityMismatch(args: {
       callerLabel: "past_artifact_identity_heal",
       buildPathKind: "recalc",
       persistRequested: true,
+      preferredActualSource: preferredActualSourceFromPastBuildInputs(args.buildInputs) ?? undefined,
     },
   });
   if (!recalc.ok) {
