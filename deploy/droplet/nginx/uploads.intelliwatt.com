@@ -1,7 +1,7 @@
 ##
-## Example nginx site for Green Button big-file uploads (uploads.intelliwatt.com).
-## Install on the SMT proxy droplet, adjust ssl_certificate paths, then:
-##   sudo nginx -t && sudo systemctl reload nginx
+## IntelliWatt Green Button big-file upload vhost (uploads.intelliwatt.com)
+##
+## Proxies to green-button-upload-server on 127.0.0.1:8091
 ##
 
 server {
@@ -18,10 +18,12 @@ server {
 
     ssl_certificate     /etc/letsencrypt/live/uploads.intelliwatt.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/uploads.intelliwatt.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
     client_max_body_size 524288000;
 
-    # CORS on nginx errors (504 without this surfaces as "CORS blocked" in the browser).
+    # CORS on nginx errors (504 without this shows as "CORS blocked" in the browser).
     add_header Access-Control-Allow-Origin "https://intelliwatt.com" always;
     add_header Access-Control-Allow-Methods "GET, POST, OPTIONS" always;
     add_header Access-Control-Allow-Headers "Content-Type" always;
@@ -42,5 +44,6 @@ server {
         proxy_connect_timeout 30s;
         proxy_send_timeout 600s;
         proxy_read_timeout 600s;
+        proxy_request_buffering on;
     }
 }

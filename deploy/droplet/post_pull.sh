@@ -35,6 +35,14 @@ else
   exit 1
 fi
 
+# 1b-gb) Green Button upload nginx (uploads.intelliwatt.com — long proxy timeout + CORS on 504)
+if [[ -f "deploy/droplet/apply_green_button_upload_nginx.sh" ]]; then
+  log "Running apply_green_button_upload_nginx.sh"
+  sudo bash "deploy/droplet/apply_green_button_upload_nginx.sh"
+else
+  log "Skipping apply_green_button_upload_nginx.sh (not present)"
+fi
+
 # 1c) Re-apply droplet systemd units (upload servers + webhook + watchdog)
 if [[ -f "deploy/droplet/apply_droplet_services.sh" ]]; then
   log "Running apply_droplet_services.sh"
