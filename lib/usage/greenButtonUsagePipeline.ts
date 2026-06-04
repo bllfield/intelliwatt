@@ -47,15 +47,33 @@ export type GreenButtonUsagePipelineResult =
   | GreenButtonUsagePipelineSuccess
   | GreenButtonUsagePipelineFailure;
 
+export type GreenButtonUsagePipelineStage = "parse" | "normalize" | "trim";
+
+export type GreenButtonUsagePipelineStageDetail = {
+  stage: GreenButtonUsagePipelineStage;
+  ms: number;
+  rawReadings?: number;
+  normalizedIntervals?: number;
+  trimmedIntervals?: number;
+};
+
 export function runGreenButtonUsagePipeline(args: {
   buffer: Buffer;
   filename?: string | null;
   windowDays?: number;
   maxKwhPerInterval?: number | null;
+  onStageComplete?: (detail: GreenButtonUsagePipelineStageDetail) => void;
 }): GreenButtonUsagePipelineResult {
   const windowDays = args.windowDays ?? GREEN_BUTTON_USAGE_PIPELINE_WINDOW_DAYS;
   const maxKwhPerInterval = args.maxKwhPerInterval ?? GREEN_BUTTON_USAGE_MAX_KWH_PER_INTERVAL;
+
+  let stageStart = Date.now();
   const parsed = parseGreenButtonBuffer(args.buffer, args.filename);
+  args.onStageComplete?.({
+    stage: "parse",
+    ms: Date.now() - stageStart,
+    rawReadings: parsed.metadata.totalReadings,
+  });
 
   if (parsed.errors.length > 0) {
     return {
@@ -77,8 +95,15 @@ export function runGreenButtonUsagePipeline(args: {
     };
   }
 
+  stageStart = Date.now();
   const normalized = normalizeGreenButtonReadingsTo15Min(parsed.readings, {
     maxKwhPerInterval,
+  });
+  args.onStageComplete?.({
+    stage: "normalize",
+    ms: Date.now() - stageStart,
+    rawReadings: parsed.metadata.totalReadings,
+    normalizedIntervals: normalized.length,
   });
 
   if (normalized.length === 0) {
@@ -92,7 +117,14 @@ export function runGreenButtonUsagePipeline(args: {
     };
   }
 
+  stageStart = Date.now();
   const { trimmed, startDateKey, endDateKey } = trimGreenButtonIntervalsToLatestLocalDays(normalized, windowDays);
+  args.onStageComplete?.({
+    stage: "trim",
+    ms: Date.now() - stageStart,
+    normalizedIntervals: normalized.length,
+    trimmedIntervals: trimmed.length,
+  });
   const earliest = trimmed[0]?.timestamp ?? null;
   const latest = trimmed[trimmed.length - 1]?.timestamp ?? null;
 

@@ -602,6 +602,9 @@ async function runGreenButtonIngestJob(args: GreenButtonIngestJobArgs): Promise<
       filename,
       windowDays: MANUAL_USAGE_LIFETIME_DAYS,
       maxKwhPerInterval: 10,
+      onStageComplete: (detail) => {
+        logEvent("ingest.pipeline_progress", { uploadRecordId, ...detail });
+      },
     });
     if (!pipelineResult.ok) {
       await (prisma as any).greenButtonUpload.update({
