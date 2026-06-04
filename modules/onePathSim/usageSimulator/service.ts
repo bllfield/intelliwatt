@@ -7484,7 +7484,6 @@ export async function getSimulatedUsageForHouseScenario(args: {
           resolvedInputHash,
           buildInputs: buildInputs as Record<string, unknown>,
           houseEsiid: pastSimEsiid,
-          recalcSimulatorBuild,
         });
         if (heal.healed) {
           const healedHash = heal.inputHash ?? resolvedInputHash;

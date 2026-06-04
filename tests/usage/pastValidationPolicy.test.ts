@@ -75,6 +75,41 @@ describe("pastValidationPolicy", () => {
     ).toBe(false);
     expect(
       shouldReconcilePastSmtValidationSelection({
+        storedSelectionMode: "stratified_weather_balanced",
+        storedValidationKeyCount: CANONICAL_PAST_SMT_VALIDATION_DAY_COUNT,
+        storedValidationDateKeysLocal: Array.from({ length: 14 }, (_, i) => {
+          const day = String(5 + i).padStart(2, "0");
+          return `2026-05-${day}`;
+        }),
+        coverageEndDate: "2026-05-18",
+      })
+    ).toBe(true);
+    expect(
+      shouldReconcilePastSmtValidationSelection({
+        storedSelectionMode: "stratified_weather_balanced",
+        storedValidationKeyCount: CANONICAL_PAST_SMT_VALIDATION_DAY_COUNT,
+        storedValidationDateKeysLocal: [
+          "2025-12-10",
+          "2026-01-15",
+          "2026-02-20",
+          "2026-03-08",
+          "2026-04-12",
+          "2026-05-03",
+          "2026-06-14",
+          "2026-07-19",
+          "2026-08-09",
+          "2025-12-14",
+          "2026-01-18",
+          "2026-02-22",
+          "2026-03-15",
+          "2026-04-18",
+        ],
+        timezone: "America/Chicago",
+        coverageEndDate: "2026-05-18",
+      })
+    ).toBe(false);
+    expect(
+      shouldReconcilePastSmtValidationSelection({
         storedSelectionMode: "manual",
         storedValidationKeyCount: 4,
       })

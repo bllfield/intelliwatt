@@ -1,3 +1,4 @@
+import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
 import { shouldReconcilePastSmtValidationSelection } from "@/lib/usage/pastValidationPolicy";
 
 export const WORKSPACE_PAST_SCENARIO_NAME = "Past (Corrected)";
@@ -41,8 +42,17 @@ export function isPastScenarioValidationBackfillEligible(args: {
   const buildMode = String(args.buildInputs.mode ?? "");
   const preferred = preferredActualSourceFromPastBuildInputs(args.buildInputs);
   if (buildMode !== "SMT_BASELINE" && preferred !== "GREEN_BUTTON") return false;
+  const storedValidationDateKeysLocal = Array.isArray(args.buildInputs.validationOnlyDateKeysLocal)
+    ? ((args.buildInputs.validationOnlyDateKeysLocal as unknown[])
+        .map((v) => String(v ?? "").slice(0, 10))
+        .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk)) as string[])
+    : [];
+  const coverage = resolveCanonicalUsage365CoverageWindow();
   return shouldReconcilePastSmtValidationSelection({
     storedSelectionMode: args.storedSelectionMode ?? null,
     storedValidationKeyCount: args.storedValidationKeyCount,
+    storedValidationDateKeysLocal,
+    timezone: String(args.buildInputs.timezone ?? "America/Chicago"),
+    coverageEndDate: coverage.endDate,
   });
 }

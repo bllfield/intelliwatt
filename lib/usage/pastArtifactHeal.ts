@@ -1,13 +1,16 @@
 /**
  * Heal stale Past cache rows when build identity hash no longer matches persisted cache.
+ * Recalc uses the same dispatch entry as One Path admin Past runs (not a parallel recalc stack).
  */
-import { preferredActualSourceFromPastBuildInputs } from "@/lib/usage/pastSimValidationReadBackfill";
+import { travelRangesFromPastBuildInputs } from "@/lib/usage/pastArtifactIdentity";
+import {
+  preferredActualSourceFromPastBuildInputs,
+} from "@/lib/usage/pastSimValidationReadBackfill";
+import { resolvePastSmtValidationPolicy } from "@/lib/usage/pastValidationPolicy";
 import { getLatestCachedPastDatasetByScenario } from "@/modules/usageSimulator/pastCache";
+import { dispatchPastSimRecalc } from "@/modules/usageSimulator/pastSimRecalcDispatch";
 import type { SimulatorMode } from "@/modules/usageSimulator/requirements";
-import { recalcSimulatorBuild as recalcSimulatorBuildUserSite } from "@/modules/usageSimulator/service";
 import type { WeatherPreference } from "@/modules/weatherNormalization/normalizer";
-
-type RecalcSimulatorBuildFn = typeof recalcSimulatorBuildUserSite;
 
 function weatherPreferenceFromBuildInputs(
   buildInputs: Record<string, unknown>
@@ -25,6 +28,15 @@ function simulatorModeFromBuildInputs(buildInputs: Record<string, unknown>): Sim
   return "SMT_BASELINE";
 }
 
+function recalcCallerLabelFromBuildInputs(
+  buildInputs: Record<string, unknown>
+): string {
+  const preferred = preferredActualSourceFromPastBuildInputs(buildInputs);
+  if (preferred === "GREEN_BUTTON") return "one_path_admin_gb_past_run";
+  if (preferred === "SMT") return "one_path_admin_past_run";
+  return "past_artifact_identity_heal";
+}
+
 export async function healPastArtifactIfIdentityMismatch(args: {
   userId: string;
   houseId: string;
@@ -32,7 +44,6 @@ export async function healPastArtifactIfIdentityMismatch(args: {
   resolvedInputHash: string;
   buildInputs: Record<string, unknown>;
   houseEsiid: string | null;
-  recalcSimulatorBuild?: RecalcSimulatorBuildFn;
 }): Promise<{ healed: boolean; inputHash?: string; error?: string }> {
   const latest = await getLatestCachedPastDatasetByScenario({
     houseId: args.houseId,
@@ -42,8 +53,18 @@ export async function healPastArtifactIfIdentityMismatch(args: {
     return { healed: false };
   }
 
-  const recalcFn = args.recalcSimulatorBuild ?? recalcSimulatorBuildUserSite;
-  const recalc = await recalcFn({
+  const actualContextHouseId =
+    typeof args.buildInputs.actualContextHouseId === "string" &&
+    String(args.buildInputs.actualContextHouseId).trim()
+      ? String(args.buildInputs.actualContextHouseId).trim()
+      : args.houseId;
+  const preferredActualSource = preferredActualSourceFromPastBuildInputs(args.buildInputs);
+  const callerLabel = recalcCallerLabelFromBuildInputs(args.buildInputs);
+  const validationPolicy = resolvePastSmtValidationPolicy({
+    surface: callerLabel.startsWith("one_path_admin") ? "admin_lab" : "user_site",
+  });
+
+  const dispatched = await dispatchPastSimRecalc({
     userId: args.userId,
     houseId: args.houseId,
     esiid: args.houseEsiid,
@@ -51,13 +72,23 @@ export async function healPastArtifactIfIdentityMismatch(args: {
     scenarioId: args.scenarioId,
     weatherPreference: weatherPreferenceFromBuildInputs(args.buildInputs),
     persistPastSimBaseline: true,
+    actualContextHouseId,
+    preLockboxTravelRanges: travelRangesFromPastBuildInputs(args.buildInputs),
+    validationDaySelectionMode: validationPolicy.selectionMode,
+    validationDayCount: validationPolicy.validationDayCount,
     runContext: {
-      callerLabel: "past_artifact_identity_heal",
+      callerLabel,
       buildPathKind: "recalc",
       persistRequested: true,
-      preferredActualSource: preferredActualSourceFromPastBuildInputs(args.buildInputs) ?? undefined,
+      preferredActualSource: preferredActualSource ?? undefined,
     },
   });
+
+  if (dispatched.executionMode === "droplet_async") {
+    return { healed: false, error: "past_artifact_identity_heal_async_unsupported" };
+  }
+
+  const recalc = dispatched.result;
   if (!recalc.ok) {
     return { healed: false, error: recalc.error ?? "past_artifact_identity_heal_failed" };
   }
