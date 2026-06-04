@@ -202,6 +202,29 @@ async function copyPastArtifactCacheRow(args: {
   });
 }
 
+function applyAdminPreferredActualSourceToMirroredBuild(
+  buildInputs: Record<string, unknown>,
+  preferredActualSource: "SMT" | "GREEN_BUTTON",
+  callerLabel?: string | null
+): void {
+  buildInputs.preferredActualSource = preferredActualSource;
+  const snapshots =
+    typeof buildInputs.snapshots === "object" && buildInputs.snapshots !== null
+      ? ({ ...(buildInputs.snapshots as Record<string, unknown>) } as Record<string, unknown>)
+      : ({} as Record<string, unknown>);
+  snapshots.actualSource = preferredActualSource;
+  buildInputs.snapshots = snapshots;
+  if (callerLabel) {
+    const lockbox =
+      typeof buildInputs.lockboxRunContext === "object" && buildInputs.lockboxRunContext !== null
+        ? ({ ...(buildInputs.lockboxRunContext as Record<string, unknown>) } as Record<string, unknown>)
+        : ({} as Record<string, unknown>);
+    lockbox.preferredActualSource = preferredActualSource;
+    lockbox.callerLabel = callerLabel;
+    buildInputs.lockboxRunContext = lockbox;
+  }
+}
+
 async function copyPastSimulatorBuildFromSource(args: {
   ownerUserId: string;
 
@@ -216,6 +239,8 @@ async function copyPastSimulatorBuildFromSource(args: {
   testScenarioId: string;
 
   parity: OnePathUserSiteParityLock;
+  preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
+  callerLabel?: string | null;
 }): Promise<void> {
   const sourceRec = await (prisma as any).usageSimulatorBuild
 
@@ -257,6 +282,14 @@ async function copyPastSimulatorBuildFromSource(args: {
   });
 
   mirrored.onePathUserSiteParity = args.parity;
+
+  if (args.preferredActualSource === "SMT" || args.preferredActualSource === "GREEN_BUTTON") {
+    applyAdminPreferredActualSourceToMirroredBuild(
+      mirrored,
+      args.preferredActualSource,
+      args.callerLabel
+    );
+  }
 
   await upsertSimulatorBuild({
     userId: args.ownerUserId,
@@ -479,6 +512,8 @@ async function mirrorOnePathPastBuildInputsFromSourceInternal(args: {
     testHomeHouseId: args.testHomeHouseId,
     testScenarioId,
     parity,
+    preferredActualSource: args.preferredActualSource,
+    callerLabel: args.callerLabel,
   });
   return {
     ok: true,

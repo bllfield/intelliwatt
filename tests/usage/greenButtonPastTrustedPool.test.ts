@@ -6,6 +6,7 @@ import {
   pruneGreenButtonTrustedDaysFromPastDatasetMeta,
   resolveGreenButtonPastSimTrustedHomeDateKeys,
   resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals,
+  resolvePastProducerIntervalActualSource,
 } from "@/lib/usage/greenButtonPastTrustedPool";
 import {
   resolveGreenButtonPastValidationCandidateDateKeys,
@@ -13,6 +14,16 @@ import {
 } from "@/lib/usage/greenButtonPastValidationCandidates";
 
 describe("greenButtonPastTrustedPool", () => {
+  it("prefers lockbox preferredActualSource over stale SMT snapshot for Past producer load", () => {
+    expect(
+      resolvePastProducerIntervalActualSource({
+        snapshots: { actualSource: "SMT" },
+        lockboxRunContext: { preferredActualSource: "GREEN_BUTTON" },
+        preferredActualSource: "GREEN_BUTTON",
+      })
+    ).toBe("GREEN_BUTTON");
+  });
+
   it("maps UTC trusted keys to home-local keys for Past Sim", () => {
     const utcGridIntervals = Array.from({ length: 96 }, (_, slot) => ({
       timestamp: new Date(new Date("2026-05-14T00:00:00.000Z").getTime() + slot * 15 * 60 * 1000),

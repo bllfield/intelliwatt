@@ -64,12 +64,13 @@ export function resolvePastProducerIntervalActualSource(buildInputs: {
   actualSource?: unknown;
   preferredActualSource?: unknown;
 }): "SMT" | "GREEN_BUTTON" | null {
-  const snapshotSource = buildInputs.snapshots?.actualSource;
-  if (snapshotSource === "GREEN_BUTTON" || snapshotSource === "SMT") return snapshotSource;
+  // Active recalc lockbox wins over persisted snapshot (One Path GB vs mirrored SMT snapshot).
   const lockboxSource = buildInputs.lockboxRunContext?.preferredActualSource;
   if (lockboxSource === "GREEN_BUTTON" || lockboxSource === "SMT") return lockboxSource;
   const preferredSource = buildInputs.preferredActualSource;
   if (preferredSource === "GREEN_BUTTON" || preferredSource === "SMT") return preferredSource;
+  const snapshotSource = buildInputs.snapshots?.actualSource;
+  if (snapshotSource === "GREEN_BUTTON" || snapshotSource === "SMT") return snapshotSource;
   const topLevelSource = buildInputs.actualSource;
   if (topLevelSource === "GREEN_BUTTON" || topLevelSource === "SMT") return topLevelSource;
   return null;
