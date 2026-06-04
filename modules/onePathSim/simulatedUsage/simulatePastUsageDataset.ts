@@ -2067,7 +2067,8 @@ export async function simulatePastUsageDataset(
         getApplianceProfileSimulatedByUserHouse({ userId, houseId }),
         ensureUsageShapeProfileForSharedSimulation({
           userId,
-          houseId: actualHouseId,
+          // Persist shape on the sim house (lab test home); intervals come from actualContext via preload.
+          houseId,
           timezone,
           canonicalMonths,
           simCoverageWindow: { startDate, endDate },

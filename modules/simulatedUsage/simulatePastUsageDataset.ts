@@ -1838,7 +1838,7 @@ export async function simulatePastUsageDataset(
         getApplianceProfileSimulatedByUserHouse({ userId, houseId }),
         ensureUsageShapeProfileForSharedSimulation({
           userId,
-          houseId: actualHouseId,
+          houseId,
           timezone,
           canonicalMonths,
           ...(intervalActualSource ? { preferredActualSource: intervalActualSource } : {}),

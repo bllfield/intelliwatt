@@ -11,6 +11,39 @@ export function isUserSiteSimulationCaller(callerLabel: string | null | undefine
   return /^user_/i.test(String(callerLabel ?? "").trim());
 }
 
+export function isOnePathAdminSmtPastRunCaller(callerLabel: string | null | undefined): boolean {
+  return String(callerLabel ?? "").trim() === "one_path_admin_past_run";
+}
+
+export function isOnePathAdminGbPastRunCaller(callerLabel: string | null | undefined): boolean {
+  return String(callerLabel ?? "").trim() === "one_path_admin_gb_past_run";
+}
+
+/**
+ * One Path admin Past runs must not inherit GREEN_BUTTON from source-house anchor when the run is SMT (INTERVAL).
+ */
+export function resolveOnePathPastPreferredActualSource(args: {
+  callerLabel?: string | null;
+  preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
+  isCrossHouseAdminLab?: boolean;
+  mode?: string | null;
+  hasEsiid?: boolean;
+}): "SMT" | "GREEN_BUTTON" | undefined {
+  if (isOnePathAdminSmtPastRunCaller(args.callerLabel)) return "SMT";
+  if (isOnePathAdminGbPastRunCaller(args.callerLabel)) return "GREEN_BUTTON";
+  if (
+    args.isCrossHouseAdminLab &&
+    args.mode === "SMT_BASELINE" &&
+    args.hasEsiid &&
+    args.preferredActualSource !== "GREEN_BUTTON"
+  ) {
+    return "SMT";
+  }
+  return args.preferredActualSource === "SMT" || args.preferredActualSource === "GREEN_BUTTON"
+    ? args.preferredActualSource
+    : undefined;
+}
+
 /** Admin-only lab houses (Gapfill / Manual Monthly / One Path) must not appear on user-site UI. */
 export function isAdminLabTestHomeForUserSite(args: {
   label?: string | null;

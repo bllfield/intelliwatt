@@ -42,6 +42,7 @@ import { resolvePastArtifactIdentity } from "@/lib/usage/pastArtifactIdentity";
 import {
   isolateBuildInputsForUserSite,
   isUserSiteSimulationCaller,
+  resolveOnePathPastPreferredActualSource,
   resolveUserSiteActualSourceForHouse,
 } from "@/lib/usage/userSiteSimulationIsolation";
 import { upsertSimulatedUsageBuckets } from "@/lib/usage/simulatedUsageBuckets";
@@ -4338,6 +4339,7 @@ async function recalcSimulatorBuildImpl(args: {
   esiid = (await resolvePastSimEsiidForHouse({ userId, houseId, houseEsiid: esiid })) ?? esiid;
   const isUserSiteCaller = isUserSiteSimulationCaller(args.runContext?.callerLabel);
   const actualContextHouseId = isUserSiteCaller ? houseId : String(args.actualContextHouseId ?? houseId);
+  const isCrossHouseAdminLab = !isUserSiteCaller && actualContextHouseId !== houseId;
   const scenarioKey = normalizeScenarioKey(args.scenarioId);
   const scenarioId = scenarioKey === "BASELINE" ? null : scenarioKey;
   const isBaselineSyntheticInvariantMode =
@@ -4383,7 +4385,13 @@ async function recalcSimulatorBuildImpl(args: {
     normalizeValidationSelectionMode(args.validationDaySelectionMode) ??
     (requestedValidationOnlyDateKeysLocal.size > 0 ? ("manual" as ValidationDaySelectionMode) : null);
   let validationSelectionDiagnostics: ValidationDaySelectionDiagnostics | null = null;
-  let preferredActualSource = args.runContext?.preferredActualSource ?? undefined;
+  let preferredActualSource = resolveOnePathPastPreferredActualSource({
+    callerLabel: args.runContext?.callerLabel,
+    preferredActualSource: args.runContext?.preferredActualSource,
+    isCrossHouseAdminLab,
+    mode,
+    hasEsiid: Boolean(esiid),
+  });
   const runContext = buildPastSimRunContext({
     correlationId: String(args.correlationId ?? ""),
     callerLabel: args.runContext?.callerLabel ?? "user_recalc",

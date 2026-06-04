@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   isolateBuildInputsForUserSite,
+  isOnePathAdminSmtPastRunCaller,
   isPersistedAdminLabTestHomeLabel,
   isUserSiteSimulationCaller,
+  resolveOnePathPastPreferredActualSource,
 } from "@/lib/usage/userSiteSimulationIsolation";
 import {
   GAPFILL_LAB_TEST_HOME_LABEL,
@@ -21,6 +23,31 @@ describe("userSiteSimulationIsolation", () => {
   it("detects user-site callers", () => {
     expect(isUserSiteSimulationCaller("user_recalc")).toBe(true);
     expect(isUserSiteSimulationCaller("one_path_admin")).toBe(false);
+  });
+
+  it("locks SMT for One Path admin INTERVAL Past and cross-house SMT lab recalc", () => {
+    expect(isOnePathAdminSmtPastRunCaller("one_path_admin_past_run")).toBe(true);
+    expect(
+      resolveOnePathPastPreferredActualSource({
+        callerLabel: "one_path_admin_past_run",
+        preferredActualSource: null,
+      })
+    ).toBe("SMT");
+    expect(
+      resolveOnePathPastPreferredActualSource({
+        callerLabel: "user_recalc",
+        isCrossHouseAdminLab: true,
+        mode: "SMT_BASELINE",
+        hasEsiid: true,
+        preferredActualSource: null,
+      })
+    ).toBe("SMT");
+    expect(
+      resolveOnePathPastPreferredActualSource({
+        callerLabel: "one_path_admin_gb_past_run",
+        preferredActualSource: null,
+      })
+    ).toBe("GREEN_BUTTON");
   });
 
   it("detects admin lab test home labels", () => {

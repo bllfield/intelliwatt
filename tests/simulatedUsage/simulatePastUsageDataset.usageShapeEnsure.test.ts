@@ -504,6 +504,46 @@ describe("shared sim usage-shape ensure path", () => {
     expect(successEv?.[1]).toHaveProperty("memoryRssMb");
   });
 
+  it("ensures usage shape on the sim house when actualContextHouseId differs (One Path cross-house)", async () => {
+    getLatestUsageShapeProfile.mockResolvedValueOnce(null).mockResolvedValueOnce(validUsageShapeRow());
+    ensureUsageShapeProfileForUserHouse.mockResolvedValue({
+      ok: true,
+      profileId: "shape-test",
+    });
+
+    await simulatePastUsageDataset({
+      userId: "lab-owner",
+      houseId: "test-home",
+      actualContextHouseId: "source-home",
+      esiid: "1044",
+      startDate: "2026-01-01",
+      endDate: "2026-01-01",
+      timezone: "America/Chicago",
+      travelRanges: [],
+      buildInputs: {
+        canonicalMonths: ["2026-01"],
+        mode: "SMT_BASELINE",
+        snapshots: {},
+      } as any,
+      buildPathKind: "recalc",
+      includeSimulatedDayResults: false,
+      actualIntervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.25 },
+        { timestamp: "2026-01-01T00:15:00.000Z", kwh: 0.25 },
+      ],
+    });
+
+    expect(ensureUsageShapeProfileForUserHouse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "lab-owner",
+        houseId: "test-home",
+      })
+    );
+    expect(ensureUsageShapeProfileForUserHouse).not.toHaveBeenCalledWith(
+      expect.objectContaining({ houseId: "source-home" })
+    );
+  });
+
   it("keeps MANUAL_TOTALS on the low-data adapter path without profile/home/appliance DB fetches", async () => {
     const out = await simulatePastUsageDataset({
       userId: "u1",
