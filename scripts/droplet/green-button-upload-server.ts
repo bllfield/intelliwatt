@@ -695,14 +695,7 @@ async function runGreenButtonIngestJob(args: GreenButtonIngestJobArgs): Promise<
   }
 }
 
-app.use((req: Request, res: Response, next: NextFunction) => {
-  setCorsHeaders(res, req.headers.origin as string | undefined);
-  if (req.method === "OPTIONS") {
-    res.sendStatus(204);
-    return;
-  }
-  next();
-});
+// CORS + OPTIONS preflight: nginx on uploads.intelliwatt.com (deploy/droplet/nginx/uploads.intelliwatt.com).
 
 app.get("/health", (_req: Request, res: Response) => {
   res.json({
