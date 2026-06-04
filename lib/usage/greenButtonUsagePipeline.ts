@@ -1,11 +1,15 @@
 import { trimGreenButtonIntervalsToLatestLocalDays } from "@/lib/usage/greenButtonCoverage";
+import {
+  GREEN_BUTTON_INTERVAL_INGEST_VERSION,
+  type GreenButtonUploadParseSummary,
+} from "@/lib/usage/greenButtonIngestContract";
 import { normalizeGreenButtonReadingsTo15Min, type GreenButton15MinInterval } from "@/lib/usage/greenButtonNormalize";
 import { parseGreenButtonBuffer, type ParsedGreenButtonResult } from "@/lib/usage/greenButtonParser";
 
 export const GREEN_BUTTON_USAGE_PIPELINE_WINDOW_DAYS = 365;
 export const GREEN_BUTTON_USAGE_MAX_KWH_PER_INTERVAL = 10;
 
-export type GreenButtonUsagePipelineSummary = {
+export type GreenButtonUsagePipelineSummary = GreenButtonUploadParseSummary & {
   format: ParsedGreenButtonResult["format"];
   totalRawReadings: number;
   normalizedIntervals: number;
@@ -14,6 +18,7 @@ export type GreenButtonUsagePipelineSummary = {
   coverageStartDateKey: string;
   coverageEndDateKey: string;
   warnings: string[];
+  intervalIngestVersion: number;
 };
 
 export type GreenButtonUsagePipelineSuccess = {
@@ -103,7 +108,7 @@ export function runGreenButtonUsagePipeline(args: {
   }
 
   const totalKwh = trimmed.reduce((sum, row) => sum + row.consumptionKwh, 0);
-  const summary = {
+  const summary: GreenButtonUsagePipelineSummary = {
     format: parsed.format,
     totalRawReadings: parsed.metadata.totalReadings,
     normalizedIntervals: trimmed.length,
@@ -112,6 +117,7 @@ export function runGreenButtonUsagePipeline(args: {
     coverageStartDateKey: startDateKey,
     coverageEndDateKey: endDateKey,
     warnings: parsed.warnings,
+    intervalIngestVersion: GREEN_BUTTON_INTERVAL_INGEST_VERSION,
   };
 
   return {

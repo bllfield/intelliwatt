@@ -2,13 +2,14 @@
 
 import {
   createHomeIntervalCalendar,
-  localDateKey,
-  localDayBoundsUtc,
-  localSlotIndex,
   resolveIntervalInstant,
-  type HomeIntervalCalendar,
   type IntervalDelivery,
 } from "@/lib/time/homeIntervalCalendar";
+import { addGreenButtonReadingToHomeLocalBuckets } from "@/lib/usage/greenButtonHomeLocalBuckets";
+import {
+  repairGreenButtonHomeLocalBuckets,
+  type GreenButtonBucketCell,
+} from "@/lib/usage/greenButtonSlotRepair";
 
 const GREEN_BUTTON_HOME = createHomeIntervalCalendar("America/Chicago");
 
@@ -92,7 +93,7 @@ export function normalizeGreenButtonReadingsTo15Min(
   const treatAsEnd = options?.treatTimestampAsEnd ?? false;
   const maxKwh = options?.maxKwhPerInterval ?? null;
 
-  const buckets = new Map<number, number>(); // key = home-local slot start (UTC ms), value = kWh sum
+  const buckets = new Map<number, GreenButtonBucketCell>(); // home-local slot start (UTC ms)
 
   for (const reading of rawReadings) {
     const durSecRaw = reading.durationSeconds ?? 900;
@@ -115,23 +116,21 @@ export function normalizeGreenButtonReadingsTo15Min(
     );
     if (!resolved) continue;
 
-    const intervals = Math.max(1, Math.round(durationSeconds / 900));
-    const perIntervalKwh = valueKwh / intervals;
-    let cursor = new Date(resolved.tsUtc);
-
-    for (let i = 0; i < intervals; i += 1) {
-      const bucketStartMs = homeLocalSlotStartMs(cursor, GREEN_BUTTON_HOME);
-      if (bucketStartMs != null) {
-        const existing = buckets.get(bucketStartMs) ?? 0;
-        buckets.set(bucketStartMs, existing + perIntervalKwh);
-      }
-      cursor = new Date(cursor.getTime() + 15 * 60 * 1000);
-    }
+    addGreenButtonReadingToHomeLocalBuckets({
+      intervalStartUtc: resolved.tsUtc,
+      durationSeconds,
+      totalKwh: valueKwh,
+      home: GREEN_BUTTON_HOME,
+      buckets,
+    });
   }
+
+  repairGreenButtonHomeLocalBuckets(buckets, GREEN_BUTTON_HOME);
 
   const results: GreenButton15MinInterval[] = [];
 
-  buckets.forEach((kwh, ms) => {
+  buckets.forEach((cell, ms) => {
+    const kwh = cell.kwh;
     if (!isFinite(kwh) || kwh < 0) {
       return;
     }
@@ -263,14 +262,6 @@ function greenButtonDeliveryForRawTimestamp(
     intervalEdge,
     durationSeconds,
   };
-}
-
-function homeLocalSlotStartMs(instant: Date, home: HomeIntervalCalendar): number | null {
-  const iso = instant.toISOString();
-  const dateKey = localDateKey(iso, home);
-  const slot = localSlotIndex(iso, home);
-  const bounds = localDayBoundsUtc(dateKey, home);
-  return bounds.startUtc.getTime() + slot * 15 * 60 * 1000;
 }
 
 /**

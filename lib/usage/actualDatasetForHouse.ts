@@ -28,6 +28,8 @@ import {
   buildUtcRangeForChicagoLocalDateRange,
   resolveGreenButtonBaselineCoverageWindow,
 } from "@/lib/usage/greenButtonCoverage";
+import { resolveGreenButtonIntervalIngestReadiness } from "@/lib/usage/greenButtonIntervalReadiness";
+import { loadPersistedGreenButtonIntervalsForWindow } from "@/lib/usage/loadPersistedGreenButtonIntervals";
 import { chicagoDateKey, dateTimePartsInTimezone, enumerateDateKeysInclusive, prevCalendarDayDateKey } from "@/lib/time/chicago";
 import { homeProjectedIntervalFromRecord } from "@/lib/time/actualIntervalCalendar";
 import {
@@ -986,20 +988,20 @@ async function fetchGreenButtonDataset(
     const start = aggregates._min?.timestamp ?? null;
     const end = aggregates._max?.timestamp ?? null;
     const lightweight = options?.lightweight === true;
-    const intervalRows = lightweight
-      ? []
-      : ((await usageClient.greenButtonInterval.findMany({
-          where: { homeId: houseId, rawId, timestamp: { gte: window.cutoff, lte: window.end } },
-          orderBy: { timestamp: "asc" },
-          select: { timestamp: true, consumptionKwh: true },
-        })) as Array<{ timestamp: Date; consumptionKwh: Prisma.Decimal | number }>);
-    const gbConverted = convertGreenButtonPersistedRowsToHome(
-      intervalRows.map((row) => ({
-        timestamp: row.timestamp,
-        consumptionKwh: decimalToNumber(row.consumptionKwh),
-      })),
-      homeTimezone,
-    );
+    const loaded = lightweight
+      ? {
+          converted: convertGreenButtonPersistedRowsToHome([], homeTimezone),
+          ingestReady: true,
+        }
+      : await loadPersistedGreenButtonIntervalsForWindow({
+          houseId,
+          rawId,
+          rangeStart: window.cutoff,
+          rangeEndInclusive: window.end,
+          homeTimezone,
+        });
+    if (!loaded.ingestReady) return null;
+    const gbConverted = loaded.converted;
     const intervals15 = lightweight ? [] : tailHomeIntervals(gbConverted.intervals, 192);
     const hourlyRows = lightweight
       ? []
@@ -1829,32 +1831,12 @@ export async function getActualIntervalsForRangeWithSource(args: {
   const start = rangeBounds.rangeStart;
   const end = rangeBounds.rangeEndInclusive;
   if (args.preferredSource === "GREEN_BUTTON") {
-    if (!USAGE_DB_ENABLED) return { source: "GREEN_BUTTON", intervals: [] };
-    try {
-      const usageClient = usagePrisma as any;
-      const rawId = await getLatestUsableRawGreenButtonIdForHouse(args.houseId);
-      if (!rawId) return { source: "GREEN_BUTTON", intervals: [] };
-      const rows = (await usageClient.$queryRaw(Prisma.sql`
-        SELECT "timestamp" AS ts, "consumptionKwh"::float AS kwh
-        FROM "GreenButtonInterval"
-        WHERE "homeId" = ${args.houseId} AND "rawId" = ${rawId}
-          AND "timestamp" >= ${start} AND "timestamp" <= ${end}
-        ORDER BY "timestamp" ASC
-      `)) as Array<{ ts: Date; kwh: number }>;
-      const gbConverted = convertGreenButtonPersistedRowsToHome(
-        rows.map((row) => ({
-          timestamp: row.ts instanceof Date ? row.ts : new Date(row.ts),
-          consumptionKwh: Number(row.kwh) || 0,
-        })),
-        homeTimezone,
-      );
-      return {
-        source: "GREEN_BUTTON",
-        intervals: gbConverted.intervals.map(homeProjectedIntervalFromRecord),
-      };
-    } catch {
-      return { source: "GREEN_BUTTON", intervals: [] };
-    }
+    return loadGreenButtonIntervalsForActualRange({
+      houseId: args.houseId,
+      rangeStart: start,
+      rangeEndInclusive: end,
+      homeTimezone,
+    });
   }
 
   const source = await chooseActualSource({
@@ -1887,28 +1869,35 @@ export async function getActualIntervalsForRangeWithSource(args: {
       return { source: "SMT", intervals: [] };
     }
   }
+  return loadGreenButtonIntervalsForActualRange({
+    houseId: args.houseId,
+    rangeStart: start,
+    rangeEndInclusive: end,
+    homeTimezone,
+  });
+}
+
+async function loadGreenButtonIntervalsForActualRange(args: {
+  houseId: string;
+  rangeStart: Date;
+  rangeEndInclusive: Date;
+  homeTimezone: string;
+}): Promise<{ source: "GREEN_BUTTON"; intervals: ReturnType<typeof homeProjectedIntervalFromRecord>[] }> {
   if (!USAGE_DB_ENABLED) return { source: "GREEN_BUTTON", intervals: [] };
   try {
-    const usageClient = usagePrisma as any;
-    const rawId = await getLatestUsableRawGreenButtonIdForHouse(args.houseId);
-    if (!rawId) return { source: "GREEN_BUTTON", intervals: [] };
-    const rows = (await usageClient.$queryRaw(Prisma.sql`
-      SELECT "timestamp" AS ts, "consumptionKwh"::float AS kwh
-      FROM "GreenButtonInterval"
-      WHERE "homeId" = ${args.houseId} AND "rawId" = ${rawId}
-        AND "timestamp" >= ${start} AND "timestamp" <= ${end}
-      ORDER BY "timestamp" ASC
-    `)) as Array<{ ts: Date; kwh: number }>;
-    const gbConverted = convertGreenButtonPersistedRowsToHome(
-      rows.map((row) => ({
-        timestamp: row.ts instanceof Date ? row.ts : new Date(row.ts),
-        consumptionKwh: Number(row.kwh) || 0,
-      })),
-      homeTimezone,
-    );
+    const readiness = await resolveGreenButtonIntervalIngestReadiness(args.houseId);
+    if (!readiness.ready) return { source: "GREEN_BUTTON", intervals: [] };
+    const { converted } = await loadPersistedGreenButtonIntervalsForWindow({
+      houseId: args.houseId,
+      rawId: readiness.rawId,
+      rangeStart: args.rangeStart,
+      rangeEndInclusive: args.rangeEndInclusive,
+      homeTimezone: args.homeTimezone,
+      requireCurrentIngest: false,
+    });
     return {
       source: "GREEN_BUTTON",
-      intervals: gbConverted.intervals.map(homeProjectedIntervalFromRecord),
+      intervals: converted.intervals.map(homeProjectedIntervalFromRecord),
     };
   } catch {
     return { source: "GREEN_BUTTON", intervals: [] };

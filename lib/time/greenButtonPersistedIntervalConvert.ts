@@ -1,6 +1,6 @@
 /**
- * Convert persisted GreenButtonInterval DB rows through homeIntervalCalendar (display path only).
- * Ingest/normalize pipelines are unchanged.
+ * Convert persisted GreenButtonInterval DB rows through homeIntervalCalendar (read path only).
+ * Normalize/repair run only in `runGreenButtonUsagePipeline` before rows are written.
  *
  * All Green Button read/display bucketing (Usage SQL parity, Past Sim, One Path read views)
  * must route series.intervals15 through this module — not parallel utcDayGrid hh:mm helpers.

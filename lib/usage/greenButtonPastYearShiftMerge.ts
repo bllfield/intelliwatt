@@ -6,6 +6,7 @@
 import { convertGreenButtonPersistedRowsToHome } from "@/lib/time/greenButtonPersistedIntervalConvert";
 import { createHomeIntervalCalendar, localSlotIndex } from "@/lib/time/homeIntervalCalendar";
 import type { ActualIntervalPoint } from "@/lib/usage/actualDatasetForHouse";
+import { resolveGreenButtonIntervalIngestReadiness } from "@/lib/usage/greenButtonIntervalReadiness";
 import { fetchGreenButtonIntervalsForCoverageWindow } from "@/modules/realUsageAdapter/greenButton";
 
 export type GreenButtonPastEngineInterval = {
@@ -134,6 +135,19 @@ export async function loadGreenButtonPastYearShiftedPayload(args: {
   timezone: string;
 }): Promise<GreenButtonPastYearShiftPayload> {
   const timezone = String(args.timezone ?? "America/Chicago").trim() || "America/Chicago";
+  const readiness = await resolveGreenButtonIntervalIngestReadiness(args.houseId);
+  if (!readiness.ready) {
+    return {
+      engineSourceIntervals: [],
+      sourceDateByTargetDate: {},
+      displayWindowNote: readiness.message,
+      shiftedIntervalCount: 0,
+      shiftedDateCount: 0,
+      sourceCoverageStart: null,
+      sourceCoverageEnd: null,
+      trustedUtcDateKeys: [],
+    };
+  }
   const shifted = await fetchGreenButtonIntervalsForCoverageWindow({
     houseId: args.houseId,
     coverageStartDate: args.coverageStartDate,

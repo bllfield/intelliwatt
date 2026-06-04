@@ -10,6 +10,7 @@ import {
   type OvernightAttribution,
   type UsageBucketDef,
 } from "@/lib/plan-engine/usageBuckets";
+import { resolveGreenButtonIntervalIngestReadiness } from "@/lib/usage/greenButtonIntervalReadiness";
 import { getLatestUsableRawGreenButtonIdForHouse } from "@/modules/realUsageAdapter/greenButton";
 
 export type UsageIntervalSource = "SMT" | "GREENBUTTON";
@@ -183,6 +184,20 @@ export async function ensureCoreMonthlyBuckets(
       };
     }
     notes.push(`greenbutton_rawId=${greenButtonRawId}`);
+    const gbReadiness = await resolveGreenButtonIntervalIngestReadiness(input.homeId);
+    if (!gbReadiness.ready) {
+      return {
+        monthsProcessed: 0,
+        rowsUpserted: 0,
+        intervalRowsRead: 0,
+        kwhSummed: 0,
+        notes: [
+          ...notes,
+          `greenbutton_ingest_not_ready=${gbReadiness.reason}`,
+          gbReadiness.message,
+        ],
+      };
+    }
   }
 
   const bucketDefsRaw = Array.isArray(input.bucketDefs) && input.bucketDefs.length > 0 ? input.bucketDefs : CORE_MONTHLY_BUCKETS;

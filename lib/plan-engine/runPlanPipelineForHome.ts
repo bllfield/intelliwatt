@@ -30,6 +30,7 @@ import { getLatestPlanPipelineJob, shouldStartPlanPipelineJob, writePlanPipeline
 import { Prisma } from "@prisma/client";
 import { currentPlanPrisma } from "@/lib/db/currentPlanClient";
 import { computeMonthsRemainingOnContract } from "@/lib/current-plan/contractTerm";
+import { isGreenButtonIntervalIngestReadyForHouse } from "@/lib/usage/greenButtonIntervalReadiness";
 import { getLatestUsableRawGreenButtonIdForHouse } from "@/modules/realUsageAdapter/greenButton";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -167,7 +168,7 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
             select: { timestamp: true },
           })
         : null;
-      if (latestGb?.timestamp) {
+      if (latestGb?.timestamp && (await isGreenButtonIntervalIngestReadyForHouse(homeId))) {
         usageWindowEnd = latestGb.timestamp as Date;
         usageSource = "GREEN_BUTTON";
       }

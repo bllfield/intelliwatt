@@ -1,8 +1,8 @@
-import { getLatestUsableRawGreenButtonIdForHouse } from "@/modules/realUsageAdapter/greenButton";
+import { resolveGreenButtonIntervalIngestReadiness } from "@/lib/usage/greenButtonIntervalReadiness";
 
 export type OnePathGreenButtonUsageMissing = {
   ok: false;
-  error: "green_button_usage_missing";
+  error: "green_button_usage_missing" | "green_button_ingest_stale";
   message: string;
   houseId: string;
 };
@@ -30,13 +30,24 @@ export async function assertOnePathGreenButtonPersistedUsage(args: {
       houseId: "",
     };
   }
-  const rawId = await getLatestUsableRawGreenButtonIdForHouse(houseId).catch(() => null);
-  if (!rawId) {
+  const readiness = await resolveGreenButtonIntervalIngestReadiness(houseId);
+  if (!readiness.ready) {
     const label = args.contextLabel ? ` (${args.contextLabel})` : "";
+    if (readiness.reason === "ingest_stale") {
+      return {
+        ok: false,
+        error: "green_button_ingest_stale",
+        message: `${readiness.message}${label}`,
+        houseId,
+      };
+    }
     return {
       ok: false,
       error: "green_button_usage_missing",
-      message: `Green Button usage is not persisted on this One Path home${label}. Upload and ingest Green Button on the test home before running Past Sim.`,
+      message:
+        readiness.reason === "upload_parse_error"
+          ? `Green Button upload did not complete successfully${label}.`
+          : `Green Button usage is not persisted on this One Path home${label}. Upload and ingest Green Button on the test home before running Past Sim.`,
       houseId,
     };
   }

@@ -308,6 +308,21 @@ export async function fetchGreenButtonIntervalsForCoverageWindow(args: {
       displayWindowNote: null,
     };
   }
+  const { resolveGreenButtonIntervalIngestReadiness } =
+    await import("@/lib/usage/greenButtonIntervalReadiness");
+  const ingestReadiness = await resolveGreenButtonIntervalIngestReadiness(args.houseId);
+  if (!ingestReadiness.ready) {
+    return {
+      intervals: [],
+      intervalsCount: 0,
+      sourceCoverageStart: null,
+      sourceCoverageEnd: null,
+      shiftedIntervalCount: 0,
+      shiftedDateCount: 0,
+      sourceDateByTargetDate: {},
+      displayWindowNote: ingestReadiness.message,
+    };
+  }
   const anchorEndDate = await getLatestGreenButtonFullDayDateKey({ houseId: args.houseId });
   const sourceCoverageWindow = anchorEndDate ? resolveSourceCoverageWindowFromAnchorEnd(anchorEndDate) : null;
   if (!sourceCoverageWindow) {

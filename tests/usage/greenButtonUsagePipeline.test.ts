@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { GREEN_BUTTON_INTERVAL_INGEST_VERSION } from "@/lib/usage/greenButtonIngestContract";
 import { runGreenButtonUsagePipeline } from "@/lib/usage/greenButtonUsagePipeline";
 
 function chicagoCstReadings(dateKey: string, count: number) {
@@ -69,6 +70,7 @@ describe("runGreenButtonUsagePipeline", () => {
     expect(result.normalized).toHaveLength(300);
     expect(result.trimmed).toHaveLength(192);
     expect(result.summary.totalKwh).toBe(48);
+    expect(result.summary.intervalIngestVersion).toBe(GREEN_BUTTON_INTERVAL_INGEST_VERSION);
   });
 
   it("reports no database write requirement for malformed files through structured failure", () => {

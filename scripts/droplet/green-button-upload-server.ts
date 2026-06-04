@@ -4,6 +4,7 @@ import { createHash, createHmac } from "node:crypto";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { PrismaClient as UsagePrismaClient } from "../../.prisma/usage-client";
 import { XMLParser } from "fast-xml-parser";
+import { runGreenButtonUsagePipeline } from "../../lib/usage/greenButtonUsagePipeline";
 
 const PORT = Number(process.env.GREEN_BUTTON_UPLOAD_PORT || "8091");
 const MAX_BYTES = Number(process.env.GREEN_BUTTON_UPLOAD_MAX_BYTES || 500 * 1024 * 1024);
@@ -424,67 +425,6 @@ function parseGreenButtonJson(json: string, warnings: string[]): GreenButtonRawR
   }
 }
 
-function normalizeGreenButtonReadingsTo15Min(
-  rawReadings: GreenButtonRawReading[],
-  options?: { treatTimestampAsEnd?: boolean; maxKwhPerInterval?: number | null },
-): GreenButton15MinInterval[] {
-  const treatAsEnd = options?.treatTimestampAsEnd ?? false;
-  const maxKwh = options?.maxKwhPerInterval ?? null;
-
-  const buckets = new Map<number, number>();
-
-  for (const reading of rawReadings) {
-    const ts = ensureUtcDate(reading.timestamp);
-    if (!ts) continue;
-
-    const durSecRaw = reading.durationSeconds ?? 900;
-    const durationSeconds = durSecRaw > 0 ? durSecRaw : 900;
-
-    const valueKwh = ensureKwh(reading.value, reading.unit ?? undefined);
-    if (!isFinite(valueKwh) || valueKwh < 0) {
-      continue;
-    }
-
-    const base = new Date(ts.getTime());
-    if (treatAsEnd) {
-      base.setSeconds(base.getSeconds() - durationSeconds);
-    }
-
-    const start = roundDownTo15Minutes(base);
-
-    const intervals = Math.max(1, Math.round(durationSeconds / 900));
-    const perIntervalKwh = valueKwh / intervals;
-
-    for (let i = 0; i < intervals; i++) {
-      const bucketStartMs = start.getTime() + i * 15 * 60 * 1000;
-      const existing = buckets.get(bucketStartMs) ?? 0;
-      buckets.set(bucketStartMs, existing + perIntervalKwh);
-    }
-  }
-
-  const results: GreenButton15MinInterval[] = [];
-
-  buckets.forEach((kwh, ms) => {
-    if (!isFinite(kwh) || kwh < 0) {
-      return;
-    }
-    if (maxKwh != null && kwh > maxKwh) {
-      return;
-    }
-
-    results.push({
-      timestamp: new Date(ms),
-      consumptionKwh: kwh,
-      intervalMinutes: 15,
-      unit: "kWh",
-    });
-  });
-
-  results.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-
-  return results;
-}
-
 function ensureUtcDate(input: string | number | Date): Date | null {
   try {
     if (input instanceof Date) {
@@ -823,82 +763,31 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
 
     logEvent("upload.record", { uploadRecordId, rawRecordId, houseId: house.id, fileSize: buffer.length });
 
-    const parsed = parseGreenButtonBuffer(buffer, filename);
-    if (parsed.errors.length > 0) {
-      if (uploadRecordId) {
-        await (prisma as any).greenButtonUpload.update({
-          where: { id: uploadRecordId },
-          data: {
-            parseStatus: "error",
-            parseMessage: parsed.errors.join("; "),
-          },
-        });
-      }
-      res.status(422).json({
-        ok: false,
-        error: parsed.errors.join("; "),
-        warnings: parsed.warnings,
-      });
-      return;
-    }
-
-    if (parsed.readings.length === 0) {
-      if (uploadRecordId) {
-        await (prisma as any).greenButtonUpload.update({
-          where: { id: uploadRecordId },
-          data: {
-            parseStatus: "empty",
-            parseMessage: "File parsed but no interval data was found.",
-          },
-        });
-      }
-      res.status(422).json({
-        ok: false,
-        error: "no_readings",
-        warnings: parsed.warnings,
-      });
-      return;
-    }
-
-    const normalized = normalizeGreenButtonReadingsTo15Min(parsed.readings, {
+    const pipelineResult = runGreenButtonUsagePipeline({
+      buffer,
+      filename,
+      windowDays: MANUAL_USAGE_LIFETIME_DAYS,
       maxKwhPerInterval: 10,
     });
-    if (normalized.length === 0) {
+    if (!pipelineResult.ok) {
       if (uploadRecordId) {
         await (prisma as any).greenButtonUpload.update({
           where: { id: uploadRecordId },
           data: {
-            parseStatus: "empty",
-            parseMessage: "Readings were parsed but could not be normalized to 15-minute intervals.",
+            parseStatus: pipelineResult.parseStatus,
+            parseMessage: pipelineResult.message,
           },
         });
       }
       res.status(422).json({
         ok: false,
-        error: "normalization_empty",
-        warnings: parsed.warnings,
+        error: pipelineResult.error,
+        warnings: pipelineResult.parsed?.warnings,
       });
       return;
     }
 
-    const { trimGreenButtonIntervalsToLatestLocalDays } = await import("@/lib/usage/greenButtonCoverage");
-    const { trimmed, startDateKey, endDateKey } = trimGreenButtonIntervalsToLatestLocalDays(
-      normalized,
-      MANUAL_USAGE_LIFETIME_DAYS
-    );
-    if (trimmed.length === 0 || !startDateKey || !endDateKey) {
-      if (uploadRecordId) {
-        await (prisma as any).greenButtonUpload.update({
-          where: { id: uploadRecordId },
-          data: {
-            parseStatus: "error",
-            parseMessage: "Unable to determine a Chicago-local 365-day coverage window for intervals.",
-          },
-        });
-      }
-      res.status(422).json({ ok: false, error: "no_recent_readings" });
-      return;
-    }
+    const { trimmed, startDateKey, endDateKey, summary, parsed, earliest, latest } = pipelineResult;
 
     // Production Droplet DB clients can run with a single connection. Keep cleanup sequential
     // so upload replacement does not compete with itself for the pool.
@@ -932,20 +821,7 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
       }
     }
 
-    const totalKwh = trimmed.reduce((sum, row) => sum + row.consumptionKwh, 0);
-    const earliest = trimmed[0]?.timestamp ?? null;
-    const latest = trimmed[trimmed.length - 1]?.timestamp ?? null;
-
-    const summary = {
-      format: parsed.format,
-      totalRawReadings: parsed.metadata.totalReadings,
-      normalizedIntervals: trimmed.length,
-      totalKwh: Number(totalKwh.toFixed(6)),
-      appliedWindowDays: MANUAL_USAGE_LIFETIME_DAYS,
-      coverageStartDateKey: startDateKey,
-      coverageEndDateKey: endDateKey,
-      warnings: parsed.warnings,
-    };
+    const totalKwh = pipelineResult.totalKwh;
 
     if (uploadRecordId) {
       await (prisma as any).greenButtonUpload.update({
@@ -988,7 +864,7 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
     logEvent("upload.success", {
       rawRecordId,
       uploadRecordId,
-      intervals: normalized.length,
+      intervals: trimmed.length,
       totalKwh,
       warnings: parsed.warnings,
     });

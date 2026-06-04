@@ -22,7 +22,9 @@
 | Baseload (Usage / baseline / Past) | `lib/usage/computeHomeBaseloadKw.ts` — full-interval `FILTERED_NORMAL_LIFE_V1`; lightweight paths overlay interval baseload (no SQL P10 as primary) |
 | Past Sim SMT ledger prep (both producers) | `lib/usage/pastSimSmtLedgerPrep.ts` — pending + incomplete-meter keys with slot-complete filter |
 
-Simulator modules re-export window helpers from `canonicalMetadataWindow.ts` for backward compatibility. Green Button ingest remains in `modules/realUsageAdapter/greenButton.ts`; read/display paths use `greenButtonPersistedIntervalConvert.ts` with DST-aware trusted thresholds (92/96/100).
+Simulator modules re-export window helpers from `canonicalMetadataWindow.ts` for backward compatibility.
+
+**Green Button interval ingest (2026-05):** single pipeline `lib/usage/greenButtonUsagePipeline.ts` (normalize + overlap + slot repair) before `GreenButtonInterval` write; Droplet and app upload both call it. Reads use `lib/usage/loadPersistedGreenButtonIntervals.ts` (no read-time slot repair). Audit: `docs/USAGE_INTERVAL_INGEST_AUDIT.md`. Past year-shift/trust remains in `modules/realUsageAdapter/greenButton.ts` (shift only, not re-normalize).
 
 ## Phase checklist
 
