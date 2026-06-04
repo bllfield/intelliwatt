@@ -1170,11 +1170,24 @@ export async function replaceGlobalOnePathLabTestHomeFromSource(args: {
       targetEsiid: sourceHouse.esiid ? String(sourceHouse.esiid) : null,
     });
 
+    const { syncOnePathPastUserSiteParityFromSource } = await import(
+      "@/lib/usage/onePathPastUserSiteParity"
+    );
+    const paritySync = await syncOnePathPastUserSiteParityFromSource({
+      ownerUserId: args.ownerUserId,
+      sourceUserId: args.sourceUserId,
+      sourceHouseId: args.sourceHouseId,
+      testHomeHouseId: testHome.id,
+    }).catch(() => ({ ok: false as const, code: "PARITY_SYNC_FAILED", message: "parity_sync_failed" }));
     await (prisma as any).houseDailyWeather
       .deleteMany({
         where: { houseId: testHome.id },
       })
       .catch(() => null);
+
+    const statusMessage = paritySync.ok
+      ? "One Path test home replaced; Past parity synced from user site."
+      : `Test home replaced; Past parity sync pending (${paritySync.code}: ${paritySync.message}). Recalc Past on the user site, then re-link.`;
 
     await upsertOnePathLabTestHomeLink({
       ownerUserId: args.ownerUserId,
@@ -1182,7 +1195,7 @@ export async function replaceGlobalOnePathLabTestHomeFromSource(args: {
       sourceUserId: args.sourceUserId,
       sourceHouseId: args.sourceHouseId,
       status: "ready",
-      statusMessage: "One Path test home replaced successfully from selected source.",
+      statusMessage,
       lastReplacedAt: new Date(),
     });
 

@@ -653,6 +653,22 @@ async function buildPastSimRunReadbackResponse(args: {
   smtSourceEsiid?: string | null;
 }) {
   const startedAt = Date.now();
+  const labLink = await getOnePathLabTestHomeLink(args.userId).catch(() => null);
+  if (
+    labLink?.testHomeHouseId === args.houseId &&
+    labLink.sourceUserId &&
+    labLink.sourceHouseId
+  ) {
+    const { ensureOnePathPastParityBeforeRead } = await import(
+      "@/lib/usage/onePathPastUserSiteParity"
+    );
+    await ensureOnePathPastParityBeforeRead({
+      ownerUserId: args.userId,
+      testHomeHouseId: args.houseId,
+      sourceUserId: String(labLink.sourceUserId),
+      sourceHouseId: String(labLink.sourceHouseId),
+    }).catch(() => null);
+  }
   const readScenarioDataset = (
     mode: "artifact_only" | "allow_rebuild",
     forceRebuildArtifact = false
@@ -668,6 +684,7 @@ async function buildPastSimRunReadbackResponse(args: {
         artifactReadMode: mode,
         projectionMode: "baseline",
         compareSidecarRequest: true,
+        userSiteIsolation: true,
       },
     });
 

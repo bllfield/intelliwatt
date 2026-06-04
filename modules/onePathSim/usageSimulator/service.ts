@@ -84,6 +84,14 @@ import {
   decodeIntervalsV1,
   INTERVAL_CODEC_V1,
 } from "@/modules/onePathSim/usageSimulator/intervalCodec";
+import {
+  WORKSPACE_PAST_SCENARIO_NAME,
+  readOnePathUserSiteParityLock,
+  isParityBuildInputsDirty,
+  clearOnePathUserSiteParityFromBuildInputs,
+  syncOnePathPastUserSiteParityFromSource,
+  loadPastDatasetForParityLock,
+} from "@/lib/usage/onePathPastUserSiteParity";
 import { IntervalSeriesKind } from "@/modules/onePathSim/usageSimulator/kinds";
 import { billingPeriodsEndingAt } from "@/modules/onePathSim/manualBillingPeriods";
 import {
@@ -4374,6 +4382,63 @@ async function recalcSimulatorBuildImpl(args: {
   let effectiveValidationSelectionMode =
     normalizeValidationSelectionMode(args.validationDaySelectionMode) ??
     (requestedValidationOnlyDateKeysLocal.size > 0 ? ("manual" as ValidationDaySelectionMode) : null);
+  if (!isUserSiteCaller && scenarioId) {
+    const scenarioRow = await (prisma as any).usageSimulatorScenario
+      .findFirst({
+        where: { id: scenarioId, userId, houseId, archivedAt: null },
+        select: { name: true },
+      })
+      .catch(() => null);
+    if (scenarioRow?.name === WORKSPACE_PAST_SCENARIO_NAME) {
+      const existingBuildInputs = await (prisma as any).usageSimulatorBuild
+        .findUnique({
+          where: { userId_houseId_scenarioKey: { userId, houseId, scenarioKey: scenarioId } },
+          select: { buildInputs: true, buildInputsHash: true },
+        })
+        .catch(() => null);
+      const parityLock = readOnePathUserSiteParityLock(
+        existingBuildInputs?.buildInputs as Record<string, unknown> | undefined
+      );
+      const requestProbe: Record<string, unknown> = {
+        ...(existingBuildInputs?.buildInputs && typeof existingBuildInputs.buildInputs === "object"
+          ? (existingBuildInputs.buildInputs as Record<string, unknown>)
+          : {}),
+        mode,
+        weatherPreference: args.weatherPreference ?? "LAST_YEAR_WEATHER",
+        validationOnlyDateKeysLocal: Array.from(requestedValidationOnlyDateKeysLocal),
+        travelRanges: requestedPreLockboxTravelRanges,
+        validationSelectionMode: effectiveValidationSelectionMode,
+        effectiveValidationSelectionMode,
+        validationDayCount: args.validationDayCount ?? null,
+      };
+      const unchangedParity =
+        parityLock &&
+        !isParityBuildInputsDirty({ currentBuildInputs: requestProbe, parity: parityLock });
+      if (unchangedParity) {
+        const refreshed = await syncOnePathPastUserSiteParityFromSource({
+          ownerUserId: userId,
+          sourceUserId: parityLock.sourceUserId,
+          sourceHouseId: parityLock.sourceHouseId,
+          testHomeHouseId: houseId,
+        });
+        if (refreshed.ok) {
+          const dataset = await loadPastDatasetForParityLock({
+            houseId,
+            parity: refreshed.parity,
+          });
+          if (dataset) {
+            return {
+              ok: true,
+              houseId,
+              buildInputsHash: String(existingBuildInputs?.buildInputsHash ?? ""),
+              dataset,
+              canonicalArtifactInputHash: refreshed.parity.parityInputHash,
+            };
+          }
+        }
+      }
+    }
+  }
   let validationSelectionDiagnostics: ValidationDaySelectionDiagnostics | null = null;
   let preferredActualSource = args.runContext?.preferredActualSource ?? undefined;
   const runContext = buildPastSimRunContext({
@@ -6039,6 +6104,11 @@ async function recalcSimulatorBuildImpl(args: {
       buildInputs: buildInputs as SimulatorBuildInputsV1,
       correlationId: args.correlationId,
     });
+  } else {
+    const parityLock = readOnePathUserSiteParityLock(buildInputs as Record<string, unknown>);
+    if (parityLock && isParityBuildInputsDirty({ currentBuildInputs: buildInputs as Record<string, unknown>, parity: parityLock })) {
+      buildInputs = clearOnePathUserSiteParityFromBuildInputs(buildInputs as Record<string, unknown>) as SimulatorBuildInputsV1;
+    }
   }
 
   const persistBuildStartedAt = Date.now();
@@ -7252,6 +7322,17 @@ export async function getSimulatedUsageForHouseScenario(args: {
         buildInputs: buildInputs as SimulatorBuildInputsV1,
         correlationId,
       });
+      const parityLockEarly = readOnePathUserSiteParityLock(buildInputs as Record<string, unknown>);
+      if (parityLockEarly) {
+        buildInputs = await applyUserSiteBuildInputsIsolationIfNeeded({
+          userSiteIsolation: true,
+          userId: args.userId,
+          houseId: args.houseId,
+          esiid: house.esiid ?? null,
+          buildInputs: buildInputs as SimulatorBuildInputsV1,
+          correlationId,
+        });
+      }
       const artifactOnlyValidationKeys = Array.isArray((buildInputs as any)?.validationOnlyDateKeysLocal)
         ? ((buildInputs as any).validationOnlyDateKeysLocal as unknown[])
             .map((v) => String(v ?? "").slice(0, 10))
@@ -7319,8 +7400,9 @@ export async function getSimulatedUsageForHouseScenario(args: {
           buildInputs = normalizeLegacyWeatherEfficiencyBuildInputs(
             buildRecAfterBackfill.buildInputs as Record<string, unknown>
           );
+          const parityAfterBackfill = readOnePathUserSiteParityLock(buildInputs as Record<string, unknown>);
           buildInputs = await applyUserSiteBuildInputsIsolationIfNeeded({
-            userSiteIsolation,
+            userSiteIsolation: parityAfterBackfill ? true : userSiteIsolation,
             userId: args.userId,
             houseId: args.houseId,
             esiid: house.esiid ?? null,
@@ -7345,16 +7427,20 @@ export async function getSimulatedUsageForHouseScenario(args: {
         };
       }
       const window = pastArtifactIdentity.window;
+      const parityLock = readOnePathUserSiteParityLock(buildInputs as Record<string, unknown>);
       let requestedExactArtifactInputHash =
         typeof args.exactArtifactInputHash === "string" && args.exactArtifactInputHash.trim()
           ? args.exactArtifactInputHash.trim()
-          : null;
+          : parityLock?.parityInputHash ?? null;
       if (pastValidationBackfillRotatedArtifact) {
         requestedExactArtifactInputHash = null;
       }
       const requireExactArtifactMatch =
         args.requireExactArtifactMatch === true && !pastValidationBackfillRotatedArtifact;
-      const resolvedInputHash = requestedExactArtifactInputHash ?? pastArtifactIdentity.inputHash;
+      const resolvedInputHash =
+        parityLock?.parityInputHash ??
+        requestedExactArtifactInputHash ??
+        pastArtifactIdentity.inputHash;
 
       let exactCached = await getCachedPastDataset({
         houseId: args.houseId,
