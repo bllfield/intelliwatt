@@ -127,6 +127,23 @@ describe("greenButtonPastTrustedPool", () => {
     expect(trustedHome.size).toBeGreaterThan(0);
   });
 
+  it("resolves many trusted home keys from a multi-day decoded UTC grid (not one UTC slice day)", () => {
+    const utcGridIntervals = Array.from({ length: 96 * 30 }, (_, index) => {
+      const dayOffset = Math.floor(index / 96);
+      const slot = index % 96;
+      const day = String(1 + dayOffset).padStart(2, "0");
+      return {
+        timestamp: new Date(`2025-06-${day}T${String(Math.floor((slot * 15) / 60)).padStart(2, "0")}:${String((slot * 15) % 60).padStart(2, "0")}:00.000Z`).toISOString(),
+        kwh: 0.25,
+      };
+    });
+    const trustedHome = resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals({
+      decodedIntervals: utcGridIntervals,
+      timezone: "America/Chicago",
+    });
+    expect(trustedHome.size).toBeGreaterThan(20);
+  });
+
   it("resolves trusted home keys from decoded intervals without adapter fetch metadata", () => {
     const utcGridIntervals = Array.from({ length: 96 }, (_, slot) => ({
       timestamp: new Date(new Date("2026-05-14T00:00:00.000Z").getTime() + slot * 15 * 60 * 1000).toISOString(),

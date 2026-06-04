@@ -2056,6 +2056,13 @@ export async function simulatePastUsageDataset(
         },
       });
       patchedIntervals = baselineBuild.intervals;
+      for (const row of patchedIntervals) {
+        const hk =
+          homeDateKeyByTs.get(String(row.timestamp)) ?? dateKeyFromTimestampForPast(String(row.timestamp));
+        if (/^\d{4}-\d{2}-\d{2}$/.test(hk)) {
+          (row as { homeDateKey?: string }).homeDateKey = hk;
+        }
+      }
       dayResults = baselineBuild.dayResults;
       if (pendingSmtIntervalDateKeys.size > 0) {
         for (const dayResult of dayResults) {

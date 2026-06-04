@@ -1,5 +1,10 @@
 import { chicagoDateKey } from "@/lib/time/chicago";
 import { createHomeIntervalCalendar, localDateKey } from "@/lib/time/homeIntervalCalendar";
+import { dateKeyFromIntervalPoint } from "@/lib/time/actualIntervalCalendar";
+import {
+  enrichPastDisplayIntervalsWithHomeDateKeys,
+  pastDailyDateKeyFromInterval,
+} from "@/lib/usage/pastIntervalDailyKey";
 import { resolveHomeTimezone } from "@/lib/time/resolveHomeTimezone";
 import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
 import {
@@ -393,14 +398,17 @@ export function buildDisplayMonthlyFromIntervalsUtc(
 
 /** Build daily array from 15-min intervals (one row per date, sorted ascending). For cache restore so daily matches the interval set. */
 export function buildDailyFromIntervals(
-  intervals: Array<{ timestamp: string; consumption_kwh?: number; kwh?: number }>,
+  intervals: Array<{
+    timestamp: string;
+    consumption_kwh?: number;
+    kwh?: number;
+    homeDateKey?: string | null;
+  }>,
   simulatedDateKeys?: Set<string>
 ): Array<{ date: string; kwh: number; source?: "ACTUAL" | "SIMULATED" }> {
   const dailyMap = new Map<string, number>();
   for (const iv of intervals ?? []) {
-    const ts = String(iv?.timestamp ?? "");
-    const parsed = new Date(ts);
-    const dk = Number.isFinite(parsed.getTime()) ? chicagoDateKey(parsed) : ts.slice(0, 10);
+    const dk = pastDailyDateKeyFromInterval(iv);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
     const kwh = Number(iv?.consumption_kwh ?? iv?.kwh ?? 0) || 0;
     dailyMap.set(dk, (dailyMap.get(dk) ?? 0) + kwh);
@@ -447,6 +455,7 @@ export function recomputePastAggregatesFromIntervals(args: {
   const normalized = (args.intervals ?? []).map((iv) => ({
     timestamp: String(iv?.timestamp ?? ""),
     kwh: Number(iv?.consumption_kwh ?? iv?.kwh ?? 0) || 0,
+    homeDateKey: (iv as { homeDateKey?: string | null }).homeDateKey ?? null,
   }));
   const intervalCount = normalized.length;
   const intervalSumKwh = round2(normalized.reduce((s, r) => s + (Number(r.kwh) || 0), 0));
@@ -761,8 +770,28 @@ export function reconcileRestoredPastDatasetFromDecodedIntervals(args: {
     });
   }
 
+  const timezoneForRestore = String((meta as Record<string, unknown> | undefined)?.timezone ?? "America/Chicago");
+  const intervalsForRecompute =
+    meta && typeof meta === "object" && resolvePastDatasetMetaActualSource(meta) === "GREEN_BUTTON"
+      ? enrichPastDisplayIntervalsWithHomeDateKeys(decodedIntervals, {
+          timezone: timezoneForRestore,
+          actualSource: "GREEN_BUTTON",
+        })
+      : enrichPastDisplayIntervalsWithHomeDateKeys(decodedIntervals, {
+          timezone: timezoneForRestore,
+          actualSource: resolvePastDatasetMetaActualSource(meta) ?? "SMT",
+        });
+  if (pastMetaHasExplicitSimulatedDayFields(meta) && simDateKeys.size === 0) {
+    simDateKeys = simulatedDateKeysUnionFromPastDatasetMeta(meta);
+    if (greenButtonTrustedHomeDateKeys.size > 0) {
+      simDateKeys = filterSimulatedDateKeysWithoutGreenButtonTrustedHome({
+        simulatedDateKeys: simDateKeys,
+        trustedHomeDateKeys: greenButtonTrustedHomeDateKeys,
+      });
+    }
+  }
   const recomputed = recomputePastAggregatesFromIntervals({
-    intervals: decodedIntervals,
+    intervals: intervalsForRecompute,
     curveEndDate: curveEnd,
     simulatedDateKeys: simDateKeys,
   });
@@ -1276,7 +1305,10 @@ export function buildSimulatedUsageDatasetFromBuildInputs(
 
   const dailyMap = new Map<string, number>();
   for (let j = 0; j < curve.intervals.length; j++) {
-    const dk = toDateKey(curve.intervals[j].timestamp);
+    const dk = dateKeyFromIntervalPoint({
+      timestamp: curve.intervals[j].timestamp,
+      homeDateKey: (curve.intervals[j] as { homeDateKey?: string | null }).homeDateKey ?? null,
+    });
     dailyMap.set(dk, (dailyMap.get(dk) ?? 0) + (Number(curve.intervals[j].consumption_kwh) || 0));
   }
   const daily = Array.from(dailyMap.entries())
@@ -1406,7 +1438,15 @@ export function buildCurveFromPatchedIntervals(args: {
     });
   }
   const rows = (args.intervals ?? [])
-    .map((p) => ({ timestamp: String(p?.timestamp ?? ""), consumption_kwh: Number(p?.kwh) || 0, interval_minutes: 15 as const }))
+    .map((p) => {
+      const homeDateKey = String((p as { homeDateKey?: string }).homeDateKey ?? "").slice(0, 10);
+      return {
+        timestamp: String(p?.timestamp ?? ""),
+        consumption_kwh: Number(p?.kwh) || 0,
+        interval_minutes: 15 as const,
+        ...( /^\d{4}-\d{2}-\d{2}$/.test(homeDateKey) ? { homeDateKey } : {}),
+      };
+    })
     .filter((p) => p.timestamp.length > 0)
     .sort((a, b) => (a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0));
 
@@ -1536,7 +1576,10 @@ export function buildSimulatedUsageDatasetFromCurve(
         const kwh = Number(interval.consumption_kwh) || 0;
         (interval as any).kwh = kwh;
         nextTotalFromIntervals += kwh;
-        const dk = toDateKey(interval.timestamp);
+        const dk = dateKeyFromIntervalPoint({
+          timestamp: interval.timestamp,
+          homeDateKey: (interval as { homeDateKey?: string | null }).homeDateKey ?? null,
+        });
         nextDailyMap.set(dk, (nextDailyMap.get(dk) ?? 0) + kwh);
       }
       return {

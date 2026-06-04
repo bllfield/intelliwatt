@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { convertGreenButtonPersistedRowsToHome } from "@/lib/time/greenButtonPersistedIntervalConvert";
+import { homeProjectedIntervalFromRecord } from "@/lib/time/actualIntervalCalendar";
 import { buildSimulatedUsageDatasetFromCurve } from "@/modules/usageSimulator/dataset";
 import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
 
@@ -152,6 +154,49 @@ describe("dataset simulated day separation", () => {
     expect(dataset.meta.simulatedTravelVacantDateKeysLocal).toEqual([]);
     expect(dataset.meta.simulatedTestModeledDateKeysLocal).toEqual(["2025-11-01"]);
     expect(dataset.meta.simulatedSourceDetailByDate?.["2025-11-01"]).toBe("SIMULATED_MANUAL_CONSTRAINED");
+  });
+
+  it("labels simulated days using homeDateKey when UTC timestamp day differs from engine localDate", () => {
+    const utcGrid = Array.from({ length: 96 }, (_, slot) => ({
+      timestamp: new Date(new Date("2026-05-14T00:00:00.000Z").getTime() + slot * 15 * 60 * 1000),
+      consumptionKwh: 0.25,
+    }));
+    const projected = convertGreenButtonPersistedRowsToHome(utcGrid, "America/Chicago").intervals.map(
+      homeProjectedIntervalFromRecord
+    );
+    const intervals = projected.map((row) => ({
+      timestamp: row.timestamp,
+      consumption_kwh: row.kwh,
+      interval_minutes: 15 as const,
+      homeDateKey: row.homeDateKey,
+    }));
+    const homeDate = String(projected[0]?.homeDateKey ?? "");
+    expect(homeDate.length).toBeGreaterThan(0);
+    expect(homeDate).not.toBe("2026-05-14");
+
+    const curve: SimulatedCurve = {
+      start: homeDate,
+      end: homeDate,
+      intervals,
+      monthlyTotals: [],
+      annualTotalKwh: 0,
+      meta: { excludedDays: 0, renormalized: false },
+    };
+    const dataset = buildSimulatedUsageDatasetFromCurve(
+      curve,
+      { baseKind: "SMT_ACTUAL_BASELINE", mode: "SMT_BASELINE", canonicalEndMonth: "2026-05" },
+      {
+        simulatedDayResults: [
+          { localDate: homeDate, displayDayKwh: 12.5, simulatedReasonCode: "TRAVEL_VACANT" } as any,
+        ],
+      }
+    );
+    const simulatedRow = dataset.daily.find((row) => row.date === homeDate);
+    expect(simulatedRow).toMatchObject({
+      date: homeDate,
+      source: "SIMULATED",
+      sourceDetail: "SIMULATED_TRAVEL_VACANT",
+    });
   });
 
   it("reuses the stitched interval payload instead of cloning a second 15-minute object array", () => {

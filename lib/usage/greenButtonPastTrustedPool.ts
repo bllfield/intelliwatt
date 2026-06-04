@@ -193,19 +193,18 @@ export function resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals(args: 
 }): Set<string> {
   const timezone = String(args.timezone ?? "America/Chicago").trim() || "America/Chicago";
   if (!args.decodedIntervals.length) return new Set();
-  return new Set(
-    resolveGreenButtonPastSimTrustedHomeDateKeysForProducer({
-      trustedUtcDateKeys: args.trustedUtcDateKeys,
-      sourceIntervals: materializeGreenButtonPastProducerIntervals({
-        sourceIntervals: args.decodedIntervals,
-        timezone,
-      }),
-      timezone,
-      dateKeyFromTimestamp: (ts) => new Date(ts).toISOString().slice(0, 10),
-      homeCalendar: createHomeIntervalCalendar(timezone),
-      localSlotIndex,
-    })
-  );
+  const homeCalendar = createHomeIntervalCalendar(timezone);
+  return resolveGreenButtonPastSimTrustedHomeDateKeysForProducer({
+    trustedUtcDateKeys: args.trustedUtcDateKeys,
+    sourceIntervals: args.decodedIntervals,
+    timezone,
+    dateKeyFromTimestamp: (ts) => {
+      const homeKey = dateKeyFromIntervalPoint({ timestamp: ts, homeDateKey: null });
+      return /^\d{4}-\d{2}-\d{2}$/.test(homeKey) ? homeKey : "";
+    },
+    homeCalendar,
+    localSlotIndex,
+  });
 }
 
 /** Align validation pool with Past sim: home-local trusted days plus year-shifted target days. */
