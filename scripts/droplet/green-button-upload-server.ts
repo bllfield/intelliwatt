@@ -627,7 +627,6 @@ async function runGreenButtonIngestJob(args: GreenButtonIngestJobArgs): Promise<
     }
 
     const { trimmed, summary, parsed, earliest, latest } = pipelineResult;
-    const storageKey = `usage:raw_green_button:${rawRecordId}`;
 
     await usagePrisma.greenButtonInterval.deleteMany({ where: { homeId: house.id, rawId: { not: rawRecordId } } });
     await usagePrisma.rawGreenButton.deleteMany({ where: { homeId: house.id, NOT: { id: rawRecordId } } });
