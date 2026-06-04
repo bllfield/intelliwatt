@@ -15,6 +15,19 @@ import {
 const HOME = createHomeIntervalCalendar("America/Chicago");
 
 describe("greenButtonSlotRepair", () => {
+  it("halves duplicate-sum slot 77 when 19:15 has its own reading (SMT double-start at 19:00)", () => {
+    const slots = new Map<number, number>([
+      [77, 3.737],
+      [78, 1.159],
+    ]);
+    const collisions = new Map<number, number>([[77, 2]]);
+    const repairs = repairGreenButtonDaySlots(slots, collisions, "2025-04-28", HOME);
+
+    expect(repairs).toBeGreaterThan(0);
+    expect(slots.get(77)).toBeCloseTo(1.8685, 3);
+    expect(slots.get(78)).toBe(1.159);
+  });
+
   it("splits an overfilled slot when the next quarter-hour is missing but usage resumes after", () => {
     const slots = new Map<number, number>([
       [76, 3.737],

@@ -59,23 +59,19 @@ export function repairGreenButtonDaySlots(
   let repairs = 0;
   const maxSlot = expectedSlots[expectedSlots.length - 1]!;
 
-  // Pass 1: duplicate/overfilled bucket beside a gap (e.g. SMT GB 19:00+19:00 → skip 19:15).
+  // Pass 1: duplicate vendor readings summed into one bucket (collisionCount >= 2).
+  // Halve this slot always; only fill slot+1 when that quarter-hour is missing (classic skip-19:15 pattern).
   for (const slot of expectedSlots) {
-    if (slot >= maxSlot) continue;
     const current = getSlotKwh(slots, slot);
     if (current == null) continue;
-    if (!isMissingOrZero(slots.get(slot + 1)) && slots.has(slot + 1)) continue;
-
-    const afterGap = getSlotKwh(slots, slot + 2);
-    if (afterGap == null) continue;
-
     const collisions = collisionBySlot?.get(slot) ?? 1;
-    // Only split when duplicate readings were summed into this bucket (SMT GB XML pattern).
     if (collisions < 2) continue;
 
     const half = current / 2;
     setSlotKwh(slots, slot, half);
-    setSlotKwh(slots, slot + 1, half);
+    if (slot < maxSlot && isMissingOrZero(slots.get(slot + 1))) {
+      setSlotKwh(slots, slot + 1, half);
+    }
     repairs += 1;
   }
 
