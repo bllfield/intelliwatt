@@ -1,5 +1,7 @@
 # Simulated usage: two API calls and Past timeout
 
+**Upstream interval truth:** Past cache fingerprints and cold builds use the same persisted interval loaders as Usage (`docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md`). Green Button rows must pass `greenButtonIntervalReadiness`; do not treat cached `insights.fifteenMinuteAverages` as live truth when DB intervals or ingest version changed.
+
 ## Why two calls when you open "Past" on the dashboard?
 
 1. **GET /api/user/usage/simulated** (list)  

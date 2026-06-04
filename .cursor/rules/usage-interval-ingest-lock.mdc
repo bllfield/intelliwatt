@@ -1,0 +1,39 @@
+---
+description: Permanent usage interval ingest/read rules — one persist path, no read-time repair (PC-2026-08)
+globs: lib/usage/greenButton*.ts,lib/usage/loadPersistedGreenButtonIntervals.ts,lib/usage/normalizeSmtIntervals.ts,lib/usage/actualDatasetForHouse.ts,lib/time/greenButtonPersistedIntervalConvert.ts,lib/time/smtPersistedIntervalConvert.ts,app/api/green-button/**/*.ts,scripts/droplet/green-button-upload-server.ts,modules/realUsageAdapter/greenButton.ts,lib/usage/aggregateMonthlyBuckets.ts,lib/plan-engine/runPlanPipelineForHome.ts
+alwaysApply: true
+---
+
+# Usage interval source of truth (permanent — PC-2026-08 shipped)
+
+**Contract:** `docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md`  
+**Master plan:** `docs/PROJECT_PLAN.md` → PC-2026-08
+
+## Non-negotiable
+
+### Green Button
+
+- **Ingest only:** `runGreenButtonUsagePipeline` → `normalizeGreenButtonReadingsTo15Min` (overlap + slot repair). Writable ingest: app upload route + Droplet server only — **no** forked normalize in Droplet.
+- **Persist:** `GreenButtonInterval` rows are canonical; stamp `intervalIngestVersion` in upload `parseMessage` via `greenButtonIngestContract.ts`.
+- **Read:** `loadPersistedGreenButtonIntervals` + `convertGreenButtonPersistedRowsToHome` only. **Forbidden** in production read paths: `repairGreenButtonIntervalSeries` (except rehydrate script/tests).
+- **Stale gate:** `resolveGreenButtonIntervalIngestReadiness` — sim/plans/Usage must not serve intervals when ingest version is stale.
+- **`greenButton.ts`:** year-shift/trusted-pool only; do not re-normalize or re-repair base intervals unless user explicitly expands scope.
+
+### SMT
+
+- **Ingest only:** `normalizeSmtIntervals` / `normalizeAndPersistSmtIntervals` / admin ingest routes — not on `getActualIntervalsForRange` read path.
+- **Read:** `convertSmtPersistedRowsToHome` only for interval projection.
+- **Coverage/heal:** `ensureSmtCoverage` + `smtWindowStatus` per `.cursor/rules/smt-unification-lock.mdc` — separate from normalize-on-read.
+
+### Shared
+
+- Raw vendor bytes are for **re-ingest** only (`rawGreenButton`, SMT raw tables), not live sim/plan/chart truth.
+- Do not add a second loader that applies repair/normalize on read “for safety.” Fix data via rehydrate/re-upload.
+
+## If a change conflicts with this rule
+
+Stop and ask the user before adding read-time repair, a second ingest pipeline, or serving unstamped/stale `GreenButtonInterval` rows to product surfaces.
+
+## Doc sync
+
+Same-pass updates: `docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md`, `docs/PROJECT_PLAN.md` PC-2026-08, `docs/PROJECT_CONTEXT.md`, `docs/USAGE_LAYER_MAP.md`, `docs/USAGE_SIMULATION_PLAN.md`, `docs/SURFACE_PARITY_OWNERS.md`, `docs/SMT_UNIFICATION_COMPLETE.md`, `docs/PAST_SHARED_CORE_UNIFICATION_PLAN.md`, `docs/CHAT_BOOTSTRAP.txt`.

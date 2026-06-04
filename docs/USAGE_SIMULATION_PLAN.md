@@ -13,6 +13,7 @@ This is a prerequisite for the next onboarding steps:
 Those inputs will be used to generate a **15‑minute interval estimate** for the missing period(s), while preserving any real measured usage we do have.
 
 ## Core principles / guardrails
+- **Usage interval source of truth (shipped PC-2026-08):** SMT and Green Button intervals are normalized/repaired **only at ingest**, persisted in `SmtInterval` / `GreenButtonInterval`, and read everywhere via shared loaders — **never** raw vendor rows or read-time slot repair on product paths. **Contract:** `docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md`. **Lock:** `.cursor/rules/usage-interval-ingest-lock.mdc`. **Master plan:** `docs/PROJECT_PLAN.md` → PC-2026-08. Simulation, Past, and plans consume **persisted** interval truth from `getActualUsageDatasetForHouse` / `getActualIntervalsForRangeWithSource`; stale GB ingest is gated until re-upload or rehydrate.
 - **One Path Sim rescue architecture:** `docs/ONE_PATH_SIM_ARCHITECTURE.md` is the canonical written architecture reference for One Path Sim. One Path Sim Admin is currently pre-cutover only. It is the proving harness / truth console, not proof that all older surfaces are already rerouted.
 - **Usage upstream rule:** the existing usage page / usage pipeline remains the upstream source of truth for usage data and usage curve production. Simulation begins only after usage truth exists, and One Path must consume persisted usage truth as upstream input rather than becoming a new usage producer.
 - **Current One Path baseline rule:** baseline is usage passthrough only for `INTERVAL`, `MANUAL_MONTHLY`, and `MANUAL_ANNUAL`. Baseline must not simulate, must not fabricate a synthetic curve/dataset, and must not do final normalized chart/output structuring.
@@ -510,7 +511,7 @@ We then extend the bucket builder to read from a canonical “interval usage” 
 
 ### Canonical Past Sim Artifact Rule
 
-- Raw actual usage remains the raw source of truth.
+- **Persisted actual intervals** (`GreenButtonInterval` / `SmtInterval` after ingest) are the upstream truth for all actual-backed simulation inputs. Raw vendor files are re-ingest inputs only (`docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md`).
 - Past Corrected Baseline is the first canonical derived full-year artifact.
 - Past Corrected Baseline is built from:
   - actual SMT intervals for non-travel and non-vacant dates, and

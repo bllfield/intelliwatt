@@ -18,9 +18,9 @@ This document defines the canonical interval-series layers and maps current endp
   - Current meaning: actual usage intervals, source selected by recency (SMT or Green Button).
   - Target layer: `ACTUAL_USAGE_INTERVALS`.
 
-- `POST /api/green-button/upload` (and admin variant)
-  - Current meaning: ingests Green Button intervals.
-  - Target layer: writes `ACTUAL_USAGE_INTERVALS`.
+- `POST /api/green-button/upload` (and Droplet `green-button-upload-server`)
+  - **Ingest only:** `runGreenButtonUsagePipeline` → writes repaired/normalized rows to `GreenButtonInterval`.
+  - Target layer: writes `ACTUAL_USAGE_INTERVALS` (persisted truth — see `docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md`).
   - Shifted Green Button actuals remain part of this actual layer. When prior-year data is shifted into a target coverage window, trusted shifted source days (90 intervals, DST-bounded by `expectedIntervalsForDateISO()`) stay actual-backed, preserve `sourceDateByTargetDate`, disclose source-day weather use, and must not be reclassified by simulation as `SIMULATED_INCOMPLETE_METER` unless the shifted source day is below the trusted threshold.
 
 - `POST /api/internal/smt/ingest-normalize` (and admin normalize/raw-upload/backfill/analysis normalize-smt routes)
@@ -28,10 +28,12 @@ This document defines the canonical interval-series layers and maps current endp
   - Target layer: writes `ACTUAL_USAGE_INTERVALS`.
 
 - Repository/functions mapped to this layer:
-  - `lib/usage/actualDatasetForHouse.ts`
-  - `modules/realUsageAdapter/*`
-  - `modules/realUsageAdapter/greenButton.ts` owns shifted Green Button day precedence/padding before simulation.
-  - `lib/usage/dualWriteUsageIntervals.ts` (replication from main DB to usage DB mirror)
+  - **Read (GB):** `lib/usage/loadPersistedGreenButtonIntervals.ts` + `lib/usage/greenButtonIntervalReadiness.ts` via `lib/usage/actualDatasetForHouse.ts`
+  - **Read (SMT):** `lib/usage/actualDatasetForHouse.ts` → `convertSmtPersistedRowsToHome`
+  - **Ingest (GB):** `lib/usage/greenButtonUsagePipeline.ts` only
+  - **Ingest (SMT):** `lib/usage/normalizeSmtIntervals.ts` (+ admin ingest routes)
+  - `modules/realUsageAdapter/greenButton.ts` — year-shift/trusted-pool on ingest-trusted DB rows only (not second normalize)
+  - `lib/usage/dualWriteUsageIntervals.ts` (SMT replication to usage DB mirror)
 
 ### `BASELINE_INTERVALS`
 
@@ -114,6 +116,17 @@ Persistence status today:
 - **One Path** may **trigger** `ensureSmtCoverage` only; no parallel SMT pull/backfill/wait in `one-path-sim/route.ts`.
 - **Usage dashboard** displays partial SMT days; **Past Sim** (INTERVAL) does not trust days with fewer than 96 Chicago slots.
 - `/api/user/smt/orchestrate` and `/api/user/usage/status` delegate to `smtWindowStatus` + `ensureSmtCoverage` — do not add a second completeness derivation.
+
+## Usage interval source of truth (shipped — PC-2026-08)
+
+**Record:** `docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md` · **Lock:** `.cursor/rules/usage-interval-ingest-lock.mdc`
+
+| Source | Ingest owner | Persisted table | Read owner |
+|--------|--------------|-----------------|------------|
+| Green Button | `runGreenButtonUsagePipeline` | `GreenButtonInterval` | `loadPersistedGreenButtonIntervals` + `convertGreenButtonPersistedRowsToHome` |
+| SMT | `normalizeSmtIntervals` / admin routes | `SmtInterval` | `convertSmtPersistedRowsToHome` via `actualDatasetForHouse` |
+
+**Rules:** no read-time GB slot repair; no serving stale GB (`intervalIngestVersion` gate); raw vendor files for re-ingest only.
 
 ## Actionable Standardization Step
 

@@ -57,7 +57,8 @@ See **`docs/ONE_PATH_DUAL_RUN_GOAL.md`** for the full spec. Summary:
 ### Usage stays upstream
 
 - The existing usage page / usage pipeline remains the upstream source of truth for usage data and usage curve production.
-- Simulation starts only **after** usage truth exists.
+- **Interval rows:** ingest once → `GreenButtonInterval` / `SmtInterval`; read via `actualDatasetForHouse` / shared loaders only (`docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md`, PC-2026-08, `.cursor/rules/usage-interval-ingest-lock.mdc`). One Path must not fork normalize/repair or read raw vendor XML for charts/sim.
+- Simulation starts only **after** persisted usage truth exists.
 - One Path baseline must reuse persisted upstream usage truth for that mode instead of simulating a baseline.
 - When persisted upstream usage truth is missing, baseline may request the existing shared usage refresh/orchestration owner, then retry the persisted read.
 - One Path Sim must **not** become a new upstream usage producer.

@@ -6,6 +6,8 @@
 
 **Master data truth:** `getActualUsageDatasetForHouse` in `lib/usage/actualDatasetForHouse.ts` (via `lib/usage/userUsageHouseContract.ts` for dashboard/baseline).
 
+**Interval ingest/read contract (shipped PC-2026-08):** `docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md` · `.cursor/rules/usage-interval-ingest-lock.mdc` — one persist path per source; no read-time GB repair; no serving stale GB rows.
+
 ---
 
 ## Surfaces (same contract, different read models)
@@ -23,6 +25,8 @@
 
 | Concern | Owner module | SMT | Green Button |
 |---------|--------------|-----|--------------|
+| **Ingest (normalize/repair)** | `lib/usage/greenButtonUsagePipeline.ts` / `normalizeSmtIntervals.ts` | Admin ingest routes → `SmtInterval` | App upload + Droplet → `GreenButtonInterval` |
+| **Read (product paths)** | `actualDatasetForHouse.ts` | `convertSmtPersistedRowsToHome` | `loadPersistedGreenButtonIntervals` + `greenButtonIntervalReadiness` |
 | 365-day window | `lib/usage/canonicalMetadataWindow.ts` | Chicago bounds | GB file-anchored via `greenButtonCoverage.ts` |
 | Per-home timezone | `lib/time/resolveHomeTimezone.ts` | Default Central | Address/state |
 | Interval calendar | `lib/time/homeIntervalCalendar.ts` + `actualIntervalCalendar.ts` | 96/96 slots | DST wall 92/96/100; trusted pool completeness via `greenButtonTrustedCompletenessThreshold` (96 cap on fall-back, same as SMT) |
@@ -87,5 +91,7 @@ Two parallel module trees exist for historical reasons. **Any Past Sim parity fi
 - `docs/ONE_PATH_DUAL_RUN_GOAL.md` — **canonical** One Path vs user Past lab model
 - `.cursor/rules/one-path-dual-run-lock.mdc` — agent constraint
 - `docs/SMT_UNIFICATION_COMPLETE.md` — SMT owners (shipped)
+- `docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md` — GB + SMT ingest/read SoT (shipped PC-2026-08)
 - `docs/SMT_UNIFICATION_AGENT_BOOTSTRAP.md` — maintenance bootstrap
 - `.cursor/rules/smt-unification-lock.mdc` — permanent constraints
+- `.cursor/rules/usage-interval-ingest-lock.mdc` — GB/SMT ingest/read constraints

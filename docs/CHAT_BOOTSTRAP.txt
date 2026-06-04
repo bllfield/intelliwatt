@@ -74,6 +74,14 @@ ONE PATH SIM RESCUE ARCHITECTURE
 - **Known-house sandbox tuning rule:** repeated One Path tuning runs should use the sandbox-only known-house scenario registry/preset loader under `modules/onePathSim/**`. Presets may preload keeper-user identity, house/context selection, scenario selection, validation inputs, travel ranges, expected truth source, and review expectations into the existing One Path Admin controls and AI copy payload, but they must not add live persistence or touch live app surfaces.
 
 ========================================
+USAGE INTERVAL SOURCE OF TRUTH (SHIPPED — PC-2026-08 COMPLETE)
+========================================
+
+- **Contract:** `docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md` · **Master:** `docs/PROJECT_PLAN.md` PC-2026-08 · **Lock:** `.cursor/rules/usage-interval-ingest-lock.mdc`
+- **Rule:** ingest once (normalize/repair) → persist `GreenButtonInterval` / `SmtInterval` → read via shared loaders only. No read-time GB slot repair; no serving raw vendor bytes or stale GB (`intervalIngestVersion` gate). Droplet + app upload both use `runGreenButtonUsagePipeline`.
+- **Parity:** Usage, baseline, Past, GapFill, and plans must all see the same persisted intervals for a house — fix data via re-upload/rehydrate, not a second normalize on read.
+
+========================================
 SMT INTERVAL UNIFICATION (SHIPPED — PC-2026-05 COMPLETE)
 ========================================
 

@@ -4,6 +4,8 @@
 
 **Status:** **Complete** (Phases 1–8 shipped). **Record:** `docs/SMT_UNIFICATION_COMPLETE.md`. **Ongoing:** `.cursor/rules/smt-unification-lock.mdc` (always apply) — any SMT-related change must preserve single owners below.
 
+**Related (GB + SMT ingest/read):** `docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md` · `docs/PROJECT_PLAN.md` → PC-2026-08 · `.cursor/rules/usage-interval-ingest-lock.mdc`
+
 **Last updated:** 2026-05-20
 
 This document is the **single implementation spec** for unifying Smart Meter Texas (SMT) interval coverage: one window, one day-status read, one heal path, strict **96/96** Chicago slots for SMT, per-session heal throttle. **Green Button is out of scope** for behavior changes in this effort.

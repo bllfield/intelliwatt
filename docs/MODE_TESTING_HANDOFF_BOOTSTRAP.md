@@ -19,9 +19,11 @@ Read these in order and confirm in your first reply that you read them:
 4. docs/ONE_PATH_SIM_ARCHITECTURE.md
 5. docs/USAGE_LAYER_MAP.md
 6. docs/SMT_UNIFICATION_COMPLETE.md + docs/PROJECT_PLAN.md → PC-2026-05
-7. .cursor/rules/one-path-dual-run-lock.mdc
-8. .cursor/rules/smt-unification-lock.mdc
-9. .cursor/rules/shared-sim-window-lock.mdc
+7. docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md + docs/PROJECT_PLAN.md → PC-2026-08 (ingest once, read persisted only)
+8. .cursor/rules/one-path-dual-run-lock.mdc
+9. .cursor/rules/smt-unification-lock.mdc
+10. .cursor/rules/usage-interval-ingest-lock.mdc
+11. .cursor/rules/shared-sim-window-lock.mdc
 
 Then skim modules/usageSimulator/kinds.ts for IntervalSeriesKind and the One Path admin route:
 app/api/admin/tools/one-path-sim/route.ts

@@ -28,6 +28,32 @@
 - **One Path SMT recovery rule (PC-2026-05 shipped):** interval admin runs trigger `lib/usage/ensureSmtCoverage.ts` only (`profile: admin_sim`, session keys `run:` / `post:`). No direct `requestTargetedSmtIntervalBackfillForHouse` or duplicate long SMT wait loops in `app/api/admin/tools/one-path-sim/route.ts`. Stale/incomplete tail does not block results; post-sim may call ensure with artifact incomplete-day hints, rebuild, and rerun once. Usage refresh/heal targets incomplete days **within the persisted SMT interval span** only (`resolveSmtPersistedCoverageSpan`, `resolveSmtHealBackfillDateKeys`); wide backfill start clamps to persisted start; retries after 30m while in-span gaps remain. Admin **full-window re-ingest:** `lib/usage/fullWindowSmtReingest.ts` + One Path `full_window_smt_reingest`. **Mode testing handoff:** `docs/MODE_TESTING_HANDOFF_BOOTSTRAP.md`.
 - **One Path known-house tuning rule:** repeated One Path tuning runs should use the sandbox-only known-house scenario registry under `modules/onePathSim/**`. Presets may preload keeper-user selection, house/context resolution strategy, scenario selection, validation inputs, weather preference, travel ranges, and review expectations into the existing One Path Admin controls, and the same preset identity should flow into sandbox summaries / AI copy payloads. No live persistence or live-surface wiring is part of this step.
 - **Cutover honesty rule:** internal seal does not mean live cutover is complete. GapFill and user sim pages are still not routed through One Path; Manual Lab now shares the One Path Stage 2 calc/read path while keeping its separate admin Stage 1 surface.
+- **Usage interval source-of-truth rule (PC-2026-08 shipped):** SMT and Green Button intervals are normalized/repaired **only at ingest**, persisted once, read everywhere via shared loaders — **never** raw vendor rows or read-time repair on product paths. GB: `runGreenButtonUsagePipeline` → `GreenButtonInterval`; read: `loadPersistedGreenButtonIntervals` + `greenButtonIntervalReadiness` gate. SMT: `normalizeSmtIntervals` → `SmtInterval`; read: `convertSmtPersistedRowsToHome`. **Contract:** `docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md`. **Lock:** `.cursor/rules/usage-interval-ingest-lock.mdc`.
+
+## PC-2026-08 — Usage interval source of truth (COMPLETE — 2026-05-20)
+
+**Status:** **Complete**. **Record:** `docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md`. **Lock:** `.cursor/rules/usage-interval-ingest-lock.mdc`.
+
+**Problem:** Green Button (and to a lesser extent documentation) allowed **multiple** normalize/repair/read paths — Droplet fork, Usage re-repair on read, Past/plans reading stale DB — causing Usage vs Past vs plan parity failures.
+
+**Product rules (locked):**
+
+- **One ingest pipeline per source:** GB = `runGreenButtonUsagePipeline`; SMT = `normalizeSmtIntervals` / admin ingest routes.
+- **One persist store per source:** `GreenButtonInterval`, `SmtInterval` (usage DB mirror via existing dual-write).
+- **One read stack:** `loadPersistedGreenButtonIntervals` + `convertGreenButtonPersistedRowsToHome` (GB); `convertSmtPersistedRowsToHome` (SMT). **No** `repairGreenButtonIntervalSeries` on `actualDatasetForHouse` or range fetch.
+- **GB stale gate:** `resolveGreenButtonIntervalIngestReadiness` — Usage, Past, plans, One Path, and `fetchGreenButtonIntervalsForCoverageWindow` fail closed until `intervalIngestVersion` matches or data is rehydrated/re-uploaded.
+- **Raw files:** `rawGreenButton` / SMT raw — **re-ingest only**, not live truth for sim/charts/plans.
+
+**Shipped owners:**
+
+| Source | Ingest | Read | Stale / repair |
+|--------|--------|------|----------------|
+| Green Button | `greenButtonUsagePipeline.ts`, Droplet + app upload | `loadPersistedGreenButtonIntervals.ts`, `actualDatasetForHouse.ts` | `greenButtonIntervalReadiness.ts`, `rehydrateGreenButtonIntervalsFromRaw.ts` |
+| SMT | `normalizeSmtIntervals.ts` (+ existing admin routes) | `actualDatasetForHouse.ts` SMT branch | `ensureSmtCoverage.ts` (coverage, not re-normalize) |
+
+**Forbidden going forward:** duplicate GB normalize in Droplet; read-time GB slot repair in production loaders; serving pre–ingest-v1 `GreenButtonInterval` to sim/plans without gate.
+
+**Same-pass doc sync:** `USAGE_INTERVAL_SOURCE_OF_TRUTH.md`, `USAGE_LAYER_MAP.md`, `PROJECT_CONTEXT.md`, `USAGE_SIMULATION_PLAN.md`, `SURFACE_PARITY_OWNERS.md`, `SMT_UNIFICATION_COMPLETE.md`, `PAST_SHARED_CORE_UNIFICATION_PLAN.md`, `UNIFIED_SIM_FINGERPRINT_PLAN.md`, `SIMULATED_USAGE_TWO_CALLS.md`, `CHAT_BOOTSTRAP.txt`, `ONE_PATH_SIM_ARCHITECTURE.md`, `ARCHITECTURE_STANDARDS.md`, `MODE_TESTING_HANDOFF_BOOTSTRAP.md`, `SMT_UNIFICATION_AGENT_BOOTSTRAP.md`; fix any doc that still says “raw actual = raw source of truth.”
 
 ## PC-2026-06 — One Path Past dual-run (COMPLETE — SMT + GB Past admin run)
 
@@ -137,6 +163,7 @@
 
 - Any structural change to simulation ownership, module boundaries, orchestration, cutover state, upstream/downstream truth ownership, or lockbox isolation must update the relevant docs and plan files in the same pass.
 - **SMT coverage changes:** same-pass updates must keep `docs/SMT_UNIFICATION_COMPLETE.md`, this PC-2026-05 section, and `.cursor/rules/smt-unification-lock.mdc` accurate. Also sync `docs/SMT_UNIFICATION_PLAN.md`, `docs/CHAT_BOOTSTRAP.txt`, `docs/PROJECT_CONTEXT.md`, `docs/USAGE_LAYER_MAP.md`, `docs/ONE_PATH_SIM_ARCHITECTURE.md` when behavior or owners change.
+- **Usage interval ingest/read changes:** same-pass updates must keep `docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md`, PC-2026-08, and `.cursor/rules/usage-interval-ingest-lock.mdc` accurate.
 - Required same-pass workflow:
   - code change
   - docs/plan sync
@@ -387,7 +414,7 @@ Checklist for stabilization follow-up (narrow scope, only if still needed):
 
 ### Canonical Past Sim Artifact Rule
 
-- Raw actual usage remains the raw source of truth.
+- **Interval usage for product surfaces** remains the **persisted** SMT/Green Button interval tables after ingest (`docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md`). Raw vendor files are re-ingest inputs only, not live chart/sim/plan truth.
 - Past Corrected Baseline is the first canonical derived full-year artifact.
 - Past Corrected Baseline is built from:
   - actual SMT intervals for non-travel and non-vacant dates, and

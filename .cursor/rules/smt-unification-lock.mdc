@@ -7,7 +7,8 @@ alwaysApply: true
 # SMT coverage rules (permanent — PC-2026-05 shipped)
 
 **Completion record:** `docs/SMT_UNIFICATION_COMPLETE.md`  
-**Architecture detail:** `docs/SMT_UNIFICATION_PLAN.md` · **Master plan:** `docs/PROJECT_PLAN.md` → PC-2026-05
+**Architecture detail:** `docs/SMT_UNIFICATION_PLAN.md` · **Master plan:** `docs/PROJECT_PLAN.md` → PC-2026-05  
+**Interval ingest/read (GB + SMT):** `docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md` · `.cursor/rules/usage-interval-ingest-lock.mdc` (PC-2026-08)
 
 These rules apply to **every** change that touches SMT interval coverage, readiness, heal, or INTERVAL Past Sim trusted pools — not only the original unification phases.
 

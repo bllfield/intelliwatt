@@ -24,7 +24,7 @@
 
 Simulator modules re-export window helpers from `canonicalMetadataWindow.ts` for backward compatibility.
 
-**Green Button interval ingest (2026-05):** single pipeline `lib/usage/greenButtonUsagePipeline.ts` (normalize + overlap + slot repair) before `GreenButtonInterval` write; Droplet and app upload both call it. Reads use `lib/usage/loadPersistedGreenButtonIntervals.ts` (no read-time slot repair). Audit: `docs/USAGE_INTERVAL_INGEST_AUDIT.md`. Past year-shift/trust remains in `modules/realUsageAdapter/greenButton.ts` (shift only, not re-normalize).
+**Green Button interval ingest/read (PC-2026-08, 2026-05-20):** **Contract:** `docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md` · **Lock:** `.cursor/rules/usage-interval-ingest-lock.mdc` · **Plan:** `docs/PROJECT_PLAN.md` → PC-2026-08. Ingest: `runGreenButtonUsagePipeline` only (app upload + Droplet). Persist: `GreenButtonInterval` with `intervalIngestVersion`. Read: `loadPersistedGreenButtonIntervals` + `greenButtonIntervalReadiness` gate — **no** read-time slot repair. Rehydrate: `rehydrateGreenButtonIntervalsFromRaw`. Past year-shift/trust remains in `modules/realUsageAdapter/greenButton.ts` (shift only, not re-normalize). SMT ingest/read pattern is the same class of rule (normalize at ingest, `convertSmtPersistedRowsToHome` on read).
 
 ## Phase checklist
 

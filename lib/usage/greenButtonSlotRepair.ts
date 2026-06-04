@@ -129,7 +129,7 @@ export function repairGreenButtonHomeLocalBuckets(
   const byDay = new Map<string, Map<number, number>>();
   const collisionByDay = new Map<string, Map<number, number>>();
 
-  for (const [ms, cell] of buckets) {
+  for (const [ms, cell] of Array.from(buckets.entries())) {
     const iso = new Date(ms).toISOString();
     const dateKey = localDateKey(iso, home);
     const slot = localSlotIndex(iso, home);
@@ -142,7 +142,7 @@ export function repairGreenButtonHomeLocalBuckets(
   }
 
   let totalRepairs = 0;
-  for (const [dateKey, daySlots] of byDay) {
+  for (const [dateKey, daySlots] of Array.from(byDay.entries())) {
     totalRepairs += repairGreenButtonDaySlots(
       daySlots,
       collisionByDay.get(dateKey) ?? null,
@@ -152,8 +152,8 @@ export function repairGreenButtonHomeLocalBuckets(
   }
 
   buckets.clear();
-  for (const [dateKey, daySlots] of byDay) {
-    for (const [slot, kwh] of daySlots) {
+  for (const [dateKey, daySlots] of Array.from(byDay.entries())) {
+    for (const [slot, kwh] of Array.from(daySlots.entries())) {
       buckets.set(slotStartMs(dateKey, slot, home), {
         kwh,
         collisionCount: collisionByDay.get(dateKey)?.get(slot) ?? 1,

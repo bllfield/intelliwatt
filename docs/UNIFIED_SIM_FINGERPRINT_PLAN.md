@@ -137,6 +137,12 @@ Final implementation must treat these as four separate shared responsibilities. 
 - Compare is only a reader and consumer of simulator output plus selected actual-day data.
 - Stitch consumes modeled travel/vacant outputs; compare consumes modeled validation/test outputs; neither module is allowed to change those modeled outputs.
 
+## Usage interval source of truth (PC-2026-08 — hard rule)
+
+- Fingerprint build, Past sim, compare, and stitch must read **persisted** SMT/Green Button rows after ingest — never raw vendor files and never read-time GB normalize/repair.
+- **Contract:** `docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md` · **Lock:** `.cursor/rules/usage-interval-ingest-lock.mdc`
+- Fingerprint `sourceHash` / interval slices must reflect the same persisted series as `getActualIntervalsForRangeWithSource`.
+
 ## Full-interval history ownership (hard rule)
 - Full-interval history work belongs in fingerprint building, not in compare.
 - Compare must pull actual usage only for the selected validation/test compare days (current wiring uses `actualContextHouseId` and validation day key sets such as `validationOnlyDateKeysLocal` on the dataset meta consumed by `getSimulatedUsageForHouseScenario`).

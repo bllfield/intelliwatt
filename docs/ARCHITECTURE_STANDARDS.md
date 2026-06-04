@@ -408,7 +408,7 @@
 
 ### Canonical Past Sim Artifact Rule
 
-- Raw actual usage remains the raw source of truth.
+- **Persisted actual intervals** after ingest (`docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md`, PC-2026-08) are upstream truth; raw vendor files are re-ingest inputs only.
 - Past Corrected Baseline is the first canonical derived full-year artifact.
 - Past Corrected Baseline must be saved in the existing Past baseline storage.
 - Past pages, admin tools, cache restore, diagnostics, and downstream systems must read the saved stitched artifact.

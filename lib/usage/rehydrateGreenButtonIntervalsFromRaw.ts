@@ -73,7 +73,7 @@ export async function rehydrateGreenButtonIntervalsFromRawForHouse(args: {
   if (!userId) return { ok: false, error: "missing_userId" };
 
   const { trimmed, startDateKey, endDateKey } = pipeline;
-  await usageClient.greenButtonInterval.deleteMany({ where: { homeId: houseId, rawId });
+  await usageClient.greenButtonInterval.deleteMany({ where: { homeId: houseId, rawId } });
   const intervalData = trimmed.map((interval) => ({
     rawId,
     homeId: houseId,

@@ -2,7 +2,7 @@
 
 **PC-2026-05 is complete.** Use this file for **maintenance** (bugfixes, new SMT features) — not for re-running implementation phases unless explicitly restoring history.
 
-**Before any SMT-related code change:** read `docs/SMT_UNIFICATION_COMPLETE.md`, `docs/PROJECT_PLAN.md` → PC-2026-05, and `.cursor/rules/smt-unification-lock.mdc` (permanent, always apply). Keep docs in sync in the same pass.
+**Before any SMT-related code change:** read `docs/SMT_UNIFICATION_COMPLETE.md`, `docs/PROJECT_PLAN.md` → PC-2026-05, and `.cursor/rules/smt-unification-lock.mdc` (permanent, always apply). For interval **ingest/read** (including Green Button), also read `docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md`, PC-2026-08, and `.cursor/rules/usage-interval-ingest-lock.mdc`. Keep docs in sync in the same pass.
 
 For historical phase-by-phase work, see `docs/SMT_UNIFICATION_PHASE_PROMPTS.md`.
 
@@ -21,19 +21,20 @@ Before any grep, code, or opinion:
 
 1. Read **docs/SMT_UNIFICATION_COMPLETE.md** (shipped owners + forbidden patterns).
 2. Read **docs/PROJECT_PLAN.md** → **PC-2026-05** (master plan; overrides informal chat summaries).
-3. Read **.cursor/rules/smt-unification-lock.mdc** and **.cursor/rules/shared-sim-window-lock.mdc** — these are permanent constraints.
-4. In your first reply, state: (a) you read COMPLETE + PC-2026-05, (b) the specific change requested, (c) which single owner module(s) you will touch.
+3. Read **docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md** + **PC-2026-08** + **.cursor/rules/usage-interval-ingest-lock.mdc** when touching ingest, persisted interval reads, or Green Button.
+4. Read **.cursor/rules/smt-unification-lock.mdc** and **.cursor/rules/shared-sim-window-lock.mdc** — these are permanent constraints.
+5. In your first reply, state: (a) you read COMPLETE + PC-2026-05 (+ PC-2026-08 if GB/ingest), (b) the specific change requested, (c) which single owner module(s) you will touch.
 
 Do NOT start implementation until you have read the above.
 
 ## Then read (in order)
 
-5. docs/SMT_UNIFICATION_PLAN.md — architecture detail (must align with PROJECT_PLAN)
-6. docs/USAGE_LAYER_MAP.md — SMT layer owners
-7. docs/ONE_PATH_DUAL_RUN_GOAL.md — One Path Past lab: two runs, one pipeline (NOT artifact copy)
-8. .cursor/rules/one-path-dual-run-lock.mdc
-9. docs/SURFACE_PARITY_OWNERS.md — Usage / Baseline / Past Sim parity map (SMT + Green Button, dual Past stacks)
-10. docs/ONE_PATH_SIM_ARCHITECTURE.md — One Path triggers ensureSmtCoverage only
+6. docs/SMT_UNIFICATION_PLAN.md — architecture detail (must align with PROJECT_PLAN)
+7. docs/USAGE_LAYER_MAP.md — SMT layer owners
+8. docs/ONE_PATH_DUAL_RUN_GOAL.md — One Path Past lab: two runs, one pipeline (NOT artifact copy)
+9. .cursor/rules/one-path-dual-run-lock.mdc
+10. docs/SURFACE_PARITY_OWNERS.md — Usage / Baseline / Past Sim parity map (SMT + Green Button, dual Past stacks)
+11. docs/ONE_PATH_SIM_ARCHITECTURE.md — One Path triggers ensureSmtCoverage only
 
 Optional: `npx tsx scripts/audit-smt-day-coverage.ts <esiid> <dateKey>` when changing slot counting or day status.
 
