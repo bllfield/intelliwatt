@@ -35,27 +35,28 @@ describe("green button upload house rebinding", () => {
     expect(userRouteSource).toContain("homeId: previousRawHomeId, rawId: rawRecord.id");
   });
 
-  it("keeps Droplet Green Button cleanup sequential for single-connection pools", () => {
+  it("returns 202 before background ingest to avoid upload gateway timeouts", () => {
     const dropletTsSource = readRepoFile("scripts/droplet/green-button-upload-server.ts");
-    const dropletJsSource = readRepoFile("scripts/droplet/green-button-upload-server.js");
-    const tsCleanup = sourceBetween(
+    const clientSource = readRepoFile("components/dashboard/GreenButtonUtilitiesCard.tsx");
+
+    expect(dropletTsSource).toContain("async function runGreenButtonIngestJob");
+    expect(dropletTsSource).toContain("res.status(202)");
+    expect(dropletTsSource).toContain("upload.accepted_async");
+    expect(clientSource).toContain("dropletResponse.status === 202");
+    expect(clientSource).toContain("waitForGreenButtonReady");
+  });
+
+  it("keeps Droplet Green Button ingest cleanup sequential for single-connection pools", () => {
+    const dropletTsSource = readRepoFile("scripts/droplet/green-button-upload-server.ts");
+    const ingestJob = sourceBetween(
       dropletTsSource,
-      "Production Droplet DB clients can run with a single connection",
-      "const intervalData = trimmed.map"
-    );
-    const jsUploadHandler = sourceBetween(
-      dropletJsSource,
-      "app.post(\"/upload\"",
-      "app.use((err"
+      "async function runGreenButtonIngestJob",
+      "app.post(\"/upload\""
     );
 
-    expect(tsCleanup).not.toContain("Promise.all");
-    expect(tsCleanup).not.toContain("cleanupTasks");
-    expect(jsUploadHandler).toContain("single connection");
-    expect(jsUploadHandler).not.toContain("await Promise.all");
-    expect(jsUploadHandler.indexOf("if (!acquireHomeLock(payload.houseId))")).toBeLessThan(
-      jsUploadHandler.indexOf("await usagePrisma.greenButtonInterval.deleteMany({ where: { homeId: house.id } })")
-    );
+    expect(ingestJob).not.toContain("Promise.all");
+    expect(ingestJob).not.toContain("cleanupTasks");
+    expect(ingestJob).toContain("deleteMany({ where: { homeId: house.id, rawId: { not: rawRecordId } } })");
   });
 
   it("keeps Droplet service management on one Green Button unit for port 8091", () => {

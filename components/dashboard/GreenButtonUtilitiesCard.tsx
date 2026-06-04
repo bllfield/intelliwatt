@@ -10,6 +10,8 @@ import {
 
 const GREEN_BUTTON_STATUS_POLL_MS = 2500;
 const GREEN_BUTTON_STATUS_MAX_WAIT_MS = 12 * 60 * 1000;
+/** Vercel serverless request body limit — droplet path required above this size. */
+const VERCEL_GREEN_BUTTON_UPLOAD_MAX_BYTES = 4.5 * 1024 * 1024;
 
 interface GreenButtonHelpSectionProps {
   houseAddressId?: string | null;
@@ -163,18 +165,45 @@ export default function GreenButtonHelpSection({
         if (trimmedUtility.length > 0) dropletForm.append("utilityName", trimmedUtility);
         if (trimmedAccount.length > 0) dropletForm.append("accountNumber", trimmedAccount);
 
-        const dropletResponse = await fetch(ticket.uploadUrl as string, {
-          method: "POST",
-          body: dropletForm,
-          credentials: "omit",
-        });
+        let dropletResponse: Response;
+        try {
+          dropletResponse = await fetch(ticket.uploadUrl as string, {
+            method: "POST",
+            body: dropletForm,
+            credentials: "omit",
+          });
+        } catch (networkErr) {
+          if (selectedFile.size <= VERCEL_GREEN_BUTTON_UPLOAD_MAX_BYTES) {
+            await uploadViaAppRoute();
+            return;
+          }
+          throw new Error(
+            "Secure upload timed out or was blocked (often a gateway timeout). For large files, wait a minute and check Usage, or retry once.",
+          );
+        }
+
+        if (
+          (dropletResponse.status === 502 ||
+            dropletResponse.status === 503 ||
+            dropletResponse.status === 504) &&
+          selectedFile.size <= VERCEL_GREEN_BUTTON_UPLOAD_MAX_BYTES
+        ) {
+          await uploadViaAppRoute();
+          return;
+        }
 
         const dropletData = await dropletResponse.json().catch(() => ({}));
-        if (!dropletResponse.ok || dropletData?.ok === false) {
+        const dropletAccepted =
+          dropletResponse.ok &&
+          dropletData?.ok !== false &&
+          (dropletResponse.status === 202 || dropletResponse.status === 201 || dropletData?.processing === true);
+        if (!dropletAccepted) {
           const detail =
             typeof dropletData?.error === "string"
               ? dropletData.error
-              : "Upload failed on the secure uploader.";
+              : dropletResponse.status === 504
+                ? "Secure upload timed out. Wait a minute and open Usage to see if processing finished, then retry if needed."
+                : "Upload failed on the secure uploader.";
           throw new Error(detail);
         }
       };

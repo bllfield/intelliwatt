@@ -502,6 +502,123 @@ function setCorsHeaders(res: Response, origin: string | undefined) {
   );
 }
 
+type GreenButtonIngestJobArgs = {
+  buffer: Buffer;
+  filename: string;
+  house: { id: string; userId: string; utilityName: string | null; esiid: string | null };
+  utilityName: string | null;
+  accountNumber: string | null;
+  rawRecordId: string;
+  uploadRecordId: string;
+  previousRawHomeId: string | null;
+};
+
+/** Runs after HTTP 202 — avoids nginx/browser timeout while ingest + DB writes complete. */
+async function runGreenButtonIngestJob(args: GreenButtonIngestJobArgs): Promise<void> {
+  const { buffer, filename, house, utilityName, accountNumber, rawRecordId, uploadRecordId, previousRawHomeId } =
+    args;
+  try {
+    const pipelineResult = runGreenButtonUsagePipeline({
+      buffer,
+      filename,
+      windowDays: MANUAL_USAGE_LIFETIME_DAYS,
+      maxKwhPerInterval: 10,
+    });
+    if (!pipelineResult.ok) {
+      await (prisma as any).greenButtonUpload.update({
+        where: { id: uploadRecordId },
+        data: {
+          parseStatus: pipelineResult.parseStatus,
+          parseMessage: pipelineResult.message,
+        },
+      });
+      logEvent("ingest.pipeline_failed", { uploadRecordId, error: pipelineResult.error });
+      return;
+    }
+
+    const { trimmed, summary, parsed, earliest, latest } = pipelineResult;
+    const storageKey = `usage:raw_green_button:${rawRecordId}`;
+
+    await usagePrisma.greenButtonInterval.deleteMany({ where: { homeId: house.id, rawId: { not: rawRecordId } } });
+    await usagePrisma.rawGreenButton.deleteMany({ where: { homeId: house.id, NOT: { id: rawRecordId } } });
+    await (prisma as any).greenButtonUpload.deleteMany({ where: { houseId: house.id, NOT: { id: uploadRecordId } } });
+    if (previousRawHomeId && previousRawHomeId !== house.id) {
+      await usagePrisma.greenButtonInterval.deleteMany({
+        where: { homeId: previousRawHomeId, rawId: rawRecordId },
+      });
+      await (prisma as any).greenButtonUpload.deleteMany({
+        where: { houseId: previousRawHomeId, storageKey },
+      });
+    }
+
+    const intervalData = trimmed.map((interval) => ({
+      rawId: rawRecordId,
+      homeId: house.id,
+      userId: house.userId,
+      timestamp: interval.timestamp,
+      consumptionKwh: new Prisma.Decimal(interval.consumptionKwh),
+      intervalMinutes: interval.intervalMinutes,
+    }));
+
+    await usagePrisma.greenButtonInterval.deleteMany({ where: { homeId: house.id } });
+    if (intervalData.length > 0) {
+      const BATCH_SIZE = 1000;
+      for (let i = 0; i < intervalData.length; i += BATCH_SIZE) {
+        const slice = intervalData.slice(i, i + BATCH_SIZE);
+        await usagePrisma.greenButtonInterval.createMany({ data: slice });
+      }
+    }
+
+    await (prisma as any).greenButtonUpload.update({
+      where: { id: uploadRecordId },
+      data: {
+        parseStatus: parsed.warnings.length > 0 ? "complete_with_warnings" : "complete",
+        parseMessage: JSON.stringify(summary),
+        dateRangeStart: earliest,
+        dateRangeEnd: latest,
+        intervalMinutes: 15,
+      },
+    });
+
+    try {
+      const { awardGreenButtonUsageEntry } = await import("@/lib/usage/awardGreenButtonUsageEntry");
+      await awardGreenButtonUsageEntry({
+        userId: house.userId,
+        houseId: house.id,
+        uploadId: uploadRecordId,
+        rawGreenButtonId: rawRecordId,
+        utilityName,
+        accountNumber,
+        summary,
+        coverageEnd: latest,
+      });
+    } catch (entryErr) {
+      logEvent("upload.entry_award_error", { error: String(entryErr) });
+    }
+
+    logEvent("upload.success", {
+      rawRecordId,
+      uploadRecordId,
+      intervals: trimmed.length,
+      totalKwh: pipelineResult.totalKwh,
+      warnings: parsed.warnings,
+    });
+  } catch (error) {
+    console.error("[green-button-upload] ingest job failed", error);
+    try {
+      await (prisma as any).greenButtonUpload.update({
+        where: { id: uploadRecordId },
+        data: {
+          parseStatus: "error",
+          parseMessage: String((error as Error)?.message || error),
+        },
+      });
+    } catch (updateErr) {
+      console.error("[green-button-upload] failed to mark upload error", updateErr);
+    }
+  }
+}
+
 app.use((req: Request, res: Response, next: NextFunction) => {
   setCorsHeaders(res, req.headers.origin as string | undefined);
   if (req.method === "OPTIONS") {
@@ -763,111 +880,31 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
 
     logEvent("upload.record", { uploadRecordId, rawRecordId, houseId: house.id, fileSize: buffer.length });
 
-    const pipelineResult = runGreenButtonUsagePipeline({
+    if (!uploadRecordId || !rawRecordId) {
+      throw new Error("upload_record_missing_after_persist");
+    }
+
+    const jobArgs: GreenButtonIngestJobArgs = {
       buffer,
       filename,
-      windowDays: MANUAL_USAGE_LIFETIME_DAYS,
-      maxKwhPerInterval: 10,
-    });
-    if (!pipelineResult.ok) {
-      if (uploadRecordId) {
-        await (prisma as any).greenButtonUpload.update({
-          where: { id: uploadRecordId },
-          data: {
-            parseStatus: pipelineResult.parseStatus,
-            parseMessage: pipelineResult.message,
-          },
-        });
-      }
-      res.status(422).json({
-        ok: false,
-        error: pipelineResult.error,
-        warnings: pipelineResult.parsed?.warnings,
-      });
-      return;
-    }
-
-    const { trimmed, startDateKey, endDateKey, summary, parsed, earliest, latest } = pipelineResult;
-
-    // Production Droplet DB clients can run with a single connection. Keep cleanup sequential
-    // so upload replacement does not compete with itself for the pool.
-    await usagePrisma.greenButtonInterval.deleteMany({ where: { homeId: house.id, rawId: { not: rawRecordId } } });
-    await usagePrisma.rawGreenButton.deleteMany({ where: { homeId: house.id, NOT: { id: rawRecordId } } });
-    await (prisma as any).greenButtonUpload.deleteMany({ where: { houseId: house.id, NOT: { id: uploadRecordId } } });
-    if (previousRawHomeId && previousRawHomeId !== house.id) {
-      await usagePrisma.greenButtonInterval.deleteMany({
-        where: { homeId: previousRawHomeId, rawId: rawRecordId },
-      });
-      await (prisma as any).greenButtonUpload.deleteMany({
-        where: { houseId: previousRawHomeId, storageKey },
-      });
-    }
-    const intervalData = trimmed.map((interval) => ({
-      rawId: rawRecordId!,
-      homeId: house.id,
-      userId: house.userId,
-      timestamp: interval.timestamp,
-      consumptionKwh: new Prisma.Decimal(interval.consumptionKwh),
-      intervalMinutes: interval.intervalMinutes,
-    }));
-
-    // Clear any prior Green Button intervals for this home to avoid double-counting across uploads.
-    await usagePrisma.greenButtonInterval.deleteMany({ where: { homeId: house.id } });
-    if (intervalData.length > 0) {
-      const BATCH_SIZE = 1000;
-      for (let i = 0; i < intervalData.length; i += BATCH_SIZE) {
-        const slice = intervalData.slice(i, i + BATCH_SIZE);
-        await usagePrisma.greenButtonInterval.createMany({ data: slice });
-      }
-    }
-
-    const totalKwh = pipelineResult.totalKwh;
-
-    if (uploadRecordId) {
-      await (prisma as any).greenButtonUpload.update({
-        where: { id: uploadRecordId },
-        data: {
-          parseStatus: parsed.warnings.length > 0 ? "complete_with_warnings" : "complete",
-          parseMessage: JSON.stringify(summary),
-          dateRangeStart: earliest,
-          dateRangeEnd: latest,
-          intervalMinutes: 15,
-        },
-      });
-    }
-
-    try {
-      const { awardGreenButtonUsageEntry } = await import("@/lib/usage/awardGreenButtonUsageEntry");
-      await awardGreenButtonUsageEntry({
-        userId: house.userId,
-        houseId: house.id,
-        uploadId: uploadRecordId!,
-        rawGreenButtonId: rawRecordId!,
-        utilityName,
-        accountNumber,
-        summary,
-        coverageEnd: latest,
-      });
-    } catch (entryErr) {
-      logEvent("upload.entry_award_error", { error: String(entryErr) });
-    }
-
-    res.status(201).json({
-      ok: true,
-      rawId: rawRecordId,
-      intervalsCreated: trimmed.length,
-      totalKwh,
-      warnings: parsed.warnings,
-      dateRangeStart: earliest ? earliest.toISOString() : null,
-      dateRangeEnd: latest ? latest.toISOString() : null,
-    });
-    logEvent("upload.success", {
+      house,
+      utilityName,
+      accountNumber,
       rawRecordId,
       uploadRecordId,
-      intervals: trimmed.length,
-      totalKwh,
-      warnings: parsed.warnings,
+      previousRawHomeId,
+    };
+    void runGreenButtonIngestJob(jobArgs);
+
+    res.status(202).json({
+      ok: true,
+      accepted: true,
+      processing: true,
+      rawId: rawRecordId,
+      uploadRecordId,
+      message: "Green Button file accepted; processing continues in the background.",
     });
+    logEvent("upload.accepted_async", { rawRecordId, uploadRecordId, houseId: house.id });
   } catch (error) {
     console.error("[green-button-upload] failed to handle upload", error);
     if (uploadRecordId) {
