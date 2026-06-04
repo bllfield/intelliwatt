@@ -1509,9 +1509,9 @@ function augmentCanonicalArtifactSimulatedDayTotalsFromArtifactDailySimulated(
     const dk = String(row?.date ?? "").slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dk) || !limitDateKeys.has(dk)) continue;
     if (out[dk] !== undefined && Number.isFinite(Number(out[dk]))) continue;
-    if (!isSimulatedDailySourceForCompare(row)) continue;
     const kwh = Number(row?.kwh);
     if (!Number.isFinite(kwh)) continue;
+    if (!isSimulatedDailySourceForCompare(row) && !limitDateKeys.has(dk)) continue;
     out[dk] = round2Local(kwh);
   }
   return out;

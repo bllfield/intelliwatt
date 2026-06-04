@@ -483,9 +483,13 @@ export function attachValidationCompareProjection(dataset: any): any {
       (row) => String(row?.date ?? "").slice(0, 10) === dk
     );
     if (!dailyRow) continue;
-    if (!isSimulatedDailySourceForCompare(dailyRow)) continue;
     const kwh = Number(dailyRow?.kwh);
-    if (Number.isFinite(kwh)) simSrc[dk] = kwh;
+    if (!Number.isFinite(kwh)) continue;
+    // GB Past validation/scored days may remain `source: ACTUAL` on the stitched daily row while
+    // still carrying modeled day totals; validation-only keys may use artifact daily kWh.
+    if (isSimulatedDailySourceForCompare(dailyRow) || keySet.has(dk)) {
+      simSrc[dk] = kwh;
+    }
   }
   const missingSimTotals = validationOnlyDateKeysLocal.filter((dk) => {
     const raw = simSrc[dk];
