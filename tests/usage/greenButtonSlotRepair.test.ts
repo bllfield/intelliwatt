@@ -15,7 +15,22 @@ import {
 const HOME = createHomeIntervalCalendar("America/Chicago");
 
 describe("greenButtonSlotRepair", () => {
-  it("halves duplicate-sum slot 77 when 19:15 has its own reading (SMT double-start at 19:00)", () => {
+  it("raises a suspicious 19:15 dip when duplicate-sum was stacked on 19:00 (slot 76)", () => {
+    const slots = new Map<number, number>([
+      [76, 3.737],
+      [77, 0.305],
+      [78, 1.75],
+    ]);
+    const collisions = new Map<number, number>([[76, 2]]);
+    const repairs = repairGreenButtonDaySlots(slots, collisions, "2025-04-28", HOME);
+
+    expect(repairs).toBeGreaterThan(0);
+    expect(slots.get(76)).toBeCloseTo(1.8685, 3);
+    expect(slots.get(77)).toBeCloseTo(1.8685, 3);
+    expect(slots.get(78)).toBe(1.75);
+  });
+
+  it("does not overwrite 19:30 when only slot 77 had duplicate collisions", () => {
     const slots = new Map<number, number>([
       [77, 3.737],
       [78, 1.159],

@@ -13,6 +13,9 @@ import {
 /** Treat at-or-below this as a missing quarter-hour (vendor padding / gap), not real zero usage. */
 export const GREEN_BUTTON_SLOT_REPAIR_EPS_KWH = 0.01;
 
+/** Next slot kWh below this fraction of a de-duplicated reading → likely stolen 19:15 energy. */
+const DUPLICATE_NEXT_SLOT_LOW_RATIO = 0.65;
+
 export type GreenButtonBucketCell = {
   kwh: number;
   /** How many raw readings were summed into this home-local bucket (duplicate XML starts, etc.). */
@@ -60,18 +63,37 @@ export function repairGreenButtonDaySlots(
   const maxSlot = expectedSlots[expectedSlots.length - 1]!;
 
   // Pass 1: duplicate vendor readings summed into one bucket (collisionCount >= 2).
-  // Halve this slot always; only fill slot+1 when that quarter-hour is missing (classic skip-19:15 pattern).
+  // SMT GB often emits two 15-min intervals with the same start (e.g. two 19:00 rows) and skips 19:15.
+  // The second reading belongs on the next quarter-hour — not left stacked on 19:00.
   for (const slot of expectedSlots) {
     const current = getSlotKwh(slots, slot);
     if (current == null) continue;
     const collisions = collisionBySlot?.get(slot) ?? 1;
     if (collisions < 2) continue;
 
-    const half = current / 2;
-    setSlotKwh(slots, slot, half);
-    if (slot < maxSlot && isMissingOrZero(slots.get(slot + 1))) {
-      setSlotKwh(slots, slot + 1, half);
+    const perReading = current / collisions;
+    setSlotKwh(slots, slot, perReading);
+
+    let placed = 1;
+    for (let offset = 1; placed < collisions && slot + offset <= maxSlot; offset += 1) {
+      const target = slot + offset;
+      const existing = slots.has(target) ? slots.get(target)! : undefined;
+      const gap = isMissingOrZero(existing);
+      const afterNext = getSlotKwh(slots, target + 1);
+      const suspiciousDip =
+        !gap &&
+        existing != null &&
+        afterNext != null &&
+        perReading > GREEN_BUTTON_SLOT_REPAIR_EPS_KWH &&
+        existing < perReading * DUPLICATE_NEXT_SLOT_LOW_RATIO &&
+        afterNext > existing * 1.15;
+
+      if (!gap && !suspiciousDip) break;
+
+      setSlotKwh(slots, target, perReading);
+      placed += 1;
     }
+
     repairs += 1;
   }
 

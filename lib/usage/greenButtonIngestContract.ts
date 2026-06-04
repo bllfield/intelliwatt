@@ -8,7 +8,7 @@
  */
 
 /** Bump when ingest semantics change (forces re-upload / rehydrate from raw). */
-export const GREEN_BUTTON_INTERVAL_INGEST_VERSION = 2;
+export const GREEN_BUTTON_INTERVAL_INGEST_VERSION = 3;
 
 export type GreenButtonUploadParseSummary = {
   format?: string;
