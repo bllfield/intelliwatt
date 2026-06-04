@@ -34,7 +34,7 @@
 | Past producer | `simulatePastUsageDataset` in **both** trees (see below) | + ledger prep | + `trustedActualDateKeys` from GB fetch |
 | Past engine | `buildPastSimulatedBaselineV1` in **both** `engine.ts` trees | Pending/incomplete/forced simulate | `intervalTrustedSource: GREEN_BUTTON` |
 | Validation compare | `compareProjection.ts` (keep admin + user copies aligned) | `forceSimulateDateKeysLocal` | Same |
-| One Path Past (SMT + GB) ↔ user Past | **Target:** same `recalcSimulatorBuild` / `simulatePastUsageDataset` on test `houseId` as user route. **Drift (remove):** `onePathPastUserSiteParity.ts` copy + lock. **Support:** `resolvePastSimEsiidForHouse.ts`, `pastArtifactIdentity.ts`, `userSiteIsolation` on both reads | Dual-run: separate cache rows; match when inputs + fingerprint match. SMT heal on **source** house only | Do not default to `parityInputHash` copy; recalc after backfill |
+| One Path Past (SMT + GB) ↔ user Past | **Target:** same `recalcSimulatorBuild` / `simulatePastUsageDataset` on test `houseId`. **SMT:** always recalc on admin Past run. **GB:** recalc when cache miss at current GB `inputHash` (`onePathGbPastArtifactRun.ts`). **Support:** `resolvePastSimEsiidForHouse.ts`, `pastArtifactIdentity.ts` | Dual-run; SMT heal on **source**; GB clone on test-home replace | No artifact copy |
 
 **Do not edit** `modules/realUsageAdapter/greenButton.ts` for SMT-only fixes (workspace lock).
 
@@ -55,7 +55,8 @@ Two parallel module trees exist for historical reasons. **Any Past Sim parity fi
 
 - `lib/usage/pastSimSmtLedgerPrep.ts` — SMT ledger + slot-complete filter for Past producers
 - `lib/usage/computeHomeBaseloadKw.ts` — baseload for Usage, baseline, and Past insights
-- `lib/usage/onePathPastUserSiteParity.ts` — **Drift:** artifact copy to test home (see `ONE_PATH_DUAL_RUN_GOAL.md`). Target: input mirror + verify only
+- `lib/usage/onePathPastUserSiteParity.ts` — input mirror on replace; no artifact copy
+- `lib/usage/onePathGbPastArtifactRun.ts` — GB Past cache probe (skip recalc when upload unchanged)
 - `lib/usage/resolvePastSimEsiidForHouse.ts` — resolve meter ESIID for lab-home Past recalc/backfill when `houseAddress.esiid` is unset
 - `lib/usage/onePathPastUserSiteParityLock.ts` — parity lock read/dirty/clear + dataset verify (pure; no DB)
 

@@ -118,12 +118,17 @@ Display-only sharing (e.g. `resolvePastSimFifteenMinuteCurveFromDataset`) is fin
 - Removed: pre-read artifact copy, `unchangedParity` recalc sync, `parityLock` cache pinning, `parityLockRebuild` sim block, copy heal on read.
 - Test-home replace → `mirrorOnePathPastBuildInputsFromSource` (build inputs only).
 
-**Still deprecated / GB out of scope:**
+**Green Button Past (shipped 2026-05-20):**
+
+- Admin `GREEN_BUTTON` + Past `scenarioId` → dual-run on test home via `dispatchPastSimRecalc` (`one_path_admin_gb_past_run`).
+- **Cache-first:** if test-home cache already matches current GB `inputHash` (same upload / unchanged intervals), skip recalc and read artifact only (`lib/usage/onePathGbPastArtifactRun.ts`).
+- **SMT contrast:** INTERVAL Past admin run always recalcs (backfill may change intervals without UI edits).
+
+**Still deprecated:**
 
 - `syncOnePathPastUserSiteParityFromSource` (full artifact copy) — do not add callers.
-- Green Button Past admin run may still use readback-first until a follow-up pass.
 
-**Audit:** `docs/ONE_PATH_DUAL_RUN_SMT_PAST_AUDIT.md`
+**Audits:** `docs/ONE_PATH_DUAL_RUN_SMT_PAST_AUDIT.md`, `docs/ONE_PATH_DUAL_RUN_GB_PAST_AUDIT.md`
 
 | Module | Role today | Target |
 |--------|------------|--------|

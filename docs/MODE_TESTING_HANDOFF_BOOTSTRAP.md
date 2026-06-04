@@ -37,7 +37,7 @@ We are **testing every mode** to ensure display labels, data ownership, SMT life
 | User Usage page | SMT / INTERVAL truth | read-only | Show persisted intervals; **no simulation**; daily rows must have `source`/`sourceDetail` (not "SOURCE UNKNOWN") |
 | One Path Admin | INTERVAL | BASELINE_PASSTHROUGH | Passthrough only — same upstream truth as Usage; **no sim**; 15-min curve + analytics must match Usage |
 | One Path Admin | INTERVAL | PAST_SIM | **Dual-run:** same Past recalc/engine as user site, persist on **test** home only; must match user when inputs + usage truth match (see `ONE_PATH_DUAL_RUN_GOAL.md`). Not copy user artifact. |
-| One Path Admin | GREEN_BUTTON | PAST_SIM | Shifted actual days stay ACTUAL; pending tail label on canonical end |
+| One Path Admin | GREEN_BUTTON | PAST_SIM | Dual-run on test home; recalc only when GB fingerprint/cache miss (same file → read cache). Re-replace test home after new upload on source. |
 | One Path Admin | MANUAL_MONTHLY / MANUAL_ANNUAL | baseline + Past | Stage 1 read + Stage 2 shared Past; no private sim on baseline |
 
 **Canonical end date (Chicago, lag 2):** `2026-05-18` (verify with `resolveCanonicalUsage365CoverageWindow()`).

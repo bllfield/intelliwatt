@@ -29,19 +29,19 @@
 - **One Path known-house tuning rule:** repeated One Path tuning runs should use the sandbox-only known-house scenario registry under `modules/onePathSim/**`. Presets may preload keeper-user selection, house/context resolution strategy, scenario selection, validation inputs, weather preference, travel ranges, and review expectations into the existing One Path Admin controls, and the same preset identity should flow into sandbox summaries / AI copy payloads. No live persistence or live-surface wiring is part of this step.
 - **Cutover honesty rule:** internal seal does not mean live cutover is complete. GapFill and user sim pages are still not routed through One Path; Manual Lab now shares the One Path Stage 2 calc/read path while keeping its separate admin Stage 1 surface.
 
-## PC-2026-06 — One Path Past dual-run (IN PROGRESS — SMT Past run shipped)
+## PC-2026-06 — One Path Past dual-run (COMPLETE — SMT + GB Past admin run)
 
-**Status:** **In progress** (SMT INTERVAL Past admin run recalc shipped 2026-05-20). **Record:** `docs/ONE_PATH_DUAL_RUN_GOAL.md`, `docs/ONE_PATH_DUAL_RUN_SMT_PAST_AUDIT.md`. **Lock:** `.cursor/rules/one-path-dual-run-lock.mdc`.
+**Status:** **Complete** (2026-05-20). **Record:** `docs/ONE_PATH_DUAL_RUN_GOAL.md`, `docs/ONE_PATH_DUAL_RUN_SMT_PAST_AUDIT.md`, `docs/ONE_PATH_DUAL_RUN_GB_PAST_AUDIT.md`. **Lock:** `.cursor/rules/one-path-dual-run-lock.mdc`.
 
 **Goal:** User home and One Path test home each **execute** the shared Past recalc/engine and persist **separate** `PastSimulatedDatasetCache` rows. Identical inputs + identical upstream usage truth (including after SMT backfill) → identical outcomes. Admin edits on test home only → allowed divergence.
 
 **Not the goal:** Copy user Past artifacts to the test home (`onePathPastUserSiteParity.ts` copy/sync, `parityLockRebuild`, admin recalc `unchangedParity` → sync).
 
-**Implementation follow-up (ordered):**
+**Shipped:**
 
-1. Remove or gate copy-first paths; admin Past **run** → test-home `recalcSimulatorBuild` same as user route.
-2. After `ensureSmtCoverage` on source, both sides recalc when interval fingerprint changes.
-3. Keep `onePathPastUserSiteParityLock` for dirty-input detection only; optional post-run verify user vs test hash.
+1. SMT INTERVAL Past admin run → always `dispatchPastSimRecalc` on test home.
+2. GB Past admin run → recalc on cache miss; skip when GB `inputHash` unchanged (same file).
+3. Copy-first parity paths removed; build mirror on test-home replace only.
 
 **Same-pass doc sync:** `ONE_PATH_DUAL_RUN_GOAL.md`, `ONE_PATH_SIM_ARCHITECTURE.md`, `SURFACE_PARITY_OWNERS.md`, `CHAT_BOOTSTRAP.txt`, `MODE_TESTING_HANDOFF_BOOTSTRAP.md`.
 

@@ -19,7 +19,8 @@ alwaysApply: true
 - **Two runs**, **one pipeline**: user home and One Path test home each execute the same Past recalc/engine; each persists only to its own `houseId`.
 - **Match** when inputs + upstream usage truth (including post-backfill interval fingerprint) match.
 - **Differ** only when admin changes test-home variables (home, appliances, travel/vacant, validation, etc.).
-- **SMT backfill** updates usage on the **source** house via `ensureSmtCoverage.ts` only; then **both** sides recalc Past—never serve stale copied user artifacts on the test home.
+- **SMT backfill** updates usage on the **source** house via `ensureSmtCoverage.ts` only; INTERVAL Past admin run **always recalcs** the test home.
+- **Green Button** changes only on **upload**; GB Past admin run recalcs on cache miss at current `inputHash` (`onePathGbPastArtifactRun.ts`), not every run.
 
 ## Forbidden (do not extend)
 

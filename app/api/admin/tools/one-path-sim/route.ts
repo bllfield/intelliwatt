@@ -29,6 +29,7 @@ import {
 import { listOnePathScenarioEvents, readOnePathSimulatedUsageScenario } from "@/modules/onePathSim/serviceBridge";
 import { dispatchPastSimRecalc } from "@/modules/usageSimulator/pastSimRecalcDispatch";
 import { resolvePastSmtValidationPolicy } from "@/lib/usage/pastValidationPolicy";
+import { resolveOnePathGbPastCachedArtifactInputHash } from "@/lib/usage/onePathGbPastArtifactRun";
 import type { TravelRange } from "@/modules/simulatedUsage/types";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
@@ -1853,7 +1854,7 @@ export async function POST(request: NextRequest) {
     try {
       if (!includeDebugDiagnostics && effectiveRawInputBase.scenarioId && !isManualMode) {
         let exactArtifactInputHash: string | null = null;
-        if (mode === "INTERVAL") {
+        if (mode === "INTERVAL" || mode === "GREEN_BUTTON") {
           const validationPolicy = resolvePastSmtValidationPolicy({
             surface: "admin_lab",
             validationSelectionMode: effectiveRawInputBase.validationSelectionMode,
@@ -1862,58 +1863,70 @@ export async function POST(request: NextRequest) {
           const preLockboxTravelRanges = Array.isArray(effectiveRawInputBase.travelRanges)
             ? (effectiveRawInputBase.travelRanges as TravelRange[])
             : [];
-          const recalcDispatched = await dispatchPastSimRecalc({
-            userId: effectiveUserId,
-            houseId: effectiveHouseId,
-            esiid: smtSourceEsiid,
-            mode: "SMT_BASELINE",
-            scenarioId: effectiveRawInputBase.scenarioId,
-            actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
-            weatherPreference: effectiveRawInputBase.weatherPreference,
-            persistPastSimBaseline: true,
-            preLockboxTravelRanges,
-            validationDaySelectionMode: validationPolicy.selectionMode,
-            validationDayCount: validationPolicy.validationDayCount,
-            validationOnlyDateKeysLocal: effectiveRawInputBase.validationOnlyDateKeysLocal,
-            correlationId,
-            runContext: {
-              callerLabel: "one_path_admin_past_run",
-              buildPathKind: "recalc",
-              persistRequested: effectiveRawInputBase.persistRequested !== false,
-              preferredActualSource: "SMT",
-            },
-          });
-          if (recalcDispatched.executionMode === "droplet_async") {
-            return NextResponse.json(
-              {
-                ok: false,
-                error: "past_recalc_async_unsupported",
-                message:
-                  "Past recalc was queued for droplet execution. One Path admin Past run requires inline recalc in this environment.",
-                jobId: recalcDispatched.jobId,
-                correlationId: recalcDispatched.correlationId,
-              },
-              { status: 503 }
-            );
+          const preferredActualSource = mode === "INTERVAL" ? ("SMT" as const) : ("GREEN_BUTTON" as const);
+          if (mode === "GREEN_BUTTON") {
+            exactArtifactInputHash = await resolveOnePathGbPastCachedArtifactInputHash({
+              userId: effectiveUserId,
+              houseId: effectiveHouseId,
+              scenarioId: effectiveRawInputBase.scenarioId,
+              actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
+            });
           }
-          if (!recalcDispatched.result.ok) {
-            return NextResponse.json(
-              {
-                ok: false,
-                error: recalcDispatched.result.error ?? "past_recalc_failed",
-                message:
-                  ("missingItems" in recalcDispatched.result &&
-                  Array.isArray(recalcDispatched.result.missingItems)
-                    ? recalcDispatched.result.missingItems.join("; ")
-                    : null) ??
-                  recalcDispatched.result.error ??
-                  "Past recalc failed on the One Path test home.",
-                correlationId: recalcDispatched.correlationId,
+          if (!exactArtifactInputHash) {
+            const recalcDispatched = await dispatchPastSimRecalc({
+              userId: effectiveUserId,
+              houseId: effectiveHouseId,
+              esiid: smtSourceEsiid,
+              mode: "SMT_BASELINE",
+              scenarioId: effectiveRawInputBase.scenarioId,
+              actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
+              weatherPreference: effectiveRawInputBase.weatherPreference,
+              persistPastSimBaseline: true,
+              preLockboxTravelRanges,
+              validationDaySelectionMode: validationPolicy.selectionMode,
+              validationDayCount: validationPolicy.validationDayCount,
+              validationOnlyDateKeysLocal: effectiveRawInputBase.validationOnlyDateKeysLocal,
+              correlationId,
+              runContext: {
+                callerLabel:
+                  mode === "INTERVAL" ? "one_path_admin_past_run" : "one_path_admin_gb_past_run",
+                buildPathKind: "recalc",
+                persistRequested: effectiveRawInputBase.persistRequested !== false,
+                preferredActualSource,
               },
-              { status: 400 }
-            );
+            });
+            if (recalcDispatched.executionMode === "droplet_async") {
+              return NextResponse.json(
+                {
+                  ok: false,
+                  error: "past_recalc_async_unsupported",
+                  message:
+                    "Past recalc was queued for droplet execution. One Path admin Past run requires inline recalc in this environment.",
+                  jobId: recalcDispatched.jobId,
+                  correlationId: recalcDispatched.correlationId,
+                },
+                { status: 503 }
+              );
+            }
+            if (!recalcDispatched.result.ok) {
+              return NextResponse.json(
+                {
+                  ok: false,
+                  error: recalcDispatched.result.error ?? "past_recalc_failed",
+                  message:
+                    ("missingItems" in recalcDispatched.result &&
+                    Array.isArray(recalcDispatched.result.missingItems)
+                      ? recalcDispatched.result.missingItems.join("; ")
+                      : null) ??
+                    recalcDispatched.result.error ??
+                    "Past recalc failed on the One Path test home.",
+                  correlationId: recalcDispatched.correlationId,
+                },
+                { status: 400 }
+              );
+            }
+            exactArtifactInputHash = recalcDispatched.result.canonicalArtifactInputHash ?? null;
           }
-          exactArtifactInputHash = recalcDispatched.result.canonicalArtifactInputHash ?? null;
         }
         const readback = await buildPastSimRunReadbackResponse({
           userId: effectiveUserId,
