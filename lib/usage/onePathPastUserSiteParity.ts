@@ -34,19 +34,12 @@ export {
   type PastParityVerification,
 };
 
-export const WORKSPACE_PAST_SCENARIO_NAME = "Past (Corrected)";
+import {
+  WORKSPACE_PAST_SCENARIO_NAME,
+  type OnePathPastParitySyncResult,
+} from "@/lib/usage/onePathPastUserSiteParityTypes";
 
-export type OnePathPastParitySyncResult =
-  | {
-      ok: true;
-
-      parity: OnePathUserSiteParityLock;
-
-      copiedFromSourceCache: boolean;
-
-      sourceInputHash: string;
-    }
-  | { ok: false; code: string; message: string };
+export { WORKSPACE_PAST_SCENARIO_NAME, type OnePathPastParitySyncResult };
 
 function stampParityMetaOnDatasetJson(
   datasetJson: Record<string, unknown>,
@@ -353,14 +346,48 @@ export async function loadPastDatasetForParityLock(args: {
 }
 
 /**
- * Mirror user-site Past build inputs onto the test home (no artifact copy).
- * Used on test-home replace; Past artifacts come from a test-home recalc run.
+ * Refresh test-home Past build inputs from the linked source house (mirror when present, else seed from source DB).
+ * Never writes to the source house. No user-portal recalc required.
  */
+export async function ensureOnePathPastBuildInputsFromSource(args: {
+  ownerUserId: string;
+  sourceUserId: string;
+  sourceHouseId: string;
+  testHomeHouseId: string;
+  preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
+  callerLabel?: string | null;
+  weatherPreference?: import("@/modules/weatherNormalization/normalizer").WeatherPreference;
+}): Promise<OnePathPastParitySyncResult> {
+  const mirrorResult = await mirrorOnePathPastBuildInputsFromSourceInternal({
+    ownerUserId: args.ownerUserId,
+    sourceUserId: args.sourceUserId,
+    sourceHouseId: args.sourceHouseId,
+    testHomeHouseId: args.testHomeHouseId,
+    preferredActualSource: args.preferredActualSource,
+    callerLabel: args.callerLabel,
+    weatherPreference: args.weatherPreference,
+  });
+  return mirrorResult;
+}
+
+/** @deprecated Use ensureOnePathPastBuildInputsFromSource */
 export async function mirrorOnePathPastBuildInputsFromSource(args: {
   ownerUserId: string;
   sourceUserId: string;
   sourceHouseId: string;
   testHomeHouseId: string;
+}): Promise<OnePathPastParitySyncResult> {
+  return ensureOnePathPastBuildInputsFromSource(args);
+}
+
+async function mirrorOnePathPastBuildInputsFromSourceInternal(args: {
+  ownerUserId: string;
+  sourceUserId: string;
+  sourceHouseId: string;
+  testHomeHouseId: string;
+  preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
+  callerLabel?: string | null;
+  weatherPreference?: import("@/modules/weatherNormalization/normalizer").WeatherPreference;
 }): Promise<OnePathPastParitySyncResult> {
   const sourceScenarioId = await findPastScenarioId({
     userId: args.sourceUserId,
@@ -390,11 +417,18 @@ export async function mirrorOnePathPastBuildInputsFromSource(args: {
     scenarioId: sourceScenarioId,
   });
   if (!sourceBuildInputs) {
-    return {
-      ok: false,
-      code: "SOURCE_PAST_BUILD_MISSING",
-      message: "Source house has no Past simulator build. Recalc Past on the user site first.",
-    };
+    const { seedOnePathPastBuildInputsFromSourceDb } = await import(
+      "@/lib/usage/onePathPastBuildInputsSeedFromSource"
+    );
+    return seedOnePathPastBuildInputsFromSourceDb({
+      ownerUserId: args.ownerUserId,
+      sourceUserId: args.sourceUserId,
+      sourceHouseId: args.sourceHouseId,
+      testHomeHouseId: args.testHomeHouseId,
+      preferredActualSource: args.preferredActualSource,
+      callerLabel: args.callerLabel,
+      weatherPreference: args.weatherPreference,
+    });
   }
   const sourceHouse = await getHouseAddressForUserHouse({
     userId: args.sourceUserId,
@@ -451,11 +485,12 @@ export async function mirrorOnePathPastBuildInputsFromSource(args: {
     parity,
     copiedFromSourceCache: false,
     sourceInputHash: identity.inputHash,
+    syncKind: "mirror",
   };
 }
 
 /**
- * @deprecated Artifact copy — use mirrorOnePathPastBuildInputsFromSource + test-home recalc.
+ * @deprecated Artifact copy — use ensureOnePathPastBuildInputsFromSource + test-home recalc.
  * Copy user-site Past artifact + build inputs from source house onto the One Path test home.
  */
 export async function syncOnePathPastUserSiteParityFromSource(args: {
@@ -507,14 +542,15 @@ export async function syncOnePathPastUserSiteParityFromSource(args: {
   });
 
   if (!sourceBuildInputs) {
-    return {
-      ok: false,
-
-      code: "SOURCE_PAST_BUILD_MISSING",
-
-      message:
-        "Source house has no Past simulator build. Recalc Past on the user site first.",
-    };
+    const { seedOnePathPastBuildInputsFromSourceDb } = await import(
+      "@/lib/usage/onePathPastBuildInputsSeedFromSource"
+    );
+    return seedOnePathPastBuildInputsFromSourceDb({
+      ownerUserId: args.ownerUserId,
+      sourceUserId: args.sourceUserId,
+      sourceHouseId: args.sourceHouseId,
+      testHomeHouseId: args.testHomeHouseId,
+    });
   }
 
   const sourceHouse = await getHouseAddressForUserHouse({

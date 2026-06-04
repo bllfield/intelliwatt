@@ -1503,6 +1503,59 @@ async function resolveOnePathTestHomeState(args: {
   };
 }
 
+/** Dual-run: refresh test-home Past build inputs from source DB before admin Past recalc (never artifact copy). */
+async function ensureOnePathPastBuildInputsFromSourceForRun(args: {
+  ownerUserId: string;
+  sourceUserId: string;
+  sourceHouseId: string;
+  testHomeHouseId: string;
+  correlationId: string;
+  mode: string;
+}): Promise<
+  | { ok: true; sourceInputHash?: string; seededFromSourceDb?: boolean }
+  | { ok: false; error: string; message: string; mirrorCode?: string }
+> {
+  const { ensureOnePathPastBuildInputsFromSource } = await import("@/lib/usage/onePathPastUserSiteParity");
+  const startedAt = Date.now();
+  const preferredActualSource = args.mode === "INTERVAL" ? ("SMT" as const) : ("GREEN_BUTTON" as const);
+  const callerLabel =
+    args.mode === "INTERVAL" ? "one_path_admin_past_run" : "one_path_admin_gb_past_run";
+  const sync = await ensureOnePathPastBuildInputsFromSource({
+    ownerUserId: args.ownerUserId,
+    sourceUserId: args.sourceUserId,
+    sourceHouseId: args.sourceHouseId,
+    testHomeHouseId: args.testHomeHouseId,
+    preferredActualSource,
+    callerLabel,
+  });
+  logSimPipelineEvent("one_path_past_build_inputs_sync", {
+    correlationId: args.correlationId,
+    sourceHouseId: args.sourceHouseId,
+    testHomeId: args.testHomeHouseId,
+    ok: sync.ok,
+    syncCode: sync.ok ? undefined : sync.code,
+    syncKind: sync.ok ? sync.syncKind : undefined,
+    sourceInputHash: sync.ok ? sync.sourceInputHash : undefined,
+    durationMs: Date.now() - startedAt,
+    mode: args.mode,
+    memoryRssMb: getMemoryRssMb(),
+    source: "one_path_sim_route",
+  });
+  if (!sync.ok) {
+    return {
+      ok: false,
+      error: "past_build_inputs_sync_failed",
+      message: sync.message ?? "Could not refresh Past build inputs from the linked source house.",
+      mirrorCode: sync.code,
+    };
+  }
+  return {
+    ok: true,
+    sourceInputHash: sync.sourceInputHash,
+    seededFromSourceDb: sync.syncKind === "seed",
+  };
+}
+
 export async function POST(request: NextRequest) {
   const denied = gateOnePathSimAdmin(request);
   if (denied) return denied;
@@ -1855,6 +1908,32 @@ export async function POST(request: NextRequest) {
       if (!includeDebugDiagnostics && effectiveRawInputBase.scenarioId && !isManualMode) {
         let exactArtifactInputHash: string | null = null;
         if (mode === "INTERVAL" || mode === "GREEN_BUTTON") {
+          if (
+            onePathTestHomeState.isPinned &&
+            onePathTestHomeState.linkedSourceHouseId &&
+            onePathTestHomeState.linkedSourceUserId
+          ) {
+            const mirrorPastInputs = await ensureOnePathPastBuildInputsFromSourceForRun({
+              ownerUserId: effectiveUserId,
+              sourceUserId: onePathTestHomeState.linkedSourceUserId,
+              sourceHouseId: onePathTestHomeState.linkedSourceHouseId,
+              testHomeHouseId: effectiveHouseId,
+              correlationId,
+              mode,
+            });
+            if (!mirrorPastInputs.ok) {
+              return NextResponse.json(
+                {
+                  ok: false,
+                  error: mirrorPastInputs.error,
+                  message: mirrorPastInputs.message,
+                  mirrorCode: mirrorPastInputs.mirrorCode,
+                  correlationId,
+                },
+                { status: 409 }
+              );
+            }
+          }
           const validationPolicy = resolvePastSmtValidationPolicy({
             surface: "admin_lab",
             validationSelectionMode: effectiveRawInputBase.validationSelectionMode,
@@ -2339,6 +2418,25 @@ export async function POST(request: NextRequest) {
     typeof body?.mode === "string" && body.mode.trim()
       ? normalizeMode(body.mode)
       : "INTERVAL";
+  const pastBuildInputsSync =
+    onePathTestHomeState.isPinned &&
+    effectiveHouseId &&
+    onePathTestHomeState.linkedSourceHouseId &&
+    onePathTestHomeState.linkedSourceUserId &&
+    (previewMode === "GREEN_BUTTON" || previewMode === "INTERVAL")
+      ? await (async () => {
+          const { ensureOnePathPastBuildInputsFromSource } = await import("@/lib/usage/onePathPastUserSiteParity");
+          return ensureOnePathPastBuildInputsFromSource({
+            ownerUserId,
+            sourceUserId: onePathTestHomeState.linkedSourceUserId!,
+            sourceHouseId: onePathTestHomeState.linkedSourceHouseId!,
+            testHomeHouseId: effectiveHouseId,
+            preferredActualSource: previewMode === "INTERVAL" ? "SMT" : "GREEN_BUTTON",
+            callerLabel:
+              previewMode === "INTERVAL" ? "one_path_admin_past_run" : "one_path_admin_gb_past_run",
+          }).catch(() => null);
+        })()
+      : null;
   const lightweightLookupRequested = body?.lightweightLookup === true;
   const lookupActualContext = resolveOnePathLookupActualContext({
     resolved,
@@ -2445,6 +2543,13 @@ export async function POST(request: NextRequest) {
         debugDiagnosticsIncluded: false,
         onePathTestHome: onePathTestHomeSummary,
         smtRefreshCheck,
+        pastBuildInputsSync: pastBuildInputsSync
+          ? {
+              ok: pastBuildInputsSync.ok,
+              syncKind: pastBuildInputsSync.ok ? pastBuildInputsSync.syncKind : undefined,
+              code: pastBuildInputsSync.ok ? undefined : pastBuildInputsSync.code,
+            }
+          : null,
         travelRangesFromDb,
         homeProfile: lightweightHomeProfile ?? lightweightFallbackHomeProfile ?? null,
         applianceProfile: lightweightApplianceProfile,
@@ -2565,6 +2670,13 @@ export async function POST(request: NextRequest) {
     usageTruthSeedResult: usageTruth?.seedResult ?? null,
     upstreamUsageTruth: usageTruth?.summary ?? null,
     smtRefreshCheck,
+    pastBuildInputsSync: pastBuildInputsSync
+      ? {
+          ok: pastBuildInputsSync.ok,
+          syncKind: pastBuildInputsSync.ok ? pastBuildInputsSync.syncKind : undefined,
+          code: pastBuildInputsSync.ok ? undefined : pastBuildInputsSync.code,
+        }
+      : null,
     onePathTestHome: onePathTestHomeSummary,
     greenButtonUpload: actualContextGreenButtonUpload,
     manualUsagePayload: manualUsage.payload ?? null,
