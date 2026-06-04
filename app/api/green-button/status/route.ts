@@ -70,7 +70,16 @@ export async function GET(request: Request) {
       .catch(() => null);
     const persistedIntervalCount = Math.max(0, Number(coverage?._count?._all ?? 0) || 0);
 
-    if ((!upload?.dateRangeStart || !upload?.dateRangeEnd) && upload && persistedIntervalCount > 0) {
+    const uploadParseProcessing =
+      String(upload?.parseStatus ?? "")
+        .toLowerCase()
+        .trim() === "processing";
+    if (
+      !uploadParseProcessing &&
+      (!upload?.dateRangeStart || !upload?.dateRangeEnd) &&
+      upload &&
+      persistedIntervalCount > 0
+    ) {
       upload = {
         ...upload,
         dateRangeStart: upload.dateRangeStart ?? coverage?._min?.timestamp ?? null,

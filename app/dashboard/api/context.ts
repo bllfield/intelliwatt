@@ -212,11 +212,19 @@ export async function loadUsageEntryContext(): Promise<UsageEntryContext> {
       }
     }
 
+    const greenButtonUploadInFlight =
+      String(greenButtonUpload?.parseStatus ?? "")
+        .toLowerCase()
+        .trim() === "processing";
     const resolvedGreenButtonUpload = greenButtonUpload
       ? {
           ...greenButtonUpload,
-          dateRangeStart: greenButtonUpload.dateRangeStart ?? gbCoverage?.start ?? null,
-          dateRangeEnd: greenButtonUpload.dateRangeEnd ?? gbCoverage?.end ?? null,
+          dateRangeStart: greenButtonUploadInFlight
+            ? greenButtonUpload.dateRangeStart
+            : (greenButtonUpload.dateRangeStart ?? gbCoverage?.start ?? null),
+          dateRangeEnd: greenButtonUploadInFlight
+            ? greenButtonUpload.dateRangeEnd
+            : (greenButtonUpload.dateRangeEnd ?? gbCoverage?.end ?? null),
           persistedIntervalCount: gbCoverage?.count ?? 0,
         }
       : gbCoverage

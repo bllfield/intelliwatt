@@ -1,3 +1,5 @@
+import { isGreenButtonIntervalIngestCurrent } from "@/lib/usage/greenButtonIngestContract";
+
 export type GreenButtonUploadStatusRow = {
   parseStatus: string | null;
   parseMessage: string | null;
@@ -6,6 +8,10 @@ export type GreenButtonUploadStatusRow = {
   createdAt: Date;
   updatedAt: Date;
 };
+
+function isGreenButtonUploadParseStatusProcessing(parseStatus: string | null | undefined): boolean {
+  return String(parseStatus ?? "").toLowerCase() === "processing";
+}
 
 export function isGreenButtonUploadParseError(parseStatus: string | null | undefined): boolean {
   const raw = String(parseStatus ?? "").toLowerCase();
@@ -16,6 +22,7 @@ export function isGreenButtonUploadReady(upload: GreenButtonUploadStatusRow | nu
   if (!upload) return false;
   const raw = String(upload.parseStatus ?? "").toLowerCase();
   if (isGreenButtonUploadParseError(raw)) return false;
+  if (isGreenButtonUploadParseStatusProcessing(upload.parseStatus)) return false;
   if (["success", "complete", "complete_with_warnings"].includes(raw)) return true;
   return Boolean(upload.dateRangeStart && upload.dateRangeEnd);
 }
@@ -33,7 +40,9 @@ export function isGreenButtonUsageIngestionReady(
   persistedIntervalCount: number
 ): boolean {
   const intervalCount = Math.max(0, Number(persistedIntervalCount) || 0);
-  return isGreenButtonUploadReady(upload) && intervalCount > 0;
+  if (!upload || intervalCount <= 0) return false;
+  if (!isGreenButtonUploadReady(upload)) return false;
+  return isGreenButtonIntervalIngestCurrent(upload.parseMessage);
 }
 
 /** Includes parse in-flight and the gap where upload metadata is complete but intervals are not queryable yet. */
@@ -48,5 +57,6 @@ export function isGreenButtonUsageIngestionProcessing(
   const raw = String(upload.parseStatus ?? "").toLowerCase();
   if (raw === "processing" || raw.length === 0) return true;
   if (isGreenButtonUploadReady(upload) && intervalCount === 0) return true;
+  if (intervalCount > 0 && !isGreenButtonIntervalIngestCurrent(upload.parseMessage)) return true;
   return false;
 }
