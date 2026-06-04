@@ -4,6 +4,7 @@ import { createHash, createHmac } from "node:crypto";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { PrismaClient as UsagePrismaClient } from "../../.prisma/usage-client";
 import { XMLParser } from "fast-xml-parser";
+import { awardGreenButtonUsageEntry } from "../../lib/usage/awardGreenButtonUsageEntry";
 import { runGreenButtonUsagePipeline } from "../../lib/usage/greenButtonUsagePipeline";
 
 const PORT = Number(process.env.GREEN_BUTTON_UPLOAD_PORT || "8091");
@@ -505,19 +506,108 @@ function setCorsHeaders(res: Response, origin: string | undefined) {
 type GreenButtonIngestJobArgs = {
   buffer: Buffer;
   filename: string;
+  mimeType: string;
   house: { id: string; userId: string; utilityName: string | null; esiid: string | null };
   utilityName: string | null;
   accountNumber: string | null;
-  rawRecordId: string;
   uploadRecordId: string;
-  previousRawHomeId: string | null;
 };
 
-/** Runs after HTTP 202 — avoids nginx/browser timeout while ingest + DB writes complete. */
+async function persistRawGreenButton(args: {
+  buffer: Buffer;
+  house: { id: string; userId: string };
+  utilityName: string | null;
+  accountNumber: string | null;
+  filename: string;
+  mimeType: string;
+}): Promise<{ rawRecordId: string; previousRawHomeId: string | null; sha256: string }> {
+  const { buffer, house, utilityName, accountNumber, filename, mimeType } = args;
+  const sha256 = createHash("sha256").update(buffer).digest("hex");
+  const content = (() => {
+    const bytes = new Uint8Array(buffer.byteLength);
+    bytes.set(buffer);
+    return bytes;
+  })();
+
+  let rawRecordId: string | null = null;
+  let previousRawHomeId: string | null = null;
+
+  const existing = await usagePrisma.rawGreenButton.findUnique({
+    where: { sha256 },
+    select: { id: true, homeId: true },
+  });
+  if (existing?.id) {
+    rawRecordId = existing.id;
+    previousRawHomeId = existing.homeId ? String(existing.homeId) : null;
+    await usagePrisma.rawGreenButton.update({
+      where: { id: existing.id },
+      data: {
+        homeId: house.id,
+        userId: house.userId,
+        utilityName,
+        accountNumber,
+        filename,
+        mimeType,
+        sizeBytes: buffer.length,
+        content,
+        capturedAt: new Date(),
+      },
+    });
+    logEvent("raw.upsert", {
+      sha256,
+      rawRecordId,
+      reused: true,
+      reboundFromHouseId: previousRawHomeId && previousRawHomeId !== house.id ? previousRawHomeId : null,
+      sizeBytes: buffer.length,
+    });
+  } else {
+    const created = await usagePrisma.rawGreenButton.create({
+      data: {
+        homeId: house.id,
+        userId: house.userId,
+        utilityName,
+        accountNumber,
+        filename,
+        mimeType,
+        sizeBytes: buffer.length,
+        content,
+        sha256,
+        capturedAt: new Date(),
+      },
+      select: { id: true },
+    });
+    rawRecordId = created.id;
+    logEvent("raw.upsert", { sha256, rawRecordId, reused: false, sizeBytes: buffer.length });
+  }
+
+  if (!rawRecordId) {
+    throw new Error("Failed to persist raw Green Button record");
+  }
+
+  return { rawRecordId, previousRawHomeId, sha256 };
+}
+
+/** Runs after HTTP 202 — raw persist, parse, and interval writes (off the request thread). */
 async function runGreenButtonIngestJob(args: GreenButtonIngestJobArgs): Promise<void> {
-  const { buffer, filename, house, utilityName, accountNumber, rawRecordId, uploadRecordId, previousRawHomeId } =
-    args;
+  const { buffer, filename, mimeType, house, utilityName, accountNumber, uploadRecordId } = args;
+  let rawRecordId: string | null = null;
+  let previousRawHomeId: string | null = null;
   try {
+    const persisted = await persistRawGreenButton({
+      buffer,
+      house,
+      utilityName,
+      accountNumber,
+      filename,
+      mimeType,
+    });
+    rawRecordId = persisted.rawRecordId;
+    previousRawHomeId = persisted.previousRawHomeId;
+    const storageKey = `usage:raw_green_button:${rawRecordId}`;
+    await (prisma as any).greenButtonUpload.update({
+      where: { id: uploadRecordId },
+      data: { storageKey },
+    });
     const pipelineResult = runGreenButtonUsagePipeline({
       buffer,
       filename,
@@ -581,7 +671,6 @@ async function runGreenButtonIngestJob(args: GreenButtonIngestJobArgs): Promise<
     });
 
     try {
-      const { awardGreenButtonUsageEntry } = await import("@/lib/usage/awardGreenButtonUsageEntry");
       await awardGreenButtonUsageEntry({
         userId: house.userId,
         houseId: house.id,
@@ -674,7 +763,6 @@ function decodePayload(encoded: string): UploadPayload {
  
 app.post("/upload", upload.single("file"), async (req: Request, res: Response) => {
   let uploadRecordId: string | null = null;
-  let rawRecordId: string | null = null;
   try {
     logEvent("request.received", {
       contentLength: req.headers["content-length"],
@@ -769,7 +857,6 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
     }
 
     const buffer = file.buffer;
-    const sha256 = createHash("sha256").update(buffer).digest("hex");
     const utilityName =
       typeof req.body?.utilityName === "string" && req.body.utilityName.trim().length > 0
         ? req.body.utilityName.trim()
@@ -781,75 +868,13 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
     const filename = file.originalname?.slice(0, 255) || file.fieldname || "green-button-upload.xml";
     const mimeType = file.mimetype?.slice(0, 128) || "application/xml";
 
-    const content = (() => {
-      const bytes = new Uint8Array(buffer.byteLength);
-      bytes.set(buffer);
-      return bytes;
-    })();
-    let previousRawHomeId: string | null = null;
-    try {
-      const existing = await usagePrisma.rawGreenButton.findUnique({
-        where: { sha256 },
-        select: { id: true, homeId: true },
-      });
-      if (existing?.id) {
-        rawRecordId = existing.id;
-        previousRawHomeId = existing.homeId ? String(existing.homeId) : null;
-        await usagePrisma.rawGreenButton.update({
-          where: { id: existing.id },
-          data: {
-            homeId: house.id,
-            userId: house.userId,
-            utilityName,
-            accountNumber,
-            filename,
-            mimeType,
-            sizeBytes: buffer.length,
-            content,
-            capturedAt: new Date(),
-          },
-        });
-        logEvent("raw.upsert", {
-          sha256,
-          rawRecordId,
-          reused: true,
-          reboundFromHouseId: previousRawHomeId && previousRawHomeId !== house.id ? previousRawHomeId : null,
-          sizeBytes: buffer.length,
-        });
-      } else {
-        const created = await usagePrisma.rawGreenButton.create({
-          data: {
-            homeId: house.id,
-            userId: house.userId,
-            utilityName,
-            accountNumber,
-            filename,
-            mimeType,
-            sizeBytes: buffer.length,
-            content,
-            sha256,
-            capturedAt: new Date(),
-          },
-          select: { id: true },
-        });
-        rawRecordId = created.id;
-        logEvent("raw.upsert", { sha256, rawRecordId, reused: false, sizeBytes: buffer.length });
-      }
-    } catch (err) {
-      logEvent("raw.upsert.error", { sha256, error: String(err) });
-      throw err;
-    }
-
-    if (!rawRecordId) {
-      throw new Error("Failed to persist raw Green Button record");
-    }
-
-    const storageKey = `usage:raw_green_button:${rawRecordId}`;
     const existingUpload = await (prisma as any).greenButtonUpload.findFirst({
-      where: { storageKey },
+      where: { houseId: house.id },
+      orderBy: { createdAt: "desc" },
       select: { id: true },
     });
 
+    const pendingStorageKey = `usage:raw_green_button:processing:${existingUpload?.id ?? "new"}`;
     const baseUploadData = {
       houseId: house.id,
       utilityName,
@@ -857,7 +882,7 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
       fileName: filename,
       fileType: mimeType,
       fileSizeBytes: buffer.length,
-      storageKey,
+      storageKey: pendingStorageKey,
       parseStatus: "processing",
       parseMessage: null,
       dateRangeStart: null,
@@ -869,30 +894,36 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
       uploadRecordId = existingUpload.id;
       await (prisma as any).greenButtonUpload.update({
         where: { id: existingUpload.id },
-        data: baseUploadData,
+        data: {
+          ...baseUploadData,
+          storageKey: `usage:raw_green_button:processing:${existingUpload.id}`,
+        },
       });
     } else {
       const createdUpload = await (prisma as any).greenButtonUpload.create({
         data: baseUploadData,
       });
       uploadRecordId = createdUpload.id;
+      await (prisma as any).greenButtonUpload.update({
+        where: { id: createdUpload.id },
+        data: { storageKey: `usage:raw_green_button:processing:${createdUpload.id}` },
+      });
     }
 
-    logEvent("upload.record", { uploadRecordId, rawRecordId, houseId: house.id, fileSize: buffer.length });
-
-    if (!uploadRecordId || !rawRecordId) {
+    if (!uploadRecordId) {
       throw new Error("upload_record_missing_after_persist");
     }
+
+    logEvent("upload.record", { uploadRecordId, houseId: house.id, fileSize: buffer.length });
 
     const jobArgs: GreenButtonIngestJobArgs = {
       buffer,
       filename,
+      mimeType,
       house,
       utilityName,
       accountNumber,
-      rawRecordId,
       uploadRecordId,
-      previousRawHomeId,
     };
     void runGreenButtonIngestJob(jobArgs);
 
@@ -900,11 +931,10 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
       ok: true,
       accepted: true,
       processing: true,
-      rawId: rawRecordId,
       uploadRecordId,
       message: "Green Button file accepted; processing continues in the background.",
     });
-    logEvent("upload.accepted_async", { rawRecordId, uploadRecordId, houseId: house.id });
+    logEvent("upload.accepted_async", { uploadRecordId, houseId: house.id });
   } catch (error) {
     console.error("[green-button-upload] failed to handle upload", error);
     if (uploadRecordId) {

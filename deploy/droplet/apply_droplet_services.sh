@@ -24,7 +24,18 @@ if [[ -z "${repo_root}" ]]; then
 fi
 
 cd "${repo_root}"
-log "repo_root=${repo_root}"
+log "repo_root=${repo_root} (systemd units will use this path)"
+
+patch_unit_repo_paths() {
+  local dst="$1"
+  local legacy
+  for legacy in "/home/deploy/apps/intelliwatt-clean" "/home/deploy/apps/intelliwatt"; do
+    if [[ "${repo_root}" != "${legacy}" ]] && sudo grep -q "${legacy}" "${dst}" 2>/dev/null; then
+      log "Patching ${dst}: ${legacy} → ${repo_root}"
+      sudo sed -i "s|${legacy}|${repo_root}|g" "${dst}"
+    fi
+  done
+}
 
 install_unit_if_present() {
   local src="$1"
@@ -32,6 +43,7 @@ install_unit_if_present() {
   if [[ -f "${src}" ]]; then
     log "Installing systemd unit → ${dst}"
     sudo cp "${src}" "${dst}"
+    patch_unit_repo_paths "${dst}"
   else
     log "Skipping missing unit (not in repo): ${src}"
   fi
