@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
-import { getOnePathLabTestHomeLink } from "@/modules/usageSimulator/labTestHome";
+import { ONE_PATH_LAB_TEST_HOME_LABEL } from "@/modules/usageSimulator/labTestHomeLabels";
 
 const USAGE_DB_ENABLED = Boolean((process.env.USAGE_DATABASE_URL ?? "").trim());
 
@@ -35,13 +35,10 @@ async function isOnePathLabTestHomeHouse(houseId: string): Promise<boolean> {
   const house = await prisma.houseAddress
     .findUnique({
       where: { id },
-      select: { userId: true },
+      select: { label: true },
     })
     .catch(() => null);
-  const ownerUserId = String(house?.userId ?? "").trim();
-  if (!ownerUserId) return false;
-  const link = await getOnePathLabTestHomeLink(ownerUserId).catch(() => null);
-  return typeof link?.testHomeHouseId === "string" && link.testHomeHouseId.trim() === id;
+  return String(house?.label ?? "").trim() === ONE_PATH_LAB_TEST_HOME_LABEL;
 }
 
 /**

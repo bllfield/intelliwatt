@@ -175,6 +175,7 @@ async function copySourceHouseIdentityToLabHome(args: {
   tx: any;
   labHouseId: string;
   sourceHouse: {
+    esiid?: string | null;
     addressLine1: string | null;
     addressLine2: string | null;
     addressCity: string | null;
@@ -214,7 +215,7 @@ async function copySourceHouseIdentityToLabHome(args: {
       utilityName: args.sourceHouse.utilityName,
       utilityPhone: args.sourceHouse.utilityPhone,
       label: args.label,
-      esiid: null,
+      esiid: args.sourceHouse.esiid ? String(args.sourceHouse.esiid) : null,
     },
   });
 }

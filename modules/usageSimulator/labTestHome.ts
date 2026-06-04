@@ -7,19 +7,22 @@ import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { validateHomeProfile } from "@/modules/homeProfile/validation";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 
-export const GAPFILL_LAB_TEST_HOME_LABEL = "GAPFILL_CANONICAL_LAB_TEST_HOME";
-export const MANUAL_MONTHLY_LAB_TEST_HOME_LABEL = "MANUAL_MONTHLY_LAB_TEST_HOME";
-export const ONE_PATH_LAB_TEST_HOME_LABEL = "ONE_PATH_LAB_TEST_HOME";
+import {
+  GAPFILL_LAB_TEST_HOME_LABEL,
+  MANUAL_MONTHLY_LAB_TEST_HOME_LABEL,
+  ONE_PATH_LAB_TEST_HOME_LABEL,
+} from "@/modules/usageSimulator/labTestHomeLabels";
 
-type LabTestHomeLink = {
-  ownerUserId: string;
-  testHomeHouseId: string;
-  sourceUserId: string | null;
-  sourceHouseId: string | null;
-  status: string;
-  statusMessage: string | null;
-  lastReplacedAt: Date | null;
-};
+export {
+  GAPFILL_LAB_TEST_HOME_LABEL,
+  MANUAL_MONTHLY_LAB_TEST_HOME_LABEL,
+  ONE_PATH_LAB_TEST_HOME_LABEL,
+} from "@/modules/usageSimulator/labTestHomeLabels";
+
+import type { LabTestHomeLink } from "@/modules/usageSimulator/labTestHomeLink";
+
+export type { LabTestHomeLink } from "@/modules/usageSimulator/labTestHomeLink";
+export { getLabTestHomeLink, getOnePathLabTestHomeLink } from "@/modules/usageSimulator/labTestHomeLink";
 
 type NamedLabHomeConfig = {
   label: string;
@@ -99,52 +102,6 @@ function normalizeHomeProfileForPersistence(
 function isPastCapableHomeProfile(profile: Awaited<ReturnType<typeof getHomeProfileSimulatedByUserHouse>>): boolean {
   if (!profile) return false;
   return validateHomeProfile(profile, { requirePastBaselineFields: true }).ok;
-}
-
-export async function getLabTestHomeLink(
-  ownerUserId: string
-): Promise<LabTestHomeLink | null> {
-  const model = await getNamedLabLinkModelIfAvailable("gapfill");
-  if (!model) return null;
-  const row = await model
-    .findUnique({
-      where: { ownerUserId },
-      select: {
-        ownerUserId: true,
-        testHomeHouseId: true,
-        sourceUserId: true,
-        sourceHouseId: true,
-        status: true,
-        statusMessage: true,
-        lastReplacedAt: true,
-      },
-    })
-    .catch(() => null);
-  if (!row) return null;
-  return row as LabTestHomeLink;
-}
-
-export async function getOnePathLabTestHomeLink(
-  ownerUserId: string
-): Promise<LabTestHomeLink | null> {
-  const model = await getNamedLabLinkModelIfAvailable("onePath");
-  if (!model) return null;
-  const row = await model
-    .findUnique({
-      where: { ownerUserId },
-      select: {
-        ownerUserId: true,
-        testHomeHouseId: true,
-        sourceUserId: true,
-        sourceHouseId: true,
-        status: true,
-        statusMessage: true,
-        lastReplacedAt: true,
-      },
-    })
-    .catch(() => null);
-  if (!row) return null;
-  return row as LabTestHomeLink;
 }
 
 export async function ensureGlobalLabTestHomeHouse(
@@ -261,6 +218,7 @@ async function copySourceHouseIdentityToLabHome(args: {
   tx: any;
   labHouseId: string;
   sourceHouse: {
+    esiid?: string | null;
     addressLine1: string | null;
     addressLine2: string | null;
     addressCity: string | null;
@@ -300,7 +258,7 @@ async function copySourceHouseIdentityToLabHome(args: {
       utilityName: args.sourceHouse.utilityName,
       utilityPhone: args.sourceHouse.utilityPhone,
       label: args.label,
-      esiid: null,
+      esiid: args.sourceHouse.esiid ? String(args.sourceHouse.esiid) : null,
     },
   });
 }

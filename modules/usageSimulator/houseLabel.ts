@@ -1,10 +1,9 @@
 import {
   GAPFILL_LAB_TEST_HOME_LABEL,
+  GAPFILL_LAB_TEST_HOME_ADDRESS,
   MANUAL_MONTHLY_LAB_TEST_HOME_LABEL,
-} from "@/modules/usageSimulator/labTestHome";
-
-const GAPFILL_LAB_TEST_HOME_ADDRESS = "gap-fill canonical lab test home";
-const MANUAL_MONTHLY_LAB_TEST_HOME_ADDRESS = "manual monthly lab test home";
+  MANUAL_MONTHLY_LAB_TEST_HOME_ADDRESS,
+} from "@/modules/usageSimulator/labTestHomeLabels";
 
 export function isInternalLabHomeIdentity(label: unknown, addressLine1?: unknown): boolean {
   const l = String(label ?? "").trim();

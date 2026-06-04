@@ -1,14 +1,10 @@
 /**
-
- * One Path GB Past sim must match user-site Past for the linked source house until admin changes inputs.
-
+ * One Path Past (SMT + GB) must match user-site Past for the linked source house until admin changes inputs.
  * Persists artifacts on the test home only; never writes to the source (user) home.
-
  */
 
+import "server-only";
 import { prisma } from "@/lib/db";
-
-import { resolvePastArtifactIdentity } from "@/lib/usage/pastArtifactIdentity";
 
 import {
   isolateBuildInputsForUserSite,
@@ -65,16 +61,12 @@ function stampParityMetaOnDatasetJson(
   return { ...datasetJson, meta };
 }
 
-import {
-  getCachedPastDataset,
-  saveCachedPastDataset,
-  PAST_ENGINE_VERSION,
-  type CachedPastDataset,
-} from "@/modules/onePathSim/usageSimulator/pastCache";
+import { upsertSimulatorBuild, getHouseAddressForUserHouse } from "@/modules/onePathSim/usageSimulator/repo";
+import type { CachedPastDataset } from "@/modules/onePathSim/usageSimulator/pastCache";
 
-import { upsertSimulatorBuild } from "@/modules/onePathSim/usageSimulator/repo";
-
-import { getHouseAddressForUserHouse } from "@/modules/onePathSim/usageSimulator/repo";
+async function pastCacheApi() {
+  return import("@/modules/onePathSim/usageSimulator/pastCache");
+}
 
 export async function findPastScenarioId(args: {
   userId: string;
@@ -168,7 +160,7 @@ async function resolveUserSiteBuildInputs(args: {
 }
 
 async function copyPastArtifactCacheRow(args: {
-  from: CachedPastDataset & { inputHash: string };
+  from: CachedPastDataset;
 
   sourceInputHash: string;
 
@@ -191,6 +183,7 @@ async function copyPastArtifactCacheRow(args: {
     args.parity,
   );
 
+  const { saveCachedPastDataset, PAST_ENGINE_VERSION } = await pastCacheApi();
   await saveCachedPastDataset({
     houseId: args.targetHouseId,
 
@@ -310,6 +303,7 @@ async function loadSourcePastArtifact(args: {
 
   inputHash: string;
 }): Promise<CachedPastDataset | null> {
+  const { getCachedPastDataset } = await pastCacheApi();
   return getCachedPastDataset({
     houseId: args.sourceHouseId,
 
@@ -324,6 +318,7 @@ export async function loadPastDatasetForParityLock(args: {
 
   parity: OnePathUserSiteParityLock;
 }): Promise<Record<string, unknown> | null> {
+  const { getCachedPastDataset } = await pastCacheApi();
   const cached = await getCachedPastDataset({
     houseId: args.houseId,
 
@@ -442,6 +437,7 @@ export async function syncOnePathPastUserSiteParityFromSource(args: {
     buildInputs: sourceBuildInputs,
   });
 
+  const { resolvePastArtifactIdentity } = await import("@/lib/usage/pastArtifactIdentity");
   const identity = await resolvePastArtifactIdentity({
     userId: args.sourceUserId,
 
@@ -585,6 +581,7 @@ export async function ensureOnePathPastParityBeforeRead(args: {
     lock.sourceHouseId === args.sourceHouseId &&
     lock.sourceUserId === args.sourceUserId
   ) {
+    const { getCachedPastDataset } = await pastCacheApi();
     const cached = await getCachedPastDataset({
       houseId: args.testHomeHouseId,
 
@@ -607,4 +604,27 @@ export async function ensureOnePathPastParityBeforeRead(args: {
   }
 
   return syncOnePathPastUserSiteParityFromSource(args);
+}
+
+/** Linked One Path test home: copy user-site Past artifact before read/rebuild. */
+export async function maybeHealOnePathPastParityForRead(args: {
+  ownerUserId: string;
+  testHomeHouseId: string;
+}): Promise<OnePathPastParitySyncResult | null> {
+  const { getOnePathLabTestHomeLink } = await import("@/modules/usageSimulator/labTestHomeLink");
+  const link = await getOnePathLabTestHomeLink(args.ownerUserId).catch(() => null);
+  if (
+    !link?.testHomeHouseId ||
+    link.testHomeHouseId !== args.testHomeHouseId ||
+    !link.sourceUserId ||
+    !link.sourceHouseId
+  ) {
+    return null;
+  }
+  return ensureOnePathPastParityBeforeRead({
+    ownerUserId: args.ownerUserId,
+    testHomeHouseId: args.testHomeHouseId,
+    sourceUserId: String(link.sourceUserId),
+    sourceHouseId: String(link.sourceHouseId),
+  });
 }

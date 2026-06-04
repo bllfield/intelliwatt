@@ -91,7 +91,9 @@ import {
   clearOnePathUserSiteParityFromBuildInputs,
   syncOnePathPastUserSiteParityFromSource,
   loadPastDatasetForParityLock,
+  maybeHealOnePathPastParityForRead,
 } from "@/lib/usage/onePathPastUserSiteParity";
+import { resolvePastSimEsiidForHouse } from "@/lib/usage/resolvePastSimEsiidForHouse";
 import { IntervalSeriesKind } from "@/modules/onePathSim/usageSimulator/kinds";
 import { billingPeriodsEndingAt } from "@/modules/onePathSim/manualBillingPeriods";
 import {
@@ -4335,7 +4337,8 @@ async function recalcSimulatorBuildImpl(args: {
   adminLabTreatmentMode?: import("@/modules/onePathSim/usageSimulator/adminLabTreatment").AdminLabTreatmentMode;
   runContext?: Partial<PastSimRunContext>;
 }): Promise<SimulatorRecalcOk | SimulatorRecalcErr> {
-  const { userId, houseId, esiid, mode } = args;
+  let { userId, houseId, esiid, mode } = args;
+  esiid = (await resolvePastSimEsiidForHouse({ userId, houseId, houseEsiid: esiid })) ?? esiid;
   const isUserSiteCaller = isUserSiteSimulationCaller(args.runContext?.callerLabel);
   const actualContextHouseId = isUserSiteCaller ? houseId : String(args.actualContextHouseId ?? houseId);
   const scenarioKey = normalizeScenarioKey(args.scenarioId);
@@ -7195,8 +7198,20 @@ export async function getSimulatedUsageForHouseScenario(args: {
 
     const house = await getHouseAddressForUserHouse({ userId: args.userId, houseId: args.houseId });
     if (!house) return { ok: false, code: "HOUSE_NOT_FOUND", message: "House not found for user" };
+    let pastSimEsiid =
+      (await resolvePastSimEsiidForHouse({
+        userId: args.userId,
+        houseId: args.houseId,
+        houseEsiid: house.esiid ?? null,
+      })) ?? house.esiid ?? null;
 
     if (readContext.artifactReadMode === "artifact_only") {
+      if (scenarioId) {
+        await maybeHealOnePathPastParityForRead({
+          ownerUserId: args.userId,
+          testHomeHouseId: args.houseId,
+        }).catch(() => null);
+      }
       const scenarioIdForCache = scenarioId ?? "BASELINE";
       // Backward-compatible artifact-only support for gapfill_lab, which does not have a usageSimulatorBuild row.
       if (scenarioIdForCache === "gapfill_lab") {
@@ -7239,7 +7254,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
           },
         };
         const smtSlotCompleteDateKeysGapfill = await resolveStaleIncompleteMeterSlotCompleteDateKeys({
-          esiid: house.esiid,
+          esiid: pastSimEsiid,
           meta: exactCached.datasetJson,
         });
         reconcileRestoredPastDatasetFromDecodedIntervals({
@@ -7284,10 +7299,10 @@ export async function getSimulatedUsageForHouseScenario(args: {
                 await getValidationActualDailyByDateForDataset({
                   dataset: restored,
                   fallbackHouseId: args.houseId,
-                  fallbackEsiid: house.esiid ?? null,
+                  fallbackEsiid: pastSimEsiid,
                 })
               )
-            : restored;
+          : restored;
         if (!restoredAny.meta || typeof restoredAny.meta !== "object") restoredAny.meta = {};
         (restoredAny.meta as any).lockboxReadContext = readContext;
         const projected = readContext.compareSidecarRequest
@@ -7318,7 +7333,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
         userSiteIsolation,
         userId: args.userId,
         houseId: args.houseId,
-        esiid: house.esiid ?? null,
+        esiid: pastSimEsiid,
         buildInputs: buildInputs as SimulatorBuildInputsV1,
         correlationId,
       });
@@ -7328,7 +7343,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
           userSiteIsolation: true,
           userId: args.userId,
           houseId: args.houseId,
-          esiid: house.esiid ?? null,
+          esiid: pastSimEsiid,
           buildInputs: buildInputs as SimulatorBuildInputsV1,
           correlationId,
         });
@@ -7362,10 +7377,17 @@ export async function getSimulatedUsageForHouseScenario(args: {
         const backfillPreferredActualSource = preferredActualSourceFromPastBuildInputs(
           buildInputs as Record<string, unknown>
         );
+        pastSimEsiid =
+          (await resolvePastSimEsiidForHouse({
+            userId: args.userId,
+            houseId: args.houseId,
+            houseEsiid: pastSimEsiid,
+            buildInputs: buildInputs as Record<string, unknown>,
+          })) ?? pastSimEsiid;
         const backfillRecalc = await recalcSimulatorBuild({
           userId: args.userId,
           houseId: args.houseId,
-          esiid: house.esiid ?? null,
+          esiid: pastSimEsiid,
           mode: "SMT_BASELINE",
           scenarioId,
           weatherPreference,
@@ -7405,7 +7427,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
             userSiteIsolation: parityAfterBackfill ? true : userSiteIsolation,
             userId: args.userId,
             houseId: args.houseId,
-            esiid: house.esiid ?? null,
+            esiid: pastSimEsiid,
             buildInputs: buildInputs as SimulatorBuildInputsV1,
             correlationId,
           });
@@ -7415,7 +7437,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
       const pastArtifactIdentity = await resolvePastArtifactIdentity({
         userId: args.userId,
         requestHouseId: args.houseId,
-        requestHouseEsiid: house.esiid ?? null,
+        requestHouseEsiid: pastSimEsiid,
         buildInputs: buildInputs as Record<string, unknown>,
       });
       if (!pastArtifactIdentity) {
@@ -7482,10 +7504,29 @@ export async function getSimulatedUsageForHouseScenario(args: {
       }
       const artifactSourceMode: "exact_hash_match" = "exact_hash_match";
       if (!exactCached || exactCached.intervalsCodec !== INTERVAL_CODEC_V1) {
+        await maybeHealOnePathPastParityForRead({
+          ownerUserId: args.userId,
+          testHomeHouseId: args.houseId,
+        }).catch(() => null);
+        const parityLockAfterHeal = readOnePathUserSiteParityLock(buildInputs as Record<string, unknown>);
+        const retryInputHash = parityLockAfterHeal?.parityInputHash ?? resolvedInputHash;
+        if (retryInputHash !== resolvedInputHash || !exactCached) {
+          exactCached = await getCachedPastDataset({
+            houseId: args.houseId,
+            scenarioId: scenarioIdForCache,
+            inputHash: retryInputHash,
+          });
+          if (exactCached && hasLegacyWeatherEfficiencySimulationActivation(exactCached.datasetJson)) {
+            exactCached = null;
+          }
+        }
+      }
+      if (!exactCached || exactCached.intervalsCodec !== INTERVAL_CODEC_V1) {
         return {
           ok: false,
           code: "ARTIFACT_MISSING",
-          message: "Persisted artifact not found for this house/scenario identity. Run explicit rebuild first.",
+          message:
+            "Persisted artifact not found for this house/scenario identity. Recalc Past on the user site, replace the One Path test home from source, then retry.",
           inputHash: resolvedInputHash,
           engineVersion: PAST_ENGINE_VERSION,
         };
@@ -7502,7 +7543,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
         },
       };
       const smtSlotCompleteDateKeysArtifactOnly = await resolveStaleIncompleteMeterSlotCompleteDateKeys({
-        esiid: house.esiid,
+        esiid: pastSimEsiid,
         meta: exactCached.datasetJson,
       });
       reconcileRestoredPastDatasetFromDecodedIntervals({
@@ -7562,7 +7603,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
               await getValidationActualDailyByDateForDataset({
                 dataset: restored,
                 fallbackHouseId: args.houseId,
-                fallbackEsiid: house.esiid ?? null,
+                fallbackEsiid: pastSimEsiid,
               })
             )
           : restored;
@@ -7571,6 +7612,13 @@ export async function getSimulatedUsageForHouseScenario(args: {
         ? attachCompareWithObservability(projectedBaselineAware)
         : projectedBaselineAware;
       return { ok: true, houseId: args.houseId, scenarioKey, scenarioId, dataset: projected };
+    }
+
+    if (scenarioId) {
+      await maybeHealOnePathPastParityForRead({
+        ownerUserId: args.userId,
+        testHomeHouseId: args.houseId,
+      }).catch(() => null);
     }
 
     let scenarioRow: { id: string; name: string } | null = null;
@@ -7609,7 +7657,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
         const recalcResult = await recalcSimulatorBuild({
           userId: args.userId,
           houseId: args.houseId,
-          esiid: house.esiid ?? null,
+          esiid: pastSimEsiid,
           mode,
           scenarioId,
           weatherPreference,
@@ -7646,7 +7694,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
       userSiteIsolation,
       userId: args.userId,
       houseId: args.houseId,
-      esiid: house.esiid ?? null,
+      esiid: pastSimEsiid,
       buildInputs,
       correlationId,
     });
@@ -7680,10 +7728,17 @@ export async function getSimulatedUsageForHouseScenario(args: {
       const backfillPreferredActualSource = preferredActualSourceFromPastBuildInputs(
         buildInputs as Record<string, unknown>
       );
+      pastSimEsiid =
+        (await resolvePastSimEsiidForHouse({
+          userId: args.userId,
+          houseId: args.houseId,
+          houseEsiid: pastSimEsiid,
+          buildInputs: buildInputs as Record<string, unknown>,
+        })) ?? pastSimEsiid;
       const backfillRecalc = await recalcSimulatorBuild({
         userId: args.userId,
         houseId: args.houseId,
-        esiid: house.esiid ?? null,
+        esiid: pastSimEsiid,
         mode: "SMT_BASELINE",
         scenarioId,
         weatherPreference,
@@ -7793,7 +7848,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
 
     let dataset: any;
     if (useActualBaseline) {
-      const actualResult = await getActualUsageDatasetForHouse(args.houseId, house.esiid ?? null);
+      const actualResult = await getActualUsageDatasetForHouse(args.houseId, pastSimEsiid);
       if (actualResult?.dataset) {
         const filledSet = new Set<string>(((buildInputs as any).filledMonths ?? []).map(String));
         const monthProvenanceByMonth: Record<string, "ACTUAL" | "SIMULATED"> = {};
@@ -7848,7 +7903,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
         (pastSimulatedList == null || !Array.isArray(pastSimulatedList) || pastSimulatedList.length === 0) &&
         !isSmtBaselineMode;
       if (pastHasNoEvents) {
-        const actualResult = await getActualUsageDatasetForHouse(args.houseId, house.esiid ?? null, {
+        const actualResult = await getActualUsageDatasetForHouse(args.houseId, pastSimEsiid, {
           skipFullYearIntervalFetch: true,
         });
         if (actualResult?.dataset) {
@@ -7915,7 +7970,9 @@ export async function getSimulatedUsageForHouseScenario(args: {
         }
         if (canonicalMonths.length === 0) {
           try {
-            const actualResult = await getActualUsageDatasetForHouse(args.houseId, house.esiid ?? null, { skipFullYearIntervalFetch: true });
+            const actualResult = await getActualUsageDatasetForHouse(args.houseId, pastSimEsiid, {
+              skipFullYearIntervalFetch: true,
+            });
             const summaryStart = String(actualResult?.dataset?.summary?.start ?? "").slice(0, 10);
             const summaryEnd = String(actualResult?.dataset?.summary?.end ?? "").slice(0, 10);
             if (/^\d{4}-\d{2}-\d{2}$/.test(summaryStart) && /^\d{4}-\d{2}-\d{2}$/.test(summaryEnd)) {
@@ -7937,7 +7994,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
         const pastArtifactIdentity = await resolvePastArtifactIdentity({
           userId: args.userId,
           requestHouseId: args.houseId,
-          requestHouseEsiid: house.esiid ?? null,
+          requestHouseEsiid: pastSimEsiid,
           buildInputs: artifactIdentityBuildInputs,
         });
         const startDate = pastArtifactIdentity?.window.startDate;
@@ -7951,7 +8008,8 @@ export async function getSimulatedUsageForHouseScenario(args: {
           sourceOfWindow: "past_artifact_identity",
         };
         if (startDate && endDate && pastArtifactIdentity) {
-          const inputHash = pastArtifactIdentity.inputHash;
+          const parityLockAllowRebuild = readOnePathUserSiteParityLock(buildInputs as Record<string, unknown>);
+          let inputHash = parityLockAllowRebuild?.parityInputHash ?? pastArtifactIdentity.inputHash;
           const scenarioIdForCache = scenarioId ?? "BASELINE";
           const cacheKeyDiag = {
             inputHash,
@@ -7961,15 +8019,33 @@ export async function getSimulatedUsageForHouseScenario(args: {
             usageShapeProfileVersion: pastArtifactIdentity.usageShapeProfileVersion,
             scenarioId: scenarioIdForCache,
           };
-          const cached = forceRebuildArtifact
+          let cached = forceRebuildArtifact
             ? null
             : await getCachedPastDataset({
                 houseId: args.houseId,
                 scenarioId: scenarioIdForCache,
                 inputHash,
               });
-          const usableCached =
+          let usableCached =
             cached && !hasLegacyWeatherEfficiencySimulationActivation(cached.datasetJson) ? cached : null;
+          if ((!usableCached || usableCached.intervalsCodec !== INTERVAL_CODEC_V1) && !forceRebuildArtifact) {
+            await maybeHealOnePathPastParityForRead({
+              ownerUserId: args.userId,
+              testHomeHouseId: args.houseId,
+            }).catch(() => null);
+            const lockAfterHeal = readOnePathUserSiteParityLock(buildInputs as Record<string, unknown>);
+            if (lockAfterHeal?.parityInputHash) {
+              inputHash = lockAfterHeal.parityInputHash;
+              cacheKeyDiag.inputHash = inputHash;
+              cached = await getCachedPastDataset({
+                houseId: args.houseId,
+                scenarioId: scenarioIdForCache,
+                inputHash,
+              });
+              usableCached =
+                cached && !hasLegacyWeatherEfficiencySimulationActivation(cached.datasetJson) ? cached : null;
+            }
+          }
           if (usableCached && usableCached.intervalsCodec === INTERVAL_CODEC_V1) {
             const decoded = decodeIntervalsV1(usableCached.intervalsCompressed);
             const restored = {
@@ -7983,7 +8059,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
             };
             dataset = restored;
             const smtSlotCompleteDateKeysCache = await resolveStaleIncompleteMeterSlotCompleteDateKeys({
-              esiid: house.esiid,
+              esiid: pastSimEsiid,
               meta: usableCached.datasetJson,
             });
             reconcileRestoredPastDatasetFromDecodedIntervals({
@@ -8025,6 +8101,16 @@ export async function getSimulatedUsageForHouseScenario(args: {
               (dataset.meta as any).coverageEnd = dataset?.summary?.end ?? endDate;
             }
           } else {
+            const parityLockRebuild = readOnePathUserSiteParityLock(buildInputs as Record<string, unknown>);
+            if (parityLockRebuild && !forceRebuildArtifact) {
+              return {
+                ok: false,
+                code: "ARTIFACT_MISSING",
+                message:
+                  "Linked One Path test home Past artifact is missing after parity sync. Recalc Past on the user site, replace the test home from source, then retry.",
+                engineVersion: PAST_ENGINE_VERSION,
+              };
+            }
             const validationModeledKeepRefDateKeysLocal =
               resolveProducerValidationModeledKeepRefDateKeysFromBuildInputs({
                 buildInputs,
@@ -8037,7 +8123,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
             const pastResult = await getPastSimulatedDatasetForHouse({
               userId: args.userId,
               houseId: args.houseId,
-              esiid: house.esiid ?? null,
+              esiid: pastSimEsiid,
               travelRanges,
               buildInputs,
               startDate,
@@ -8227,7 +8313,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
             await getValidationActualDailyByDateForDataset({
               dataset,
               fallbackHouseId: args.houseId,
-              fallbackEsiid: house.esiid ?? null,
+              fallbackEsiid: pastSimEsiid,
             })
           )
         : dataset;

@@ -1,8 +1,11 @@
 import {
   GAPFILL_LAB_TEST_HOME_LABEL,
+  GAPFILL_LAB_TEST_HOME_ADDRESS,
   MANUAL_MONTHLY_LAB_TEST_HOME_LABEL,
+  MANUAL_MONTHLY_LAB_TEST_HOME_ADDRESS,
   ONE_PATH_LAB_TEST_HOME_LABEL,
-} from "@/modules/usageSimulator/labTestHome";
+  ONE_PATH_LAB_TEST_HOME_ADDRESS,
+} from "@/modules/usageSimulator/labTestHomeLabels";
 
 export function isUserSiteSimulationCaller(callerLabel: string | null | undefined): boolean {
   return /^user_/i.test(String(callerLabel ?? "").trim());
@@ -23,9 +26,9 @@ export function isAdminLabTestHomeForUserSite(args: {
   }
   const addressLine1 = String(args.addressLine1 ?? "").trim().toLowerCase();
   return (
-    addressLine1 === "gap-fill canonical lab test home" ||
-    addressLine1 === "manual monthly lab test home" ||
-    addressLine1 === "one path lab test home"
+    addressLine1 === GAPFILL_LAB_TEST_HOME_ADDRESS ||
+    addressLine1 === MANUAL_MONTHLY_LAB_TEST_HOME_ADDRESS ||
+    addressLine1 === ONE_PATH_LAB_TEST_HOME_ADDRESS
   );
 }
 

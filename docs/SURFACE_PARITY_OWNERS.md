@@ -32,7 +32,7 @@
 | Past producer | `simulatePastUsageDataset` in **both** trees (see below) | + ledger prep | + `trustedActualDateKeys` from GB fetch |
 | Past engine | `buildPastSimulatedBaselineV1` in **both** `engine.ts` trees | Pending/incomplete/forced simulate | `intervalTrustedSource: GREEN_BUTTON` |
 | Validation compare | `compareProjection.ts` (keep admin + user copies aligned) | `forceSimulateDateKeysLocal` | Same |
-| One Path GB Past ↔ user Past | `lib/usage/onePathPastUserSiteParity.ts` | Copy source artifact + build to test home; `parityInputHash` on read | Same lock + `userSiteIsolation` on admin readback |
+| One Path Past (SMT + GB) ↔ user Past | `lib/usage/onePathPastUserSiteParity.ts` + `resolvePastSimEsiidForHouse.ts` | Copy source artifact + build; lab home keeps source ESIID; parity heal before read/rebuild | `parityInputHash` + `userSiteIsolation` on admin readback |
 
 **Do not edit** `modules/realUsageAdapter/greenButton.ts` for SMT-only fixes (workspace lock).
 
@@ -53,7 +53,8 @@ Two parallel module trees exist for historical reasons. **Any Past Sim parity fi
 
 - `lib/usage/pastSimSmtLedgerPrep.ts` — SMT ledger + slot-complete filter for Past producers
 - `lib/usage/computeHomeBaseloadKw.ts` — baseload for Usage, baseline, and Past insights
-- `lib/usage/onePathPastUserSiteParity.ts` — GB Past load parity: sync source user-site Past artifact to One Path test home; heal before admin readback
+- `lib/usage/onePathPastUserSiteParity.ts` — Past (SMT + GB) load parity: sync source user-site Past artifact to One Path test home; heal before admin readback
+- `lib/usage/resolvePastSimEsiidForHouse.ts` — resolve meter ESIID for lab-home Past recalc/backfill when `houseAddress.esiid` is unset
 - `lib/usage/onePathPastUserSiteParityLock.ts` — parity lock read/dirty/clear + dataset verify (pure; no DB)
 
 ---
