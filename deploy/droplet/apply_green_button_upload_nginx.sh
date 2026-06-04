@@ -51,6 +51,9 @@ disable_duplicate_uploads_vhosts() {
   )
 
   for path in "${matches[@]}"; do
+    if [[ "${path}" == *".disabled"* ]]; then
+      continue
+    fi
     if [[ "${path}" == "${NGINX_DST}" || "${path}" == "${NGINX_LINK}" ]]; then
       continue
     fi
