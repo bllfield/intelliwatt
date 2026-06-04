@@ -292,6 +292,15 @@ export function OnePathSimAdmin() {
     [selectedKnownScenarioKey]
   );
   const selectedKnownScenarioIsGreenButton = selectedKnownScenario?.scenarioType === "GREEN_BUTTON_TRUTH";
+  /** House that holds persisted GB intervals for One Path runs (test home when pinned, else actual context). */
+  const greenButtonPersistedUsageHouseId = useMemo(() => {
+    if (onePathTestHomePinned && effectiveMutableHouseId) {
+      return effectiveMutableHouseId;
+    }
+    return (actualContextHouseId || effectiveHouseId || "").trim();
+  }, [onePathTestHomePinned, effectiveMutableHouseId, actualContextHouseId, effectiveHouseId]);
+  const showGreenButtonRehydratePanel =
+    selectedKnownScenarioIsGreenButton && Boolean(greenButtonPersistedUsageHouseId);
   const lastRunKnownScenario = useMemo(
     () => getKnownHouseScenarioByKey(lastRunKnownScenarioKey),
     [lastRunKnownScenarioKey]
@@ -946,18 +955,18 @@ export function OnePathSimAdmin() {
       setError("Lookup a user and house first.");
       return;
     }
-    if (mode !== "GREEN_BUTTON") {
-      setError("Green Button rehydrate is only available in GREEN_BUTTON mode.");
+    if (!selectedKnownScenarioIsGreenButton && mode !== "GREEN_BUTTON") {
+      setError("Select a Green Button scenario preset or set Mode to GREEN_BUTTON first.");
       return;
     }
-    if (!effectiveActualContextHouseId) {
+    if (!greenButtonPersistedUsageHouseId) {
       setError("Select or pin a One Path test home with Green Button actual context first.");
       return;
     }
     setBusy(true);
     setError(null);
     setStatus(
-      `Re-running canonical Green Button ingest from stored raw bytes for ${effectiveActualContextHouseId}…`
+      `Re-running canonical Green Button ingest from stored raw bytes for ${greenButtonPersistedUsageHouseId}…`
     );
     try {
       const res = await fetch("/api/admin/tools/one-path-sim", {
@@ -996,7 +1005,14 @@ export function OnePathSimAdmin() {
     } finally {
       setBusy(false);
     }
-  }, [email, effectiveActualContextHouseId, loadLookup, lookup, mode]);
+  }, [
+    email,
+    greenButtonPersistedUsageHouseId,
+    loadLookup,
+    lookup,
+    mode,
+    selectedKnownScenarioIsGreenButton,
+  ]);
 
   const uploadGreenButtonThroughUsage = useCallback(
     async (houseId: string) => {
@@ -1470,43 +1486,6 @@ export function OnePathSimAdmin() {
             </div>
           ) : null}
 
-          {mode === "GREEN_BUTTON" && effectiveActualContextHouseId ? (
-            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/50 p-4 text-sm text-slate-700">
-              <div className="font-semibold text-brand-navy">Green Button rehydrate from raw</div>
-              <p className="mt-1 text-xs text-slate-600">
-                Re-runs the same canonical ingest pipeline as Droplet/Vercel upload on stored{" "}
-                <code className="text-[11px]">rawGreenButton</code> bytes (overlap + slot repair + ingest v1). Use when
-                intervals exist but the ingest gate reports stale pre-v1 data — no need to re-upload the XML file.
-              </p>
-              <p className="mt-1 text-xs text-slate-500">
-                Target house: <span className="font-mono">{effectiveActualContextHouseId}</span>
-              </p>
-              <label className="mt-3 flex items-start gap-3 rounded-lg border border-amber-100 bg-white/80 px-3 py-2">
-                <input
-                  type="checkbox"
-                  className="mt-1"
-                  checked={rehydrateGreenButtonFromRaw}
-                  onChange={(event) => setRehydrateGreenButtonFromRaw(event.target.checked)}
-                />
-                <span className="text-xs">
-                  <span className="font-semibold text-brand-navy">Rehydrate before One Path run</span>
-                  <span className="mt-1 block text-slate-600">
-                    Optional. When checked, the next Run re-processes raw bytes first, then continues the sim (same as
-                    clicking Rehydrate now).
-                  </span>
-                </span>
-              </label>
-              <button
-                type="button"
-                onClick={() => void runGreenButtonRehydrateFromRaw()}
-                disabled={busy}
-                className="mt-3 rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-brand-navy hover:bg-amber-100/60 disabled:opacity-60"
-              >
-                Rehydrate Green Button from raw now
-              </button>
-            </div>
-          ) : null}
-
           {onePathTestHome ? (
             <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50/40 p-4 text-sm text-slate-700">
               <div className="font-semibold text-brand-navy">Pinned One Path test home</div>
@@ -1618,6 +1597,43 @@ export function OnePathSimAdmin() {
                 ) : null}
                 {greenButtonUploadError ? (
                   <div className="mt-3 rounded-lg bg-rose-100 px-3 py-2 text-sm text-rose-700">{greenButtonUploadError}</div>
+                ) : null}
+                {showGreenButtonRehydratePanel ? (
+                  <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/60 p-4 text-sm text-slate-700">
+                    <div className="font-semibold text-brand-navy">Green Button rehydrate from raw</div>
+                    <p className="mt-1 text-xs text-slate-600">
+                      Re-runs the same canonical ingest pipeline as Droplet/Vercel upload on stored{" "}
+                      <code className="text-[11px]">rawGreenButton</code> bytes (overlap + slot repair + current ingest
+                      version). Use when intervals exist but the ingest gate reports stale data — no need to re-upload the
+                      XML file.
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Target house: <span className="font-mono">{greenButtonPersistedUsageHouseId}</span>
+                    </p>
+                    <label className="mt-3 flex items-start gap-3 rounded-lg border border-amber-100 bg-white/80 px-3 py-2">
+                      <input
+                        type="checkbox"
+                        className="mt-1"
+                        checked={rehydrateGreenButtonFromRaw}
+                        onChange={(event) => setRehydrateGreenButtonFromRaw(event.target.checked)}
+                      />
+                      <span className="text-xs">
+                        <span className="font-semibold text-brand-navy">Rehydrate before One Path run</span>
+                        <span className="mt-1 block text-slate-600">
+                          Optional. When checked, the next Run re-processes raw bytes first, then continues the sim (same
+                          as clicking Rehydrate now). Requires Mode GREEN_BUTTON on run.
+                        </span>
+                      </span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => void runGreenButtonRehydrateFromRaw()}
+                      disabled={busy || greenButtonUploadBusy}
+                      className="mt-3 rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-brand-navy hover:bg-amber-100/60 disabled:opacity-60"
+                    >
+                      Rehydrate Green Button from raw now
+                    </button>
+                  </div>
                 ) : null}
               </div>
             ) : null}
