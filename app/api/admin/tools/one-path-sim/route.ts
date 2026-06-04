@@ -34,6 +34,7 @@ import {
   assertOnePathGreenButtonPersistedUsage,
   greenButtonUploadHasPersistedUsage,
 } from "@/lib/usage/onePathGreenButtonUsageGate";
+import { rehydrateGreenButtonIntervalsFromRawForHouse } from "@/lib/usage/rehydrateGreenButtonIntervalsFromRaw";
 import type { TravelRange } from "@/modules/simulatedUsage/types";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
@@ -1635,6 +1636,28 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  if (action === "rehydrate_green_button_from_raw") {
+    const greenButtonContext = resolveOnePathGreenButtonActualContextForUsage({
+      resolved,
+      onePathTestHomeState,
+      effectiveUserId,
+      effectiveHouseId,
+    });
+    const rehydrate = await rehydrateGreenButtonIntervalsFromRawForHouse({
+      houseId: greenButtonContext.houseId,
+      userId: greenButtonContext.userId,
+    });
+    return NextResponse.json({
+      ok: rehydrate.ok,
+      email: resolved.email,
+      userId: resolved.userId,
+      houses: resolved.houses,
+      selectedHouse: resolved.selectedHouse,
+      greenButtonRehydrateFromRaw: rehydrate,
+      greenButtonActualContextHouseId: greenButtonContext.houseId,
+    });
+  }
+
   if (action === "full_window_smt_reingest") {
     const writable = requireOnePathWritableContext({ testHomeState: onePathTestHomeState });
     if (!writable.ok) return writable.response;
@@ -1784,6 +1807,33 @@ export async function POST(request: NextRequest) {
             effectiveHouseId,
           })
         : null;
+    let greenButtonRehydrateFromRaw: Awaited<
+      ReturnType<typeof rehydrateGreenButtonIntervalsFromRawForHouse>
+    > | null = null;
+    if (
+      mode === "GREEN_BUTTON" &&
+      body?.rehydrateGreenButtonFromRaw === true &&
+      greenButtonRunActualContext
+    ) {
+      greenButtonRehydrateFromRaw = await rehydrateGreenButtonIntervalsFromRawForHouse({
+        houseId: greenButtonRunActualContext.houseId,
+        userId: greenButtonRunActualContext.userId,
+      });
+      if (!greenButtonRehydrateFromRaw.ok) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: greenButtonRehydrateFromRaw.error,
+            message:
+              "Green Button rehydrate from raw failed. Check rawGreenButton bytes on the test home, then retry.",
+            houseId: greenButtonRunActualContext.houseId,
+            greenButtonRehydrateFromRaw,
+            correlationId,
+          },
+          { status: 422 }
+        );
+      }
+    }
     if (mode === "GREEN_BUTTON" && greenButtonRunActualContext) {
       const gbUsageGate = await assertOnePathGreenButtonPersistedUsage({
         houseId: greenButtonRunActualContext.houseId,
@@ -1796,6 +1846,7 @@ export async function POST(request: NextRequest) {
             error: gbUsageGate.error,
             message: gbUsageGate.message,
             houseId: gbUsageGate.houseId,
+            greenButtonRehydrateFromRaw,
             correlationId,
           },
           { status: 409 }
@@ -2314,6 +2365,7 @@ export async function POST(request: NextRequest) {
           runDisplayView,
           artifact: null,
           readModel: compactReadModel,
+          greenButtonRehydrateFromRaw,
         });
       }
       return NextResponse.json({
@@ -2330,6 +2382,7 @@ export async function POST(request: NextRequest) {
         readModel,
         manualStageOneView: readModel.manualStageOneView ?? null,
         runDisplayView,
+        greenButtonRehydrateFromRaw,
       });
     } catch (error) {
       if (isUpstreamUsageTruthMissingFailure(error)) {

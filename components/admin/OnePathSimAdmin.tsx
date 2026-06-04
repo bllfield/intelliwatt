@@ -224,6 +224,7 @@ export function OnePathSimAdmin() {
   const [greenButtonUploadBusy, setGreenButtonUploadBusy] = useState(false);
   const [greenButtonUploadStatus, setGreenButtonUploadStatus] = useState<string | null>(null);
   const [greenButtonUploadError, setGreenButtonUploadError] = useState<string | null>(null);
+  const [rehydrateGreenButtonFromRaw, setRehydrateGreenButtonFromRaw] = useState(false);
 
   const loadVariablePolicy = useCallback(async () => {
     const res = await fetch("/api/admin/tools/one-path-sim/variables");
@@ -939,6 +940,64 @@ export function OnePathSimAdmin() {
     [actualContextHouseId, applyLookupResponse, email, ensureOnePathTestHomeReady, requestLookup]
   );
 
+  const runGreenButtonRehydrateFromRaw = useCallback(async () => {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !lookup?.selectedHouse?.id) {
+      setError("Lookup a user and house first.");
+      return;
+    }
+    if (mode !== "GREEN_BUTTON") {
+      setError("Green Button rehydrate is only available in GREEN_BUTTON mode.");
+      return;
+    }
+    if (!effectiveActualContextHouseId) {
+      setError("Select or pin a One Path test home with Green Button actual context first.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setStatus(
+      `Re-running canonical Green Button ingest from stored raw bytes for ${effectiveActualContextHouseId}…`
+    );
+    try {
+      const res = await fetch("/api/admin/tools/one-path-sim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "rehydrate_green_button_from_raw",
+          email: trimmedEmail,
+          houseId: lookup.selectedHouse.id,
+          sourceHouseId: lookup.selectedHouse.id,
+        }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok) {
+        setStatus(null);
+        setError(
+          json?.message ??
+            json?.greenButtonRehydrateFromRaw?.error ??
+            json?.error ??
+            `Green Button rehydrate failed (${res.status})`
+        );
+        return;
+      }
+      const rehydrate = json?.greenButtonRehydrateFromRaw as
+        | { ok?: boolean; intervalsWritten?: number; intervalIngestVersion?: number }
+        | undefined;
+      setStatus(
+        rehydrate?.ok
+          ? `Rehydrate complete: ${rehydrate.intervalsWritten ?? "?"} intervals written (ingest v${rehydrate.intervalIngestVersion ?? "?"}).`
+          : "Green Button rehydrate finished with errors; see network response."
+      );
+      await loadLookup(undefined, { freshSelection: false });
+    } catch (rehydrateError) {
+      setStatus(null);
+      setError(rehydrateError instanceof Error ? rehydrateError.message : "Green Button rehydrate failed.");
+    } finally {
+      setBusy(false);
+    }
+  }, [email, effectiveActualContextHouseId, loadLookup, lookup, mode]);
+
   const uploadGreenButtonThroughUsage = useCallback(
     async (houseId: string) => {
       if (!greenButtonSelectedFile) {
@@ -1232,6 +1291,8 @@ export function OnePathSimAdmin() {
           persistRequested,
           runReason,
           includeDebugDiagnostics: effectiveIncludeDebugDiagnostics,
+          rehydrateGreenButtonFromRaw:
+            mode === "GREEN_BUTTON" && rehydrateGreenButtonFromRaw ? true : undefined,
         }),
       });
       json = await res.json().catch(() => null);
@@ -1293,6 +1354,7 @@ export function OnePathSimAdmin() {
     validationOnlyDateKeysLocal,
     weatherPreference,
     includeSimRunAuditEnabled,
+    rehydrateGreenButtonFromRaw,
   ]);
 
   const manualTransport = useMemo(
@@ -1404,6 +1466,43 @@ export function OnePathSimAdmin() {
                 className="mt-3 rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-brand-navy hover:bg-amber-100/60 disabled:opacity-60"
               >
                 Full window SMT re-ingest (365-day)
+              </button>
+            </div>
+          ) : null}
+
+          {mode === "GREEN_BUTTON" && effectiveActualContextHouseId ? (
+            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/50 p-4 text-sm text-slate-700">
+              <div className="font-semibold text-brand-navy">Green Button rehydrate from raw</div>
+              <p className="mt-1 text-xs text-slate-600">
+                Re-runs the same canonical ingest pipeline as Droplet/Vercel upload on stored{" "}
+                <code className="text-[11px]">rawGreenButton</code> bytes (overlap + slot repair + ingest v1). Use when
+                intervals exist but the ingest gate reports stale pre-v1 data — no need to re-upload the XML file.
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                Target house: <span className="font-mono">{effectiveActualContextHouseId}</span>
+              </p>
+              <label className="mt-3 flex items-start gap-3 rounded-lg border border-amber-100 bg-white/80 px-3 py-2">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={rehydrateGreenButtonFromRaw}
+                  onChange={(event) => setRehydrateGreenButtonFromRaw(event.target.checked)}
+                />
+                <span className="text-xs">
+                  <span className="font-semibold text-brand-navy">Rehydrate before One Path run</span>
+                  <span className="mt-1 block text-slate-600">
+                    Optional. When checked, the next Run re-processes raw bytes first, then continues the sim (same as
+                    clicking Rehydrate now).
+                  </span>
+                </span>
+              </label>
+              <button
+                type="button"
+                onClick={() => void runGreenButtonRehydrateFromRaw()}
+                disabled={busy}
+                className="mt-3 rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-brand-navy hover:bg-amber-100/60 disabled:opacity-60"
+              >
+                Rehydrate Green Button from raw now
               </button>
             </div>
           ) : null}

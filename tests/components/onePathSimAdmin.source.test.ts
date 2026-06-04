@@ -332,6 +332,19 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(readRepoFile("modules/onePathSim/usageSimulator/simulationVariablePolicy.ts")).toContain('case "GREEN_BUTTON":');
   });
 
+  it("exposes optional Green Button rehydrate from raw on the admin harness", () => {
+    const source = readRepoFile("components/admin/OnePathSimAdmin.tsx");
+    const routeSource = readRepoFile("app/api/admin/tools/one-path-sim/route.ts");
+
+    expect(source).toContain("Green Button rehydrate from raw");
+    expect(source).toContain("Rehydrate before One Path run");
+    expect(source).toContain('action: "rehydrate_green_button_from_raw"');
+    expect(source).toContain("rehydrateGreenButtonFromRaw");
+    expect(routeSource).toContain('action === "rehydrate_green_button_from_raw"');
+    expect(routeSource).toContain("rehydrateGreenButtonIntervalsFromRawForHouse");
+    expect(routeSource).toContain("body?.rehydrateGreenButtonFromRaw === true");
+  });
+
   it("keeps Green Button compare selection tied to the actual simulation interval pool", () => {
     const serviceSource = readRepoFile("modules/onePathSim/usageSimulator/service.ts");
     const datasetSource = readRepoFile("modules/onePathSim/usageSimulator/dataset.ts");

@@ -87,6 +87,7 @@ SMT ingest routes: `app/api/admin/smt/normalize`, `app/api/admin/smt/raw-upload`
 |--------|------|
 | Re-upload on Droplet / app | Preferred; runs pipeline + stamps `intervalIngestVersion` |
 | `rehydrateGreenButtonIntervalsFromRawForHouse({ houseId })` | House has raw bytes but old intervals |
+| One Path Admin (`GREEN_BUTTON` mode) | Optional checkbox **Rehydrate before One Path run** or button **Rehydrate Green Button from raw now** → `POST /api/admin/tools/one-path-sim` action `rehydrate_green_button_from_raw` |
 | Past / Usage recalc | After remediation; artifacts may still need rebuild |
 
 Detect: `isGreenButtonIntervalIngestCurrent(upload.parseMessage)`.
