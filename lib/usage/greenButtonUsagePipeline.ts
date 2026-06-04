@@ -3,7 +3,12 @@ import {
   GREEN_BUTTON_INTERVAL_INGEST_VERSION,
   type GreenButtonUploadParseSummary,
 } from "@/lib/usage/greenButtonIngestContract";
-import { normalizeGreenButtonReadingsTo15Min, type GreenButton15MinInterval } from "@/lib/usage/greenButtonNormalize";
+import {
+  GREEN_BUTTON_NORMALIZE_READINGS_PER_CHUNK,
+  normalizeGreenButtonReadingsTo15MinChunked,
+  type GreenButton15MinInterval,
+  type GreenButtonNormalizeChunkProgress,
+} from "@/lib/usage/greenButtonNormalize";
 import { parseGreenButtonBuffer, type ParsedGreenButtonResult } from "@/lib/usage/greenButtonParser";
 
 export const GREEN_BUTTON_USAGE_PIPELINE_WINDOW_DAYS = 365;
@@ -47,7 +52,7 @@ export type GreenButtonUsagePipelineResult =
   | GreenButtonUsagePipelineSuccess
   | GreenButtonUsagePipelineFailure;
 
-export type GreenButtonUsagePipelineStage = "parse" | "normalize" | "trim";
+export type GreenButtonUsagePipelineStage = "parse" | "normalize" | "normalize_repair" | "trim";
 
 export type GreenButtonUsagePipelineStageDetail = {
   stage: GreenButtonUsagePipelineStage;
@@ -55,24 +60,34 @@ export type GreenButtonUsagePipelineStageDetail = {
   rawReadings?: number;
   normalizedIntervals?: number;
   trimmedIntervals?: number;
+  parseMode?: "xml_full_tree" | "xml_interval_blocks";
+  chunkCount?: number;
 };
+
+export type { GreenButtonNormalizeChunkProgress };
 
 export function runGreenButtonUsagePipeline(args: {
   buffer: Buffer;
   filename?: string | null;
   windowDays?: number;
   maxKwhPerInterval?: number | null;
+  readingsPerChunk?: number;
   onStageComplete?: (detail: GreenButtonUsagePipelineStageDetail) => void;
+  onNormalizeChunkComplete?: (progress: GreenButtonNormalizeChunkProgress) => void;
+  onXmlParseProgress?: (detail: { blocksScanned: number; readingsFound: number }) => void;
 }): GreenButtonUsagePipelineResult {
   const windowDays = args.windowDays ?? GREEN_BUTTON_USAGE_PIPELINE_WINDOW_DAYS;
   const maxKwhPerInterval = args.maxKwhPerInterval ?? GREEN_BUTTON_USAGE_MAX_KWH_PER_INTERVAL;
 
   let stageStart = Date.now();
-  const parsed = parseGreenButtonBuffer(args.buffer, args.filename);
+  const parsed = parseGreenButtonBuffer(args.buffer, args.filename, {
+    onXmlParseProgress: args.onXmlParseProgress,
+  });
   args.onStageComplete?.({
     stage: "parse",
     ms: Date.now() - stageStart,
     rawReadings: parsed.metadata.totalReadings,
+    parseMode: parsed.metadata.parseMode,
   });
 
   if (parsed.errors.length > 0) {
@@ -95,14 +110,29 @@ export function runGreenButtonUsagePipeline(args: {
     };
   }
 
+  const readingsPerChunk = args.readingsPerChunk ?? GREEN_BUTTON_NORMALIZE_READINGS_PER_CHUNK;
+  const chunkCount = Math.max(1, Math.ceil(parsed.readings.length / readingsPerChunk));
+
   stageStart = Date.now();
-  const normalized = normalizeGreenButtonReadingsTo15Min(parsed.readings, {
+  const normalized = normalizeGreenButtonReadingsTo15MinChunked(parsed.readings, {
     maxKwhPerInterval,
+    readingsPerChunk,
+    onChunkComplete: (progress) => args.onNormalizeChunkComplete?.(progress),
+    onRepairComplete: (detail) => {
+      args.onStageComplete?.({
+        stage: "normalize_repair",
+        ms: detail.ms,
+        rawReadings: parsed.metadata.totalReadings,
+        chunkCount,
+        normalizedIntervals: detail.bucketsBefore,
+      });
+    },
   });
   args.onStageComplete?.({
     stage: "normalize",
     ms: Date.now() - stageStart,
     rawReadings: parsed.metadata.totalReadings,
+    chunkCount,
     normalizedIntervals: normalized.length,
   });
 

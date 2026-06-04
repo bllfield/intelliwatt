@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { GREEN_BUTTON_INTERVAL_INGEST_VERSION } from "@/lib/usage/greenButtonIngestContract";
+import { normalizeGreenButtonReadingsTo15Min } from "@/lib/usage/greenButtonNormalize";
+import { parseGreenButtonBuffer } from "@/lib/usage/greenButtonParser";
 import { runGreenButtonUsagePipeline } from "@/lib/usage/greenButtonUsagePipeline";
 
 function chicagoCstReadings(dateKey: string, count: number) {
@@ -83,6 +85,42 @@ describe("runGreenButtonUsagePipeline", () => {
     if (result.ok) return;
     expect(result.error).toBe("no_readings");
     expect(result.parseStatus).toBe("empty");
+  });
+
+  it("chunked normalize matches single-pass normalize for the same readings", () => {
+    const readings = chicagoCstReadings("2026-02-01", 96);
+    const buffer = Buffer.from(readingsToCsv(readings));
+    const parsed = parseGreenButtonBuffer(buffer, "usage.csv");
+    const single = normalizeGreenButtonReadingsTo15Min(parsed.readings, { maxKwhPerInterval: 10 });
+    const chunkedStages: Array<{ chunkIndex: number; chunkCount: number }> = [];
+    const result = runGreenButtonUsagePipeline({
+      buffer,
+      filename: "usage.csv",
+      windowDays: 365,
+      readingsPerChunk: 32,
+      onNormalizeChunkComplete: (p) => chunkedStages.push(p),
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(chunkedStages.length).toBe(3);
+    expect(result.normalized.map((r) => [r.timestamp.getTime(), r.consumptionKwh])).toEqual(
+      single.map((r) => [r.timestamp.getTime(), r.consumptionKwh])
+    );
+  });
+
+  it("uses interval block scan for large XML and matches full-tree parse", () => {
+    const xml = smtGreenButtonXmlReadings("2025-12-01", 192, 120);
+    const padded = `${"<!-- pad -->\n".repeat(60_000)}${xml}`;
+    expect(padded.length).toBeGreaterThan(512 * 1024);
+
+    const blockParsed = parseGreenButtonBuffer(Buffer.from(padded), "large.xml");
+    const treeParsed = parseGreenButtonBuffer(Buffer.from(xml), "small.xml");
+
+    expect(blockParsed.metadata.parseMode).toBe("xml_interval_blocks");
+    expect(blockParsed.readings.length).toBe(treeParsed.readings.length);
+    expect(blockParsed.readings.map((r) => [r.timestamp, r.value, r.durationSeconds])).toEqual(
+      treeParsed.readings.map((r) => [r.timestamp, r.value, r.durationSeconds])
+    );
   });
 
   it("inherits ESPI uom=72 as Wh so SMT Green Button values under 100 are not dropped as kWh outliers", () => {

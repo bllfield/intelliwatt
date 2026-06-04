@@ -597,13 +597,29 @@ async function runGreenButtonIngestJob(args: GreenButtonIngestJobArgs): Promise<
 
     let stageStart = Date.now();
     logEvent("ingest.stage_start", { uploadRecordId, stage: "pipeline" });
+    const readingsPerChunk = Number(process.env.GREEN_BUTTON_READINGS_PER_CHUNK || "5000");
     const pipelineResult = runGreenButtonUsagePipeline({
       buffer,
       filename,
       windowDays: MANUAL_USAGE_LIFETIME_DAYS,
       maxKwhPerInterval: 10,
+      readingsPerChunk,
       onStageComplete: (detail) => {
         logEvent("ingest.pipeline_progress", { uploadRecordId, ...detail });
+      },
+      onNormalizeChunkComplete: (progress) => {
+        logEvent("ingest.pipeline_progress", {
+          uploadRecordId,
+          stage: "normalize_chunk",
+          ...progress,
+        });
+      },
+      onXmlParseProgress: (detail) => {
+        logEvent("ingest.pipeline_progress", {
+          uploadRecordId,
+          stage: "parse_xml_blocks",
+          ...detail,
+        });
       },
     });
     if (!pipelineResult.ok) {

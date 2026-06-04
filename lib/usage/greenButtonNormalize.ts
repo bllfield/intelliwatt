@@ -13,6 +13,22 @@ import {
 
 const GREEN_BUTTON_HOME = createHomeIntervalCalendar("America/Chicago");
 
+/** Chunk size for bucketing raw readings (same idea as SMT LINES_PER_CHUNK). */
+export const GREEN_BUTTON_NORMALIZE_READINGS_PER_CHUNK = 5000;
+
+export type GreenButtonNormalizeOptions = {
+  treatTimestampAsEnd?: boolean;
+  maxKwhPerInterval?: number | null;
+};
+
+export type GreenButtonNormalizeChunkProgress = {
+  chunkIndex: number;
+  chunkCount: number;
+  readingsInChunk: number;
+  ms: number;
+  bucketsAfter: number;
+};
+
 export type GreenButtonRawReading = {
   /**
    * Timestamp for the reading:
@@ -74,26 +90,13 @@ export type GreenButton15MinInterval = {
  * - Splits long intervals (e.g., 1-hour readings) across multiple 15-min buckets.
  * - Aggregates multiple readings that map to the same 15-min bucket.
  */
-export function normalizeGreenButtonReadingsTo15Min(
+/** Add raw readings into shared home-local buckets (no repair yet). */
+export function accumulateGreenButtonReadingsIntoBuckets(
   rawReadings: GreenButtonRawReading[],
-  options?: {
-    /**
-     * If true, treat timestamps in the input as interval END instead of interval START.
-     * In that case we shift by durationSeconds backwards before bucketing.
-     * Default: false (assume timestamps are interval start).
-     */
-    treatTimestampAsEnd?: boolean;
-    /**
-     * Optional guard to cap extreme outliers (in kWh) after normalization.
-     * If null/undefined, no cap is applied.
-     */
-    maxKwhPerInterval?: number | null;
-  },
-): GreenButton15MinInterval[] {
+  buckets: Map<number, GreenButtonBucketCell>,
+  options?: GreenButtonNormalizeOptions
+): void {
   const treatAsEnd = options?.treatTimestampAsEnd ?? false;
-  const maxKwh = options?.maxKwhPerInterval ?? null;
-
-  const buckets = new Map<number, GreenButtonBucketCell>(); // home-local slot start (UTC ms)
 
   for (const reading of rawReadings) {
     const durSecRaw = reading.durationSeconds ?? 900;
@@ -101,7 +104,7 @@ export function normalizeGreenButtonReadingsTo15Min(
 
     const valueKwh = ensureKwh(reading.value, reading.unit);
     if (!isFinite(valueKwh) || valueKwh < 0) {
-      continue; // drop invalid or negative values
+      continue;
     }
 
     const delivery = greenButtonDeliveryForRawTimestamp(reading.timestamp, durationSeconds, treatAsEnd);
@@ -112,7 +115,7 @@ export function normalizeGreenButtonReadingsTo15Min(
         kwh: valueKwh,
         unit: reading.unit ?? "kWh",
       },
-      delivery,
+      delivery
     );
     if (!resolved) continue;
 
@@ -124,20 +127,21 @@ export function normalizeGreenButtonReadingsTo15Min(
       buckets,
     });
   }
+}
 
+/** Run slot repair once, then materialize 15-minute intervals from buckets. */
+export function finalizeGreenButtonBuckets(
+  buckets: Map<number, GreenButtonBucketCell>,
+  options?: GreenButtonNormalizeOptions
+): GreenButton15MinInterval[] {
+  const maxKwh = options?.maxKwhPerInterval ?? null;
   repairGreenButtonHomeLocalBuckets(buckets, GREEN_BUTTON_HOME);
 
   const results: GreenButton15MinInterval[] = [];
-
   buckets.forEach((cell, ms) => {
     const kwh = cell.kwh;
-    if (!isFinite(kwh) || kwh < 0) {
-      return;
-    }
-    if (maxKwh != null && kwh > maxKwh) {
-      return;
-    }
-
+    if (!isFinite(kwh) || kwh < 0) return;
+    if (maxKwh != null && kwh > maxKwh) return;
     results.push({
       timestamp: new Date(ms),
       consumptionKwh: kwh,
@@ -145,10 +149,49 @@ export function normalizeGreenButtonReadingsTo15Min(
       unit: "kWh",
     });
   });
-
-  // Sort by timestamp ascending.
   results.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  return results;
+}
 
+export function normalizeGreenButtonReadingsTo15Min(
+  rawReadings: GreenButtonRawReading[],
+  options?: GreenButtonNormalizeOptions
+): GreenButton15MinInterval[] {
+  const buckets = new Map<number, GreenButtonBucketCell>();
+  accumulateGreenButtonReadingsIntoBuckets(rawReadings, buckets, options);
+  return finalizeGreenButtonBuckets(buckets, options);
+}
+
+/** Chunked normalize: accumulate in batches, repair once at end (SMT-style progress + same semantics). */
+export function normalizeGreenButtonReadingsTo15MinChunked(
+  rawReadings: GreenButtonRawReading[],
+  options?: GreenButtonNormalizeOptions & {
+    readingsPerChunk?: number;
+    onChunkComplete?: (progress: GreenButtonNormalizeChunkProgress) => void;
+    onRepairComplete?: (detail: { ms: number; bucketsBefore: number }) => void;
+  }
+): GreenButton15MinInterval[] {
+  const chunkSize = Math.max(1, options?.readingsPerChunk ?? GREEN_BUTTON_NORMALIZE_READINGS_PER_CHUNK);
+  const buckets = new Map<number, GreenButtonBucketCell>();
+  const chunkCount = Math.max(1, Math.ceil(rawReadings.length / chunkSize));
+
+  for (let offset = 0; offset < rawReadings.length; offset += chunkSize) {
+    const chunk = rawReadings.slice(offset, offset + chunkSize);
+    const chunkStart = Date.now();
+    accumulateGreenButtonReadingsIntoBuckets(chunk, buckets, options);
+    options?.onChunkComplete?.({
+      chunkIndex: Math.floor(offset / chunkSize) + 1,
+      chunkCount,
+      readingsInChunk: chunk.length,
+      ms: Date.now() - chunkStart,
+      bucketsAfter: buckets.size,
+    });
+  }
+
+  const bucketsBefore = buckets.size;
+  const repairStart = Date.now();
+  const results = finalizeGreenButtonBuckets(buckets, options);
+  options?.onRepairComplete?.({ ms: Date.now() - repairStart, bucketsBefore });
   return results;
 }
 

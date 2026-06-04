@@ -12,6 +12,7 @@ export type ParsedGreenButtonResult = {
     meterSerialNumber: string | null;
     sourceTitle: string | null;
     totalReadings: number;
+    parseMode?: "xml_full_tree" | "xml_interval_blocks";
   };
   /** Non-fatal parsing warnings */
   warnings: string[];
@@ -31,7 +32,16 @@ const XML_PARSER_OPTIONS = {
  * Parse a Green Button file (XML/CSV/JSON) into raw readings that can later be normalized.
  * The parser is intentionally tolerant and will return as many readings as it can recover.
  */
-export function parseGreenButtonBuffer(buffer: Buffer, filename?: string | null): ParsedGreenButtonResult {
+const LARGE_XML_INTERVAL_BLOCK_THRESHOLD_BYTES = 512 * 1024;
+const XML_BLOCK_PARSE_PROGRESS_EVERY = 2000;
+
+export function parseGreenButtonBuffer(
+  buffer: Buffer,
+  filename?: string | null,
+  options?: {
+    onXmlParseProgress?: (detail: { blocksScanned: number; readingsFound: number }) => void;
+  }
+): ParsedGreenButtonResult {
   const warnings: string[] = [];
   const errors: string[] = [];
 
@@ -49,22 +59,27 @@ export function parseGreenButtonBuffer(buffer: Buffer, filename?: string | null)
   }
 
   let readings: GreenButtonRawReading[] = [];
-  let metadata = {
-    timezoneOffsetSeconds: null as number | null,
-    meterSerialNumber: null as string | null,
-    sourceTitle: null as string | null,
+  let metadata: ParsedGreenButtonResult["metadata"] = {
+    timezoneOffsetSeconds: null,
+    meterSerialNumber: null,
+    sourceTitle: null,
     totalReadings: 0,
+    parseMode: undefined,
   };
 
   try {
     if (format === "xml") {
-      const xmlResult = parseGreenButtonXml(content);
+      const useBlockParser = content.length >= LARGE_XML_INTERVAL_BLOCK_THRESHOLD_BYTES;
+      const xmlResult = useBlockParser
+        ? parseGreenButtonXmlLarge(content, options?.onXmlParseProgress)
+        : parseGreenButtonXml(content);
       readings = xmlResult.readings;
       metadata = {
         timezoneOffsetSeconds: xmlResult.timezoneOffsetSeconds,
         meterSerialNumber: xmlResult.meterSerialNumber,
         sourceTitle: xmlResult.sourceTitle,
         totalReadings: readings.length,
+        parseMode: xmlResult.parseMode,
       };
       warnings.push(...xmlResult.warnings);
     } else if (format === "csv" || format === "unknown") {
@@ -114,7 +129,89 @@ type XmlParseResult = {
   meterSerialNumber: string | null;
   sourceTitle: string | null;
   warnings: string[];
+  parseMode?: "xml_full_tree" | "xml_interval_blocks";
 };
+
+function resolveXmlDefaultReadingUnitFromHeader(xml: string): string | null {
+  const head = xml.slice(0, 250_000);
+  if (/<uom>\s*72\s*<\/uom>/i.test(head)) {
+    if (/<powerOfTenMultiplier>\s*3\s*<\/powerOfTenMultiplier>/i.test(head)) return "kWh";
+    return "Wh";
+  }
+  const titleMatch = head.match(/<title>([^<]*)<\/title>/i);
+  const title = titleMatch?.[1] ?? null;
+  if (/\bKWH\b/i.test(String(title ?? ""))) return "kWh";
+  if (/\bWH\b/i.test(String(title ?? ""))) return "Wh";
+  return null;
+}
+
+function intervalReadingNodeFromWrappedBlock(wrappedRoot: Record<string, unknown>): Record<string, unknown> | null {
+  const direct = getFirstObject(wrappedRoot.IntervalReading);
+  if (direct) return direct;
+  return wrappedRoot;
+}
+
+/**
+ * Large ESPI files: scan IntervalReading blocks without building one giant XML tree.
+ * Falls back to full-tree parse when block scan finds too few readings.
+ */
+function parseGreenButtonXmlLarge(
+  xml: string,
+  onProgress?: (detail: { blocksScanned: number; readingsFound: number }) => void
+): XmlParseResult {
+  const warnings: string[] = [];
+  const defaultUnit = resolveXmlDefaultReadingUnitFromHeader(xml);
+  const readings: GreenButtonRawReading[] = [];
+  const blockRe = /<IntervalReading\b[^>]*>[\s\S]*?<\/IntervalReading>/gi;
+  const miniParser = new XMLParser(XML_PARSER_OPTIONS);
+  let blocksScanned = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = blockRe.exec(xml)) !== null) {
+    blocksScanned += 1;
+    try {
+      const wrapped = miniParser.parse(`<ir>${match[0]}</ir>`) as { ir?: Record<string, unknown> };
+      const node = intervalReadingNodeFromWrappedBlock(wrapped?.ir ?? {});
+      const reading = readingFromNode(node, defaultUnit);
+      if (reading) readings.push(reading);
+    } catch {
+      // skip malformed block
+    }
+    if (blocksScanned % XML_BLOCK_PARSE_PROGRESS_EVERY === 0) {
+      onProgress?.({ blocksScanned, readingsFound: readings.length });
+    }
+  }
+
+  onProgress?.({ blocksScanned, readingsFound: readings.length });
+
+  if (readings.length === 0) {
+    warnings.push("Interval block scan found no readings; falling back to full XML tree parse.");
+    const fallback = parseGreenButtonXml(xml);
+    return { ...fallback, parseMode: "xml_full_tree" };
+  }
+
+  const expectedBlocks = (xml.match(/<IntervalReading\b/gi) ?? []).length;
+  if (expectedBlocks > 100 && readings.length < expectedBlocks * 0.9) {
+    warnings.push(
+      `Interval block scan recovered ${readings.length}/${expectedBlocks} readings; falling back to full XML tree parse.`
+    );
+    const fallback = parseGreenButtonXml(xml);
+    return { ...fallback, parseMode: "xml_full_tree" };
+  }
+
+  if (readings.length === 0) {
+    warnings.push("Parsed XML successfully, but no interval readings were found.");
+  }
+
+  return {
+    readings,
+    timezoneOffsetSeconds: parseIntOrNull(xml.match(/<tzOffset>\s*([^<]+)\s*<\/tzOffset>/i)?.[1] ?? null),
+    meterSerialNumber: xml.match(/<meterSerialNumber>\s*([^<]+)\s*<\/meterSerialNumber>/i)?.[1]?.trim() ?? null,
+    sourceTitle: xml.match(/<title>\s*([^<]+)\s*<\/title>/i)?.[1]?.trim() ?? null,
+    warnings,
+    parseMode: "xml_interval_blocks",
+  };
+}
 
 function parseGreenButtonXml(xml: string): XmlParseResult {
   const parser = new XMLParser(XML_PARSER_OPTIONS);
@@ -145,6 +242,7 @@ function parseGreenButtonXml(xml: string): XmlParseResult {
     meterSerialNumber,
     sourceTitle,
     warnings,
+    parseMode: "xml_full_tree",
   };
 }
 
