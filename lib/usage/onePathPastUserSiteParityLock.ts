@@ -1,3 +1,7 @@
+/**
+ * Dirty-input detection for One Path lab Past builds.
+ * Product goal: docs/ONE_PATH_DUAL_RUN_GOAL.md (dual-run, not artifact copy).
+ */
 import { createHash } from "crypto";
 
 export type OnePathUserSiteParityLock = {

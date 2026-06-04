@@ -89,9 +89,6 @@ import {
   readOnePathUserSiteParityLock,
   isParityBuildInputsDirty,
   clearOnePathUserSiteParityFromBuildInputs,
-  syncOnePathPastUserSiteParityFromSource,
-  loadPastDatasetForParityLock,
-  maybeHealOnePathPastParityForRead,
 } from "@/lib/usage/onePathPastUserSiteParity";
 import { resolvePastSimEsiidForHouse } from "@/lib/usage/resolvePastSimEsiidForHouse";
 import { IntervalSeriesKind } from "@/modules/onePathSim/usageSimulator/kinds";
@@ -4385,63 +4382,6 @@ async function recalcSimulatorBuildImpl(args: {
   let effectiveValidationSelectionMode =
     normalizeValidationSelectionMode(args.validationDaySelectionMode) ??
     (requestedValidationOnlyDateKeysLocal.size > 0 ? ("manual" as ValidationDaySelectionMode) : null);
-  if (!isUserSiteCaller && scenarioId) {
-    const scenarioRow = await (prisma as any).usageSimulatorScenario
-      .findFirst({
-        where: { id: scenarioId, userId, houseId, archivedAt: null },
-        select: { name: true },
-      })
-      .catch(() => null);
-    if (scenarioRow?.name === WORKSPACE_PAST_SCENARIO_NAME) {
-      const existingBuildInputs = await (prisma as any).usageSimulatorBuild
-        .findUnique({
-          where: { userId_houseId_scenarioKey: { userId, houseId, scenarioKey: scenarioId } },
-          select: { buildInputs: true, buildInputsHash: true },
-        })
-        .catch(() => null);
-      const parityLock = readOnePathUserSiteParityLock(
-        existingBuildInputs?.buildInputs as Record<string, unknown> | undefined
-      );
-      const requestProbe: Record<string, unknown> = {
-        ...(existingBuildInputs?.buildInputs && typeof existingBuildInputs.buildInputs === "object"
-          ? (existingBuildInputs.buildInputs as Record<string, unknown>)
-          : {}),
-        mode,
-        weatherPreference: args.weatherPreference ?? "LAST_YEAR_WEATHER",
-        validationOnlyDateKeysLocal: Array.from(requestedValidationOnlyDateKeysLocal),
-        travelRanges: requestedPreLockboxTravelRanges,
-        validationSelectionMode: effectiveValidationSelectionMode,
-        effectiveValidationSelectionMode,
-        validationDayCount: args.validationDayCount ?? null,
-      };
-      const unchangedParity =
-        parityLock &&
-        !isParityBuildInputsDirty({ currentBuildInputs: requestProbe, parity: parityLock });
-      if (unchangedParity) {
-        const refreshed = await syncOnePathPastUserSiteParityFromSource({
-          ownerUserId: userId,
-          sourceUserId: parityLock.sourceUserId,
-          sourceHouseId: parityLock.sourceHouseId,
-          testHomeHouseId: houseId,
-        });
-        if (refreshed.ok) {
-          const dataset = await loadPastDatasetForParityLock({
-            houseId,
-            parity: refreshed.parity,
-          });
-          if (dataset) {
-            return {
-              ok: true,
-              houseId,
-              buildInputsHash: String(existingBuildInputs?.buildInputsHash ?? ""),
-              dataset,
-              canonicalArtifactInputHash: refreshed.parity.parityInputHash,
-            };
-          }
-        }
-      }
-    }
-  }
   let validationSelectionDiagnostics: ValidationDaySelectionDiagnostics | null = null;
   let preferredActualSource = args.runContext?.preferredActualSource ?? undefined;
   const runContext = buildPastSimRunContext({
@@ -7206,12 +7146,6 @@ export async function getSimulatedUsageForHouseScenario(args: {
       })) ?? house.esiid ?? null;
 
     if (readContext.artifactReadMode === "artifact_only") {
-      if (scenarioId) {
-        await maybeHealOnePathPastParityForRead({
-          ownerUserId: args.userId,
-          testHomeHouseId: args.houseId,
-        }).catch(() => null);
-      }
       const scenarioIdForCache = scenarioId ?? "BASELINE";
       // Backward-compatible artifact-only support for gapfill_lab, which does not have a usageSimulatorBuild row.
       if (scenarioIdForCache === "gapfill_lab") {
@@ -7449,20 +7383,17 @@ export async function getSimulatedUsageForHouseScenario(args: {
         };
       }
       const window = pastArtifactIdentity.window;
-      const parityLock = readOnePathUserSiteParityLock(buildInputs as Record<string, unknown>);
       let requestedExactArtifactInputHash =
         typeof args.exactArtifactInputHash === "string" && args.exactArtifactInputHash.trim()
           ? args.exactArtifactInputHash.trim()
-          : parityLock?.parityInputHash ?? null;
+          : null;
       if (pastValidationBackfillRotatedArtifact) {
         requestedExactArtifactInputHash = null;
       }
       const requireExactArtifactMatch =
         args.requireExactArtifactMatch === true && !pastValidationBackfillRotatedArtifact;
       const resolvedInputHash =
-        parityLock?.parityInputHash ??
-        requestedExactArtifactInputHash ??
-        pastArtifactIdentity.inputHash;
+        requestedExactArtifactInputHash ?? pastArtifactIdentity.inputHash;
 
       let exactCached = await getCachedPastDataset({
         houseId: args.houseId,
@@ -7504,29 +7435,11 @@ export async function getSimulatedUsageForHouseScenario(args: {
       }
       const artifactSourceMode: "exact_hash_match" = "exact_hash_match";
       if (!exactCached || exactCached.intervalsCodec !== INTERVAL_CODEC_V1) {
-        await maybeHealOnePathPastParityForRead({
-          ownerUserId: args.userId,
-          testHomeHouseId: args.houseId,
-        }).catch(() => null);
-        const parityLockAfterHeal = readOnePathUserSiteParityLock(buildInputs as Record<string, unknown>);
-        const retryInputHash = parityLockAfterHeal?.parityInputHash ?? resolvedInputHash;
-        if (retryInputHash !== resolvedInputHash || !exactCached) {
-          exactCached = await getCachedPastDataset({
-            houseId: args.houseId,
-            scenarioId: scenarioIdForCache,
-            inputHash: retryInputHash,
-          });
-          if (exactCached && hasLegacyWeatherEfficiencySimulationActivation(exactCached.datasetJson)) {
-            exactCached = null;
-          }
-        }
-      }
-      if (!exactCached || exactCached.intervalsCodec !== INTERVAL_CODEC_V1) {
         return {
           ok: false,
           code: "ARTIFACT_MISSING",
           message:
-            "Persisted artifact not found for this house/scenario identity. Recalc Past on the user site, replace the One Path test home from source, then retry.",
+            "Persisted artifact not found for this house/scenario identity. Run Past Sim recalc on this home, then retry.",
           inputHash: resolvedInputHash,
           engineVersion: PAST_ENGINE_VERSION,
         };
@@ -7612,13 +7525,6 @@ export async function getSimulatedUsageForHouseScenario(args: {
         ? attachCompareWithObservability(projectedBaselineAware)
         : projectedBaselineAware;
       return { ok: true, houseId: args.houseId, scenarioKey, scenarioId, dataset: projected };
-    }
-
-    if (scenarioId) {
-      await maybeHealOnePathPastParityForRead({
-        ownerUserId: args.userId,
-        testHomeHouseId: args.houseId,
-      }).catch(() => null);
     }
 
     let scenarioRow: { id: string; name: string } | null = null;
@@ -8008,8 +7914,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
           sourceOfWindow: "past_artifact_identity",
         };
         if (startDate && endDate && pastArtifactIdentity) {
-          const parityLockAllowRebuild = readOnePathUserSiteParityLock(buildInputs as Record<string, unknown>);
-          let inputHash = parityLockAllowRebuild?.parityInputHash ?? pastArtifactIdentity.inputHash;
+          let inputHash = pastArtifactIdentity.inputHash;
           const scenarioIdForCache = scenarioId ?? "BASELINE";
           const cacheKeyDiag = {
             inputHash,
@@ -8028,24 +7933,6 @@ export async function getSimulatedUsageForHouseScenario(args: {
               });
           let usableCached =
             cached && !hasLegacyWeatherEfficiencySimulationActivation(cached.datasetJson) ? cached : null;
-          if ((!usableCached || usableCached.intervalsCodec !== INTERVAL_CODEC_V1) && !forceRebuildArtifact) {
-            await maybeHealOnePathPastParityForRead({
-              ownerUserId: args.userId,
-              testHomeHouseId: args.houseId,
-            }).catch(() => null);
-            const lockAfterHeal = readOnePathUserSiteParityLock(buildInputs as Record<string, unknown>);
-            if (lockAfterHeal?.parityInputHash) {
-              inputHash = lockAfterHeal.parityInputHash;
-              cacheKeyDiag.inputHash = inputHash;
-              cached = await getCachedPastDataset({
-                houseId: args.houseId,
-                scenarioId: scenarioIdForCache,
-                inputHash,
-              });
-              usableCached =
-                cached && !hasLegacyWeatherEfficiencySimulationActivation(cached.datasetJson) ? cached : null;
-            }
-          }
           if (usableCached && usableCached.intervalsCodec === INTERVAL_CODEC_V1) {
             const decoded = decodeIntervalsV1(usableCached.intervalsCompressed);
             const restored = {
@@ -8101,16 +7988,6 @@ export async function getSimulatedUsageForHouseScenario(args: {
               (dataset.meta as any).coverageEnd = dataset?.summary?.end ?? endDate;
             }
           } else {
-            const parityLockRebuild = readOnePathUserSiteParityLock(buildInputs as Record<string, unknown>);
-            if (parityLockRebuild && !forceRebuildArtifact) {
-              return {
-                ok: false,
-                code: "ARTIFACT_MISSING",
-                message:
-                  "Linked One Path test home Past artifact is missing after parity sync. Recalc Past on the user site, replace the test home from source, then retry.",
-                engineVersion: PAST_ENGINE_VERSION,
-              };
-            }
             const validationModeledKeepRefDateKeysLocal =
               resolveProducerValidationModeledKeepRefDateKeysFromBuildInputs({
                 buildInputs,

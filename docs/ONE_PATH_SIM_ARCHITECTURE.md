@@ -13,6 +13,8 @@ Use it to answer:
 
 When this document conflicts with older planning or audit language, this document wins unless a newer authoritative override explicitly replaces it.
 
+**Past / lab-home product goal:** `docs/ONE_PATH_DUAL_RUN_GOAL.md` (two independent runs, one shared pipeline—not copy user Past artifacts to the test home). Agent lock: `.cursor/rules/one-path-dual-run-lock.mdc`.
+
 ## Current state
 
 - One Path Sim Admin is currently a **pre-cutover proving harness / truth console**.
@@ -25,6 +27,15 @@ When this document conflicts with older planning or audit language, this documen
 - This phase is about locking ownership and contracts so later cutover can happen without drift.
 
 ## One Path admin operating rules
+
+### Dual-run rule (Past Corrected — authoritative)
+
+See **`docs/ONE_PATH_DUAL_RUN_GOAL.md`** for the full spec. Summary:
+
+- User site and One Path test home each **run** the same Past recalc/engine and **persist separate** `PastSimulatedDatasetCache` rows (`user houseId` vs `test houseId`).
+- Identical inputs + identical upstream usage truth (including after SMT backfill) → **identical sim outcomes**, proved by execution, not by copying the user’s cache row.
+- Admin may change test-home variables only; then test results may diverge intentionally.
+- **Artifact copy from user → test is drift**, not the target architecture (see dual-run doc § Implementation drift).
 
 - One Path Admin writes only to a dedicated reusable `ONE_PATH_LAB_TEST_HOME`. The selected source house stays read-only. Replacing the test home resets isolated mutable state, copies scenarios/manual payload context, repairs missing home/appliance profiles, and clones Green Button actual-usage records onto the test home so admin tuning stays sandboxed.
 - When the test home is pinned, actual usage still stays under shared usage ownership. `INTERVAL` / SMT runs may use the selected source house ESIID as the SMT identity fallback for the pinned actual-context house, while `GREEN_BUTTON` runs read persisted Green Button truth cloned onto the test home. Route code must not invent a private actual-usage source.

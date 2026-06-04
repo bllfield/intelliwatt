@@ -1,6 +1,10 @@
 /**
- * One Path Past (SMT + GB) must match user-site Past for the linked source house until admin changes inputs.
- * Persists artifacts on the test home only; never writes to the source (user) home.
+ * DRIFT — not the product goal. See docs/ONE_PATH_DUAL_RUN_GOAL.md and .cursor/rules/one-path-dual-run-lock.mdc.
+ *
+ * Target: user + test home each RUN the shared Past pipeline (separate cache rows); match when inputs match.
+ * This module currently COPYs user Past cache/build to the test home — temporary; remove copy-first paths.
+ *
+ * Never writes to the source (user) home. Test home persistence only.
  */
 
 import "server-only";
@@ -349,11 +353,111 @@ export async function loadPastDatasetForParityLock(args: {
 }
 
 /**
-
- * Copy user-site Past artifact + build inputs from source house onto the One Path test home.
-
+ * Mirror user-site Past build inputs onto the test home (no artifact copy).
+ * Used on test-home replace; Past artifacts come from a test-home recalc run.
  */
+export async function mirrorOnePathPastBuildInputsFromSource(args: {
+  ownerUserId: string;
+  sourceUserId: string;
+  sourceHouseId: string;
+  testHomeHouseId: string;
+}): Promise<OnePathPastParitySyncResult> {
+  const sourceScenarioId = await findPastScenarioId({
+    userId: args.sourceUserId,
+    houseId: args.sourceHouseId,
+  });
+  const testScenarioId = await findPastScenarioId({
+    userId: args.ownerUserId,
+    houseId: args.testHomeHouseId,
+  });
+  if (!sourceScenarioId) {
+    return {
+      ok: false,
+      code: "SOURCE_PAST_SCENARIO_MISSING",
+      message: "Source house has no Past (Corrected) scenario.",
+    };
+  }
+  if (!testScenarioId) {
+    return {
+      ok: false,
+      code: "TEST_PAST_SCENARIO_MISSING",
+      message: "One Path test home has no Past (Corrected) scenario after link.",
+    };
+  }
+  let sourceBuildInputs = await loadPastSimulatorBuild({
+    userId: args.sourceUserId,
+    houseId: args.sourceHouseId,
+    scenarioId: sourceScenarioId,
+  });
+  if (!sourceBuildInputs) {
+    return {
+      ok: false,
+      code: "SOURCE_PAST_BUILD_MISSING",
+      message: "Source house has no Past simulator build. Recalc Past on the user site first.",
+    };
+  }
+  const sourceHouse = await getHouseAddressForUserHouse({
+    userId: args.sourceUserId,
+    houseId: args.sourceHouseId,
+  });
+  if (!sourceHouse) {
+    return {
+      ok: false,
+      code: "SOURCE_HOUSE_NOT_FOUND",
+      message: "Source house not found.",
+    };
+  }
+  sourceBuildInputs = await resolveUserSiteBuildInputs({
+    userId: args.sourceUserId,
+    houseId: args.sourceHouseId,
+    esiid: sourceHouse.esiid ?? null,
+    buildInputs: sourceBuildInputs,
+  });
+  const { resolvePastArtifactIdentity } = await import("@/lib/usage/pastArtifactIdentity");
+  const identity = await resolvePastArtifactIdentity({
+    userId: args.sourceUserId,
+    requestHouseId: args.sourceHouseId,
+    requestHouseEsiid: sourceHouse.esiid ?? null,
+    buildInputs: sourceBuildInputs,
+  });
+  if (!identity) {
+    return {
+      ok: false,
+      code: "PARITY_IDENTITY_FAILED",
+      message: "Could not resolve Past artifact identity for source house.",
+    };
+  }
+  const snapshotHash = stableParityBuildInputsSnapshot(sourceBuildInputs);
+  const parity: OnePathUserSiteParityLock = {
+    sourceUserId: args.sourceUserId,
+    sourceHouseId: args.sourceHouseId,
+    sourceScenarioId,
+    testScenarioId,
+    parityInputHash: identity.inputHash,
+    parityBuildInputsSnapshotHash: snapshotHash,
+    syncedAt: new Date().toISOString(),
+  };
+  await copyPastSimulatorBuildFromSource({
+    ownerUserId: args.ownerUserId,
+    sourceUserId: args.sourceUserId,
+    sourceHouseId: args.sourceHouseId,
+    sourceScenarioId,
+    testHomeHouseId: args.testHomeHouseId,
+    testScenarioId,
+    parity,
+  });
+  return {
+    ok: true,
+    parity,
+    copiedFromSourceCache: false,
+    sourceInputHash: identity.inputHash,
+  };
+}
 
+/**
+ * @deprecated Artifact copy — use mirrorOnePathPastBuildInputsFromSource + test-home recalc.
+ * Copy user-site Past artifact + build inputs from source house onto the One Path test home.
+ */
 export async function syncOnePathPastUserSiteParityFromSource(args: {
   ownerUserId: string;
 
@@ -549,82 +653,20 @@ export async function syncOnePathPastUserSiteParityFromSource(args: {
   };
 }
 
-export async function ensureOnePathPastParityBeforeRead(args: {
+/** No-op: dual-run uses test-home recalc, not user artifact copy before read. */
+export async function ensureOnePathPastParityBeforeRead(_args: {
   ownerUserId: string;
-
   testHomeHouseId: string;
-
   sourceUserId: string;
-
   sourceHouseId: string;
 }): Promise<OnePathPastParitySyncResult | null> {
-  const testScenarioId = await findPastScenarioId({
-    userId: args.ownerUserId,
-
-    houseId: args.testHomeHouseId,
-  });
-
-  if (!testScenarioId) return null;
-
-  const testBuildInputs = await loadPastSimulatorBuild({
-    userId: args.ownerUserId,
-
-    houseId: args.testHomeHouseId,
-
-    scenarioId: testScenarioId,
-  });
-
-  const lock = readOnePathUserSiteParityLock(testBuildInputs);
-
-  if (
-    lock &&
-    lock.sourceHouseId === args.sourceHouseId &&
-    lock.sourceUserId === args.sourceUserId
-  ) {
-    const { getCachedPastDataset } = await pastCacheApi();
-    const cached = await getCachedPastDataset({
-      houseId: args.testHomeHouseId,
-
-      scenarioId: testScenarioId,
-
-      inputHash: lock.parityInputHash,
-    });
-
-    if (cached) {
-      return {
-        ok: true,
-
-        parity: lock,
-
-        copiedFromSourceCache: true,
-
-        sourceInputHash: lock.parityInputHash,
-      };
-    }
-  }
-
-  return syncOnePathPastUserSiteParityFromSource(args);
+  return null;
 }
 
-/** Linked One Path test home: copy user-site Past artifact before read/rebuild. */
-export async function maybeHealOnePathPastParityForRead(args: {
+/** No-op: see docs/ONE_PATH_DUAL_RUN_GOAL.md */
+export async function maybeHealOnePathPastParityForRead(_args: {
   ownerUserId: string;
   testHomeHouseId: string;
 }): Promise<OnePathPastParitySyncResult | null> {
-  const { getOnePathLabTestHomeLink } = await import("@/modules/usageSimulator/labTestHomeLink");
-  const link = await getOnePathLabTestHomeLink(args.ownerUserId).catch(() => null);
-  if (
-    !link?.testHomeHouseId ||
-    link.testHomeHouseId !== args.testHomeHouseId ||
-    !link.sourceUserId ||
-    !link.sourceHouseId
-  ) {
-    return null;
-  }
-  return ensureOnePathPastParityBeforeRead({
-    ownerUserId: args.ownerUserId,
-    testHomeHouseId: args.testHomeHouseId,
-    sourceUserId: String(link.sourceUserId),
-    sourceHouseId: String(link.sourceHouseId),
-  });
+  return null;
 }

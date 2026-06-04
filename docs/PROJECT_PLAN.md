@@ -15,7 +15,8 @@
 - **Exact run snapshot rule:** the canonical artifact/read model must expose `effectiveSimulationVariablesUsed` for the same run identity so admin tuning surfaces can inspect the resolved shared values and their value sources without reconstructing them in the page.
 - **Shared weather selector rule**: user Past owns `userWeatherLogicSetting`; GapFill Actual Home and GapFill Test Home share `gapfillWeatherLogicSetting` within a run. The selector difference is pre-lockbox only; the resolver/path/display remain shared.
 - **Compare** stays persisted-artifact-read-only and is not part of the active truth-producing phase.
-- **One Path Sim rescue architecture:** see `docs/ONE_PATH_SIM_ARCHITECTURE.md` for the current verified architecture state. One Path Sim Admin is pre-cutover only. Usage remains upstream and untouched. One Path baseline is usage passthrough only: it reuses persisted upstream usage truth, may seed that truth through the existing shared usage refresh owner when missing, and does not simulate baseline. Past Sim remains the first place simulation/final chart structuring happen. Live app surfaces remain quarantined from One Path, and `modules/onePathSim/**` is now internally sealed from live behavior-owner imports under `modules/usageSimulator/**`, `modules/manualUsage/**`, `modules/weatherSensitivity/**`, and `modules/simulatedUsage/**`.
+- **One Path Past lab goal (authoritative):** `docs/ONE_PATH_DUAL_RUN_GOAL.md` — user home and test home each **run** the shared Past pipeline and persist **separate** artifacts; identical inputs + usage truth → identical results; SMT backfill → recalc both sides. **Not** copy user `PastSimulatedDatasetCache` to the test home (current `onePathPastUserSiteParity.ts` copy path = drift to remove). Lock: `.cursor/rules/one-path-dual-run-lock.mdc`.
+- **One Path Sim rescue architecture:** see `docs/ONE_PATH_SIM_ARCHITECTURE.md` for the current verified architecture state. One Path Sim Admin is pre-cutover only. Usage remains upstream and untouched. One Path baseline is usage passthrough only: it reuses persisted upstream usage truth, may seed that truth through the existing shared usage refresh owner when missing, and does not simulate baseline. Past Sim remains the first place simulation/final chart structuring happen. Live app surfaces remain quarantined from One Path, and `modules/onePathSim/**` is now internally sealed from live behavior-owner imports under `modules/usageSimulator/**`, `modules/manualUsage/**`, `modules/weatherSensitivity/**`, `modules/simulatedUsage/**`.
 - **One Path manual Stage 1 publication rule:** One Path manual Stage 1 must be surfaced from One Path-owned wrappers/read models under `modules/onePathSim/**` with the saved manual user payload as the data truth and Manual Lab semantics as reference interpretation/presentation logic only, not from the current user manual page.
 - **One Path admin manual seeding rule:** One Path Admin may synthesize admin-only `MANUAL_MONTHLY` / `MANUAL_ANNUAL` Stage 1 seeds from interval-backed actual usage when the selected test home does not yet have a saved manual payload. That seeding must use the same Stage 1 helper semantics proven in Manual Lab / GapFill, must keep customer/source payloads read-only, and must pass only resolved manual totals plus Stage 1 metadata into Stage 2.
 - **One Path admin rolling-anchor rule:** unresolved One Path admin manual loads must default to the same rolling current-Chicago-minus-2-days anchor / bill-end contract GapFill uses, auto-filling statement ranges backward from that anchor as admin convenience only.
@@ -27,6 +28,24 @@
 - **One Path SMT recovery rule (PC-2026-05 shipped):** interval admin runs trigger `lib/usage/ensureSmtCoverage.ts` only (`profile: admin_sim`, session keys `run:` / `post:`). No direct `requestTargetedSmtIntervalBackfillForHouse` or duplicate long SMT wait loops in `app/api/admin/tools/one-path-sim/route.ts`. Stale/incomplete tail does not block results; post-sim may call ensure with artifact incomplete-day hints, rebuild, and rerun once. Usage refresh/heal targets incomplete days **within the persisted SMT interval span** only (`resolveSmtPersistedCoverageSpan`, `resolveSmtHealBackfillDateKeys`); wide backfill start clamps to persisted start; retries after 30m while in-span gaps remain. Admin **full-window re-ingest:** `lib/usage/fullWindowSmtReingest.ts` + One Path `full_window_smt_reingest`. **Mode testing handoff:** `docs/MODE_TESTING_HANDOFF_BOOTSTRAP.md`.
 - **One Path known-house tuning rule:** repeated One Path tuning runs should use the sandbox-only known-house scenario registry under `modules/onePathSim/**`. Presets may preload keeper-user selection, house/context resolution strategy, scenario selection, validation inputs, weather preference, travel ranges, and review expectations into the existing One Path Admin controls, and the same preset identity should flow into sandbox summaries / AI copy payloads. No live persistence or live-surface wiring is part of this step.
 - **Cutover honesty rule:** internal seal does not mean live cutover is complete. GapFill and user sim pages are still not routed through One Path; Manual Lab now shares the One Path Stage 2 calc/read path while keeping its separate admin Stage 1 surface.
+
+## PC-2026-06 — One Path Past dual-run (IN PROGRESS — SMT Past run shipped)
+
+**Status:** **In progress** (SMT INTERVAL Past admin run recalc shipped 2026-05-20). **Record:** `docs/ONE_PATH_DUAL_RUN_GOAL.md`, `docs/ONE_PATH_DUAL_RUN_SMT_PAST_AUDIT.md`. **Lock:** `.cursor/rules/one-path-dual-run-lock.mdc`.
+
+**Goal:** User home and One Path test home each **execute** the shared Past recalc/engine and persist **separate** `PastSimulatedDatasetCache` rows. Identical inputs + identical upstream usage truth (including after SMT backfill) → identical outcomes. Admin edits on test home only → allowed divergence.
+
+**Not the goal:** Copy user Past artifacts to the test home (`onePathPastUserSiteParity.ts` copy/sync, `parityLockRebuild`, admin recalc `unchangedParity` → sync).
+
+**Implementation follow-up (ordered):**
+
+1. Remove or gate copy-first paths; admin Past **run** → test-home `recalcSimulatorBuild` same as user route.
+2. After `ensureSmtCoverage` on source, both sides recalc when interval fingerprint changes.
+3. Keep `onePathPastUserSiteParityLock` for dirty-input detection only; optional post-run verify user vs test hash.
+
+**Same-pass doc sync:** `ONE_PATH_DUAL_RUN_GOAL.md`, `ONE_PATH_SIM_ARCHITECTURE.md`, `SURFACE_PARITY_OWNERS.md`, `CHAT_BOOTSTRAP.txt`, `MODE_TESTING_HANDOFF_BOOTSTRAP.md`.
+
+---
 
 ## PC-2026-05 — SMT interval coverage unification (8 phases, COMPLETE)
 

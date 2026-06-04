@@ -5,6 +5,7 @@ ACTIVE WORK (2026-05-20) — MODE TESTING HANDOFF
 ========================================
 
 - **Start here for a new chat:** `docs/MODE_TESTING_HANDOFF_BOOTSTRAP.md` — paste the block into Cursor; it lists required reads, open bugs, and per-mode audit checklist.
+- **One Path Past lab goal (authoritative):** `docs/ONE_PATH_DUAL_RUN_GOAL.md` — two independent runs through one shared pipeline (user home + test home); identical inputs → identical engine output; **not** copy user Past artifacts to the test home. Agent lock: `.cursor/rules/one-path-dual-run-lock.mdc`. Copy-first code in `onePathPastUserSiteParity.ts` is **drift** to remove.
 - **Goal:** test all modes (Usage read path, One Path INTERVAL/GREEN_BUTTON/MANUAL baseline + Past Sim) for correct labels, SMT lifecycle, and Usage ↔ baseline analytics passthrough.
 - **Open bugs (from latest INTERVAL baseline run logs):** User Usage shows SOURCE UNKNOWN + 5/18 simulated while One Path baseline payload shows ACTUAL/COMPLETE; One Path baseline UI missing 15-min curve though payload `rawReadModel` has 96 points; confirm houseId (`8a6fe8b9` source vs `29a3d820` lab context).
 - **SMT heal (shipped):** incomplete days healed only within persisted SMT span (`resolveSmtPersistedCoverageSpan`); full-window admin re-ingest on One Path admin.

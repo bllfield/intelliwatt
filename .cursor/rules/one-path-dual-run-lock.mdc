@@ -1,0 +1,44 @@
+---
+description: One Path lab Past must be two independent runs through one shared pipeline—not copy user artifacts to the test home.
+globs:
+  - "**/one-path-sim/**"
+  - "**/onePathSim/**"
+  - "**/onePathPastUserSiteParity*"
+  - "**/labTestHome*"
+  - "docs/ONE_PATH*.md"
+  - "docs/SURFACE_PARITY_OWNERS.md"
+alwaysApply: true
+---
+
+# One Path dual-run lock (product goal)
+
+**Canonical doc:** `docs/ONE_PATH_DUAL_RUN_GOAL.md` — read before any Past / lab-home parity work.
+
+## Goal
+
+- **Two runs**, **one pipeline**: user home and One Path test home each execute the same Past recalc/engine; each persists only to its own `houseId`.
+- **Match** when inputs + upstream usage truth (including post-backfill interval fingerprint) match.
+- **Differ** only when admin changes test-home variables (home, appliances, travel/vacant, validation, etc.).
+- **SMT backfill** updates usage on the **source** house via `ensureSmtCoverage.ts` only; then **both** sides recalc Past—never serve stale copied user artifacts on the test home.
+
+## Forbidden (do not extend)
+
+- Default **copy** of `PastSimulatedDatasetCache` from user → test home as a substitute for test-home `recalc` / `getPastSimulatedDatasetForHouse`.
+- Admin Past **run** that only readbacks copied cache when data or fingerprint changed.
+- `unchangedParity` → `syncOnePathPastUserSiteParityFromSource` instead of re-sim on test home (drift—remove, do not add callers).
+- `parityLockRebuild` blocking test-home sim when cache is missing (drift).
+- Persisting sim/build rows on the **source** (user) home from One Path.
+
+## Allowed
+
+- Mirror **build inputs** onto test home; dirty lock when admin edits.
+- Shared **display** owners (`pastSimDisplayFromDataset`, etc.)—presentation only.
+- Post-run **verify** user vs test artifact hash/totals (optional gate)—not copy.
+
+## Drift
+
+`lib/usage/onePathPastUserSiteParity.ts` copy-first behavior is **known drift** against `docs/ONE_PATH_DUAL_RUN_GOAL.md`. New work moves toward dual-run; do not document copy as the intended end state.
+
+## Doc sync
+
+Changes to Past lab semantics or removal of copy paths must update `docs/ONE_PATH_DUAL_RUN_GOAL.md`, `docs/SURFACE_PARITY_OWNERS.md`, and `docs/ONE_PATH_SIM_ARCHITECTURE.md` in the same pass.

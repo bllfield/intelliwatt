@@ -27,6 +27,9 @@ import {
   type CanonicalSimulationInputType,
 } from "@/modules/onePathSim/onePathSim";
 import { listOnePathScenarioEvents, readOnePathSimulatedUsageScenario } from "@/modules/onePathSim/serviceBridge";
+import { dispatchPastSimRecalc } from "@/modules/usageSimulator/pastSimRecalcDispatch";
+import { resolvePastSmtValidationPolicy } from "@/lib/usage/pastValidationPolicy";
+import type { TravelRange } from "@/modules/simulatedUsage/types";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import {
@@ -647,28 +650,13 @@ async function buildPastSimRunReadbackResponse(args: {
   scenarioId: string;
   correlationId?: string | null;
   readMode?: "artifact_only" | "allow_rebuild";
+  exactArtifactInputHash?: string | null;
   smtPostSimHealing?: PastSimReadbackSmtHealingArgs | null;
   actualContextHouseId?: string | null;
   preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
   smtSourceEsiid?: string | null;
 }) {
   const startedAt = Date.now();
-  const labLink = await getOnePathLabTestHomeLink(args.userId).catch(() => null);
-  if (
-    labLink?.testHomeHouseId === args.houseId &&
-    labLink.sourceUserId &&
-    labLink.sourceHouseId
-  ) {
-    const { ensureOnePathPastParityBeforeRead } = await import(
-      "@/lib/usage/onePathPastUserSiteParity"
-    );
-    await ensureOnePathPastParityBeforeRead({
-      ownerUserId: args.userId,
-      testHomeHouseId: args.houseId,
-      sourceUserId: String(labLink.sourceUserId),
-      sourceHouseId: String(labLink.sourceHouseId),
-    }).catch(() => null);
-  }
   const readScenarioDataset = (
     mode: "artifact_only" | "allow_rebuild",
     forceRebuildArtifact = false
@@ -679,6 +667,8 @@ async function buildPastSimRunReadbackResponse(args: {
       scenarioId: args.scenarioId,
       readMode: mode,
       forceRebuildArtifact,
+      exactArtifactInputHash: args.exactArtifactInputHash ?? undefined,
+      requireExactArtifactMatch: Boolean(args.exactArtifactInputHash),
       projectionMode: "baseline",
       readContext: {
         artifactReadMode: mode,
@@ -840,7 +830,7 @@ async function buildPastSimRunReadbackResponse(args: {
   return {
     ok: true as const,
     debugDiagnosticsIncluded: false,
-    executionMode: "artifact_readback" as const,
+    executionMode: args.exactArtifactInputHash ? ("past_recalc_readback" as const) : ("artifact_readback" as const),
     readbackPending: false,
     runType: "PAST_SIM" as const,
     correlationId: args.correlationId ?? null,
@@ -1862,6 +1852,69 @@ export async function POST(request: NextRequest) {
     }
     try {
       if (!includeDebugDiagnostics && effectiveRawInputBase.scenarioId && !isManualMode) {
+        let exactArtifactInputHash: string | null = null;
+        if (mode === "INTERVAL") {
+          const validationPolicy = resolvePastSmtValidationPolicy({
+            surface: "admin_lab",
+            validationSelectionMode: effectiveRawInputBase.validationSelectionMode,
+            validationDayCount: effectiveRawInputBase.validationDayCount,
+          });
+          const preLockboxTravelRanges = Array.isArray(effectiveRawInputBase.travelRanges)
+            ? (effectiveRawInputBase.travelRanges as TravelRange[])
+            : [];
+          const recalcDispatched = await dispatchPastSimRecalc({
+            userId: effectiveUserId,
+            houseId: effectiveHouseId,
+            esiid: smtSourceEsiid,
+            mode: "SMT_BASELINE",
+            scenarioId: effectiveRawInputBase.scenarioId,
+            actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
+            weatherPreference: effectiveRawInputBase.weatherPreference,
+            persistPastSimBaseline: true,
+            preLockboxTravelRanges,
+            validationDaySelectionMode: validationPolicy.selectionMode,
+            validationDayCount: validationPolicy.validationDayCount,
+            validationOnlyDateKeysLocal: effectiveRawInputBase.validationOnlyDateKeysLocal,
+            correlationId,
+            runContext: {
+              callerLabel: "one_path_admin_past_run",
+              buildPathKind: "recalc",
+              persistRequested: effectiveRawInputBase.persistRequested !== false,
+              preferredActualSource: "SMT",
+            },
+          });
+          if (recalcDispatched.executionMode === "droplet_async") {
+            return NextResponse.json(
+              {
+                ok: false,
+                error: "past_recalc_async_unsupported",
+                message:
+                  "Past recalc was queued for droplet execution. One Path admin Past run requires inline recalc in this environment.",
+                jobId: recalcDispatched.jobId,
+                correlationId: recalcDispatched.correlationId,
+              },
+              { status: 503 }
+            );
+          }
+          if (!recalcDispatched.result.ok) {
+            return NextResponse.json(
+              {
+                ok: false,
+                error: recalcDispatched.result.error ?? "past_recalc_failed",
+                message:
+                  ("missingItems" in recalcDispatched.result &&
+                  Array.isArray(recalcDispatched.result.missingItems)
+                    ? recalcDispatched.result.missingItems.join("; ")
+                    : null) ??
+                  recalcDispatched.result.error ??
+                  "Past recalc failed on the One Path test home.",
+                correlationId: recalcDispatched.correlationId,
+              },
+              { status: 400 }
+            );
+          }
+          exactArtifactInputHash = recalcDispatched.result.canonicalArtifactInputHash ?? null;
+        }
         const readback = await buildPastSimRunReadbackResponse({
           userId: effectiveUserId,
           houseId: effectiveHouseId,
@@ -1870,6 +1923,8 @@ export async function POST(request: NextRequest) {
           actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
           preferredActualSource: effectiveRawInputBase.preferredActualSource,
           smtSourceEsiid,
+          exactArtifactInputHash,
+          readMode: exactArtifactInputHash ? "artifact_only" : undefined,
         });
         if (!readback.ok) {
           const status =

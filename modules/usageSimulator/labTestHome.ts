@@ -1128,10 +1128,10 @@ export async function replaceGlobalOnePathLabTestHomeFromSource(args: {
       targetEsiid: sourceHouse.esiid ? String(sourceHouse.esiid) : null,
     });
 
-    const { syncOnePathPastUserSiteParityFromSource } = await import(
+    const { mirrorOnePathPastBuildInputsFromSource } = await import(
       "@/lib/usage/onePathPastUserSiteParity"
     );
-    const paritySync = await syncOnePathPastUserSiteParityFromSource({
+    const paritySync = await mirrorOnePathPastBuildInputsFromSource({
       ownerUserId: args.ownerUserId,
       sourceUserId: args.sourceUserId,
       sourceHouseId: args.sourceHouseId,
@@ -1144,8 +1144,8 @@ export async function replaceGlobalOnePathLabTestHomeFromSource(args: {
       .catch(() => null);
 
     const statusMessage = paritySync.ok
-      ? "One Path test home replaced; Past parity synced from user site."
-      : `Test home replaced; Past parity sync pending (${paritySync.code}: ${paritySync.message}). Recalc Past on the user site, then re-link.`;
+      ? "One Path test home replaced; Past build inputs mirrored from user site. Run Past Sim on One Path to build the test-home artifact."
+      : `Test home replaced; Past build mirror pending (${paritySync.code}: ${paritySync.message}). Recalc Past on the user site, then re-link.`;
 
     await upsertOnePathLabTestHomeLink({
       ownerUserId: args.ownerUserId,

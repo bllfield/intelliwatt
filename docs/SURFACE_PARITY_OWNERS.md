@@ -2,6 +2,8 @@
 
 **Purpose:** When you fix SMT on Usage + One Path Baseline + Past Sim, use this map so the same correction applies to **Green Button** and both code paths (admin One Path + user `usageSimulator`) without triple work.
 
+**One Path Past lab goal (read first):** `docs/ONE_PATH_DUAL_RUN_GOAL.md` — two runs, one pipeline; **do not** treat artifact copy as the product model.
+
 **Master data truth:** `getActualUsageDatasetForHouse` in `lib/usage/actualDatasetForHouse.ts` (via `lib/usage/userUsageHouseContract.ts` for dashboard/baseline).
 
 ---
@@ -32,7 +34,7 @@
 | Past producer | `simulatePastUsageDataset` in **both** trees (see below) | + ledger prep | + `trustedActualDateKeys` from GB fetch |
 | Past engine | `buildPastSimulatedBaselineV1` in **both** `engine.ts` trees | Pending/incomplete/forced simulate | `intervalTrustedSource: GREEN_BUTTON` |
 | Validation compare | `compareProjection.ts` (keep admin + user copies aligned) | `forceSimulateDateKeysLocal` | Same |
-| One Path Past (SMT + GB) ↔ user Past | `lib/usage/onePathPastUserSiteParity.ts` + `resolvePastSimEsiidForHouse.ts` | Copy source artifact + build; lab home keeps source ESIID; parity heal before read/rebuild | `parityInputHash` + `userSiteIsolation` on admin readback |
+| One Path Past (SMT + GB) ↔ user Past | **Target:** same `recalcSimulatorBuild` / `simulatePastUsageDataset` on test `houseId` as user route. **Drift (remove):** `onePathPastUserSiteParity.ts` copy + lock. **Support:** `resolvePastSimEsiidForHouse.ts`, `pastArtifactIdentity.ts`, `userSiteIsolation` on both reads | Dual-run: separate cache rows; match when inputs + fingerprint match. SMT heal on **source** house only | Do not default to `parityInputHash` copy; recalc after backfill |
 
 **Do not edit** `modules/realUsageAdapter/greenButton.ts` for SMT-only fixes (workspace lock).
 
@@ -53,7 +55,7 @@ Two parallel module trees exist for historical reasons. **Any Past Sim parity fi
 
 - `lib/usage/pastSimSmtLedgerPrep.ts` — SMT ledger + slot-complete filter for Past producers
 - `lib/usage/computeHomeBaseloadKw.ts` — baseload for Usage, baseline, and Past insights
-- `lib/usage/onePathPastUserSiteParity.ts` — Past (SMT + GB) load parity: sync source user-site Past artifact to One Path test home; heal before admin readback
+- `lib/usage/onePathPastUserSiteParity.ts` — **Drift:** artifact copy to test home (see `ONE_PATH_DUAL_RUN_GOAL.md`). Target: input mirror + verify only
 - `lib/usage/resolvePastSimEsiidForHouse.ts` — resolve meter ESIID for lab-home Past recalc/backfill when `houseAddress.esiid` is unset
 - `lib/usage/onePathPastUserSiteParityLock.ts` — parity lock read/dirty/clear + dataset verify (pure; no DB)
 
@@ -81,6 +83,8 @@ Two parallel module trees exist for historical reasons. **Any Past Sim parity fi
 
 ## Related docs
 
+- `docs/ONE_PATH_DUAL_RUN_GOAL.md` — **canonical** One Path vs user Past lab model
+- `.cursor/rules/one-path-dual-run-lock.mdc` — agent constraint
 - `docs/SMT_UNIFICATION_COMPLETE.md` — SMT owners (shipped)
 - `docs/SMT_UNIFICATION_AGENT_BOOTSTRAP.md` — maintenance bootstrap
 - `.cursor/rules/smt-unification-lock.mdc` — permanent constraints

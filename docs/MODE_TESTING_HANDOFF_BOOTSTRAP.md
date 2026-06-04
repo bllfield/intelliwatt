@@ -14,12 +14,14 @@ You are taking over IntelliWatt mode-testing and Usage ↔ One Path parity work.
 Read these in order and confirm in your first reply that you read them:
 
 1. docs/MODE_TESTING_HANDOFF_BOOTSTRAP.md (this file — current state + open bugs)
-2. docs/CHAT_BOOTSTRAP.txt (house rules + architecture; do not recreate, follow)
-3. docs/ONE_PATH_SIM_ARCHITECTURE.md
-4. docs/USAGE_LAYER_MAP.md
-5. docs/SMT_UNIFICATION_COMPLETE.md + docs/PROJECT_PLAN.md → PC-2026-05
-6. .cursor/rules/smt-unification-lock.mdc
-7. .cursor/rules/shared-sim-window-lock.mdc
+2. docs/ONE_PATH_DUAL_RUN_GOAL.md (One Path vs user Past — two runs, one pipeline; NOT artifact copy)
+3. docs/CHAT_BOOTSTRAP.txt (house rules + architecture; do not recreate, follow)
+4. docs/ONE_PATH_SIM_ARCHITECTURE.md
+5. docs/USAGE_LAYER_MAP.md
+6. docs/SMT_UNIFICATION_COMPLETE.md + docs/PROJECT_PLAN.md → PC-2026-05
+7. .cursor/rules/one-path-dual-run-lock.mdc
+8. .cursor/rules/smt-unification-lock.mdc
+9. .cursor/rules/shared-sim-window-lock.mdc
 
 Then skim modules/usageSimulator/kinds.ts for IntervalSeriesKind and the One Path admin route:
 app/api/admin/tools/one-path-sim/route.ts
@@ -34,7 +36,7 @@ We are **testing every mode** to ensure display labels, data ownership, SMT life
 |---------|------|----------|-------------------|
 | User Usage page | SMT / INTERVAL truth | read-only | Show persisted intervals; **no simulation**; daily rows must have `source`/`sourceDetail` (not "SOURCE UNKNOWN") |
 | One Path Admin | INTERVAL | BASELINE_PASSTHROUGH | Passthrough only — same upstream truth as Usage; **no sim**; 15-min curve + analytics must match Usage |
-| One Path Admin | INTERVAL | PAST_SIM | Sim where rules say so; canonical end day `PENDING_SMT` until window advances; incomplete meter only for true gaps |
+| One Path Admin | INTERVAL | PAST_SIM | **Dual-run:** same Past recalc/engine as user site, persist on **test** home only; must match user when inputs + usage truth match (see `ONE_PATH_DUAL_RUN_GOAL.md`). Not copy user artifact. |
 | One Path Admin | GREEN_BUTTON | PAST_SIM | Shifted actual days stay ACTUAL; pending tail label on canonical end |
 | One Path Admin | MANUAL_MONTHLY / MANUAL_ANNUAL | baseline + Past | Stage 1 read + Stage 2 shared Past; no private sim on baseline |
 
@@ -135,5 +137,6 @@ For each mode, user pastes **One Path AI copy payload** (`canonical_run_response
 When mode-testing fixes land, update in the same PR:
 
 - This file (checklist + known-good dates)
+- `docs/ONE_PATH_DUAL_RUN_GOAL.md` if Past lab / dual-run semantics change
 - `docs/CHAT_BOOTSTRAP.txt` (pointer only — keep lean)
 - `docs/SMT_UNIFICATION_COMPLETE.md` / `docs/PROJECT_PLAN.md` if SMT/heal/display semantics change
