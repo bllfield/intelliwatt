@@ -12,9 +12,35 @@ import {
   GREEN_BUTTON_INTERVAL_INGEST_VERSION,
   isGreenButtonIntervalIngestCurrent,
 } from "@/lib/usage/greenButtonIngestContract";
+import { createManyGreenButtonIntervalsInBatches } from "@/lib/usage/greenButtonIntervalPersist";
 import { runGreenButtonUsagePipeline } from "@/lib/usage/greenButtonUsagePipeline";
 
 const USAGE_DB_ENABLED = Boolean((process.env.USAGE_DATABASE_URL ?? "").trim());
+
+/** Year-scale GB XML ingest exceeds Vercel one-path-sim maxDuration (~300s). */
+export const GREEN_BUTTON_REHYDRATE_RAW_MAX_BYTES_ON_VERCEL = 3 * 1024 * 1024;
+
+export function isGreenButtonRehydrateBlockedOnVercel(sizeBytes: number): boolean {
+  return process.env.VERCEL === "1" && sizeBytes > GREEN_BUTTON_REHYDRATE_RAW_MAX_BYTES_ON_VERCEL;
+}
+
+export function greenButtonRehydrateUserMessage(error: string): string {
+  switch (error) {
+    case "raw_too_large_for_vercel_rehydrate":
+      return (
+        "This Green Button raw file is too large to rehydrate on Vercel (full-year ingest can take several minutes). " +
+        "Re-upload at uploads.intelliwatt.com so the droplet runs ingest, then retry One Path without “Rehydrate from raw”."
+      );
+    case "usage_db_disabled":
+      return "Usage database is not configured; cannot rehydrate Green Button intervals.";
+    case "missing_raw_green_button":
+      return "No stored Green Button raw file for this home.";
+    case "raw_content_missing":
+      return "Stored Green Button raw file has no content.";
+    default:
+      return error;
+  }
+}
 
 export type RehydrateGreenButtonIntervalsResult =
   | {
@@ -45,17 +71,24 @@ export async function rehydrateGreenButtonIntervalsFromRawForHouse(args: {
     const latest = await usageClient.rawGreenButton.findFirst({
       where: { homeId: houseId },
       orderBy: { createdAt: "desc" },
-      select: { id: true },
+      select: { id: true, sizeBytes: true },
     });
+    if (latest?.id && isGreenButtonRehydrateBlockedOnVercel(latest.sizeBytes ?? 0)) {
+      return { ok: false, error: "raw_too_large_for_vercel_rehydrate" };
+    }
     rawId = latest?.id ?? null;
   }
   if (!rawId) return { ok: false, error: "missing_raw_green_button" };
 
   const raw = await usageClient.rawGreenButton.findUnique({
     where: { id: rawId },
-    select: { id: true, homeId: true, userId: true, filename: true, content: true },
+    select: { id: true, homeId: true, userId: true, filename: true, sizeBytes: true, content: true },
   });
-  if (!raw?.content) return { ok: false, error: "raw_content_missing" };
+  if (!raw) return { ok: false, error: "missing_raw_green_button" };
+  if (isGreenButtonRehydrateBlockedOnVercel(raw.sizeBytes ?? 0)) {
+    return { ok: false, error: "raw_too_large_for_vercel_rehydrate" };
+  }
+  if (!raw.content) return { ok: false, error: "raw_content_missing" };
 
   const pipeline = runGreenButtonUsagePipeline({
     buffer: Buffer.isBuffer(raw.content) ? raw.content : Buffer.from(raw.content),
@@ -73,7 +106,7 @@ export async function rehydrateGreenButtonIntervalsFromRawForHouse(args: {
   if (!userId) return { ok: false, error: "missing_userId" };
 
   const { trimmed, startDateKey, endDateKey } = pipeline;
-  await usageClient.greenButtonInterval.deleteMany({ where: { homeId: houseId, rawId } });
+  await usageClient.greenButtonInterval.deleteMany({ where: { rawId } });
   const intervalData = trimmed.map((interval) => ({
     rawId,
     homeId: houseId,
@@ -83,12 +116,7 @@ export async function rehydrateGreenButtonIntervalsFromRawForHouse(args: {
     intervalMinutes: interval.intervalMinutes,
   }));
 
-  const BATCH_SIZE = 4000;
-  for (let i = 0; i < intervalData.length; i += BATCH_SIZE) {
-    const slice = intervalData.slice(i, i + BATCH_SIZE);
-    if (slice.length === 0) continue;
-    await usageClient.greenButtonInterval.createMany({ data: slice });
-  }
+  await createManyGreenButtonIntervalsInBatches(usageClient, intervalData);
 
   const uploads = await (prisma as any).greenButtonUpload.findMany({
     where: { houseId: houseId },

@@ -93,4 +93,18 @@ describe("one path tuning cycle summary", () => {
       rmse: null,
     });
   });
+
+  it("coerces object run errors without throwing", () => {
+    const summary = buildOnePathTuningCycleSummary({
+      sandboxSummary: {
+        runStatus: { selectedMode: "GREEN_BUTTON", runType: "PAST_SIM" },
+        monthlyTruthCompare: {},
+        weatherAndShape: {},
+        compareVisibility: { compareProjectionRowsCount: 0 },
+      },
+      runError: { code: "INTERNAL_ERROR", message: "Past Sim failed before compare." },
+    });
+
+    expect(summary.biggestDriftReason).toBe("Past Sim failed before compare.");
+  });
 });

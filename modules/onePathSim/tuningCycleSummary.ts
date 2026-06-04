@@ -1,3 +1,4 @@
+import { formatAdminToolErrorMessage } from "@/lib/admin/formatAdminToolError";
 import type { OnePathKnownScenario } from "@/modules/onePathSim/knownHouseScenarios";
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -64,8 +65,9 @@ export function buildOnePathTuningCycleSummary(args: {
     rmse: expectations.targetRmseMax == null || rmse == null ? null : rmse <= Number(expectations.targetRmseMax),
   };
 
+  const runErrorText = formatAdminToolErrorMessage(args.runError);
   const biggestDriftReason =
-    (args.runError && args.runError.trim()) ||
+    (runErrorText || null) ||
     firstFailedManualParityReason(manualParitySummary) ||
     (expectations.expectedPastSimCompareAvailable === true && !compareAvailable
       ? "Expected compare surfaces are not available for this preset yet."

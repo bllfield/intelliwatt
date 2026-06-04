@@ -9,7 +9,8 @@ import {
 } from "@/lib/usage/greenButtonUserMessages";
 
 const GREEN_BUTTON_STATUS_POLL_MS = 2500;
-const GREEN_BUTTON_STATUS_MAX_WAIT_MS = 12 * 60 * 1000;
+/** Droplet year-file ingest (parse + ~35k DB rows) can exceed 12 minutes. */
+const GREEN_BUTTON_STATUS_MAX_WAIT_MS = 30 * 60 * 1000;
 /** Vercel serverless request body limit — droplet path required above this size. */
 const VERCEL_GREEN_BUTTON_UPLOAD_MAX_BYTES = 4.5 * 1024 * 1024;
 

@@ -12,6 +12,7 @@ import {
   buildSimulationVariableFamilyAdminView,
 } from "@/modules/onePathSim/simulationVariablePresentation";
 import { buildOnePathSandboxHarnessSummary } from "@/modules/onePathSim/adminHarnessSummary";
+import { formatAdminToolErrorMessage } from "@/lib/admin/formatAdminToolError";
 import { buildOnePathTuningCycleSummary } from "@/modules/onePathSim/tuningCycleSummary";
 import {
   DEFAULT_ONE_PATH_SCENARIO_PRESET_KEY,
@@ -762,7 +763,7 @@ export function OnePathSimAdmin() {
       if (!res.ok || !json?.ok) {
         setBusy(false);
         setStatus(null);
-        setError(json?.error ?? `Lookup failed (${res.status})`);
+        setError(formatAdminToolErrorMessage(json?.error) || `Lookup failed (${res.status})`);
         return null;
       }
       setBusy(false);
@@ -812,7 +813,11 @@ export function OnePathSimAdmin() {
       const json = await res.json().catch(() => null);
       if (!res.ok) {
         setStatus(null);
-        setError(json?.message ?? json?.error ?? `Full-window re-ingest failed (${res.status})`);
+        setError(
+          formatAdminToolErrorMessage(json?.message) ||
+            formatAdminToolErrorMessage(json?.error) ||
+            `Full-window re-ingest failed (${res.status})`
+        );
         return;
       }
       if (json?.sourceContext && lookup) {
@@ -888,7 +893,11 @@ export function OnePathSimAdmin() {
       if (!replaceJson?.ok) {
         setBusy(false);
         setStatus(null);
-        setError(replaceJson?.message ?? replaceJson?.error ?? "One Path test-home replacement failed.");
+        setError(
+          formatAdminToolErrorMessage(replaceJson?.message) ||
+            formatAdminToolErrorMessage(replaceJson?.error) ||
+            "One Path test-home replacement failed."
+        );
         return null;
       }
 
@@ -983,9 +992,9 @@ export function OnePathSimAdmin() {
       if (!res.ok || !json?.ok) {
         setStatus(null);
         setError(
-          json?.message ??
-            json?.greenButtonRehydrateFromRaw?.error ??
-            json?.error ??
+          formatAdminToolErrorMessage(json?.message) ||
+            formatAdminToolErrorMessage(json?.greenButtonRehydrateFromRaw?.error) ||
+            formatAdminToolErrorMessage(json?.error) ||
             `Green Button rehydrate failed (${res.status})`
         );
         return;
@@ -1337,11 +1346,10 @@ export function OnePathSimAdmin() {
         ? json.missingItems.map((item: unknown) => String(item ?? "").trim()).filter(Boolean)
         : [];
       const surfacedMessage =
-        typeof json?.message === "string" && json.message.trim()
-          ? json.message.trim()
-          : missingItems.length > 0
-            ? missingItems.join("; ")
-            : json?.error ?? `Run failed (${res.status})`;
+        formatAdminToolErrorMessage(json?.message) ||
+        (missingItems.length > 0 ? missingItems.join("; ") : "") ||
+        formatAdminToolErrorMessage(json?.error) ||
+        `Run failed (${res.status})`;
       setStatus(null);
       setError(surfacedMessage);
       return;

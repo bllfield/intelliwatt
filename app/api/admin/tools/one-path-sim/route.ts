@@ -34,7 +34,10 @@ import {
   assertOnePathGreenButtonPersistedUsage,
   greenButtonUploadHasPersistedUsage,
 } from "@/lib/usage/onePathGreenButtonUsageGate";
-import { rehydrateGreenButtonIntervalsFromRawForHouse } from "@/lib/usage/rehydrateGreenButtonIntervalsFromRaw";
+import {
+  greenButtonRehydrateUserMessage,
+  rehydrateGreenButtonIntervalsFromRawForHouse,
+} from "@/lib/usage/rehydrateGreenButtonIntervalsFromRaw";
 import type { TravelRange } from "@/modules/simulatedUsage/types";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
@@ -1653,6 +1656,7 @@ export async function POST(request: NextRequest) {
       userId: resolved.userId,
       houses: resolved.houses,
       selectedHouse: resolved.selectedHouse,
+      message: rehydrate.ok ? undefined : greenButtonRehydrateUserMessage(rehydrate.error),
       greenButtonRehydrateFromRaw: rehydrate,
       greenButtonActualContextHouseId: greenButtonContext.houseId,
     });
@@ -1824,8 +1828,7 @@ export async function POST(request: NextRequest) {
           {
             ok: false,
             error: greenButtonRehydrateFromRaw.error,
-            message:
-              "Green Button rehydrate from raw failed. Check rawGreenButton bytes on the test home, then retry.",
+            message: greenButtonRehydrateUserMessage(greenButtonRehydrateFromRaw.error),
             houseId: greenButtonRunActualContext.houseId,
             greenButtonRehydrateFromRaw,
             correlationId,

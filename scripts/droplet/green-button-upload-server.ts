@@ -5,6 +5,7 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import { PrismaClient as UsagePrismaClient } from "../../.prisma/usage-client";
 import { XMLParser } from "fast-xml-parser";
 import { awardGreenButtonUsageEntry } from "../../lib/usage/awardGreenButtonUsageEntry";
+import { createManyGreenButtonIntervalsInBatches } from "../../lib/usage/greenButtonIntervalPersist";
 import { runGreenButtonUsagePipeline } from "../../lib/usage/greenButtonUsagePipeline";
 
 const PORT = Number(process.env.GREEN_BUTTON_UPLOAD_PORT || "8091");
@@ -575,27 +576,15 @@ async function persistRawGreenButton(args: {
   return { rawRecordId, previousRawHomeId, sha256 };
 }
 
-/** Runs after HTTP 202 — raw persist, parse, and interval writes (off the request thread). */
+/** Runs after HTTP 202 — full reparse from upload bytes, raw persist, interval replace (off request thread). */
 async function runGreenButtonIngestJob(args: GreenButtonIngestJobArgs): Promise<void> {
   const { buffer, filename, mimeType, house, utilityName, accountNumber, uploadRecordId } = args;
   let rawRecordId: string | null = null;
   let previousRawHomeId: string | null = null;
+  const ingestStartedAt = Date.now();
+  const stageMs: Record<string, number> = {};
   try {
-    const persisted = await persistRawGreenButton({
-      buffer,
-      house,
-      utilityName,
-      accountNumber,
-      filename,
-      mimeType,
-    });
-    rawRecordId = persisted.rawRecordId;
-    previousRawHomeId = persisted.previousRawHomeId;
-    const storageKey = `usage:raw_green_button:${rawRecordId}`;
-    await (prisma as any).greenButtonUpload.update({
-      where: { id: uploadRecordId },
-      data: { storageKey },
-    });
+    let stageStart = Date.now();
     const pipelineResult = runGreenButtonUsagePipeline({
       buffer,
       filename,
@@ -613,20 +602,46 @@ async function runGreenButtonIngestJob(args: GreenButtonIngestJobArgs): Promise<
       logEvent("ingest.pipeline_failed", { uploadRecordId, error: pipelineResult.error });
       return;
     }
-
     const { trimmed, summary, parsed, earliest, latest } = pipelineResult;
+    stageMs.pipeline = Date.now() - stageStart;
 
-    await usagePrisma.greenButtonInterval.deleteMany({ where: { homeId: house.id, rawId: { not: rawRecordId } } });
-    await usagePrisma.rawGreenButton.deleteMany({ where: { homeId: house.id, NOT: { id: rawRecordId } } });
-    await (prisma as any).greenButtonUpload.deleteMany({ where: { houseId: house.id, NOT: { id: uploadRecordId } } });
+    stageStart = Date.now();
+    const persisted = await persistRawGreenButton({
+      buffer,
+      house,
+      utilityName,
+      accountNumber,
+      filename,
+      mimeType,
+    });
+    rawRecordId = persisted.rawRecordId;
+    previousRawHomeId = persisted.previousRawHomeId;
+    stageMs.rawPersist = Date.now() - stageStart;
+
+    const storageKey = `usage:raw_green_button:${rawRecordId}`;
+    await (prisma as any).greenButtonUpload.update({
+      where: { id: uploadRecordId },
+      data: { storageKey },
+    });
+
+    stageStart = Date.now();
+    await Promise.all([
+      usagePrisma.greenButtonInterval.deleteMany({ where: { homeId: house.id, rawId: { not: rawRecordId } } }),
+      usagePrisma.rawGreenButton.deleteMany({ where: { homeId: house.id, NOT: { id: rawRecordId } } }),
+      (prisma as any).greenButtonUpload.deleteMany({ where: { houseId: house.id, NOT: { id: uploadRecordId } } }),
+    ]);
     if (previousRawHomeId && previousRawHomeId !== house.id) {
-      await usagePrisma.greenButtonInterval.deleteMany({
-        where: { homeId: previousRawHomeId, rawId: rawRecordId },
-      });
-      await (prisma as any).greenButtonUpload.deleteMany({
-        where: { houseId: previousRawHomeId, storageKey },
-      });
+      await Promise.all([
+        usagePrisma.greenButtonInterval.deleteMany({
+          where: { homeId: previousRawHomeId, rawId: rawRecordId },
+        }),
+        (prisma as any).greenButtonUpload.deleteMany({
+          where: { houseId: previousRawHomeId, storageKey },
+        }),
+      ]);
     }
+    await usagePrisma.greenButtonInterval.deleteMany({ where: { rawId: rawRecordId } });
+    stageMs.cleanupDeletes = Date.now() - stageStart;
 
     const intervalData = trimmed.map((interval) => ({
       rawId: rawRecordId,
@@ -637,15 +652,12 @@ async function runGreenButtonIngestJob(args: GreenButtonIngestJobArgs): Promise<
       intervalMinutes: interval.intervalMinutes,
     }));
 
-    await usagePrisma.greenButtonInterval.deleteMany({ where: { homeId: house.id } });
-    if (intervalData.length > 0) {
-      const BATCH_SIZE = 1000;
-      for (let i = 0; i < intervalData.length; i += BATCH_SIZE) {
-        const slice = intervalData.slice(i, i + BATCH_SIZE);
-        await usagePrisma.greenButtonInterval.createMany({ data: slice });
-      }
-    }
+    stageStart = Date.now();
+    const insertStats = await createManyGreenButtonIntervalsInBatches(usagePrisma, intervalData);
+    stageMs.intervalInsert = Date.now() - stageStart;
+    stageMs.intervalInsertBatches = insertStats.batches;
 
+    stageStart = Date.now();
     await (prisma as any).greenButtonUpload.update({
       where: { id: uploadRecordId },
       data: {
@@ -657,6 +669,8 @@ async function runGreenButtonIngestJob(args: GreenButtonIngestJobArgs): Promise<
       },
     });
 
+    stageMs.uploadStatusUpdate = Date.now() - stageStart;
+    stageStart = Date.now();
     try {
       await awardGreenButtonUsageEntry({
         userId: house.userId,
@@ -671,13 +685,22 @@ async function runGreenButtonIngestJob(args: GreenButtonIngestJobArgs): Promise<
     } catch (entryErr) {
       logEvent("upload.entry_award_error", { error: String(entryErr) });
     }
+    stageMs.entryAward = Date.now() - stageStart;
+    stageMs.total = Date.now() - ingestStartedAt;
 
+    logEvent("ingest.timings", {
+      uploadRecordId,
+      houseId: house.id,
+      intervals: trimmed.length,
+      ...stageMs,
+    });
     logEvent("upload.success", {
       rawRecordId,
       uploadRecordId,
       intervals: trimmed.length,
       totalKwh: pipelineResult.totalKwh,
       warnings: parsed.warnings,
+      ingestMs: stageMs.total,
     });
   } catch (error) {
     console.error("[green-button-upload] ingest job failed", error);
