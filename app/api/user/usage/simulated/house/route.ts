@@ -15,6 +15,8 @@ import {
 } from "@/lib/usage/pastSimStaleIncompleteMeter";
 import { sageActualDailyKwhByDate } from "@/lib/usage/sageActualDailyTruth";
 import { isPersistedAdminLabTestHomeLabel } from "@/lib/usage/userSiteSimulationIsolation";
+import { resolveHouseCommittedUsageSource } from "@/lib/usage/houseCommittedUsageSource";
+import type { ActualUsageSource } from "@/modules/realUsageAdapter/actual";
 import { attachFailureContract, correlationHeaders } from "@/lib/api/usageSimulationApiContract";
 import { buildManualUsageReadDecorations } from "@/modules/manualUsage/pastSimReadResult";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
@@ -134,6 +136,19 @@ export async function GET(request: NextRequest) {
       where: { id: scenarioId, userId: u.user.id, houseId, archivedAt: null },
       select: { name: true },
     });
+    const houseRow = await prisma.houseAddress.findFirst({
+      where: { id: houseId, userId: u.user.id, archivedAt: null },
+      select: { id: true, esiid: true },
+    });
+    const committedSource = houseRow
+      ? await resolveHouseCommittedUsageSource({
+          houseId: houseRow.id,
+          userId: u.user.id,
+          esiid: houseRow.esiid ?? null,
+        })
+      : null;
+    const preferredActualSource: ActualUsageSource | undefined =
+      committedSource === "SMT" || committedSource === "GREEN_BUTTON" ? committedSource : undefined;
     const readModeParam = String(searchParams.get("readMode") ?? "").trim();
     const readMode =
       readModeParam === "allow_rebuild"
@@ -162,7 +177,7 @@ export async function GET(request: NextRequest) {
 
     let readModeUsed: "artifact_only" | "allow_rebuild" = readMode;
     let out = await readPastScenario(readMode);
-    // Usage/baseline show live SMT; Past still needs a persisted sim artifact. Prefer artifact read, but
+    // Past needs a persisted sim artifact; compare truth follows committed usage source. Prefer artifact read, but
     // self-heal when cache is missing (e.g. engine v11 bump) instead of failing the tab.
     if (!out.ok && out.code === "ARTIFACT_MISSING" && readMode === "artifact_only") {
       readModeUsed = "allow_rebuild";
@@ -178,6 +193,8 @@ export async function GET(request: NextRequest) {
         userId: u.user.id,
         houseId,
         timezone: "America/Chicago",
+        esiid: houseRow?.esiid ?? null,
+        preferredActualSource: preferredActualSource ?? null,
       });
       if (rebuilt.ok) {
         out = await readPastScenario(readModeUsed);
@@ -189,10 +206,7 @@ export async function GET(request: NextRequest) {
       const datasetAny = (out as any)?.dataset ?? {};
       const okHeaders = new Headers({ "Cache-Control": cacheControl });
       okHeaders.set("X-Correlation-Id", correlationId);
-      const house = await prisma.houseAddress.findFirst({
-        where: { id: houseId, userId: u.user.id, archivedAt: null },
-        select: { id: true, esiid: true },
-      });
+      const house = houseRow;
       const actualDatasetForCompare =
         house?.id != null
           ? (
@@ -202,6 +216,7 @@ export async function GET(request: NextRequest) {
                 layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
                 scenarioId: null,
                 esiid: house.esiid ?? null,
+                preferredActualSource: preferredActualSource ?? null,
               }).catch(() => null)
             )?.dataset ?? null
           : null;
@@ -231,7 +246,8 @@ export async function GET(request: NextRequest) {
           actualContextHouseId: houseId,
           smtSourceEsiid: house?.esiid ?? null,
           seedIfMissing: false,
-          preferredActualSource: null,
+          preferredActualSource: preferredActualSource ?? null,
+          greenButtonFullYearIntervalsForDisplay: preferredActualSource === "GREEN_BUTTON",
         }).catch(() => null),
         resolveStaleIncompleteMeterSlotCompleteDateKeys({
           esiid: house?.esiid ?? null,
@@ -261,6 +277,7 @@ export async function GET(request: NextRequest) {
                         layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
                         scenarioId: null,
                         esiid: house.esiid ?? null,
+                        preferredActualSource: preferredActualSource ?? null,
                       }).catch(() => null)
                     )?.dataset ?? null
                   : null;

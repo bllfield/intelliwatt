@@ -1,10 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("server-only", () => ({}));
 import {
   isolateBuildInputsForUserSite,
   isOnePathAdminSmtPastRunCaller,
   isPersistedAdminLabTestHomeLabel,
   isUserSiteSimulationCaller,
   resolveOnePathPastPreferredActualSource,
+  resolvePastRecalcPreferredActualSource,
 } from "@/lib/usage/userSiteSimulationIsolation";
 import {
   GAPFILL_LAB_TEST_HOME_LABEL,
@@ -23,6 +26,18 @@ describe("userSiteSimulationIsolation", () => {
   it("detects user-site callers", () => {
     expect(isUserSiteSimulationCaller("user_recalc")).toBe(true);
     expect(isUserSiteSimulationCaller("one_path_admin")).toBe(false);
+  });
+
+  it("prefers runContext source before committed usage lookup", async () => {
+    await expect(
+      resolvePastRecalcPreferredActualSource({
+        callerLabel: "user_recalc",
+        preferredActualSource: "GREEN_BUTTON",
+        houseId: "house-1",
+        userId: "user-1",
+        esiid: null,
+      }),
+    ).resolves.toBe("GREEN_BUTTON");
   });
 
   it("locks SMT for One Path admin INTERVAL Past and cross-house SMT lab recalc", () => {

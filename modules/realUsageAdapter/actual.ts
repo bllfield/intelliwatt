@@ -43,8 +43,9 @@ export async function resolveActualUsageSourceAnchor(args: {
   preferredSource?: ActualUsageSource | null;
 }): Promise<ActualUsageSourceAnchor> {
   const timezone = String(args.timezone ?? "America/Chicago").trim() || "America/Chicago";
+  const preferred = args.preferredSource ?? null;
   const [smtLatest, gbAnchorDateKey] = await Promise.all([
-    getLatestSmtIntervalTimestamp(args.esiid),
+    preferred === "GREEN_BUTTON" ? Promise.resolve(null) : getLatestSmtIntervalTimestamp(args.esiid),
     getLatestGreenButtonFullDayDateKey({ houseId: args.houseId }),
   ]);
   const smtMs = smtLatest ? smtLatest.getTime() : 0;
@@ -52,7 +53,6 @@ export async function resolveActualUsageSourceAnchor(args: {
     typeof gbAnchorDateKey === "string" && /^\d{4}-\d{2}-\d{2}$/.test(gbAnchorDateKey)
       ? new Date(`${gbAnchorDateKey}T12:00:00.000Z`).getTime()
       : 0;
-  const preferred = args.preferredSource ?? null;
   let source: ActualUsageSource | null = null;
   // Firm admin/user preference: never cross-fallback to the other source.
   if (preferred === "GREEN_BUTTON") source = gbMs > 0 ? "GREEN_BUTTON" : null;

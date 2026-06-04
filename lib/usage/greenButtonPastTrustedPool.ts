@@ -68,9 +68,14 @@ export function resolvePastProducerIntervalActualSource(buildInputs: {
   actualSource?: unknown;
   preferredActualSource?: unknown;
 }): "SMT" | "GREEN_BUTTON" | null {
-  const callerLabel = buildInputs.lockboxRunContext?.callerLabel;
+  const callerLabel =
+    typeof buildInputs.lockboxRunContext?.callerLabel === "string"
+      ? buildInputs.lockboxRunContext.callerLabel
+      : null;
   if (isOnePathAdminGbPastRunCaller(callerLabel)) return "GREEN_BUTTON";
   if (isOnePathAdminSmtPastRunCaller(callerLabel)) return "SMT";
+  const topLevelPreferred = buildInputs.preferredActualSource;
+  if (topLevelPreferred === "GREEN_BUTTON" || topLevelPreferred === "SMT") return topLevelPreferred;
   // Active recalc lockbox wins over persisted snapshot (One Path GB vs mirrored SMT snapshot).
   const lockboxSource = buildInputs.lockboxRunContext?.preferredActualSource;
   if (lockboxSource === "GREEN_BUTTON" || lockboxSource === "SMT") return lockboxSource;

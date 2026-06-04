@@ -9,10 +9,9 @@ import { buildSimulatorInputs, type BaseKind } from "@/modules/onePathSim/usageS
 import { computeBuildInputsHash } from "@/modules/onePathSim/usageSimulator/hash";
 import { computeRequirements, type SimulatorMode } from "@/modules/onePathSim/usageSimulator/requirements";
 import { upsertSimulatorBuild } from "@/modules/onePathSim/usageSimulator/repo";
-import {
-  isolateBuildInputsForUserSite,
-  resolveUserSiteActualSourceForHouse,
-} from "@/lib/usage/userSiteSimulationIsolation";
+import { assertOnePathGreenButtonPersistedUsage } from "@/lib/usage/onePathGreenButtonUsageGate";
+import { resolveHouseCommittedUsageSource } from "@/lib/usage/houseCommittedUsageSource";
+import { isolateBuildInputsForUserSite } from "@/lib/usage/userSiteSimulationIsolation";
 import { INTRADAY_TEMPLATE_VERSION } from "@/modules/onePathSim/simulatedUsage/intradayTemplates";
 import { SMT_SHAPE_DERIVATION_VERSION } from "@/modules/realUsageAdapter/smt";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
@@ -118,13 +117,41 @@ export async function recalcUserSiteBaselinePassthrough(args: {
   const applianceProfile = normalizeStoredApplianceProfile((applianceRec?.appliancesJson as unknown) ?? null);
   const homeProfile = homeRec ? { ...homeRec } : null;
 
-  const preferredActualSource = await resolveUserSiteActualSourceForHouse({ userId, houseId, esiid });
+  const committedSource = await resolveHouseCommittedUsageSource({ userId, houseId, esiid });
+  if (committedSource === "GREEN_BUTTON") {
+    const gbGate = await assertOnePathGreenButtonPersistedUsage({
+      houseId: actualContextHouseId,
+      contextLabel: "user site baseline",
+    });
+    if (!gbGate.ok) {
+      return {
+        ok: false,
+        error: gbGate.error,
+        missingItems: [gbGate.message],
+      };
+    }
+  }
+  const preferredActualSource = committedSource;
   const actualSourceAnchor = await resolveActualUsageSourceAnchor({
     houseId: actualContextHouseId,
     esiid,
     timezone: "America/Chicago",
-    preferredSource: preferredActualSource,
+    preferredSource: preferredActualSource ?? null,
   });
+  if (committedSource === "GREEN_BUTTON" && actualSourceAnchor.source !== "GREEN_BUTTON") {
+    return {
+      ok: false,
+      error: "green_button_usage_missing",
+      missingItems: ["Green Button usage is not available for this home."],
+    };
+  }
+  if (committedSource === "SMT" && actualSourceAnchor.source !== "SMT") {
+    return {
+      ok: false,
+      error: "smt_usage_missing",
+      missingItems: ["Smart Meter Texas usage is not available for this home."],
+    };
+  }
   const canonical = canonicalMonthsForUserSiteBaseline({
     mode,
     manualUsagePayload,
@@ -230,10 +257,16 @@ export async function recalcUserSiteBaselinePassthrough(args: {
     versions,
   };
 
+  const isolationActualSource: "SMT" | "GREEN_BUTTON" =
+    committedSource === "SMT" || committedSource === "GREEN_BUTTON"
+      ? committedSource
+      : actualSourceAnchor.source === "SMT" || actualSourceAnchor.source === "GREEN_BUTTON"
+        ? actualSourceAnchor.source
+        : "GREEN_BUTTON";
   const isolated = isolateBuildInputsForUserSite({
     buildInputs,
     requestHouseId: houseId,
-    actualSource: preferredActualSource,
+    actualSource: isolationActualSource,
   });
   buildInputs = isolated.buildInputs;
 

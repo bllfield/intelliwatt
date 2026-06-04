@@ -2120,9 +2120,9 @@ export async function runSharedSimulation(
       ...(engineInput.runtime.runContext ?? {}),
       callerLabel:
         engineInput.runtime.runContext?.callerLabel ??
-        (engineInput.runtime.preferredActualSource === "GREEN_BUTTON"
+        (engineInput.runtime.runContext?.preferredActualSource === "GREEN_BUTTON"
           ? "one_path_admin_gb_past_run"
-          : engineInput.runtime.preferredActualSource === "SMT"
+          : engineInput.runtime.runContext?.preferredActualSource === "SMT"
             ? "one_path_admin_past_run"
             : "one_path_sim_admin"),
     },

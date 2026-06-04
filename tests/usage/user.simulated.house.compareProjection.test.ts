@@ -41,6 +41,7 @@ const {
     manualUsageInput: { findUnique: vi.fn() },
     houseAddress: { findFirst: vi.fn() },
     usageSimulatorScenario: { findFirst: vi.fn() },
+    usageSimulatorBuild: { findFirst: vi.fn().mockResolvedValue(null) },
   } as any,
   readOnePathSimulatedUsageScenario: vi.fn(),
   getSimulatedUsageForHouseScenario: vi.fn(),
@@ -90,6 +91,10 @@ vi.mock("@/modules/usageSimulator/compareProjection", async (importOriginal) => 
 
 vi.mock("@/lib/usage/resolveIntervalsLayer", () => ({
   resolveIntervalsLayer: (...args: any[]) => resolveIntervalsLayer(...args),
+}));
+
+vi.mock("@/lib/usage/houseCommittedUsageSource", () => ({
+  resolveHouseCommittedUsageSource: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/modules/usageShapeProfile/autoBuild", () => ({

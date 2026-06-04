@@ -20,6 +20,39 @@ export function isOnePathAdminGbPastRunCaller(callerLabel: string | null | undef
 }
 
 /**
+ * Past recalc preferred source: admin caller locks, then explicit runContext, then user-site committed usage.
+ */
+export async function resolvePastRecalcPreferredActualSource(args: {
+  callerLabel?: string | null;
+  preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
+  isCrossHouseAdminLab?: boolean;
+  mode?: string | null;
+  hasEsiid?: boolean;
+  userId?: string;
+  houseId?: string;
+  esiid?: string | null;
+}): Promise<"SMT" | "GREEN_BUTTON" | undefined> {
+  const fromCaller = resolveOnePathPastPreferredActualSource({
+    callerLabel: args.callerLabel,
+    preferredActualSource: args.preferredActualSource,
+    isCrossHouseAdminLab: args.isCrossHouseAdminLab,
+    mode: args.mode,
+    hasEsiid: args.hasEsiid,
+  });
+  if (fromCaller) return fromCaller;
+  if (isUserSiteSimulationCaller(args.callerLabel) && args.houseId) {
+    const { resolveHouseCommittedUsageSource } = await import("@/lib/usage/houseCommittedUsageSource");
+    const committed = await resolveHouseCommittedUsageSource({
+      houseId: args.houseId,
+      userId: args.userId ?? null,
+      esiid: args.esiid ?? null,
+    });
+    if (committed === "SMT" || committed === "GREEN_BUTTON") return committed;
+  }
+  return undefined;
+}
+
+/**
  * One Path admin Past runs must not inherit GREEN_BUTTON from source-house anchor when the run is SMT (INTERVAL).
  */
 export function resolveOnePathPastPreferredActualSource(args: {

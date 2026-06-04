@@ -43,6 +43,7 @@ import {
   isolateBuildInputsForUserSite,
   isUserSiteSimulationCaller,
   resolveOnePathPastPreferredActualSource,
+  resolvePastRecalcPreferredActualSource,
   resolveUserSiteActualSourceForHouse,
 } from "@/lib/usage/userSiteSimulationIsolation";
 import { upsertSimulatedUsageBuckets } from "@/lib/usage/simulatedUsageBuckets";
@@ -4385,12 +4386,15 @@ async function recalcSimulatorBuildImpl(args: {
     normalizeValidationSelectionMode(args.validationDaySelectionMode) ??
     (requestedValidationOnlyDateKeysLocal.size > 0 ? ("manual" as ValidationDaySelectionMode) : null);
   let validationSelectionDiagnostics: ValidationDaySelectionDiagnostics | null = null;
-  let preferredActualSource = resolveOnePathPastPreferredActualSource({
+  let preferredActualSource = await resolvePastRecalcPreferredActualSource({
     callerLabel: args.runContext?.callerLabel,
     preferredActualSource: args.runContext?.preferredActualSource,
     isCrossHouseAdminLab,
     mode,
     hasEsiid: Boolean(esiid),
+    userId,
+    houseId,
+    esiid,
   });
   const runContext = buildPastSimRunContext({
     correlationId: String(args.correlationId ?? ""),
@@ -4511,7 +4515,7 @@ async function recalcSimulatorBuildImpl(args: {
         ok: false,
         error: "green_button_usage_missing",
         missingItems: [
-          "Green Button usage is not persisted for this Past run house. Upload Green Button on the One Path test home before running.",
+          "Green Button usage is not persisted for this home. Upload Green Button data before running Past Sim.",
         ],
       };
     }

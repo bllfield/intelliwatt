@@ -8168,6 +8168,15 @@ export async function getSimulatorRequirements(args: { userId: string; houseId: 
   const house = await getHouseAddressForUserHouse({ userId: args.userId, houseId: args.houseId }).catch(() => null);
   if (!house) return { ok: false as const, error: "house_not_found" };
 
+  const { resolveHouseCommittedUsageSource } = await import("@/lib/usage/houseCommittedUsageSource");
+  const committedSource = await resolveHouseCommittedUsageSource({
+    houseId: args.houseId,
+    userId: args.userId,
+    esiid: house.esiid ?? null,
+  });
+  const preferredSource =
+    committedSource === "SMT" || committedSource === "GREEN_BUTTON" ? committedSource : null;
+
   const [manualRec, homeRec, applianceRec] = await Promise.all([
     (prisma as any).manualUsageInput
       .findUnique({ where: { userId_houseId: { userId: args.userId, houseId: args.houseId } }, select: { payload: true } })
@@ -8182,11 +8191,17 @@ export async function getSimulatorRequirements(args: { userId: string; houseId: 
   const applianceProfile = normalizeStoredApplianceProfile((applianceRec?.appliancesJson as any) ?? null);
   const homeProfile = homeRec ? { ...homeRec } : null;
 
-  const hasActual = await hasActualIntervals({ houseId: args.houseId, esiid: house.esiid ?? null, canonicalMonths: canonical.months });
+  const hasActual = await hasActualIntervals({
+    houseId: args.houseId,
+    esiid: house.esiid ?? null,
+    canonicalMonths: canonical.months,
+    preferredSource,
+  });
   const actualSourceAnchor = await resolveActualUsageSourceAnchor({
     houseId: args.houseId,
     esiid: house.esiid ?? null,
     timezone: "America/Chicago",
+    preferredSource,
   });
   const actualSource = actualSourceAnchor.source;
   const req = computeRequirements(

@@ -5,6 +5,7 @@
  */
 
 import type { DailyRowWithSource } from "@/lib/usage/sageActualDailyTruth";
+import { isGreenButtonBackedDatasetMeta } from "@/lib/time/greenButtonPersistedIntervalConvert";
 import {
   readGreenButtonTrustedHomeDateKeysFromPastMeta,
   resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals,
@@ -101,10 +102,21 @@ export function filterSimulatedDateKeysWithoutStaleIncompleteMeter(args: {
 }
 
 /** Live SMT completeness for persisted incomplete-meter days (DST fall-back safe). */
+export function pastReadShouldSkipSmtSlotOverlay(meta: unknown): boolean {
+  if (resolvePastDatasetMetaActualSource(meta) === "GREEN_BUTTON") return true;
+  return (
+    meta != null &&
+    typeof meta === "object" &&
+    !Array.isArray(meta) &&
+    isGreenButtonBackedDatasetMeta(meta as Record<string, unknown>)
+  );
+}
+
 export async function resolveStaleIncompleteMeterSlotCompleteDateKeys(args: {
   esiid: string | null | undefined;
   meta: unknown;
 }): Promise<Set<string>> {
+  if (pastReadShouldSkipSmtSlotOverlay(args.meta)) return new Set();
   const esiid = String(args.esiid ?? "").trim();
   if (!esiid) return new Set();
   const stale = incompleteMeterDateKeysFromPastMeta(args.meta);

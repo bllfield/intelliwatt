@@ -2,6 +2,8 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
+import { resolveHouseCommittedUsageSource } from "@/lib/usage/houseCommittedUsageSource";
+import { assertOnePathGreenButtonPersistedUsage } from "@/lib/usage/onePathGreenButtonUsageGate";
 import { dispatchPastSimRecalc } from "@/modules/usageSimulator/pastSimRecalcDispatch";
 import { getPastSimRecalcJobForUser } from "@/modules/usageSimulator/simDropletJob";
 import { resolvePastSmtValidationPolicy } from "@/lib/usage/pastValidationPolicy";
@@ -122,6 +124,34 @@ export async function POST(request: NextRequest) {
         { status: 403 }
       );
     }
+    const committedSource = await resolveHouseCommittedUsageSource({
+      houseId: house.id,
+      userId: u.user.id,
+      esiid: house.esiid ?? null,
+    });
+    if (committedSource === "GREEN_BUTTON") {
+      const gbGate = await assertOnePathGreenButtonPersistedUsage({
+        houseId: house.id,
+        contextLabel: "Past Sim recalc",
+      });
+      if (!gbGate.ok) {
+        const { failureCode, failureMessage } = failureContractFromRecalcErr({
+          ok: false,
+          error: gbGate.error,
+          missingItems: [gbGate.message],
+        });
+        return NextResponse.json(
+          {
+            ok: false,
+            error: gbGate.error,
+            message: gbGate.message,
+            failureCode,
+            failureMessage,
+          },
+          { status: 409 }
+        );
+      }
+    }
     const dispatched = await dispatchPastSimRecalc({
       userId: u.user.id,
       houseId,
@@ -136,6 +166,9 @@ export async function POST(request: NextRequest) {
         callerLabel: "user_recalc",
         buildPathKind: "recalc",
         persistRequested: true,
+        ...(committedSource === "SMT" || committedSource === "GREEN_BUTTON"
+          ? { preferredActualSource: committedSource }
+          : {}),
       },
     });
     if (dispatched.executionMode === "droplet_async") {

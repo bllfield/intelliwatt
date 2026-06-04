@@ -14,16 +14,26 @@ export function resolvePastDatasetRestoreActualSource(meta: unknown): "SMT" | "G
   if (explicit) return explicit;
   if (meta && typeof meta === "object" && !Array.isArray(meta)) {
     const lockbox = (meta as Record<string, unknown>).lockboxRunContext;
+    const lockboxCaller =
+      lockbox && typeof lockbox === "object"
+        ? (lockbox as Record<string, unknown>).callerLabel
+        : null;
     if (
-      lockbox &&
-      typeof lockbox === "object" &&
-      isOnePathAdminGbPastRunCaller((lockbox as Record<string, unknown>).callerLabel)
+      typeof lockboxCaller === "string" &&
+      isOnePathAdminGbPastRunCaller(lockboxCaller)
     ) {
       return "GREEN_BUTTON";
     }
     if (readGreenButtonTrustedHomeDateKeysFromPastMeta(meta).size > 0) return "GREEN_BUTTON";
   }
-  if (isGreenButtonBackedDatasetMeta(meta)) return "GREEN_BUTTON";
+  if (
+    meta &&
+    typeof meta === "object" &&
+    !Array.isArray(meta) &&
+    isGreenButtonBackedDatasetMeta(meta as Record<string, unknown>)
+  ) {
+    return "GREEN_BUTTON";
+  }
   return "SMT";
 }
 
@@ -55,14 +65,25 @@ export function enrichPastDisplayIntervalsWithHomeDateKeys<T extends PastInterva
   if (hasHome) {
     return intervals.map((row) => {
       const homeDateKey = String(row.homeDateKey ?? pastDailyDateKeyFromInterval(row)).slice(0, 10);
-      return { ...row, homeDateKey };
+      const homeSlot = row.homeSlot;
+      return {
+        ...row,
+        homeDateKey,
+        ...(homeSlot != null ? { homeSlot } : {}),
+      };
     });
   }
 
   const timezone = String(args.timezone ?? "America/Chicago").trim() || "America/Chicago";
   if (args.actualSource === "GREEN_BUTTON") {
     const materialized = materializeGreenButtonPastProducerIntervals({
-      sourceIntervals: intervals,
+      sourceIntervals: intervals.map((row) => ({
+        timestamp: String(row.timestamp ?? ""),
+        kwh: row.kwh,
+        consumption_kwh: row.consumption_kwh,
+        homeDateKey: row.homeDateKey ?? undefined,
+        homeSlot: row.homeSlot ?? undefined,
+      })),
       timezone,
     });
     const byTs = new Map(materialized.map((row) => [row.timestamp, row]));
