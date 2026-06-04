@@ -2,7 +2,6 @@ import { DateTime } from "luxon";
 
 import {
   enumerateExpectedLocalSlotsForDate,
-  enumerateLocalDateKeys,
   localDateKey,
   localSlotIndex,
   type HomeIntervalCalendar,
@@ -36,6 +35,57 @@ export function homeLocalSlotStartMsFromInstant(
   return homeLocalSlotBoundsUtc(dateKey, slot, home).startUtc.getTime();
 }
 
+const expectedSlotsByDayCache = new Map<string, number[]>();
+
+function cacheKey(home: HomeIntervalCalendar, dateKey: string): string {
+  return `${home.timezone}\t${dateKey}`;
+}
+
+function expectedSlotsForDate(dateKey: string, home: HomeIntervalCalendar): number[] {
+  const key = cacheKey(home, dateKey);
+  let slots = expectedSlotsByDayCache.get(key);
+  if (!slots) {
+    slots = enumerateExpectedLocalSlotsForDate(dateKey, home);
+    expectedSlotsByDayCache.set(key, slots);
+  }
+  return slots;
+}
+
+/** Clear DST slot cache between ingest jobs (optional; bounded to ~365 keys per job). */
+export function clearGreenButtonHomeLocalSlotCache(): void {
+  expectedSlotsByDayCache.clear();
+}
+
+function nextHomeLocalSlot(
+  dateKey: string,
+  slot: number,
+  home: HomeIntervalCalendar
+): { dateKey: string; slot: number } | null {
+  const expected = expectedSlotsForDate(dateKey, home);
+  const idx = expected.indexOf(slot);
+  if (idx >= 0 && idx < expected.length - 1) {
+    return { dateKey, slot: expected[idx + 1]! };
+  }
+  const nextDay = DateTime.fromISO(dateKey, { zone: home.timezone }).plus({ days: 1 }).toFormat("yyyy-MM-dd");
+  const nextExpected = expectedSlotsForDate(nextDay, home);
+  if (nextExpected.length === 0) return null;
+  return { dateKey: nextDay, slot: nextExpected[0]! };
+}
+
+function addKwhFragmentToBucket(
+  buckets: Map<number, GreenButtonBucketCell>,
+  slotStartMs: number,
+  kwhFragment: number
+): void {
+  const existing = buckets.get(slotStartMs);
+  if (existing) {
+    existing.kwh += kwhFragment;
+    existing.collisionCount += 1;
+  } else {
+    buckets.set(slotStartMs, { kwh: kwhFragment, collisionCount: 1 });
+  }
+}
+
 /**
  * Place interval energy into canonical 15-minute home-local buckets by wall-clock overlap.
  * Avoids assigning full kWh to a single slot when the vendor interval straddles boundaries.
@@ -52,30 +102,35 @@ export function addGreenButtonReadingToHomeLocalBuckets(args: {
   const totalKwh = args.totalKwh;
   if (!Number.isFinite(totalKwh) || totalKwh < 0 || durationMs <= 0) return;
 
+  const home = args.home;
   const startMs = args.intervalStartUtc.getTime();
   const endMs = startMs + durationMs;
+  const startIso = args.intervalStartUtc.toISOString();
+  let dateKey = localDateKey(startIso, home);
+  let slot = localSlotIndex(startIso, home);
 
-  const startDateKey = localDateKey(args.intervalStartUtc, args.home);
-  const endDateKey = localDateKey(new Date(endMs - 1), args.home);
-  const dateKeys = enumerateLocalDateKeys(startDateKey, endDateKey, args.home);
+  let guard = 0;
+  const maxSlotSteps = 200;
 
-  for (const dateKey of dateKeys) {
-    for (const slot of enumerateExpectedLocalSlotsForDate(dateKey, args.home)) {
-      const { startUtc, endUtcExclusive } = homeLocalSlotBoundsUtc(dateKey, slot, args.home);
-      const slotStartMs = startUtc.getTime();
-      const slotEndMs = endUtcExclusive.getTime();
-      const overlapMs = Math.min(endMs, slotEndMs) - Math.max(startMs, slotStartMs);
-      if (overlapMs <= 0) continue;
+  while (guard++ < maxSlotSteps) {
+    const { startUtc, endUtcExclusive } = homeLocalSlotBoundsUtc(dateKey, slot, home);
+    const slotStartMs = startUtc.getTime();
+    const slotEndMs = endUtcExclusive.getTime();
 
+    if (slotStartMs >= endMs) break;
+
+    const overlapMs = Math.min(endMs, slotEndMs) - Math.max(startMs, slotStartMs);
+    if (overlapMs > 0) {
       const kwhFragment = totalKwh * (overlapMs / durationMs);
-      const existing = args.buckets.get(slotStartMs);
-      if (existing) {
-        existing.kwh += kwhFragment;
-        existing.collisionCount += 1;
-      } else {
-        args.buckets.set(slotStartMs, { kwh: kwhFragment, collisionCount: 1 });
-      }
+      addKwhFragmentToBucket(args.buckets, slotStartMs, kwhFragment);
     }
+
+    if (slotEndMs >= endMs) break;
+
+    const next = nextHomeLocalSlot(dateKey, slot, home);
+    if (!next) break;
+    dateKey = next.dateKey;
+    slot = next.slot;
   }
 }
 

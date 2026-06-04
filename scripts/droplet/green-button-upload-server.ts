@@ -607,6 +607,13 @@ async function runGreenButtonIngestJob(args: GreenButtonIngestJobArgs): Promise<
       onStageComplete: (detail) => {
         logEvent("ingest.pipeline_progress", { uploadRecordId, ...detail });
       },
+      onNormalizeChunkStart: (progress) => {
+        logEvent("ingest.pipeline_progress", {
+          uploadRecordId,
+          stage: "normalize_chunk_start",
+          ...progress,
+        });
+      },
       onNormalizeChunkComplete: (progress) => {
         logEvent("ingest.pipeline_progress", {
           uploadRecordId,

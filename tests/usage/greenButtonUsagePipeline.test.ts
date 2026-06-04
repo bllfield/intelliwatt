@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { GREEN_BUTTON_INTERVAL_INGEST_VERSION } from "@/lib/usage/greenButtonIngestContract";
-import { normalizeGreenButtonReadingsTo15Min } from "@/lib/usage/greenButtonNormalize";
+import {
+  normalizeGreenButtonReadingsTo15Min,
+  normalizeGreenButtonReadingsTo15MinChunked,
+} from "@/lib/usage/greenButtonNormalize";
 import { parseGreenButtonBuffer } from "@/lib/usage/greenButtonParser";
 import { runGreenButtonUsagePipeline } from "@/lib/usage/greenButtonUsagePipeline";
 
@@ -121,6 +124,24 @@ describe("runGreenButtonUsagePipeline", () => {
     expect(blockParsed.readings.map((r) => [r.timestamp, r.value, r.durationSeconds])).toEqual(
       treeParsed.readings.map((r) => [r.timestamp, r.value, r.durationSeconds])
     );
+  });
+
+  it("normalizes a full-year ESPI-sized reading count within ingest SLA", { timeout: 30_000 }, () => {
+    const count = 36576;
+    const startMs = Date.UTC(2024, 5, 1, 5, 0, 0, 0);
+    const readings = Array.from({ length: count }, (_, i) => ({
+      timestamp: new Date(startMs + i * 15 * 60 * 1000).toISOString(),
+      value: 89,
+      unit: "Wh",
+      durationSeconds: 900,
+    }));
+
+    const started = Date.now();
+    const normalized = normalizeGreenButtonReadingsTo15MinChunked(readings, { maxKwhPerInterval: 10 });
+    const ms = Date.now() - started;
+
+    expect(normalized.length).toBeGreaterThan(0);
+    expect(ms).toBeLessThan(25_000);
   });
 
   it("inherits ESPI uom=72 as Wh so SMT Green Button values under 100 are not dropped as kWh outliers", () => {

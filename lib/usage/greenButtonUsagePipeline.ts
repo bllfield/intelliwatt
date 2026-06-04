@@ -73,6 +73,7 @@ export function runGreenButtonUsagePipeline(args: {
   maxKwhPerInterval?: number | null;
   readingsPerChunk?: number;
   onStageComplete?: (detail: GreenButtonUsagePipelineStageDetail) => void;
+  onNormalizeChunkStart?: (progress: Pick<GreenButtonNormalizeChunkProgress, "chunkIndex" | "chunkCount" | "readingsInChunk">) => void;
   onNormalizeChunkComplete?: (progress: GreenButtonNormalizeChunkProgress) => void;
   onXmlParseProgress?: (detail: { blocksScanned: number; readingsFound: number }) => void;
 }): GreenButtonUsagePipelineResult {
@@ -117,6 +118,7 @@ export function runGreenButtonUsagePipeline(args: {
   const normalized = normalizeGreenButtonReadingsTo15MinChunked(parsed.readings, {
     maxKwhPerInterval,
     readingsPerChunk,
+    onChunkStart: (progress) => args.onNormalizeChunkStart?.(progress),
     onChunkComplete: (progress) => args.onNormalizeChunkComplete?.(progress),
     onRepairComplete: (detail) => {
       args.onStageComplete?.({

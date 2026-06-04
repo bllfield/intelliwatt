@@ -5,7 +5,10 @@ import {
   resolveIntervalInstant,
   type IntervalDelivery,
 } from "@/lib/time/homeIntervalCalendar";
-import { addGreenButtonReadingToHomeLocalBuckets } from "@/lib/usage/greenButtonHomeLocalBuckets";
+import {
+  addGreenButtonReadingToHomeLocalBuckets,
+  clearGreenButtonHomeLocalSlotCache,
+} from "@/lib/usage/greenButtonHomeLocalBuckets";
 import {
   repairGreenButtonHomeLocalBuckets,
   type GreenButtonBucketCell,
@@ -167,6 +170,7 @@ export function normalizeGreenButtonReadingsTo15MinChunked(
   rawReadings: GreenButtonRawReading[],
   options?: GreenButtonNormalizeOptions & {
     readingsPerChunk?: number;
+    onChunkStart?: (progress: Pick<GreenButtonNormalizeChunkProgress, "chunkIndex" | "chunkCount" | "readingsInChunk">) => void;
     onChunkComplete?: (progress: GreenButtonNormalizeChunkProgress) => void;
     onRepairComplete?: (detail: { ms: number; bucketsBefore: number }) => void;
   }
@@ -174,13 +178,16 @@ export function normalizeGreenButtonReadingsTo15MinChunked(
   const chunkSize = Math.max(1, options?.readingsPerChunk ?? GREEN_BUTTON_NORMALIZE_READINGS_PER_CHUNK);
   const buckets = new Map<number, GreenButtonBucketCell>();
   const chunkCount = Math.max(1, Math.ceil(rawReadings.length / chunkSize));
+  clearGreenButtonHomeLocalSlotCache();
 
   for (let offset = 0; offset < rawReadings.length; offset += chunkSize) {
     const chunk = rawReadings.slice(offset, offset + chunkSize);
+    const chunkIndex = Math.floor(offset / chunkSize) + 1;
+    options?.onChunkStart?.({ chunkIndex, chunkCount, readingsInChunk: chunk.length });
     const chunkStart = Date.now();
     accumulateGreenButtonReadingsIntoBuckets(chunk, buckets, options);
     options?.onChunkComplete?.({
-      chunkIndex: Math.floor(offset / chunkSize) + 1,
+      chunkIndex,
       chunkCount,
       readingsInChunk: chunk.length,
       ms: Date.now() - chunkStart,
