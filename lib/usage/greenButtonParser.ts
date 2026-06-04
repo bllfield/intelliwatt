@@ -145,10 +145,9 @@ function resolveXmlDefaultReadingUnitFromHeader(xml: string): string | null {
   return null;
 }
 
-function intervalReadingNodeFromWrappedBlock(wrappedRoot: Record<string, unknown>): Record<string, unknown> | null {
+function intervalReadingNodeFromWrappedBlock(wrappedRoot: Record<string, unknown>): Record<string, unknown> {
   const direct = getFirstObject(wrappedRoot.IntervalReading);
-  if (direct) return direct;
-  return wrappedRoot;
+  return direct ?? wrappedRoot;
 }
 
 /**
