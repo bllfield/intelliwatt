@@ -18,8 +18,8 @@ Environment=GREEN_BUTTON_UPLOAD_MAX_BYTES=524288000
 # Best-effort: clear stale or legacy listeners before binding 8091.
 ExecStartPre=-/usr/local/bin/gb-kill-8091.sh
 
-# Start the Node upload server
-ExecStart=/usr/bin/node scripts/droplet/green-button-upload-server.js
+# Run TS entrypoint so ingest uses lib/usage/greenButtonUsagePipeline (legacy .js is not updated).
+ExecStart=/home/deploy/apps/intelliwatt/node_modules/.bin/tsx scripts/droplet/green-button-upload-server.ts
 
 # Always restart this service - it's a critical long-running daemon
 Restart=always

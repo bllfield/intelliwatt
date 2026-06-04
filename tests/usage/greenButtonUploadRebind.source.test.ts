@@ -72,5 +72,8 @@ describe("green button upload house rebinding", () => {
     expect(ensureServicesSource).toContain("disable_if_installed \"green-button-upload.service\"");
     expect(ensureServicesSource).toContain("ensure_enabled_active \"green-button-upload-server.service\"");
     expect(greenButtonUnitSource).toContain("ExecStartPre=-/usr/local/bin/gb-kill-8091.sh");
+    expect(greenButtonUnitSource).toContain("green-button-upload-server.ts");
+    expect(greenButtonUnitSource).toContain("node_modules/.bin/tsx");
+    expect(greenButtonUnitSource).not.toMatch(/ExecStart=.*green-button-upload-server\.js/);
   });
 });
