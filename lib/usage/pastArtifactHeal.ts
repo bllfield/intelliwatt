@@ -6,7 +6,7 @@ import { travelRangesFromPastBuildInputs } from "@/lib/usage/pastArtifactIdentit
 import {
   preferredActualSourceFromPastBuildInputs,
 } from "@/lib/usage/pastSimValidationReadBackfill";
-import { resolvePastSmtValidationPolicy } from "@/lib/usage/pastValidationPolicy";
+import { resolvePastValidationPolicy } from "@/lib/usage/pastValidationPolicy";
 import { getLatestCachedPastDatasetByScenario } from "@/modules/usageSimulator/pastCache";
 import { dispatchPastSimRecalc } from "@/modules/usageSimulator/pastSimRecalcDispatch";
 import type { SimulatorMode } from "@/modules/usageSimulator/requirements";
@@ -60,7 +60,7 @@ export async function healPastArtifactIfIdentityMismatch(args: {
       : args.houseId;
   const preferredActualSource = preferredActualSourceFromPastBuildInputs(args.buildInputs);
   const callerLabel = recalcCallerLabelFromBuildInputs(args.buildInputs);
-  const validationPolicy = resolvePastSmtValidationPolicy({
+  const validationPolicy = resolvePastValidationPolicy({
     surface: callerLabel.startsWith("one_path_admin") ? "admin_lab" : "user_site",
   });
 

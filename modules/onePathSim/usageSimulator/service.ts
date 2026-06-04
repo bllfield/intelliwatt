@@ -31,8 +31,8 @@ import { resolvePastSimTravelRangesForRecalc } from "@/lib/usage/pastSimTravelRa
 import {
   resolveCanonicalPastValidationDayCount,
   resolveCanonicalPastValidationSelectionMode,
-  resolvePastSmtValidationPolicy,
-  shouldReconcilePastSmtValidationSelection,
+  resolvePastValidationPolicy,
+  shouldReconcilePastValidationSelection,
 } from "@/lib/usage/pastValidationPolicy";
 import {
   isPastScenarioValidationBackfillEligible,
@@ -7349,7 +7349,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
           weatherPreferenceRaw === "LONG_TERM_AVERAGE"
             ? (weatherPreferenceRaw as WeatherPreference)
             : "NONE";
-        const validationBackfillPolicy = resolvePastSmtValidationPolicy({ surface: "user_site" });
+        const validationBackfillPolicy = resolvePastValidationPolicy({ surface: "user_site" });
         const backfillPreferredActualSource = preferredActualSourceFromPastBuildInputs(
           buildInputs as Record<string, unknown>
         );
@@ -7700,7 +7700,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
         weatherPreferenceRaw === "LONG_TERM_AVERAGE"
           ? (weatherPreferenceRaw as WeatherPreference)
           : "NONE";
-      const validationBackfillPolicy = resolvePastSmtValidationPolicy({ surface: "user_site" });
+      const validationBackfillPolicy = resolvePastValidationPolicy({ surface: "user_site" });
       const backfillPreferredActualSource = preferredActualSourceFromPastBuildInputs(
         buildInputs as Record<string, unknown>
       );

@@ -30,8 +30,8 @@ import { resolvePastSimTravelRangesForRecalc } from "@/lib/usage/pastSimTravelRa
 import {
   resolveCanonicalPastValidationDayCount,
   resolveCanonicalPastValidationSelectionMode,
-  resolvePastSmtValidationPolicy,
-  shouldReconcilePastSmtValidationSelection,
+  resolvePastValidationPolicy,
+  shouldReconcilePastValidationSelection,
 } from "@/lib/usage/pastValidationPolicy";
 import { isPastScenarioValidationBackfillEligible } from "@/lib/usage/pastSimValidationReadBackfill";
 import { resolvePastArtifactIdentity } from "@/lib/usage/pastArtifactIdentity";
@@ -7034,7 +7034,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
           weatherPreferenceRaw === "LONG_TERM_AVERAGE"
             ? (weatherPreferenceRaw as WeatherPreference)
             : "NONE";
-        const validationBackfillPolicy = resolvePastSmtValidationPolicy({ surface: "user_site" });
+        const validationBackfillPolicy = resolvePastValidationPolicy({ surface: "user_site" });
         const backfillPreferredActualSource = resolvePreferredActualSourceFromBuildInputs(buildInputs);
         const backfillRecalc = await recalcSimulatorBuild({
           userId: args.userId,
@@ -7358,7 +7358,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
         weatherPreferenceRaw === "LONG_TERM_AVERAGE"
           ? (weatherPreferenceRaw as WeatherPreference)
           : "NONE";
-      const validationBackfillPolicy = resolvePastSmtValidationPolicy({ surface: "user_site" });
+      const validationBackfillPolicy = resolvePastValidationPolicy({ surface: "user_site" });
       const backfillPreferredActualSource = resolvePreferredActualSourceFromBuildInputs(buildInputs);
       const backfillRecalc = await recalcSimulatorBuild({
         userId: args.userId,

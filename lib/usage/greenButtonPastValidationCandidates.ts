@@ -8,7 +8,7 @@ import { filterOutDstAmbiguousLocalDateKeys } from "@/lib/usage/dstAmbiguousLoca
 import { resolveGreenButtonPastSimTrustedHomeDateKeys } from "@/lib/usage/greenButtonPastTrustedPool";
 import {
   resolveCanonicalPastValidationDayCount,
-  resolvePastSmtValidationPolicy,
+  resolvePastValidationPolicy,
 } from "@/lib/usage/pastValidationPolicy";
 import { localDateKeysInRange } from "@/lib/admin/gapfillLab";
 import {
@@ -206,7 +206,7 @@ export function resolveGreenButtonPastValidationOnlyDateKeysAtRead(args: {
       : typeof args.buildInputs?.validationDayCount === "number"
         ? (args.buildInputs.validationDayCount as number)
         : null;
-  const policy = resolvePastSmtValidationPolicy({
+  const policy = resolvePastValidationPolicy({
     surface: "user_site",
     validationSelectionMode: selectionModeRaw,
     validationDayCount,
@@ -304,7 +304,7 @@ export function resolveGreenButtonPastValidationSelectionAfterSim(args: {
   });
   if (candidates.length === 0) return null;
 
-  const policy = resolvePastSmtValidationPolicy({
+  const policy = resolvePastValidationPolicy({
     surface: "user_site",
     validationSelectionMode: args.validationSelectionMode ?? null,
     validationDayCount: args.validationDayCount ?? null,

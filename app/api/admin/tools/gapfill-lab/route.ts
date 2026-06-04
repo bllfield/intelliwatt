@@ -70,7 +70,7 @@ import {
   ADMIN_LAB_TREATMENT_MODES,
   isAdminLabTreatmentMode,
 } from "@/modules/usageSimulator/adminLabTreatment";
-import { resolvePastSmtValidationPolicy } from "@/lib/usage/pastValidationPolicy";
+import { resolvePastValidationPolicy } from "@/lib/usage/pastValidationPolicy";
 import {
   resolveAdminValidationPolicy,
   resolveTestHomeUsageInputMode,
@@ -1791,7 +1791,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const userValidationPolicy = resolvePastSmtValidationPolicy({
+    const userValidationPolicy = resolvePastValidationPolicy({
       surface: "user_site",
       validationDayCount: testDaysRequested ?? undefined,
     });
@@ -2989,7 +2989,7 @@ export async function POST(req: NextRequest) {
         };
       }
     }
-    const userValidationPolicy = resolvePastSmtValidationPolicy({
+    const userValidationPolicy = resolvePastValidationPolicy({
       surface: "user_site",
       validationDayCount: testDaysRequested ?? undefined,
     });

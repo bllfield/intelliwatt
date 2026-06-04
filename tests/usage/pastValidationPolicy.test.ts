@@ -1,25 +1,25 @@
 import { describe, expect, it } from "vitest";
 import {
-  CANONICAL_PAST_SMT_VALIDATION_DAY_COUNT,
-  CANONICAL_PAST_SMT_VALIDATION_SELECTION_MODE,
-  resolvePastSmtValidationPolicy,
+  CANONICAL_PAST_VALIDATION_DAY_COUNT,
+  CANONICAL_PAST_VALIDATION_SELECTION_MODE,
+  resolvePastValidationPolicy,
   resolvePastValidationEngineInput,
   resolveUserValidationPolicy,
   resolveAdminValidationPolicy,
-  shouldReconcilePastSmtValidationSelection,
+  shouldReconcilePastValidationSelection,
 } from "@/lib/usage/pastValidationPolicy";
 
 describe("pastValidationPolicy", () => {
-  it("uses the same canonical defaults for user site and admin lab", () => {
-    expect(resolvePastSmtValidationPolicy({ surface: "user_site" })).toEqual({
+  it("uses the same canonical defaults for user site and admin lab (SMT + Green Button Past)", () => {
+    expect(resolvePastValidationPolicy({ surface: "user_site" })).toEqual({
       owner: "userValidationPolicy",
-      selectionMode: CANONICAL_PAST_SMT_VALIDATION_SELECTION_MODE,
-      validationDayCount: CANONICAL_PAST_SMT_VALIDATION_DAY_COUNT,
+      selectionMode: CANONICAL_PAST_VALIDATION_SELECTION_MODE,
+      validationDayCount: CANONICAL_PAST_VALIDATION_DAY_COUNT,
     });
-    expect(resolvePastSmtValidationPolicy({ surface: "admin_lab" })).toEqual({
+    expect(resolvePastValidationPolicy({ surface: "admin_lab" })).toEqual({
       owner: "adminValidationPolicy",
-      selectionMode: CANONICAL_PAST_SMT_VALIDATION_SELECTION_MODE,
-      validationDayCount: CANONICAL_PAST_SMT_VALIDATION_DAY_COUNT,
+      selectionMode: CANONICAL_PAST_VALIDATION_SELECTION_MODE,
+      validationDayCount: CANONICAL_PAST_VALIDATION_DAY_COUNT,
     });
   });
 
@@ -31,7 +31,7 @@ describe("pastValidationPolicy", () => {
       })
     ).toEqual({
       validationSelectionMode: "manual",
-      validationDayCount: CANONICAL_PAST_SMT_VALIDATION_DAY_COUNT,
+      validationDayCount: CANONICAL_PAST_VALIDATION_DAY_COUNT,
     });
   });
 
@@ -56,27 +56,27 @@ describe("pastValidationPolicy", () => {
 
   it("reconciles legacy random_simple and count drift but preserves manual picks", () => {
     expect(
-      shouldReconcilePastSmtValidationSelection({
+      shouldReconcilePastValidationSelection({
         storedSelectionMode: "random_simple",
         storedValidationKeyCount: 4,
       })
     ).toBe(true);
     expect(
-      shouldReconcilePastSmtValidationSelection({
+      shouldReconcilePastValidationSelection({
         storedSelectionMode: "stratified_weather_balanced",
         storedValidationKeyCount: 4,
       })
     ).toBe(true);
     expect(
-      shouldReconcilePastSmtValidationSelection({
+      shouldReconcilePastValidationSelection({
         storedSelectionMode: "stratified_weather_balanced",
-        storedValidationKeyCount: CANONICAL_PAST_SMT_VALIDATION_DAY_COUNT,
+        storedValidationKeyCount: CANONICAL_PAST_VALIDATION_DAY_COUNT,
       })
     ).toBe(false);
     expect(
-      shouldReconcilePastSmtValidationSelection({
+      shouldReconcilePastValidationSelection({
         storedSelectionMode: "stratified_weather_balanced",
-        storedValidationKeyCount: CANONICAL_PAST_SMT_VALIDATION_DAY_COUNT,
+        storedValidationKeyCount: CANONICAL_PAST_VALIDATION_DAY_COUNT,
         storedValidationDateKeysLocal: Array.from({ length: 14 }, (_, i) => {
           const day = String(5 + i).padStart(2, "0");
           return `2026-05-${day}`;
@@ -85,9 +85,9 @@ describe("pastValidationPolicy", () => {
       })
     ).toBe(true);
     expect(
-      shouldReconcilePastSmtValidationSelection({
+      shouldReconcilePastValidationSelection({
         storedSelectionMode: "stratified_weather_balanced",
-        storedValidationKeyCount: CANONICAL_PAST_SMT_VALIDATION_DAY_COUNT,
+        storedValidationKeyCount: CANONICAL_PAST_VALIDATION_DAY_COUNT,
         storedValidationDateKeysLocal: [
           "2025-12-10",
           "2026-01-15",
@@ -109,15 +109,15 @@ describe("pastValidationPolicy", () => {
       })
     ).toBe(false);
     expect(
-      shouldReconcilePastSmtValidationSelection({
+      shouldReconcilePastValidationSelection({
         storedSelectionMode: "manual",
         storedValidationKeyCount: 4,
       })
     ).toBe(true);
     expect(
-      shouldReconcilePastSmtValidationSelection({
+      shouldReconcilePastValidationSelection({
         storedSelectionMode: "manual",
-        storedValidationKeyCount: CANONICAL_PAST_SMT_VALIDATION_DAY_COUNT,
+        storedValidationKeyCount: CANONICAL_PAST_VALIDATION_DAY_COUNT,
       })
     ).toBe(false);
   });

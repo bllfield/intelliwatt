@@ -7,40 +7,41 @@ export type PastValidationPolicySurface = "user_site" | "admin_lab";
 
 export type ValidationPolicyOwner = "userValidationPolicy" | "adminValidationPolicy";
 
-/** Canonical Past SMT auto-pick mode for user site and One Path admin lab. */
-export const CANONICAL_PAST_SMT_VALIDATION_SELECTION_MODE: ValidationDaySelectionMode =
+/** Canonical auto-pick mode for Past (Corrected) compare days — SMT and Green Button share this. */
+export const CANONICAL_PAST_VALIDATION_SELECTION_MODE: ValidationDaySelectionMode =
   "stratified_weather_balanced";
 
-/** Canonical Past SMT validation-day count when callers do not override. */
-export const CANONICAL_PAST_SMT_VALIDATION_DAY_COUNT = 14;
+/** Canonical scored compare-day count for Past (Corrected) when callers do not override. */
+export const CANONICAL_PAST_VALIDATION_DAY_COUNT = 14;
 
 /** Bumped when shared user/One Path validation selection policy changes. */
-export const PAST_VALIDATION_POLICY_REVISION = "unified_stratified_14_v2_spread_reconcile";
+export const PAST_VALIDATION_POLICY_REVISION = "unified_past_validation_stratified_14_v3";
 
-export type ResolvedPastSmtValidationPolicy = {
+export type ResolvedPastValidationPolicy = {
   owner: ValidationPolicyOwner;
   selectionMode: ValidationDaySelectionMode;
   validationDayCount: number;
 };
 
 export function normalizePastValidationDayCount(value: number | null | undefined): number {
-  const normalized = Math.floor(Number(value) || CANONICAL_PAST_SMT_VALIDATION_DAY_COUNT);
+  const normalized = Math.floor(Number(value) || CANONICAL_PAST_VALIDATION_DAY_COUNT);
   return Math.max(1, Math.min(365, normalized));
 }
 
 export function resolveCanonicalPastValidationSelectionMode(): ValidationDaySelectionMode {
-  return CANONICAL_PAST_SMT_VALIDATION_SELECTION_MODE;
+  return CANONICAL_PAST_VALIDATION_SELECTION_MODE;
 }
 
 export function resolveCanonicalPastValidationDayCount(value?: number | null): number {
   return normalizePastValidationDayCount(value);
 }
 
-export function resolvePastSmtValidationPolicy(args: {
+/** Shared Past validation policy (interval SMT and Green Button Past — not SMT-only). */
+export function resolvePastValidationPolicy(args: {
   surface: PastValidationPolicySurface;
   validationSelectionMode?: string | null;
   validationDayCount?: number | null;
-}): ResolvedPastSmtValidationPolicy {
+}): ResolvedPastValidationPolicy {
   const owner: ValidationPolicyOwner =
     args.surface === "admin_lab" ? "adminValidationPolicy" : "userValidationPolicy";
   const explicitMode = normalizeValidationSelectionMode(args.validationSelectionMode);
@@ -70,7 +71,7 @@ export function resolvePastValidationEngineInput(args: {
       validationDayCount: resolveCanonicalPastValidationDayCount(args.validationDayCount),
     };
   }
-  const policy = resolvePastSmtValidationPolicy({
+  const policy = resolvePastValidationPolicy({
     surface: args.surface,
     validationSelectionMode: args.validationSelectionMode,
     validationDayCount: args.validationDayCount,
@@ -86,8 +87,8 @@ export function resolveUserValidationPolicy(args: {
   defaultSelectionMode?: ValidationDaySelectionMode | null;
   validationSelectionMode?: string | null;
   validationDayCount?: number | null;
-}): ResolvedPastSmtValidationPolicy {
-  return resolvePastSmtValidationPolicy({
+}): ResolvedPastValidationPolicy {
+  return resolvePastValidationPolicy({
     surface: "user_site",
     validationSelectionMode: args.validationSelectionMode ?? args.defaultSelectionMode ?? null,
     validationDayCount: args.validationDayCount,
@@ -97,8 +98,8 @@ export function resolveUserValidationPolicy(args: {
 export function resolveAdminValidationPolicy(args: {
   selectionMode?: ValidationDaySelectionMode | string | null;
   validationDayCount?: number | null;
-}): ResolvedPastSmtValidationPolicy {
-  return resolvePastSmtValidationPolicy({
+}): ResolvedPastValidationPolicy {
+  return resolvePastValidationPolicy({
     surface: "admin_lab",
     validationSelectionMode: args.selectionMode ?? null,
     validationDayCount: args.validationDayCount,
@@ -195,18 +196,18 @@ export function storedValidationKeysLackCanonicalSpread(args: {
 }
 
 /**
- * True when a persisted Past SMT build should re-run auto validation-day selection
+ * True when a persisted Past (Corrected) build should re-run auto validation-day selection
  * (missing keys, legacy random_simple picks, or drift from canonical mode/count).
- * Manual date picks are left untouched.
+ * Applies to SMT interval Past and Green Button Past. Manual date picks are left untouched.
  */
-export function shouldReconcilePastSmtValidationSelection(args: {
+export function shouldReconcilePastValidationSelection(args: {
   storedSelectionMode?: string | null;
   storedValidationKeyCount: number;
   storedValidationDateKeysLocal?: readonly string[];
   timezone?: string | null;
   coverageEndDate?: string | null;
 }): boolean {
-  const canonical = resolvePastSmtValidationPolicy({ surface: "user_site" });
+  const canonical = resolvePastValidationPolicy({ surface: "user_site" });
   const storedMode = normalizeValidationSelectionMode(args.storedSelectionMode);
   const keyCount = Math.max(0, Math.floor(Number(args.storedValidationKeyCount) || 0));
   const storedKeys = args.storedValidationDateKeysLocal ?? [];
@@ -237,3 +238,14 @@ export function shouldReconcilePastSmtValidationSelection(args: {
   }
   return false;
 }
+
+/** @deprecated Use CANONICAL_PAST_VALIDATION_SELECTION_MODE. */
+export const CANONICAL_PAST_SMT_VALIDATION_SELECTION_MODE = CANONICAL_PAST_VALIDATION_SELECTION_MODE;
+/** @deprecated Use CANONICAL_PAST_VALIDATION_DAY_COUNT. */
+export const CANONICAL_PAST_SMT_VALIDATION_DAY_COUNT = CANONICAL_PAST_VALIDATION_DAY_COUNT;
+/** @deprecated Use ResolvedPastValidationPolicy. */
+export type ResolvedPastSmtValidationPolicy = ResolvedPastValidationPolicy;
+/** @deprecated Use resolvePastValidationPolicy. */
+export const resolvePastSmtValidationPolicy = resolvePastValidationPolicy;
+/** @deprecated Use shouldReconcilePastValidationSelection. */
+export const shouldReconcilePastSmtValidationSelection = shouldReconcilePastValidationSelection;

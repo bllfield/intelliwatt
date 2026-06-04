@@ -1,5 +1,5 @@
 import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
-import { shouldReconcilePastSmtValidationSelection } from "@/lib/usage/pastValidationPolicy";
+import { shouldReconcilePastValidationSelection } from "@/lib/usage/pastValidationPolicy";
 
 export const WORKSPACE_PAST_SCENARIO_NAME = "Past (Corrected)";
 
@@ -48,7 +48,7 @@ export function isPastScenarioValidationBackfillEligible(args: {
         .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk)) as string[])
     : [];
   const coverage = resolveCanonicalUsage365CoverageWindow();
-  return shouldReconcilePastSmtValidationSelection({
+  return shouldReconcilePastValidationSelection({
     storedSelectionMode: args.storedSelectionMode ?? null,
     storedValidationKeyCount: args.storedValidationKeyCount,
     storedValidationDateKeysLocal,

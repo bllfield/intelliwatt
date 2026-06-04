@@ -18,7 +18,7 @@ import {
 } from "@/modules/usageSimulator/labTestHome";
 import { getTravelRangesFromDb } from "@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers";
 import { dispatchPastSimRecalc } from "@/modules/onePathSim/usageSimulator/pastSimRecalcDispatch";
-import { resolvePastSmtValidationPolicy } from "@/lib/usage/pastValidationPolicy";
+import { resolvePastValidationPolicy } from "@/lib/usage/pastValidationPolicy";
 import { resolveUserWeatherLogicSetting } from "@/modules/usageSimulator/pastSimWeatherPolicy";
 import { classifySimulationFailure } from "@/modules/usageSimulator/simulationDataAlerts";
 import { getMemoryRssMb, logSimPipelineEvent } from "@/modules/usageSimulator/simObservability";
@@ -333,7 +333,7 @@ async function buildLabPrefill(args: {
 
 async function resolveManualMonthlyLabPolicies(weatherPreference: WeatherPreference = "LAST_YEAR_WEATHER") {
   const userWeatherLogic = resolveUserWeatherLogicSetting(weatherPreference);
-  const userValidationPolicy = resolvePastSmtValidationPolicy({ surface: "user_site" });
+  const userValidationPolicy = resolvePastValidationPolicy({ surface: "user_site" });
   return { userWeatherLogic, userValidationPolicy };
 }
 

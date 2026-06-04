@@ -6,7 +6,7 @@ import { resolveHouseCommittedUsageSource } from "@/lib/usage/houseCommittedUsag
 import { assertOnePathGreenButtonPersistedUsage } from "@/lib/usage/onePathGreenButtonUsageGate";
 import { dispatchPastSimRecalc } from "@/modules/usageSimulator/pastSimRecalcDispatch";
 import { getPastSimRecalcJobForUser } from "@/modules/usageSimulator/simDropletJob";
-import { resolvePastSmtValidationPolicy } from "@/lib/usage/pastValidationPolicy";
+import { resolvePastValidationPolicy } from "@/lib/usage/pastValidationPolicy";
 import { resolveUserWeatherLogicSetting } from "@/modules/usageSimulator/pastSimWeatherPolicy";
 import type { SimulatorMode } from "@/modules/usageSimulator/requirements";
 import type { WeatherPreference } from "@/modules/weatherNormalization/normalizer";
@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
         ? (weatherPreferenceRaw as WeatherPreference)
         : undefined;
     const userWeatherLogic = resolveUserWeatherLogicSetting(weatherPreference ?? "LAST_YEAR_WEATHER");
-    const userValidationPolicy = resolvePastSmtValidationPolicy({ surface: "user_site" });
+    const userValidationPolicy = resolvePastValidationPolicy({ surface: "user_site" });
     if (!houseId) {
       return NextResponse.json(
         attachFailureContract({ ok: false, error: "houseId_required", message: "houseId is required." }),

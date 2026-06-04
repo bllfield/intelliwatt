@@ -2,7 +2,7 @@ import { prisma } from "@/lib/db";
 import { getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
 import { buildValidationCompareProjectionSidecar } from "@/modules/usageSimulator/compareProjection";
 import { loadDisplayProfilesForHouse } from "@/modules/usageSimulator/profileDisplay";
-import { resolvePastSmtValidationPolicy } from "@/lib/usage/pastValidationPolicy";
+import { resolvePastValidationPolicy } from "@/lib/usage/pastValidationPolicy";
 import { getSharedPastCoverageWindowForHouse, getSimulatedUsageForHouseScenario } from "@/modules/usageSimulator/service";
 import { buildSharedPastSimDiagnostics } from "@/modules/usageSimulator/sharedDiagnostics";
 import { boundDateKeysToCoverageWindow } from "@/modules/usageSimulator/metadataWindow";
@@ -168,7 +168,7 @@ export async function buildSourceHomePastSimSnapshot(args: {
       }).catch(() => ({ dataset: null })),
     ]);
 
-  const userValidationPolicy = resolvePastSmtValidationPolicy({ surface: "user_site" });
+  const userValidationPolicy = resolvePastValidationPolicy({ surface: "user_site" });
 
   const baselineRead = await readUserPastBaseline({
     userId: args.userId,

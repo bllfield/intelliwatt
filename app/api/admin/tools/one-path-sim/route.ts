@@ -28,7 +28,7 @@ import {
 } from "@/modules/onePathSim/onePathSim";
 import { listOnePathScenarioEvents, readOnePathSimulatedUsageScenario } from "@/modules/onePathSim/serviceBridge";
 import { dispatchPastSimRecalc } from "@/modules/usageSimulator/pastSimRecalcDispatch";
-import { resolvePastSmtValidationPolicy } from "@/lib/usage/pastValidationPolicy";
+import { resolvePastValidationPolicy } from "@/lib/usage/pastValidationPolicy";
 import { resolveOnePathGbPastCachedArtifactInputHash } from "@/lib/usage/onePathGbPastArtifactRun";
 import {
   assertOnePathGreenButtonPersistedUsage,
@@ -1916,7 +1916,7 @@ export async function POST(request: NextRequest) {
               );
             }
           }
-          const validationPolicy = resolvePastSmtValidationPolicy({
+          const validationPolicy = resolvePastValidationPolicy({
             surface: "admin_lab",
             validationSelectionMode: effectiveRawInputBase.validationSelectionMode,
             validationDayCount: effectiveRawInputBase.validationDayCount,

@@ -3,20 +3,20 @@ import type { SimulatorMode } from "@/modules/usageSimulator/requirements";
 
 export type {
   PastValidationPolicySurface,
-  ResolvedPastSmtValidationPolicy,
+  ResolvedPastValidationPolicy,
   ValidationPolicyOwner,
 } from "@/lib/usage/pastValidationPolicy";
 export {
-  CANONICAL_PAST_SMT_VALIDATION_DAY_COUNT,
-  CANONICAL_PAST_SMT_VALIDATION_SELECTION_MODE,
+  CANONICAL_PAST_VALIDATION_DAY_COUNT,
+  CANONICAL_PAST_VALIDATION_SELECTION_MODE,
   normalizePastValidationDayCount,
   resolveAdminValidationPolicy,
   resolveCanonicalPastValidationDayCount,
   resolveCanonicalPastValidationSelectionMode,
-  resolvePastSmtValidationPolicy,
+  resolvePastValidationPolicy,
   resolvePastValidationEngineInput,
   resolveUserValidationPolicy,
-  shouldReconcilePastSmtValidationSelection,
+  shouldReconcilePastValidationSelection,
 } from "@/lib/usage/pastValidationPolicy";
 
 export type TestHomeUsageInputMode =
