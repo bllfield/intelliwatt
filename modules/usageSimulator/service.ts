@@ -35,6 +35,7 @@ import {
 } from "@/lib/usage/pastValidationPolicy";
 import { isPastScenarioValidationBackfillEligible } from "@/lib/usage/pastSimValidationReadBackfill";
 import { resolvePastArtifactIdentity } from "@/lib/usage/pastArtifactIdentity";
+import { healPastArtifactIfIdentityMismatch } from "@/lib/usage/pastArtifactHeal";
 import { upsertSimulatedUsageBuckets } from "@/lib/usage/simulatedUsageBuckets";
 import { usagePrisma } from "@/lib/db/usageClient";
 import {
@@ -7141,6 +7142,34 @@ export async function getSimulatedUsageForHouseScenario(args: {
         };
       }
       const artifactSourceMode: "exact_hash_match" = "exact_hash_match";
+      if (!exactCached || exactCached.intervalsCodec !== INTERVAL_CODEC_V1) {
+        const heal = await healPastArtifactIfIdentityMismatch({
+          userId: args.userId,
+          houseId: args.houseId,
+          scenarioId: scenarioIdForCache,
+          resolvedInputHash,
+          buildInputs: buildInputs as Record<string, unknown>,
+          houseEsiid: house.esiid ?? null,
+        });
+        if (heal.healed) {
+          const healedHash = heal.inputHash ?? resolvedInputHash;
+          exactCached = await getCachedPastDataset({
+            houseId: args.houseId,
+            scenarioId: scenarioIdForCache,
+            inputHash: healedHash,
+          });
+          if (exactCached && exactCached.intervalsCodec === INTERVAL_CODEC_V1) {
+            logSimPipelineEvent("artifact_cache_hit", {
+              correlationId,
+              houseId: args.houseId,
+              scenarioId: scenarioIdForCache,
+              inputHash: healedHash,
+              artifactInputHash: String((exactCached as any).inputHash ?? ""),
+              source: "getSimulatedUsageForHouseScenario",
+            });
+          }
+        }
+      }
       if (!exactCached || exactCached.intervalsCodec !== INTERVAL_CODEC_V1) {
         return {
           ok: false,

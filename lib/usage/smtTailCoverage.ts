@@ -9,13 +9,13 @@ import {
   runDeferredPendingSmtDayRepairs,
 } from "@/lib/usage/smtDayCoverageLedger";
 import { smtCoverageDateKey } from "@/lib/time/chicago";
+import { SMT_TAIL_REQUIRED_INTERVALS_PER_DAY } from "@/lib/usage/smtCoverageConstants";
 import {
   loadSmtWindowDayStatus,
   missingChicagoSlotsFromFilledSlots,
   resolveSmtCanonicalWindow,
   smtCompletenessIntervalThreshold,
   smtRequiredSlotsForDateKey,
-  SMT_REQUIRED_SLOTS_PER_DAY,
   type SmtPersistedCoverageSpan,
   type SmtWindowStatusSnapshot,
 } from "@/lib/usage/smtWindowStatus";
@@ -24,7 +24,7 @@ export { chicagoSlot96FromTs, smtCoverageDateKey } from "@/lib/time/chicago";
 export { missingChicagoSlotsFromFilledSlots } from "@/lib/usage/smtWindowStatus";
 
 export const SMT_TAIL_LOOKBACK_DAYS = 14;
-export const SMT_TAIL_REQUIRED_INTERVALS_PER_DAY = SMT_REQUIRED_SLOTS_PER_DAY;
+export { SMT_TAIL_REQUIRED_INTERVALS_PER_DAY };
 export const SMT_TAIL_WAIT_TIMEOUT_MS = 60_000;
 export const SMT_TAIL_WAIT_INTERVAL_MS = 2_000;
 /** User-facing usage route budget: leave headroom when multiple homes are loaded. */

@@ -814,7 +814,7 @@ export const UsageDashboard: React.FC<Props> = ({
     return (
       <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
         <p className="text-sm text-neutral-600">
-          {datasetMode === "SIMULATED"
+          {effectiveFetchMode === "SIMULATED"
             ? "No homes found yet. Add a service address, then enter manual usage to generate a simulated curve."
             : "No usage data yet. Connect SMT or upload a Green Button file to view analytics."}
         </p>
@@ -841,7 +841,7 @@ export const UsageDashboard: React.FC<Props> = ({
               ? "Based on your saved monthly statement totals. Daily and interval analytics stay on the Past Sim page after the house usage is simulated."
               : shouldRenderManualAnnualStageOne
               ? "Based on your saved annual total and billing-date context. The full chart and analytics appear on the Past Sim page after the house usage is simulated."
-              : datasetMode === "SIMULATED"
+              : effectiveFetchMode === "SIMULATED"
               ? coverage?.hasSimulatedFill
                 ? "Based on actual usage data with simulated fill for Travel/Vacant dates."
                 : "Based on a simulated 15-minute curve generated from your manual entry or SMT baseline."

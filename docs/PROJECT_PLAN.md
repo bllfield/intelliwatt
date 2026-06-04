@@ -45,6 +45,18 @@
 
 **Same-pass doc sync:** `ONE_PATH_DUAL_RUN_GOAL.md`, `ONE_PATH_SIM_ARCHITECTURE.md`, `SURFACE_PARITY_OWNERS.md`, `CHAT_BOOTSTRAP.txt`, `MODE_TESTING_HANDOFF_BOOTSTRAP.md`.
 
+## PC-2026-07 — Past display / artifact parity (2026-05-20)
+
+**Status:** Shipped (audit follow-up).
+
+1. **Artifact identity heal:** `lib/usage/pastArtifactHeal.ts` — `artifact_only` reads auto-recalc when cache hash ≠ `resolvePastArtifactIdentity` (no latest-by-scenario substitution).
+2. **GB shifted Past curve:** `lib/usage/pastSimDisplayFifteenMinuteCurve.ts` — prefer full 96-slot artifact insights over undersampled series rebuild (fixes admin 92-slot / 0.738 kW).
+3. **Headline net kWh:** `modules/onePathSim/runReadOnlyView.ts` + `lib/usage/userUsageDashboardViewModel.ts` — totals from canonical-clamped display daily rows.
+4. **Lab replace GB:** `modules/usageSimulator/labTestHome.ts` — fail closed if Green Button clone returns zero intervals.
+5. **Usage Simulator BASELINE tab copy:** `components/usage/UsageDashboard.tsx` — subtitle uses `effectiveFetchMode` (REAL fetch) not forced SIMULATED label.
+
+**Evidence:** `scripts/tmp-audit-PHASE7-drift-register.json`.
+
 ---
 
 ## PC-2026-05 — SMT interval coverage unification (8 phases, COMPLETE)

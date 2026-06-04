@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { enumerateDateKeysInclusive, smtCoverageDateKey } from "@/lib/time/chicago";
+import { enumerateDateKeysInclusive } from "@/lib/time/chicago";
 import {
   enumerateExpectedLocalSlotsForDate,
   expectedSlotsForLocalDate,
@@ -10,14 +10,12 @@ import {
   smtHomeIntervalCalendar,
 } from "@/lib/time/homeIntervalCalendar";
 import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
-import {
-  loadSmtDayLedgerSnapshot,
-  SMT_DAY_LEDGER_STATUS,
-  type SmtDayLedgerStatus,
-} from "@/lib/usage/smtDayCoverageLedger";
+import { SMT_REQUIRED_SLOTS_PER_DAY } from "@/lib/usage/smtCoverageConstants";
+import { SMT_DAY_LEDGER_STATUS } from "@/lib/usage/smtDayCoverageLedgerMeta";
 
-/** Nominal slots on a standard 24h day; use `expectedSlotsForLocalDate` per calendar day. */
-export const SMT_REQUIRED_SLOTS_PER_DAY = 96;
+type SmtDayLedgerStatus = (typeof SMT_DAY_LEDGER_STATUS)[keyof typeof SMT_DAY_LEDGER_STATUS];
+
+export { SMT_REQUIRED_SLOTS_PER_DAY };
 
 const SMT_HOME = smtHomeIntervalCalendar();
 
@@ -216,6 +214,7 @@ export async function loadSmtWindowDayStatus(args: {
   const dateKeys = normalizeDateKeys(
     args.dateKeys ?? enumerateDateKeysInclusive(window.startDate, window.endDate)
   );
+  const { loadSmtDayLedgerSnapshot } = await import("@/lib/usage/smtDayCoverageLedger");
   const [{ countsByDate, distinctSlotCountByDate, missingSlotsByDate, requiredSlotsByDate }, ledger] =
     await Promise.all([
     loadChicagoSlotCountsByDateKeys({ esiid: args.esiid, dateKeys }),

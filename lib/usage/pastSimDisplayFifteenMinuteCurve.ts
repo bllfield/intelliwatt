@@ -128,12 +128,26 @@ const GREEN_BUTTON_CURVE_OWNER =
 const GREEN_BUTTON_INSIGHTS_OWNER =
   "resolvePastSimDisplayFifteenMinuteCurve(...).insights.fifteenMinuteAverages (shared GB/SQL or reconcile)";
 
+/** Display curves must expose a full 15-minute grid (96 slots at 15-min resolution). */
+const GREEN_BUTTON_FULL_DISPLAY_CURVE_SLOTS = 96;
+
+function isFullGreenButtonInsightCurve(curve: Array<{ hhmm: string }>): boolean {
+  return curve.length >= GREEN_BUTTON_FULL_DISPLAY_CURVE_SLOTS;
+}
+
 /** Detect cached insight curves that no longer match a fresh series rebuild (e.g. partial admin cache). */
 function greenButtonInsightsStaleVsSeries(
   insights: Array<{ hhmm: string; avgKw: number }>,
   series: Array<{ hhmm: string; avgKw: number }>
 ): boolean {
   if (insights.length === 0 || series.length === 0) return false;
+  if (
+    isFullGreenButtonInsightCurve(insights) &&
+    series.length > 0 &&
+    series.length < GREEN_BUTTON_FULL_DISPLAY_CURVE_SLOTS
+  ) {
+    return false;
+  }
   const seriesByHhmm = new Map(series.map((row) => [row.hhmm, row.avgKw]));
   for (const row of insights) {
     const rebuilt = seriesByHhmm.get(row.hhmm);
@@ -205,11 +219,23 @@ export function resolvePastSimDisplayFifteenMinuteCurve(
       };
     }
 
-    if (shiftedGreenButtonPast && greenButtonSeriesCurve.length > 0) {
-      return {
-        fifteenMinuteAverages: greenButtonSeriesCurve,
-        sourceOwner: `${GREEN_BUTTON_CURVE_OWNER} (home_local display meta for shifted GB Past)`,
-      };
+    if (shiftedGreenButtonPast) {
+      if (
+        isFullGreenButtonInsightCurve(insightFifteenCurve) &&
+        (!greenButtonSeriesCurve.length ||
+          !greenButtonInsightsStaleVsSeries(insightFifteenCurve, greenButtonSeriesCurve))
+      ) {
+        return {
+          fifteenMinuteAverages: insightFifteenCurve,
+          sourceOwner: `${GREEN_BUTTON_INSIGHTS_OWNER} (shifted GB Past artifact insights)`,
+        };
+      }
+      if (greenButtonSeriesCurve.length > 0) {
+        return {
+          fifteenMinuteAverages: greenButtonSeriesCurve,
+          sourceOwner: `${GREEN_BUTTON_CURVE_OWNER} (home_local display meta for shifted GB Past)`,
+        };
+      }
     }
 
     if (insightFifteenCurve.length === 0 && greenButtonSeriesCurve.length > 0) {

@@ -50,6 +50,10 @@ vi.mock("@/modules/weather/identity", () => ({
   computePastWeatherIdentity: (...args: any[]) => computePastWeatherIdentity(...args),
 }));
 
+vi.mock("@/lib/usage/pastArtifactHeal", () => ({
+  healPastArtifactIfIdentityMismatch: vi.fn().mockResolvedValue({ healed: false }),
+}));
+
 vi.mock("@/modules/usageSimulator/intervalCodec", () => ({
   encodeIntervalsV1: vi.fn(),
   decodeIntervalsV1: vi.fn(() => [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.5 }]),

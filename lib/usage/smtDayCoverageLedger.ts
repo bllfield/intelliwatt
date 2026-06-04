@@ -1,11 +1,7 @@
 import { prisma } from "@/lib/db";
-import {
-  enumerateDateKeysInclusive,
-  loadSmtDateCoverage,
-  SMT_TAIL_REQUIRED_INTERVALS_PER_DAY,
-  smtCoverageDateKey,
-  waitForSmtDateCoverage,
-} from "@/lib/usage/smtTailCoverage";
+import { enumerateDateKeysInclusive, smtCoverageDateKey } from "@/lib/time/chicago";
+import { SMT_TAIL_REQUIRED_INTERVALS_PER_DAY } from "@/lib/usage/smtCoverageConstants";
+import { loadSmtDateCoverage, waitForSmtDateCoverage } from "@/lib/usage/smtTailCoverage";
 import {
   requestUsageRefreshForUserHouse,
   type UsageRefreshResult,

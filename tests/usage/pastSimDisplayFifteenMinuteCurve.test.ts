@@ -109,6 +109,37 @@ describe("resolvePastSimDisplayFifteenMinuteCurve", () => {
     expect(adminView?.fifteenMinuteCurveSourceOwner).not.toContain("upstream GB actual");
   });
 
+  it("shifted GB Past prefers full artifact insights over partial series rebuild", () => {
+    const insightSlots = Array.from({ length: 96 }, (_, index) => {
+      const totalMinutes = index * 15;
+      const hh = String(Math.floor(totalMinutes / 60)).padStart(2, "0");
+      const mm = String(totalMinutes % 60).padStart(2, "0");
+      return { hhmm: `${hh}:${mm}`, avgKw: 1.67 };
+    });
+    const partialSeriesSlots = Array.from({ length: 92 }, (_, index) => ({
+      timestamp: `2026-06-01T${String(Math.floor((index * 15) / 60)).padStart(2, "0")}:${String((index * 15) % 60).padStart(2, "0")}:00.000Z`,
+      kwh: 0.1,
+    }));
+    const result = resolvePastSimDisplayFifteenMinuteCurve({
+      insightsFifteenMinuteAverages: insightSlots,
+      intervals15: partialSeriesSlots,
+      hasSimulatedFill: true,
+      displayDaily: [{ date: "2026-06-01", source: "ACTUAL", sourceDetail: "GREEN_BUTTON" }],
+      timezone: "America/Chicago",
+      coverageStart: "2026-06-01",
+      coverageEnd: "2026-06-30",
+      meta: {
+        actualSource: "GREEN_BUTTON",
+        greenButtonIntervalTimestampMode: "home_local",
+        greenButtonSourceDateByTargetDate: { "2026-06-01": "2025-06-01" },
+      },
+    });
+
+    expect(result.fifteenMinuteAverages).toHaveLength(96);
+    expect(result.fifteenMinuteAverages[0]?.avgKw).toBe(1.67);
+    expect(result.sourceOwner).toContain("artifact insights");
+  });
+
   it("prefers shared Green Button series curve over stale insights for ACTUAL usage", () => {
     const intervals15 = Array.from({ length: 96 * 31 }, () => ({
       timestamp: "2026-06-01T05:00:00.000Z",

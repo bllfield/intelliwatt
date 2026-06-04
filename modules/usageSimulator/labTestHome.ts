@@ -1121,12 +1121,25 @@ export async function replaceGlobalOnePathLabTestHomeFromSource(args: {
       testHomeHouseId: testHome.id,
     });
 
-    await cloneOnePathGreenButtonUsageFromSource({
+    const cloneResult = await cloneOnePathGreenButtonUsageFromSource({
       sourceHouseId: args.sourceHouseId,
       targetHouseId: testHome.id,
       targetUserId: args.ownerUserId,
       targetEsiid: sourceHouse.esiid ? String(sourceHouse.esiid) : null,
     });
+    if (!cloneResult.copied || !cloneResult.rawId) {
+      throw new Error(
+        "green_button_clone_failed: source Green Button intervals were not copied to the One Path test home"
+      );
+    }
+    const clonedIntervalCount = await (usagePrisma as any).greenButtonInterval
+      ?.count?.({ where: { homeId: testHome.id, rawId: cloneResult.rawId } })
+      .catch(() => 0);
+    if (!Number(clonedIntervalCount) || clonedIntervalCount < 1) {
+      throw new Error(
+        `green_button_clone_failed: expected persisted intervals on test home but found ${clonedIntervalCount ?? 0}`
+      );
+    }
 
     const { mirrorOnePathPastBuildInputsFromSource } = await import(
       "@/lib/usage/onePathPastUserSiteParity"

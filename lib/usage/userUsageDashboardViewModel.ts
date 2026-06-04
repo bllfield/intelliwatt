@@ -279,11 +279,13 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
     ? deriveTotalsFromRows(monthly.map((row: any) => ({ kwh: Number(row?.kwh) || 0 })))
     : null;
   const totals =
-    totalsFromApi != null
-      ? totalsFromMonthly != null && Math.abs((Number(totalsFromApi?.netKwh) || 0) - totalsFromMonthly.netKwh) > 0.05
-        ? totalsFromMonthly
-        : totalsFromApi
-      : totalsFromMonthly ?? totalsFromSeries;
+    hasSimulatedFill && displayDaily.length
+      ? totalsFromSeries
+      : totalsFromApi != null
+        ? totalsFromMonthly != null && Math.abs((Number(totalsFromApi?.netKwh) || 0) - totalsFromMonthly.netKwh) > 0.05
+          ? totalsFromMonthly
+          : totalsFromApi
+        : totalsFromMonthly ?? totalsFromSeries;
   const totalKwh = totals.netKwh;
   const recentDaily = displayDaily
     .slice()

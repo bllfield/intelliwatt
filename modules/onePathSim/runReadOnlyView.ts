@@ -472,6 +472,27 @@ export function buildOnePathRunReadOnlyView(args: {
     }
     dailyRows = clampDailyRowsToCanonicalCoverageWindow(dailyRows, canonicalCoverageWindow);
   }
+
+  const totalsFromDailyRows = (rows: Array<ReturnType<typeof dailyRowFieldsFromSourceRow>>) => {
+    let netKwh = 0;
+    let weekdayKwh = 0;
+    let weekendKwh = 0;
+    for (const row of rows) {
+      const kwh = Number(row.kwh) || 0;
+      netKwh += kwh;
+      const day = new Date(`${row.date}T12:00:00`);
+      const dow = Number.isFinite(day.getTime()) ? day.getUTCDay() : -1;
+      if (dow === 0 || dow === 6) weekendKwh += kwh;
+      else if (dow >= 0) weekdayKwh += kwh;
+    }
+    return {
+      netKwh: round2(netKwh),
+      importKwh: round2(Math.max(0, netKwh)),
+      exportKwh: round2(Math.max(0, -netKwh)),
+      weekdayKwh: round2(weekdayKwh),
+      weekendKwh: round2(weekendKwh),
+    };
+  };
   // SMT Past: unchanged — sage SMT daily truth overlays compare rows when present.
   // Green Button Past only: prefer build-time GB interval totals; never overlay SMT sage onto GB compare.
   if (!isBaselinePassthrough && compareRows.length > 0) {
@@ -495,6 +516,10 @@ export function buildOnePathRunReadOnlyView(args: {
         ? (tuningSummary.validationMetricsSummary as Record<string, unknown>)
         : null;
 
+  const displayTotals = isBaselinePassthrough
+    ? viewModel.derived.totals
+    : totalsFromDailyRows(dailyRows);
+
   return {
     summary: {
       source: viewModel.coverage.source,
@@ -512,15 +537,18 @@ export function buildOnePathRunReadOnlyView(args: {
       sourceOfDaySimulationCore: viewModel.coverage.sourceOfDaySimulationCore,
       pastValidationPolicyRevision: viewModel.coverage.pastValidationPolicyRevision,
       hasSimulatedFill: Boolean(viewModel.coverage.hasSimulatedFill),
-      totals: viewModel.derived.totals,
-      avgDailyKwh: viewModel.derived.avgDailyKwh,
+      totals: displayTotals,
+      avgDailyKwh:
+        !isBaselinePassthrough && dailyRows.length > 0
+          ? round2(displayTotals.netKwh / dailyRows.length)
+          : viewModel.derived.avgDailyKwh,
       baseload: viewModel.derived.baseload,
       baseloadDaily: viewModel.derived.baseloadDaily,
       baseloadMonthly: viewModel.derived.baseloadMonthly,
       peakDay: viewModel.derived.peakDay,
       peakHour: viewModel.derived.peakHour,
-      weekdayKwh: viewModel.derived.weekdayKwh,
-      weekendKwh: viewModel.derived.weekendKwh,
+      weekdayKwh: isBaselinePassthrough ? viewModel.derived.weekdayKwh : displayTotals.weekdayKwh,
+      weekendKwh: isBaselinePassthrough ? viewModel.derived.weekendKwh : displayTotals.weekendKwh,
       timeOfDayBuckets: viewModel.derived.timeOfDayBuckets,
     },
     monthlyRows: viewModel.derived.monthly,
