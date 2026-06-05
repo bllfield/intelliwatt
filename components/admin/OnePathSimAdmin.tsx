@@ -1321,7 +1321,8 @@ export function OnePathSimAdmin() {
     const effectiveRunReason = presetRunControls?.runReason ?? runReason;
     const effectiveWeatherPreference = presetRunControls?.weatherPreference ?? weatherPreference;
     const effectiveValidationSelectionMode = presetRunControls?.validationSelectionMode ?? validationSelectionMode;
-    const effectiveValidationDayCount = presetRunControls?.validationDayCount ?? Number(validationDayCount) || null;
+    const effectiveValidationDayCount =
+      presetRunControls?.validationDayCount ?? (Number(validationDayCount) || null);
     const effectiveValidationOnlyDateKeysLocal =
       presetRunControls?.validationOnlyDateKeysLocal ?? validationOnlyDateKeysLocal;
     const effectiveTravelRanges = presetRunControls?.travelRanges ?? travelRanges;
