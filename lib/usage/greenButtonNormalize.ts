@@ -22,6 +22,8 @@ export const GREEN_BUTTON_NORMALIZE_READINGS_PER_CHUNK = 5000;
 export type GreenButtonNormalizeOptions = {
   treatTimestampAsEnd?: boolean;
   maxKwhPerInterval?: number | null;
+  /** Default false: SMT ingest must not reshape slots at finalize. */
+  runSlotRepair?: boolean;
 };
 
 export type GreenButtonNormalizeChunkProgress = {
@@ -137,7 +139,9 @@ export function finalizeGreenButtonBuckets(
   buckets: Map<number, GreenButtonBucketCell>,
   options?: GreenButtonNormalizeOptions
 ): GreenButton15MinInterval[] {
-  repairGreenButtonHomeLocalBuckets(buckets, GREEN_BUTTON_HOME);
+  if (options?.runSlotRepair) {
+    repairGreenButtonHomeLocalBuckets(buckets, GREEN_BUTTON_HOME);
+  }
 
   const results: GreenButton15MinInterval[] = [];
   buckets.forEach((cell, ms) => {

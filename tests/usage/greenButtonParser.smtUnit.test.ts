@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { normalizeGreenButtonReadingsTo15Min } from "@/lib/usage/greenButtonNormalize";
 import { parseGreenButtonBuffer } from "@/lib/usage/greenButtonParser";
+import { normalizeGreenButtonIntervalBlocksTo15Min } from "@/lib/usage/greenButtonSequentialBlockNormalize";
 
 const FIXTURE = path.join(process.cwd(), "docs", "GreenButtonDatanew.xml");
 const hasFixture = fs.existsSync(FIXTURE);
@@ -40,11 +41,12 @@ describe("parseGreenButtonBuffer SMT Wh unit", () => {
     () => {
       const parsed = parseGreenButtonBuffer(fs.readFileSync(FIXTURE), "GreenButtonDatanew.xml");
       expect(parsed.readings.length).toBe(36_576);
-      expect(parsed.metadata.parseMode).toBe("xml_interval_blocks");
+      expect(parsed.metadata.parseMode).toBe("xml_sequential_interval_blocks");
+      expect(parsed.intervalBlocks?.length).toBeGreaterThan(300);
       expect(parsed.readings.every((r) => r.unit === "Wh")).toBe(true);
 
-      const normalized = normalizeGreenButtonReadingsTo15Min(parsed.readings);
-      expect(normalized.length).toBeGreaterThan(36_000);
+      const normalized = normalizeGreenButtonIntervalBlocksTo15Min(parsed.intervalBlocks ?? []);
+      expect(normalized.length).toBe(36_576);
       expect(normalized.filter((r) => r.consumptionKwh > 10).length).toBe(0);
       expect(Math.max(...normalized.map((r) => r.consumptionKwh))).toBeLessThan(5);
     },

@@ -1,18 +1,34 @@
+import { DateTime } from "luxon";
 import { XMLParser } from "fast-xml-parser";
 import { GreenButtonRawReading } from "./greenButtonNormalize";
+
+export type GreenButtonParsedIntervalBlock = {
+  /** Chicago local service calendar day from IntervalBlock interval start date label. */
+  serviceDateKey: string;
+  readings: GreenButtonRawReading[];
+  blockStartEpochSeconds?: number;
+};
+
+export type GreenButtonXmlParseMode =
+  | "xml_full_tree"
+  | "xml_interval_blocks"
+  | "xml_sequential_interval_blocks";
 
 export type ParsedGreenButtonResult = {
   /** Detected source format */
   format: "xml" | "csv" | "json" | "unknown";
   /** Raw readings extracted from the file */
   readings: GreenButtonRawReading[];
+  /** ESPI IntervalBlock rows when sequential local-day slotting applies. */
+  intervalBlocks?: GreenButtonParsedIntervalBlock[];
+  slottingMode?: "epoch_bucket" | "sequential_local_day";
   /** Metadata extracted from the file (best-effort) */
   metadata: {
     timezoneOffsetSeconds: number | null;
     meterSerialNumber: string | null;
     sourceTitle: string | null;
     totalReadings: number;
-    parseMode?: "xml_full_tree" | "xml_interval_blocks";
+    parseMode?: GreenButtonXmlParseMode;
   };
   /** Non-fatal parsing warnings */
   warnings: string[];
@@ -59,6 +75,8 @@ export function parseGreenButtonBuffer(
   }
 
   let readings: GreenButtonRawReading[] = [];
+  let intervalBlocks: GreenButtonParsedIntervalBlock[] | undefined;
+  let slottingMode: ParsedGreenButtonResult["slottingMode"];
   let metadata: ParsedGreenButtonResult["metadata"] = {
     timezoneOffsetSeconds: null,
     meterSerialNumber: null,
@@ -69,11 +87,13 @@ export function parseGreenButtonBuffer(
 
   try {
     if (format === "xml") {
-      const useBlockParser = content.length >= LARGE_XML_INTERVAL_BLOCK_THRESHOLD_BYTES;
-      const xmlResult = useBlockParser
+      const useLargeParser = content.length >= LARGE_XML_INTERVAL_BLOCK_THRESHOLD_BYTES;
+      const xmlResult = useLargeParser
         ? parseGreenButtonXmlLarge(content, options?.onXmlParseProgress)
         : parseGreenButtonXml(content);
       readings = xmlResult.readings;
+      intervalBlocks = xmlResult.intervalBlocks;
+      slottingMode = xmlResult.slottingMode;
       metadata = {
         timezoneOffsetSeconds: xmlResult.timezoneOffsetSeconds,
         meterSerialNumber: xmlResult.meterSerialNumber,
@@ -110,6 +130,8 @@ export function parseGreenButtonBuffer(
   return {
     format,
     readings,
+    intervalBlocks,
+    slottingMode,
     metadata,
     warnings,
     errors,
@@ -125,12 +147,154 @@ function stripBom(input: string): string {
 
 type XmlParseResult = {
   readings: GreenButtonRawReading[];
+  intervalBlocks?: GreenButtonParsedIntervalBlock[];
+  slottingMode?: ParsedGreenButtonResult["slottingMode"];
   timezoneOffsetSeconds: number | null;
   meterSerialNumber: string | null;
   sourceTitle: string | null;
   warnings: string[];
-  parseMode?: "xml_full_tree" | "xml_interval_blocks";
+  parseMode?: GreenButtonXmlParseMode;
 };
+
+function intervalBlockServiceDateKey(blockStartEpochSeconds: number): string | null {
+  if (!Number.isFinite(blockStartEpochSeconds)) return null;
+  const dt = DateTime.fromSeconds(Math.trunc(blockStartEpochSeconds), { zone: "utc" });
+  return dt.isValid ? dt.toFormat("yyyy-MM-dd") : null;
+}
+
+function flattenIntervalBlockReadings(blocks: GreenButtonParsedIntervalBlock[]): GreenButtonRawReading[] {
+  return blocks.flatMap((block) => block.readings);
+}
+
+function readingFromIntervalBlockNode(
+  node: Record<string, unknown>,
+  defaultUnit: string | null,
+): GreenButtonRawReading | null {
+  const reading = readingFromNode(node, defaultUnit);
+  if (!reading) return null;
+
+  const intervalNode = getFirstObject(node.interval) ?? getFirstObject(node.timePeriod);
+  const rawStart = parseIntOrNull(getScalar(intervalNode?.start));
+  if (rawStart != null) {
+    return { ...reading, rawXmlStartSeconds: rawStart };
+  }
+  return reading;
+}
+
+function parseIntervalBlockXmlFragment(
+  blockXml: string,
+  defaultUnit: string | null,
+  miniParser: XMLParser,
+): GreenButtonParsedIntervalBlock | null {
+  const blockStartRaw = blockXml.match(/<interval>[\s\S]*?<start>(\d+)<\/start>/i)?.[1];
+  const blockStartEpochSeconds = parseIntOrNull(blockStartRaw ?? null);
+  if (blockStartEpochSeconds == null) return null;
+
+  const serviceDateKey = intervalBlockServiceDateKey(blockStartEpochSeconds);
+  if (!serviceDateKey) return null;
+
+  const readings: GreenButtonRawReading[] = [];
+  const readingRe = /<IntervalReading\b[^>]*>[\s\S]*?<\/IntervalReading>/gi;
+  let readingMatch: RegExpExecArray | null;
+  while ((readingMatch = readingRe.exec(blockXml)) !== null) {
+    try {
+      const wrapped = miniParser.parse(`<ir>${readingMatch[0]}</ir>`) as { ir?: Record<string, unknown> };
+      const node = intervalReadingNodeFromWrappedBlock(wrapped?.ir ?? {});
+      const reading = readingFromIntervalBlockNode(node, defaultUnit);
+      if (reading) readings.push(reading);
+    } catch {
+      // skip malformed reading
+    }
+  }
+
+  if (readings.length === 0) return null;
+
+  return {
+    serviceDateKey,
+    readings,
+    blockStartEpochSeconds,
+  };
+}
+
+function parseGreenButtonXmlSequentialIntervalBlocksLarge(
+  xml: string,
+  onProgress?: (detail: { blocksScanned: number; readingsFound: number }) => void,
+): XmlParseResult {
+  const warnings: string[] = [];
+  const defaultUnit = resolveXmlDefaultReadingUnitFromHeader(xml);
+  const intervalBlocks: GreenButtonParsedIntervalBlock[] = [];
+  const blockRe = /<IntervalBlock\b[^>]*>[\s\S]*?<\/IntervalBlock>/gi;
+  const miniParser = new XMLParser(XML_PARSER_OPTIONS);
+  let blocksScanned = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = blockRe.exec(xml)) !== null) {
+    blocksScanned += 1;
+    const block = parseIntervalBlockXmlFragment(match[0], defaultUnit, miniParser);
+    if (block) intervalBlocks.push(block);
+    if (blocksScanned % XML_BLOCK_PARSE_PROGRESS_EVERY === 0) {
+      onProgress?.({ blocksScanned, readingsFound: flattenIntervalBlockReadings(intervalBlocks).length });
+    }
+  }
+
+  const readings = flattenIntervalBlockReadings(intervalBlocks);
+  onProgress?.({ blocksScanned, readingsFound: readings.length });
+
+  return {
+    readings,
+    intervalBlocks,
+    slottingMode: intervalBlocks.length > 0 ? "sequential_local_day" : undefined,
+    timezoneOffsetSeconds: parseIntOrNull(xml.match(/<tzOffset>\s*([^<]+)\s*<\/tzOffset>/i)?.[1] ?? null),
+    meterSerialNumber: xml.match(/<meterSerialNumber>\s*([^<]+)\s*<\/meterSerialNumber>/i)?.[1]?.trim() ?? null,
+    sourceTitle: xml.match(/<title>\s*([^<]+)\s*<\/title>/i)?.[1]?.trim() ?? null,
+    warnings,
+    parseMode: intervalBlocks.length > 0 ? "xml_sequential_interval_blocks" : undefined,
+  };
+}
+
+function collectXmlIntervalBlocks(
+  node: unknown,
+  out: GreenButtonParsedIntervalBlock[],
+  defaultUnit: string | null,
+): void {
+  if (!node) return;
+  if (Array.isArray(node)) {
+    for (const entry of node) collectXmlIntervalBlocks(entry, out, defaultUnit);
+    return;
+  }
+  if (typeof node !== "object") return;
+
+  const record = node as Record<string, unknown>;
+  if ("IntervalBlock" in record) {
+    const blocks = record.IntervalBlock;
+    const blockList = Array.isArray(blocks) ? blocks : blocks ? [blocks] : [];
+    for (const blockNode of blockList) {
+      if (!blockNode || typeof blockNode !== "object") continue;
+      const blockRecord = blockNode as Record<string, unknown>;
+      const intervalNode = getFirstObject(blockRecord.interval);
+      const blockStartEpochSeconds = parseIntOrNull(getScalar(intervalNode?.start));
+      if (blockStartEpochSeconds == null) continue;
+      const serviceDateKey = intervalBlockServiceDateKey(blockStartEpochSeconds);
+      if (!serviceDateKey) continue;
+
+      const readings: GreenButtonRawReading[] = [];
+      const readingNodes = blockRecord.IntervalReading;
+      const readingList = Array.isArray(readingNodes) ? readingNodes : readingNodes ? [readingNodes] : [];
+      for (const readingNode of readingList) {
+        if (!readingNode || typeof readingNode !== "object") continue;
+        const reading = readingFromIntervalBlockNode(readingNode as Record<string, unknown>, defaultUnit);
+        if (reading) readings.push(reading);
+      }
+      if (readings.length > 0) {
+        out.push({ serviceDateKey, readings, blockStartEpochSeconds });
+      }
+    }
+  }
+
+  for (const value of Object.values(record)) {
+    collectXmlIntervalBlocks(value, out, defaultUnit);
+  }
+}
 
 /** ESPI uom 72 = watt-hours; ReadingType often appears after IntervalReading blocks on SMT exports. */
 function resolveEspiWhKwhFromUom72(xml: string): "Wh" | "kWh" | null {
@@ -174,6 +338,13 @@ function parseGreenButtonXmlLarge(
   xml: string,
   onProgress?: (detail: { blocksScanned: number; readingsFound: number }) => void
 ): XmlParseResult {
+  if (/<IntervalBlock\b/i.test(xml)) {
+    const sequential = parseGreenButtonXmlSequentialIntervalBlocksLarge(xml, onProgress);
+    if (sequential.intervalBlocks && sequential.intervalBlocks.length > 0) {
+      return sequential;
+    }
+  }
+
   const warnings: string[] = [];
   const defaultUnit = resolveXmlDefaultReadingUnitFromHeader(xml);
   const readings: GreenButtonRawReading[] = [];
@@ -240,6 +411,26 @@ function parseGreenButtonXml(xml: string): XmlParseResult {
   }
 
   const defaultReadingUnit = resolveXmlDefaultReadingUnit(root);
+  const intervalBlocks: GreenButtonParsedIntervalBlock[] = [];
+  collectXmlIntervalBlocks(root, intervalBlocks, defaultReadingUnit);
+
+  if (intervalBlocks.length > 0) {
+    const readings = flattenIntervalBlockReadings(intervalBlocks);
+    if (readings.length === 0) {
+      warnings.push("Parsed XML successfully, but no interval readings were found.");
+    }
+    return {
+      readings,
+      intervalBlocks,
+      slottingMode: "sequential_local_day",
+      timezoneOffsetSeconds: parseIntOrNull(findFirstScalar(root, "tzOffset")),
+      meterSerialNumber: findFirstScalar(root, "meterSerialNumber"),
+      sourceTitle: findFirstScalar(root, "title"),
+      warnings,
+      parseMode: "xml_sequential_interval_blocks",
+    };
+  }
+
   const readings: GreenButtonRawReading[] = [];
   collectXmlReadings(root, readings, defaultReadingUnit);
 

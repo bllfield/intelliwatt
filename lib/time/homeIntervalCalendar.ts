@@ -174,6 +174,16 @@ function gridInstantLocal(dateKey: string, slot: number, zone: string): Date | n
   return dt.isValid ? dt.toUTC().toJSDate() : null;
 }
 
+/** America/Chicago local-day grid: midnight + sequential 15-minute slots (DST-aware). */
+export function homeLocalSequentialSlotUtc(
+  homeDateKey: string,
+  slotIndex: number,
+  home: HomeIntervalCalendar,
+): Date | null {
+  if (slotIndex < 0 || slotIndex > 99) return null;
+  return gridInstantLocal(homeDateKey, slotIndex, home.timezone);
+}
+
 function applyIntervalEdge(instant: Date, delivery: IntervalDelivery, durationSeconds: number): Date {
   if (delivery.intervalEdge !== "end") return instant;
   return new Date(instant.getTime() - durationSeconds * 1000);

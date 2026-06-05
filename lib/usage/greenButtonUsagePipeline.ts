@@ -12,6 +12,10 @@ import {
   type GreenButton15MinInterval,
   type GreenButtonNormalizeChunkProgress,
 } from "@/lib/usage/greenButtonNormalize";
+import {
+  GREEN_BUTTON_SEQUENTIAL_BLOCKS_PER_CHUNK,
+  normalizeGreenButtonIntervalBlocksTo15MinChunked,
+} from "@/lib/usage/greenButtonSequentialBlockNormalize";
 import { parseGreenButtonBuffer, type ParsedGreenButtonResult } from "@/lib/usage/greenButtonParser";
 
 export const GREEN_BUTTON_USAGE_PIPELINE_WINDOW_DAYS = 365;
@@ -118,25 +122,38 @@ export function runGreenButtonUsagePipeline(args: {
     };
   }
 
+  const useSequentialBlocks =
+    parsed.slottingMode === "sequential_local_day" &&
+    parsed.intervalBlocks != null &&
+    parsed.intervalBlocks.length > 0;
   const readingsPerChunk = args.readingsPerChunk ?? GREEN_BUTTON_NORMALIZE_READINGS_PER_CHUNK;
-  const chunkCount = Math.max(1, Math.ceil(parsed.readings.length / readingsPerChunk));
+  const chunkCount = useSequentialBlocks
+    ? Math.max(1, Math.ceil(parsed.intervalBlocks!.length / GREEN_BUTTON_SEQUENTIAL_BLOCKS_PER_CHUNK))
+    : Math.max(1, Math.ceil(parsed.readings.length / readingsPerChunk));
 
   stageStart = Date.now();
-  const normalized = normalizeGreenButtonReadingsTo15MinChunked(parsed.readings, {
-    maxKwhPerInterval,
-    readingsPerChunk,
-    onChunkStart: (progress) => args.onNormalizeChunkStart?.(progress),
-    onChunkComplete: (progress) => args.onNormalizeChunkComplete?.(progress),
-    onRepairComplete: (detail) => {
-      args.onStageComplete?.({
-        stage: "normalize_repair",
-        ms: detail.ms,
-        rawReadings: parsed.metadata.totalReadings,
-        chunkCount,
-        normalizedIntervals: detail.bucketsBefore,
+  const normalized = useSequentialBlocks
+    ? normalizeGreenButtonIntervalBlocksTo15MinChunked(parsed.intervalBlocks!, {
+        maxKwhPerInterval,
+        blocksPerChunk: GREEN_BUTTON_SEQUENTIAL_BLOCKS_PER_CHUNK,
+        onChunkStart: (progress) => args.onNormalizeChunkStart?.(progress),
+        onChunkComplete: (progress) => args.onNormalizeChunkComplete?.(progress),
+      })
+    : normalizeGreenButtonReadingsTo15MinChunked(parsed.readings, {
+        maxKwhPerInterval,
+        readingsPerChunk,
+        onChunkStart: (progress) => args.onNormalizeChunkStart?.(progress),
+        onChunkComplete: (progress) => args.onNormalizeChunkComplete?.(progress),
+        onRepairComplete: (detail) => {
+          args.onStageComplete?.({
+            stage: "normalize_repair",
+            ms: detail.ms,
+            rawReadings: parsed.metadata.totalReadings,
+            chunkCount,
+            normalizedIntervals: detail.bucketsBefore,
+          });
+        },
       });
-    },
-  });
   args.onStageComplete?.({
     stage: "normalize",
     ms: Date.now() - stageStart,

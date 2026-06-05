@@ -28,6 +28,7 @@ function readingsToCsv(readings: ReturnType<typeof chicagoCstReadings>) {
 
 function smtGreenButtonXmlReadings(dateKey: string, count: number, valueWh: number) {
   const [year, month, day] = dateKey.split("-").map(Number);
+  const blockStartEpochSeconds = Date.UTC(year, month - 1, day, 0, 0, 0, 0) / 1000;
   const startEpochSeconds = Date.UTC(year, month - 1, day, 6, 0, 0, 0) / 1000;
   const readings = Array.from({ length: count }, (_, i) => {
     const start = startEpochSeconds + i * 15 * 60;
@@ -38,7 +39,7 @@ function smtGreenButtonXmlReadings(dateKey: string, count: number, valueWh: numb
   <entry>
     <title>Central Time</title>
     <content>
-      <IntervalBlock xmlns="http://naesb.org/espi">${readings}</IntervalBlock>
+      <IntervalBlock xmlns="http://naesb.org/espi"><interval><duration>86400</duration><start>${blockStartEpochSeconds}</start></interval>${readings}</IntervalBlock>
     </content>
   </entry>
   <entry>
@@ -128,7 +129,7 @@ describe("runGreenButtonUsagePipeline", () => {
     const blockParsed = parseGreenButtonBuffer(Buffer.from(padded), "large.xml");
     const treeParsed = parseGreenButtonBuffer(Buffer.from(xml), "small.xml");
 
-    expect(blockParsed.metadata.parseMode).toBe("xml_interval_blocks");
+    expect(blockParsed.metadata.parseMode).toBe("xml_sequential_interval_blocks");
     expect(blockParsed.readings.length).toBe(treeParsed.readings.length);
     expect(blockParsed.readings.map((r) => [r.timestamp, r.value, r.durationSeconds])).toEqual(
       treeParsed.readings.map((r) => [r.timestamp, r.value, r.durationSeconds])

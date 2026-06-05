@@ -1,14 +1,15 @@
 /**
  * Green Button interval ingest contract.
  *
- * All normalization, overlap allocation, vendor slot repair, and Chicago 15-minute
- * bucketing run only in `runGreenButtonUsagePipeline` before `GreenButtonInterval` rows
- * are written. Downstream code must read persisted rows and project through
- * `loadPersistedGreenButtonIntervals` — never re-run slot repair on read.
+ * All normalization and Chicago 15-minute slot assignment run only in
+ * `runGreenButtonUsagePipeline` before `GreenButtonInterval` rows are written.
+ * SMT ESPI IntervalBlock exports use sequential local-day slotting (not raw epoch buckets).
+ * Legacy epoch-bucket CSV/JSON paths skip default slot repair. Downstream code must read
+ * persisted rows via `loadPersistedGreenButtonIntervals` — never re-run slot repair on read.
  */
 
 /** Bump when ingest semantics change (forces re-upload / rehydrate from raw). */
-export const GREEN_BUTTON_INTERVAL_INGEST_VERSION = 3;
+export const GREEN_BUTTON_INTERVAL_INGEST_VERSION = 4;
 
 export type GreenButtonUploadParseSummary = {
   format?: string;

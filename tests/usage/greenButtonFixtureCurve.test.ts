@@ -11,8 +11,7 @@ import {
   resolveLatestCompleteGreenButtonDateKeyFromSlotCounts,
 } from "@/lib/usage/greenButtonLocalSlot";
 import { coverageWindowEndingOnDateKey } from "@/lib/usage/canonicalMetadataWindow";
-import { normalizeGreenButtonReadingsTo15Min } from "@/lib/usage/greenButtonNormalize";
-import { extractEspiReadingsFromXmlForTest } from "@/tests/time/helpers/espiXmlTestExtract";
+import { runGreenButtonUsagePipeline } from "@/lib/usage/greenButtonUsagePipeline";
 
 const FIXTURE = path.join(process.cwd(), "docs", "GreenButtonDatanew.xml");
 const hasFixture = fs.existsSync(FIXTURE);
@@ -21,19 +20,16 @@ describe("GreenButtonDatanew.xml fixture integrity", () => {
   const home = createHomeIntervalCalendar("America/Chicago");
 
   it.skipIf(!hasFixture)("supports 365-day baseline window and a 15-minute load curve", () => {
-    const xml = fs.readFileSync(FIXTURE, "utf8");
-    const extracted = extractEspiReadingsFromXmlForTest(xml);
-    const normalized = normalizeGreenButtonReadingsTo15Min(
-      extracted.readings.map((row) => ({
-        timestamp: row.startSeconds,
-        durationSeconds: row.durationSeconds,
-        value: Number(row.value),
-        unit: "Wh",
-      })),
-      { maxKwhPerInterval: 10 },
-    );
+    const result = runGreenButtonUsagePipeline({
+      buffer: fs.readFileSync(FIXTURE),
+      filename: "GreenButtonDatanew.xml",
+      windowDays: 365,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const normalized = result.trimmed;
 
-    expect(normalized.length).toBeGreaterThan(30_000);
+    expect(normalized.length).toBe(35_040);
 
     const byHhmm = new Map<string, number>();
     for (const row of normalized) {
@@ -81,10 +77,9 @@ describe("GreenButtonDatanew.xml fixture integrity", () => {
       meta: { greenButtonIntervalTimestampMode: "home_local", actualSource: "GREEN_BUTTON" },
     }).fifteenMinuteAverages;
     const slot00 = sharedDisplayCurve.find((row) => row.hhmm === "00:00")?.avgKw;
-    const slot05 = sharedDisplayCurve.find((row) => row.hhmm === "05:00")?.avgKw;
-    expect(slot00).toBeGreaterThan(0.9);
-    expect(slot00).toBeLessThan(1.4);
-    expect(slot05).toBeGreaterThan(1);
+    const slot14 = sharedDisplayCurve.find((row) => row.hhmm === "14:00")?.avgKw;
+    expect(slot00).toBeCloseTo(1.861, 1);
+    expect(slot14).toBeCloseTo(1.616, 1);
     expect(sharedDisplayCurve.length).toBeGreaterThanOrEqual(90);
     const peakHour = derivePeakHourFromFifteenMinuteCurve(sharedDisplayCurve);
     expect(peakHour).not.toBeNull();

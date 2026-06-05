@@ -42,6 +42,7 @@
 - **One persist store per source:** `GreenButtonInterval`, `SmtInterval` (usage DB mirror via existing dual-write).
 - **One read stack:** `loadPersistedGreenButtonIntervals` + `convertGreenButtonPersistedRowsToHome` (GB); `convertSmtPersistedRowsToHome` (SMT). **No** `repairGreenButtonIntervalSeries` on `actualDatasetForHouse` or range fetch.
 - **GB stale gate:** `resolveGreenButtonIntervalIngestReadiness` — Usage, Past, plans, One Path, and `fetchGreenButtonIntervalsForCoverageWindow` fail closed until `intervalIngestVersion` matches or data is rehydrated/re-uploaded.
+- **GB ingest v4 (2026-05-20):** SMT ESPI `IntervalBlock` XML → sequential Chicago local-day slots (`normalizeGreenButtonIntervalBlocksTo15Min`); default ingest skips `repairGreenButtonHomeLocalBuckets`. Bump forces re-upload/rehydrate for correct load-curve shape.
 - **Raw files:** `rawGreenButton` / SMT raw — **re-ingest only**, not live truth for sim/charts/plans.
 
 **Shipped owners:**

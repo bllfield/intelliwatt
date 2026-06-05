@@ -116,7 +116,7 @@ describe("greenButtonSlotRepair", () => {
         { timestamp: "1745884800", durationSeconds: 900, value: 1908, unit: "Wh" },
         { timestamp: "1745886600", durationSeconds: 900, value: 1159, unit: "Wh" },
       ],
-      { maxKwhPerInterval: 10 }
+      { maxKwhPerInterval: 10, runSlotRepair: true }
     );
 
     expect(normalized.length).toBeGreaterThanOrEqual(3);

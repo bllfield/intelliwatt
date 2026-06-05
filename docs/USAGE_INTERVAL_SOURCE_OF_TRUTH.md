@@ -4,10 +4,10 @@
 
 ## Product rule (non-negotiable)
 
-1. **Ingest once** — parse, timezone/DST, 15-minute bucketing, overlap allocation, and vendor repair run **only** at ingest, before any row is written to the usage interval tables.
+1. **Ingest once** — parse, timezone/DST, and 15-minute slot assignment run **only** at ingest, before any row is written to the usage interval tables. SMT ESPI `IntervalBlock` XML uses sequential Chicago local-day slotting (block service date + reading index); default ingest does **not** run vendor slot repair.
 2. **Persist once** — `GreenButtonInterval` and `SmtInterval` (and usage-DB mirrors) are the **only** interval truth stores for product surfaces.
 3. **Read project only** — Usage, Past Sim, Gap-Fill, plans, and admin tools **load persisted rows** and project through `homeIntervalCalendar` helpers. **No** read-time normalize, **no** read-time slot repair, **no** serving raw vendor rows as if they were canonical intervals.
-4. **Fail closed on stale GB** — if Green Button was ingested before `intervalIngestVersion: 1`, consumers return empty / not-ready until re-upload or `rehydrateGreenButtonIntervalsFromRawForHouse`.
+4. **Fail closed on stale GB** — if Green Button was ingested before the current `GREEN_BUTTON_INTERVAL_INGEST_VERSION` (4: sequential IntervalBlock ingest), consumers return empty / not-ready until re-upload or `rehydrateGreenButtonIntervalsFromRawForHouse`.
 
 Raw files (`rawGreenButton.content`, SMT raw rows, XML/CSV uploads) exist **only** to re-run ingest — never as a live read path for charts, sim, or plan math.
 
@@ -18,7 +18,8 @@ Raw files (`rawGreenButton.content`, SMT raw rows, XML/CSV uploads) exist **only
 | Concern | Module | Notes |
 |---------|--------|--------|
 | **Ingest pipeline** | `lib/usage/greenButtonUsagePipeline.ts` | `runGreenButtonUsagePipeline` only |
-| Normalize + overlap + repair | `normalizeGreenButtonReadingsTo15Min` | Calls `greenButtonHomeLocalBuckets` + `greenButtonSlotRepair` |
+| Normalize (epoch CSV/JSON) | `normalizeGreenButtonReadingsTo15Min` | `greenButtonHomeLocalBuckets`; repair opt-in only (`runSlotRepair`) |
+| Normalize (SMT IntervalBlock XML) | `normalizeGreenButtonIntervalBlocksTo15Min` | Sequential Chicago local-day slots from block date + reading index; **no** repair |
 | Overlap (straddle-safe) | `lib/usage/greenButtonHomeLocalBuckets.ts` | DST-safe slot bounds via home TZ |
 | Vendor gap repair (/2, /3) | `lib/usage/greenButtonSlotRepair.ts` | **Ingest only**; `repairGreenButtonIntervalSeries` reserved for rehydrate/tests |
 | 365-day trim | `lib/usage/greenButtonCoverage.ts` | After normalize |
