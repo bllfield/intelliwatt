@@ -109,6 +109,24 @@ export function buildFifteenMinuteAveragesFromIntervalRows(
   return buildLoadCurveInsightsFromIntervalRows(rows, timezone).fifteenMinuteAverages;
 }
 
+/** Peak pattern headline: highest average kW among 15-minute slots (matches the load-curve table). */
+export function derivePeakHourFromFifteenMinuteCurve(
+  curve: Array<{ hhmm: string; avgKw: number }>
+): { hour: number; kw: number } | null {
+  if (!Array.isArray(curve) || curve.length === 0) return null;
+  let top: { hhmm: string; avgKw: number } | null = null;
+  for (const row of curve) {
+    const hhmm = String(row?.hhmm ?? "");
+    if (!/^\d{2}:\d{2}$/.test(hhmm)) continue;
+    const avgKw = Number(row?.avgKw) || 0;
+    if (!top || avgKw > top.avgKw) top = { hhmm, avgKw };
+  }
+  if (!top) return null;
+  const hour = Number(top.hhmm.slice(0, 2));
+  if (!Number.isFinite(hour) || hour < 0 || hour > 23) return null;
+  return { hour, kw: round2(top.avgKw) };
+}
+
 export function buildTimeOfDayBucketsFromIntervalRows(
   rows: Array<{ timestamp?: string; kwh?: number; consumption_kwh?: number }>,
   timezone: string

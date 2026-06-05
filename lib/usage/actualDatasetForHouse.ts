@@ -35,11 +35,14 @@ import { loadPersistedGreenButtonIntervalsForWindow } from "@/lib/usage/loadPers
 import { chicagoDateKey, dateTimePartsInTimezone, enumerateDateKeysInclusive, prevCalendarDayDateKey } from "@/lib/time/chicago";
 import { homeProjectedIntervalFromRecord } from "@/lib/time/actualIntervalCalendar";
 import {
+  buildGreenButtonLoadCurveInsightsFromPersistedIntervalRows,
   convertGreenButtonPersistedRowsToHome,
   greenButtonHomeIntervalCalendar,
   homeDailyToUsageSeriesPoints as greenButtonHomeDailyToUsageSeriesPoints,
   tailHomeIntervals,
 } from "@/lib/time/greenButtonPersistedIntervalConvert";
+import { derivePeakHourFromFifteenMinuteCurve } from "@/lib/usage/fifteenMinuteLoadCurve";
+import { queryPersistedGreenButtonIntervalRows } from "@/lib/usage/loadPersistedGreenButtonIntervals";
 import {
   convertSmtPersistedRowsToHome,
   homeDailyToUsageSeriesPoints,
@@ -639,34 +642,28 @@ async function computeInsightsFromDb(args: {
       GROUP BY 1 ORDER BY 1 ASC
     `)) as Array<{ month: string; kwh: number }>
         ).map((r) => ({ month: String(r.month), kwh: round2(r.kwh) }));
-    const fifteenRows = (await usageClient.$queryRaw(Prisma.sql`
-      SELECT to_char(${gbLoc}, 'HH24:MI') AS hhmm, AVG(("consumptionKwh" * 4))::float AS avgkw
-      FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff} AND "timestamp" <= ${args.end}
-      GROUP BY 1 ORDER BY 1 ASC
-    `)) as Array<{ hhmm: string; avgkw: number }>;
-    const fifteenMinuteAverages = fifteenRows.map((r) => ({ hhmm: String(r.hhmm), avgKw: round2(r.avgkw) }));
-    const todRows = (await usageClient.$queryRaw(Prisma.sql`
-      SELECT key, label, sort, SUM("consumptionKwh")::float AS kwh FROM (
-        SELECT CASE WHEN EXTRACT(HOUR FROM ${gbLoc}) < 6 THEN 'overnight'
-                    WHEN EXTRACT(HOUR FROM ${gbLoc}) < 12 THEN 'morning'
-                    WHEN EXTRACT(HOUR FROM ${gbLoc}) < 18 THEN 'afternoon' ELSE 'evening' END AS key,
-               CASE WHEN EXTRACT(HOUR FROM ${gbLoc}) < 6 THEN 'Overnight (12am–6am)'
-                    WHEN EXTRACT(HOUR FROM ${gbLoc}) < 12 THEN 'Morning (6am–12pm)'
-                    WHEN EXTRACT(HOUR FROM ${gbLoc}) < 18 THEN 'Afternoon (12pm–6pm)' ELSE 'Evening (6pm–12am)' END AS label,
-               CASE WHEN EXTRACT(HOUR FROM ${gbLoc}) < 6 THEN 1
-                    WHEN EXTRACT(HOUR FROM ${gbLoc}) < 12 THEN 2
-                    WHEN EXTRACT(HOUR FROM ${gbLoc}) < 18 THEN 3 ELSE 4 END AS sort,
-               "consumptionKwh"
-        FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff} AND "timestamp" <= ${args.end}
-      ) t GROUP BY key, label, sort ORDER BY sort ASC
-    `)) as Array<{ key: string; label: string; sort: number; kwh: number }>;
-    const timeOfDayBuckets = todRows.map((r) => ({ key: String(r.key), label: String(r.label), kwh: round2(r.kwh) }));
-    const peakHourRows = (await usageClient.$queryRaw(Prisma.sql`
-      SELECT EXTRACT(HOUR FROM ${gbLoc})::int AS hour, AVG(("consumptionKwh" * 4))::float AS avgkw
-      FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff} AND "timestamp" <= ${args.end}
-      GROUP BY 1 ORDER BY avgkw DESC LIMIT 1
-    `)) as Array<{ hour: number; avgkw: number }>;
-    const peakHour = peakHourRows?.[0] ? { hour: Number(peakHourRows[0].hour), kw: round2(Number(peakHourRows[0].avgkw)) } : null;
+    let fifteenMinuteAverages: Array<{ hhmm: string; avgKw: number }> = [];
+    let timeOfDayBuckets: Array<{ key: string; label: string; kwh: number }> = [];
+    let peakHour: { hour: number; kw: number } | null = null;
+    try {
+      const persistedRows = await queryPersistedGreenButtonIntervalRows({
+        houseId,
+        rawId,
+        rangeStart: args.cutoff,
+        rangeEndInclusive: args.end,
+      });
+      if (persistedRows.length > 0) {
+        const loadCurve = buildGreenButtonLoadCurveInsightsFromPersistedIntervalRows(
+          persistedRows,
+          args.homeTimezone
+        );
+        fifteenMinuteAverages = loadCurve.fifteenMinuteAverages;
+        timeOfDayBuckets = loadCurve.timeOfDayBuckets;
+        peakHour = derivePeakHourFromFifteenMinuteCurve(fifteenMinuteAverages);
+      }
+    } catch {
+      // Leave chart insights empty; daily/monthly SQL aggregates above remain available.
+    }
     const baseloadRows = (await usageClient.$queryRaw(Prisma.sql`
       WITH t AS (SELECT "consumptionKwh"::float AS kwh FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff} AND "timestamp" <= ${args.end}),
            p AS (SELECT percentile_cont(0.10) WITHIN GROUP (ORDER BY kwh) AS p10 FROM t WHERE kwh > 0)

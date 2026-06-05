@@ -44,6 +44,83 @@ function round2(value: number): number {
   return Math.round((Number(value) || 0) * 100) / 100;
 }
 
+/**
+ * GreenButtonInterval.timestamp is TIMESTAMP(3) without time zone: ingest stores UTC wall clock.
+ * Postgres labels slots with `(timestamp AT TIME ZONE 'UTC') AT TIME ZONE <home>` — not local Date getters.
+ */
+export function persistedGreenButtonUtcWallClockDateTime(
+  timestamp: Date,
+  homeTimezone: string
+): DateTime {
+  const zone = String(homeTimezone ?? "").trim() || GREEN_BUTTON_DEFAULT_HOME_TIMEZONE;
+  const y = timestamp.getUTCFullYear();
+  const m = String(timestamp.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(timestamp.getUTCDate()).padStart(2, "0");
+  const h = String(timestamp.getUTCHours()).padStart(2, "0");
+  const mi = String(timestamp.getUTCMinutes()).padStart(2, "0");
+  const s = String(timestamp.getUTCSeconds()).padStart(2, "0");
+  const ms = String(timestamp.getUTCMilliseconds()).padStart(3, "0");
+  return DateTime.fromSQL(`${y}-${m}-${d} ${h}:${mi}:${s}.${ms}`, { zone: "UTC" }).setZone(zone);
+}
+
+export function persistedGreenButtonTimestampHhmm(
+  timestamp: Date,
+  homeTimezone?: string
+): string | null {
+  const dt = persistedGreenButtonUtcWallClockDateTime(
+    timestamp,
+    homeTimezone ?? GREEN_BUTTON_DEFAULT_HOME_TIMEZONE
+  );
+  if (!dt.isValid) return null;
+  const hhmm = dt.toFormat("HH:mm");
+  return /^\d{2}:\d{2}$/.test(hhmm) ? hhmm : null;
+}
+
+/**
+ * Usage 15-minute curve: aggregate stored consumptionKwh only (no slot repair / no calendar re-project).
+ * Matches SQL `AVG(consumptionKwh * 4)` grouped by Chicago HH24:MI with double AT TIME ZONE UTC.
+ */
+export function buildGreenButtonLoadCurveInsightsFromPersistedIntervalRows(
+  rows: Array<{ timestamp: Date; consumptionKwh: number }>,
+  homeTimezone?: string
+): GreenButtonLoadCurveInsights {
+  const zone = String(homeTimezone ?? "").trim() || GREEN_BUTTON_DEFAULT_HOME_TIMEZONE;
+  const hhmmBuckets = new Map<string, { sumKw: number; count: number }>();
+  const sums = { overnight: 0, morning: 0, afternoon: 0, evening: 0 };
+
+  for (const row of rows) {
+    const kwh = Number(row.consumptionKwh) || 0;
+    if (!Number.isFinite(kwh) || kwh < 0) continue;
+    const hhmm = persistedGreenButtonTimestampHhmm(row.timestamp, zone);
+    if (!hhmm) continue;
+    const current = hhmmBuckets.get(hhmm) ?? { sumKw: 0, count: 0 };
+    current.sumKw += kwh * 4;
+    current.count += 1;
+    hhmmBuckets.set(hhmm, current);
+    const hour = persistedGreenButtonUtcWallClockDateTime(row.timestamp, zone).hour;
+    if (hour < 6) sums.overnight += kwh;
+    else if (hour < 12) sums.morning += kwh;
+    else if (hour < 18) sums.afternoon += kwh;
+    else sums.evening += kwh;
+  }
+
+  const fifteenMinuteAverages = Array.from(hhmmBuckets.entries())
+    .map(([hhmm, bucket]) => ({
+      hhmm,
+      avgKw: bucket.count > 0 ? round2(bucket.sumKw / bucket.count) : 0,
+    }))
+    .sort((left, right) => (left.hhmm < right.hhmm ? -1 : left.hhmm > right.hhmm ? 1 : 0));
+
+  const timeOfDayBuckets = [
+    { key: "overnight", label: "Overnight (12am–6am)", kwh: round2(sums.overnight) },
+    { key: "morning", label: "Morning (6am–12pm)", kwh: round2(sums.morning) },
+    { key: "afternoon", label: "Afternoon (12pm–6pm)", kwh: round2(sums.afternoon) },
+    { key: "evening", label: "Evening (6pm–12am)", kwh: round2(sums.evening) },
+  ];
+
+  return { fifteenMinuteAverages, timeOfDayBuckets };
+}
+
 /** Minimum 15m rows to rebuild a year-shaped curve from series (avoids tail-only Usage loads). */
 export const GREEN_BUTTON_MIN_INTERVALS_FOR_SERIES_CURVE = 96 * 30;
 

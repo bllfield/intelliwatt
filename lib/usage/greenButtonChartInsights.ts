@@ -1,3 +1,5 @@
+import { derivePeakHourFromFifteenMinuteCurve } from "@/lib/usage/fifteenMinuteLoadCurve";
+
 function hasNonEmptyInsightArray(value: unknown): boolean {
   return Array.isArray(value) && value.length > 0;
 }
@@ -60,8 +62,15 @@ export function mergeGreenButtonChartInsightsOntoPassthroughDataset(args: {
   const timeOfDayBuckets = hasNonEmptyInsightArray(resolvedInsights.timeOfDayBuckets)
     ? resolvedInsights.timeOfDayBuckets
     : passthroughInsights.timeOfDayBuckets;
-  const peakHour =
-    passthroughInsights.peakHour != null ? passthroughInsights.peakHour : resolvedInsights.peakHour ?? null;
+  const peakHour = hasNonEmptyInsightArray(fifteenMinuteAverages)
+    ? derivePeakHourFromFifteenMinuteCurve(
+        fifteenMinuteAverages as Array<{ hhmm: string; avgKw: number }>
+      ) ??
+      (resolvedInsights.peakHour as { hour: number; kw: number } | null | undefined) ??
+      null
+    : (passthroughInsights.peakHour as { hour: number; kw: number } | null | undefined) ??
+      (resolvedInsights.peakHour as { hour: number; kw: number } | null | undefined) ??
+      null;
   const baseload =
     typeof passthroughInsights.baseload === "number" && Number.isFinite(passthroughInsights.baseload)
       ? passthroughInsights.baseload

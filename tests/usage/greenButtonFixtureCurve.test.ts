@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { createHomeIntervalCalendar, localDateKey } from "@/lib/time/homeIntervalCalendar";
 import { buildGreenButtonLoadCurveInsightsFromSeriesRows } from "@/lib/time/greenButtonPersistedIntervalConvert";
+import { derivePeakHourFromFifteenMinuteCurve } from "@/lib/usage/fifteenMinuteLoadCurve";
 import {
   countDistinctLocalSlotsByDateKey,
   resolveLatestCompleteGreenButtonDateKeyFromSlotCounts,
@@ -85,5 +86,10 @@ describe("GreenButtonDatanew.xml fixture integrity", () => {
     expect(slot00).toBeLessThan(1.4);
     expect(slot05).toBeGreaterThan(1);
     expect(sharedDisplayCurve.length).toBeGreaterThanOrEqual(90);
+    const peakHour = derivePeakHourFromFifteenMinuteCurve(sharedDisplayCurve);
+    expect(peakHour).not.toBeNull();
+    const peakSlot = sharedDisplayCurve.reduce((top, row) => (row.avgKw > top.avgKw ? row : top));
+    expect(peakHour?.kw).toBe(peakSlot.avgKw);
+    expect(peakHour?.hour).toBe(Number(peakSlot.hhmm.slice(0, 2)));
   }, 120_000);
 });

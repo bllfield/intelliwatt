@@ -8,6 +8,7 @@ import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMet
 import { readPastValidationPolicyRevisionFromMeta } from "@/lib/usage/pastSimulationCoreLabel";
 import { buildDisplayedMonthlyRows } from "@/modules/usageSimulator/monthlyCompareRows";
 import type { UserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
+import { derivePeakHourFromFifteenMinuteCurve } from "@/lib/usage/fifteenMinuteLoadCurve";
 
 type UserUsageDashboardHouseLike = Pick<UserUsageHouseContract, "dataset"> & {
   weatherSensitivityScore?: UserUsageHouseContract["weatherSensitivityScore"];
@@ -343,7 +344,8 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
         kwh: bucket.kwh,
       })),
       peakDay: peakDay ?? dataset?.insights?.peakDay ?? null,
-      peakHour: dataset?.insights?.peakHour ?? null,
+      peakHour:
+        derivePeakHourFromFifteenMinuteCurve(fifteenCurve) ?? dataset?.insights?.peakHour ?? null,
       baseload: dataset?.insights?.baseload ?? null,
       baseloadDaily:
         dataset?.insights?.baseloadDaily ??

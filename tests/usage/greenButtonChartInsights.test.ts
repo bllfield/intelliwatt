@@ -43,7 +43,31 @@ describe("mergeGreenButtonChartInsightsOntoPassthroughDataset", () => {
         { hhmm: "00:00", avgKw: 1.1 },
         { hhmm: "00:15", avgKw: 1.2 },
       ],
-      peakHour: { hour: 20, kw: 2.3 },
+      peakHour: { hour: 0, kw: 1.2 },
+    });
+  });
+
+  it("derives peakHour from the resolved fifteen-minute curve", () => {
+    const merged = mergeGreenButtonChartInsightsOntoPassthroughDataset({
+      passthroughDataset: {
+        insights: {
+          peakHour: { hour: 20, kw: 2.3 },
+          fifteenMinuteAverages: [{ hhmm: "12:00", avgKw: 9.9 }],
+        },
+      },
+      resolvedDataset: {
+        insights: {
+          fifteenMinuteAverages: [
+            { hhmm: "14:00", avgKw: 5.23 },
+            { hhmm: "14:15", avgKw: 4.84 },
+          ],
+        },
+      },
+    });
+
+    expect((merged.insights as { peakHour: { hour: number; kw: number } }).peakHour).toEqual({
+      hour: 14,
+      kw: 5.23,
     });
   });
 

@@ -14,6 +14,7 @@ const getLatestGreenButtonFullDayDateKey = vi.fn();
 const buildUsageBucketsForEstimate = vi.fn();
 const ensureHouseWeatherBackfill = vi.fn();
 const getHouseWeatherDays = vi.fn();
+const queryPersistedGreenButtonIntervalRows = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   prisma: {},
@@ -57,6 +58,11 @@ vi.mock("@/modules/weather/repo", () => ({
   getHouseWeatherDays: (...args: any[]) => getHouseWeatherDays(...args),
 }));
 
+vi.mock("@/lib/usage/loadPersistedGreenButtonIntervals", () => ({
+  queryPersistedGreenButtonIntervalRows: (...args: any[]) =>
+    queryPersistedGreenButtonIntervalRows(...args),
+}));
+
 describe("actualDatasetForHouse lightweight green button", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -69,6 +75,7 @@ describe("actualDatasetForHouse lightweight green button", () => {
     buildUsageBucketsForEstimate.mockReset();
     ensureHouseWeatherBackfill.mockReset();
     getHouseWeatherDays.mockReset();
+    queryPersistedGreenButtonIntervalRows.mockReset();
     getLatestUsableRawGreenButtonIdForHouse.mockResolvedValue("raw-1");
     getLatestGreenButtonFullDayDateKey.mockResolvedValue("2026-04-14");
     ensureHouseWeatherBackfill.mockResolvedValue({ fetched: 1, stubbed: 0 });
@@ -97,25 +104,12 @@ describe("actualDatasetForHouse lightweight green button", () => {
     usageQueryRaw
       .mockResolvedValueOnce([{ bucket: new Date("2026-04-14T05:00:00.000Z"), kwh: 100 }])
       .mockResolvedValueOnce([{ bucket: new Date("2026-04-01T05:00:00.000Z"), kwh: 100 }])
-      .mockResolvedValueOnce([
-        { key: "overnight", label: "Overnight (12am–6am)", sort: 1, kwh: 25 },
-        { key: "morning", label: "Morning (6am–12pm)", sort: 2, kwh: 25 },
-        { key: "afternoon", label: "Afternoon (12pm–6pm)", sort: 3, kwh: 25 },
-        { key: "evening", label: "Evening (6pm–12am)", sort: 4, kwh: 25 },
-      ])
-      .mockResolvedValueOnce([
-        { hhmm: "00:00", avgkw: 4 },
-        { hhmm: "00:15", avgkw: 4.4 },
-      ])
-      .mockResolvedValueOnce([
-        { key: "overnight", label: "Overnight (12am–6am)", sort: 1, kwh: 25 },
-        { key: "morning", label: "Morning (6am–12pm)", sort: 2, kwh: 25 },
-        { key: "afternoon", label: "Afternoon (12pm–6pm)", sort: 3, kwh: 25 },
-        { key: "evening", label: "Evening (6pm–12am)", sort: 4, kwh: 25 },
-      ])
-      .mockResolvedValueOnce([{ hour: 18, avgkw: 6.2 }])
       .mockResolvedValueOnce([{ baseload: 0.65 }])
       .mockResolvedValueOnce([{ weekdaykwh: 70, weekendkwh: 30 }]);
+    queryPersistedGreenButtonIntervalRows.mockResolvedValue([
+      { timestamp: new Date("2026-04-14T18:00:00.000Z"), consumptionKwh: 1.55 },
+      { timestamp: new Date("2026-04-14T18:15:00.000Z"), consumptionKwh: 1.65 },
+    ]);
   });
 
   it("recomputes lightweight green button insight readouts with the anchored local window", async () => {
@@ -129,16 +123,16 @@ describe("actualDatasetForHouse lightweight green button", () => {
     expect(result.skippedFullYearIntervalFetch).toBe(true);
     expect(buildUsageBucketsForEstimate).not.toHaveBeenCalled();
     expect(result.dataset?.insights?.timeOfDayBuckets).toEqual([
-      { key: "overnight", label: "Overnight (12am–6am)", kwh: 25 },
-      { key: "morning", label: "Morning (6am–12pm)", kwh: 25 },
-      { key: "afternoon", label: "Afternoon (12pm–6pm)", kwh: 25 },
-      { key: "evening", label: "Evening (6pm–12am)", kwh: 25 },
+      { key: "overnight", label: "Overnight (12am–6am)", kwh: 0 },
+      { key: "morning", label: "Morning (6am–12pm)", kwh: 0 },
+      { key: "afternoon", label: "Afternoon (12pm–6pm)", kwh: 3.2 },
+      { key: "evening", label: "Evening (6pm–12am)", kwh: 0 },
     ]);
     expect(result.dataset?.insights?.fifteenMinuteAverages).toEqual([
-      { hhmm: "00:00", avgKw: 4 },
-      { hhmm: "00:15", avgKw: 4.4 },
+      { hhmm: "13:00", avgKw: 6.2 },
+      { hhmm: "13:15", avgKw: 6.6 },
     ]);
-    expect(result.dataset?.insights?.peakHour).toEqual({ hour: 18, kw: 6.2 });
+    expect(result.dataset?.insights?.peakHour).toEqual({ hour: 13, kw: 6.6 });
     expect(ensureHouseWeatherBackfill).toHaveBeenCalledWith(
       expect.objectContaining({
         houseId: "house-1",
@@ -170,8 +164,8 @@ describe("actualDatasetForHouse lightweight green button", () => {
     });
 
     expect(result.dataset?.insights?.fifteenMinuteAverages).toEqual([
-      { hhmm: "00:00", avgKw: 4 },
-      { hhmm: "00:15", avgKw: 4.4 },
+      { hhmm: "13:00", avgKw: 6.2 },
+      { hhmm: "13:15", avgKw: 6.6 },
     ]);
   });
 });

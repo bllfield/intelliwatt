@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildFifteenMinuteAveragesFromIntervalRows,
   buildLoadCurveInsightsFromIntervalRows,
+  derivePeakHourFromFifteenMinuteCurve,
   filterIntervalRowsToActualDailyDates,
   hhmmInHomeTimezone,
 } from "@/lib/usage/fifteenMinuteLoadCurve";
@@ -47,6 +48,16 @@ describe("fifteenMinuteLoadCurve", () => {
     const filtered = filterIntervalRowsToActualDailyDates(rows, daily, timezone);
     expect(filtered).toHaveLength(1);
     expect(filtered[0]?.kwh).toBe(10);
+  });
+
+  it("derivePeakHourFromFifteenMinuteCurve picks the highest 15-minute slot", () => {
+    expect(
+      derivePeakHourFromFifteenMinuteCurve([
+        { hhmm: "14:00", avgKw: 5.23 },
+        { hhmm: "14:15", avgKw: 4.84 },
+        { hhmm: "13:00", avgKw: 2.27 },
+      ])
+    ).toEqual({ hour: 14, kw: 5.23 });
   });
 
   it("buildLoadCurveInsightsFromIntervalRows matches separate 15m and time-of-day builders", () => {
