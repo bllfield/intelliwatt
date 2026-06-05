@@ -3,8 +3,6 @@ import { prisma } from "@/lib/db";
 import { resolveStaleIncompleteMeterSlotCompleteDateKeys } from "@/lib/usage/pastSimStaleIncompleteMeter";
 import { sageActualDailyRowsFromDataset } from "@/lib/usage/sageActualDailyTruth";
 import { buildUserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
-import { resolveIntervalsLayer } from "@/lib/usage/resolveIntervalsLayer";
-import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import {
   ensureSmtCoverageForHouse,
   type EnsureSmtCoverageResult,
@@ -621,6 +619,29 @@ async function resolveSageActualTruthForRunDisplay(args: {
     preferredActualSource: args.preferredActualSource ?? null,
     greenButtonFullYearIntervalsForDisplay: args.greenButtonFullYearIntervalsForDisplay === true,
   }).catch(() => null);
+}
+
+/** Reuse adapt-time upstream truth for baseline passthrough runs instead of reloading intervals. */
+function resolveSageDatasetForRunDisplay(args: {
+  engineInput: CanonicalSimulationEngineInput;
+  scenarioId?: string | null;
+  isManualMode: boolean;
+  preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
+  greenButtonFullYearIntervalsForDisplay?: boolean;
+  reloadSageTruth: () => Promise<Awaited<ReturnType<typeof resolveSageActualTruthForRunDisplay>>>;
+}) {
+  const needsFreshSageTruth =
+    Boolean(args.scenarioId) ||
+    args.isManualMode ||
+    args.greenButtonFullYearIntervalsForDisplay === true;
+  if (needsFreshSageTruth) {
+    return args.reloadSageTruth();
+  }
+  const prefetched = args.engineInput.prefetchedBaselineUpstreamUsageTruth?.dataset ?? null;
+  if (prefetched) {
+    return Promise.resolve({ dataset: prefetched } as Awaited<ReturnType<typeof resolveSageActualTruthForRunDisplay>>);
+  }
+  return args.reloadSageTruth();
 }
 
 function sageDisplayViewArgsFromDataset(dataset: unknown): {
@@ -2092,31 +2113,6 @@ export async function POST(request: NextRequest) {
           ...readback,
         });
       }
-      let engineInput =
-        mode === "INTERVAL"
-          ? await adaptIntervalRawInput(effectiveRawInputBase)
-          : mode === "GREEN_BUTTON"
-            ? await withAdminRouteStageTimeout({
-                stage: "adapt_green_button_raw_input",
-                correlationId,
-                timeoutMs: GREEN_BUTTON_ROUTE_STAGE_TIMEOUT_MS,
-                mode,
-                houseId: effectiveHouseId,
-                stageTimingsMs,
-                promise: adaptGreenButtonRawInput(effectiveRawInputBase),
-              })
-          : mode === "MANUAL_ANNUAL"
-            ? await adaptManualAnnualRawInput({
-                ...effectiveRawInputBase,
-                manualUsagePayload: effectiveManualUsagePayload,
-              })
-            : mode === "NEW_BUILD"
-              ? await adaptNewBuildRawInput(effectiveRawInputBase)
-              : await adaptManualMonthlyRawInput({
-                  ...effectiveRawInputBase,
-                  manualUsagePayload: effectiveManualUsagePayload,
-                });
-      let slimEngineInput = buildSlimAdminEngineInput(engineInput);
       if (mode === "GREEN_BUTTON" && !effectiveRawInputBase.scenarioId) {
         const gbParitySource = resolveOnePathGreenButtonParitySource({
           resolved,
@@ -2137,28 +2133,15 @@ export async function POST(request: NextRequest) {
             skipLightweightInsightRecompute: false,
           }),
         });
-        const baselineDataset = asRecord(
-          gbParityContract?.dataset ??
-            (await withAdminRouteStageTimeout({
-              stage: "build_green_button_baseline_dataset",
-              correlationId,
-              timeoutMs: GREEN_BUTTON_ROUTE_STAGE_TIMEOUT_MS,
-              mode,
-              houseId: effectiveHouseId,
-              stageTimingsMs,
-              promise: buildIntervalLikeBaselinePassthroughDataset(engineInput, {
-                skipGreenButtonInsightHydration: true,
-              }),
-            }))
-        );
+        const baselineDataset = asRecord(gbParityContract?.dataset);
         const baselineDatasetMeta = asRecord(baselineDataset?.meta);
         const compactRunDisplayView =
           buildOnePathRunReadOnlyViewFromBaselineContract({ houseContract: gbParityContract }) ??
           buildOnePathRunReadOnlyView({
             dataset: baselineDataset,
-            engineInput: asRecord(engineInput),
+            engineInput: null,
             readModel: null,
-            weatherSensitivityScore: engineInput.weatherSensitivityScore ?? null,
+            weatherSensitivityScore: gbParityContract?.weatherSensitivityScore ?? null,
           }) ??
           null;
         const compactReadModel =
@@ -2177,13 +2160,38 @@ export async function POST(request: NextRequest) {
           debugDiagnosticsIncluded: false,
           runType: "BASELINE_PASSTHROUGH",
           correlationId,
-          engineInput: slimEngineInput,
+          engineInput: null,
           manualStageOneView: null,
           runDisplayView: compactRunDisplayView,
           artifact: null,
           readModel: compactReadModel,
         });
       }
+      let engineInput =
+        mode === "INTERVAL"
+          ? await adaptIntervalRawInput(effectiveRawInputBase)
+          : mode === "GREEN_BUTTON"
+            ? await withAdminRouteStageTimeout({
+                stage: "adapt_green_button_raw_input",
+                correlationId,
+                timeoutMs: GREEN_BUTTON_ROUTE_STAGE_TIMEOUT_MS,
+                mode,
+                houseId: effectiveHouseId,
+                stageTimingsMs,
+                promise: adaptGreenButtonRawInput(effectiveRawInputBase),
+              })
+            : mode === "MANUAL_ANNUAL"
+              ? await adaptManualAnnualRawInput({
+                  ...effectiveRawInputBase,
+                  manualUsagePayload: effectiveManualUsagePayload,
+                })
+              : mode === "NEW_BUILD"
+                ? await adaptNewBuildRawInput(effectiveRawInputBase)
+                : await adaptManualMonthlyRawInput({
+                    ...effectiveRawInputBase,
+                    manualUsagePayload: effectiveManualUsagePayload,
+                  });
+      const slimEngineInput = buildSlimAdminEngineInput(engineInput);
       let artifact = await runSharedSimulation(engineInput);
       let artifactDataset = asRecord(artifact.dataset);
       let artifactDatasetMeta = asRecord(artifactDataset?.meta);
@@ -2241,23 +2249,33 @@ export async function POST(request: NextRequest) {
         });
       }
       const shouldReturnCompactPastResponse = Boolean(effectiveRawInputBase.scenarioId && !isManualMode);
-      const buildInputsForCompare = await loadPastSimBuildInputsForRead({
-        userId: effectiveUserId,
-        houseId: effectiveHouseId,
-        scenarioId: String(effectiveRawInputBase.scenarioId ?? ""),
-      });
+      const buildInputsForCompare = effectiveRawInputBase.scenarioId
+        ? await loadPastSimBuildInputsForRead({
+            userId: effectiveUserId,
+            houseId: effectiveHouseId,
+            scenarioId: String(effectiveRawInputBase.scenarioId),
+          })
+        : null;
       const preferredActualSourceForPast = resolvePastSimPreferredActualSource({
         preferredActualSource: effectiveRawInputBase.preferredActualSource,
         dataset: artifactDataset,
         buildInputs: buildInputsForCompare,
       });
-      const sageTruthForPastDisplay = await resolveSageActualTruthForRunDisplay({
-        userId: effectiveUserId,
-        houseId: effectiveHouseId,
-        actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
-        smtSourceEsiid,
+      const sageTruthForPastDisplay = await resolveSageDatasetForRunDisplay({
+        engineInput,
+        scenarioId: effectiveRawInputBase.scenarioId,
+        isManualMode,
         preferredActualSource: preferredActualSourceForPast,
         greenButtonFullYearIntervalsForDisplay: preferredActualSourceForPast === "GREEN_BUTTON",
+        reloadSageTruth: () =>
+          resolveSageActualTruthForRunDisplay({
+            userId: effectiveUserId,
+            houseId: effectiveHouseId,
+            actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
+            smtSourceEsiid,
+            preferredActualSource: preferredActualSourceForPast,
+            greenButtonFullYearIntervalsForDisplay: preferredActualSourceForPast === "GREEN_BUTTON",
+          }),
       });
       const sageDisplayArgsForPast = await sageAndStaleIncompleteDisplayArgs({
         sageDataset: sageTruthForPastDisplay?.dataset,
@@ -2748,46 +2766,39 @@ export async function POST(request: NextRequest) {
     lightweightActualUsage: true as const,
     skipLightweightInsightRecompute: (previewMode === "GREEN_BUTTON" ? false : true) as boolean,
   };
-  const { resolveGreenButtonBaselineUsageForUserSite } = await import("@/lib/usage/greenButtonUserSiteBaseline");
-  const { isGreenButtonPrimaryDataset } = await import("@/lib/usage/smtTailCoverage");
-
-  let sourceBaselineResolvedUsage: {
-    dataset: unknown;
-    alternatives: { smt: unknown; greenButton: unknown };
-  } | null = null;
-  if (compactLookupBaselineResponse) {
-    const sourceLayer = await resolveIntervalsLayer({
-      userId: resolved.userId,
-      houseId: resolved.selectedHouse.id,
-      layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
-      esiid: resolved.selectedHouse.esiid ?? null,
-      lightweightActualUsage: true,
-      skipLightweightInsightRecompute: previewMode !== "GREEN_BUTTON",
-    }).catch(() => null);
-    if (sourceLayer && isGreenButtonPrimaryDataset(sourceLayer.dataset)) {
-      sourceBaselineResolvedUsage = await resolveGreenButtonBaselineUsageForUserSite({
-        userId: resolved.userId,
-        houseId: resolved.selectedHouse.id,
-        actualContextHouseId: previewActualContextHouse.id,
-        resolvedUsage: sourceLayer,
-      }).catch(() => null);
-    }
-  }
-
-  // User-site baseline contract: same GB passthrough + weather score as /api/user/usage.
-  const userUsagePageBaselineContract = await buildUserUsageHouseContract({
+  const lookupContractProfileArgs = {
     userId: resolved.userId,
-    house: {
-      id: resolved.selectedHouse.id,
-      label: resolved.selectedHouse.label ?? null,
-      esiid: resolved.selectedHouse.esiid ?? null,
-    },
-    weatherHouseId: previewActualContextHouse.id,
     homeProfile: homeProfile ?? null,
     applianceProfileRecord: applianceProfileRecord ?? null,
-    ...(sourceBaselineResolvedUsage ? { resolvedUsage: sourceBaselineResolvedUsage } : {}),
     ...lookupContractOpts,
-  }).catch(() => null);
+  } as const;
+
+  // User-site baseline contract: same GB passthrough + weather score as /api/user/usage.
+  const userUsagePageBaselineContract =
+    previewMode === "GREEN_BUTTON"
+      ? await buildGreenButtonUserSiteParityContract({
+          ...lookupContractProfileArgs,
+          sourceHouse: {
+            id: resolved.selectedHouse.id,
+            label: resolved.selectedHouse.label ?? null,
+            esiid: resolved.selectedHouse.esiid ?? null,
+          },
+          actualContextHouseId: previewActualContextHouse.id,
+        }).catch(() => null)
+      : await buildUserUsageHouseContract({
+          ...lookupContractProfileArgs,
+          house: {
+            id: resolved.selectedHouse.id,
+            label: resolved.selectedHouse.label ?? null,
+            esiid: resolved.selectedHouse.esiid ?? null,
+          },
+          weatherHouseId: previewActualContextHouse.id,
+          resolvedUsage: sharedResolvedUsageLayer,
+          weatherSensitivity: {
+            score: weatherEnvelope.score ?? null,
+            derivedInput: weatherEnvelope.derivedInput ?? null,
+          },
+        }).catch(() => null);
   const userUsageBaselineContract = userUsagePageBaselineContract;
   const baselineParityAudit = buildOnePathBaselineParityAudit({
     houseContract: userUsageBaselineContract,

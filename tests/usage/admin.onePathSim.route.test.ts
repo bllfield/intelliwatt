@@ -44,6 +44,7 @@ const buildSharedSimulationReadModel = vi.fn();
 const buildOnePathManualUsagePastSimReadResult = vi.fn();
 const readOnePathSimulatedUsageScenario = vi.fn();
 const listOnePathScenarioEvents = vi.fn();
+const dispatchPastSimRecalc = vi.fn();
 const ensureGlobalOnePathLabTestHomeHouse = vi.fn();
 const getOnePathLabTestHomeLink = vi.fn();
 const replaceGlobalOnePathLabTestHomeFromSource = vi.fn();
@@ -126,6 +127,19 @@ vi.mock("@/lib/usage/greenButtonUserSiteBaseline", () => ({
   weatherSensitivityFromPassthroughDataset: vi.fn(() => null),
 }));
 
+vi.mock("@/lib/usage/onePathGreenButtonUsageGate", () => ({
+  assertOnePathGreenButtonPersistedUsage: vi.fn(async () => ({ ok: true })),
+  greenButtonUploadHasPersistedUsage: vi.fn(() => true),
+}));
+
+vi.mock("@/lib/usage/loadPastSimBuildInputsForRead", () => ({
+  loadPastSimBuildInputsForRead: vi.fn(async () => null),
+}));
+
+vi.mock("@/lib/usage/onePathPastUserSiteParity", () => ({
+  ensureOnePathPastBuildInputsFromSource: vi.fn(async () => ({ ok: true, syncKind: "noop" })),
+}));
+
 vi.mock("@/modules/onePathSim/baselineReadOnlyView", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/modules/onePathSim/baselineReadOnlyView")>();
   return {
@@ -199,6 +213,10 @@ vi.mock("@/modules/onePathSim/onePathSim", () => ({
 vi.mock("@/modules/onePathSim/serviceBridge", () => ({
   readOnePathSimulatedUsageScenario: (...args: any[]) => readOnePathSimulatedUsageScenario(...args),
   listOnePathScenarioEvents: (...args: any[]) => listOnePathScenarioEvents(...args),
+}));
+
+vi.mock("@/modules/usageSimulator/pastSimRecalcDispatch", () => ({
+  dispatchPastSimRecalc: (...args: any[]) => dispatchPastSimRecalc(...args),
 }));
 
 vi.mock("@/modules/onePathSim/manualPastSimReadResult", () => ({
@@ -333,6 +351,7 @@ describe("admin one path sim route", () => {
     buildOnePathManualUsagePastSimReadResult.mockReset();
     readOnePathSimulatedUsageScenario.mockReset();
     listOnePathScenarioEvents.mockReset();
+    dispatchPastSimRecalc.mockReset();
     ensureGlobalOnePathLabTestHomeHouse.mockReset();
     getOnePathLabTestHomeLink.mockReset();
     replaceGlobalOnePathLabTestHomeFromSource.mockReset();
@@ -682,6 +701,11 @@ describe("admin one path sim route", () => {
         },
       },
     });
+    dispatchPastSimRecalc.mockResolvedValue({
+      executionMode: "inline",
+      correlationId: "past-recalc-corr-1",
+      result: { ok: true, canonicalArtifactInputHash: null },
+    });
     listOnePathScenarioEvents.mockResolvedValue({
       ok: true,
       events: [
@@ -1018,15 +1042,12 @@ describe("admin one path sim route", () => {
 
     expect(res.status).toBe(200);
     expect(json.ok).toBe(true);
-    expect(resolveUpstreamUsageTruthForSimulation).toHaveBeenCalledWith({
-      userId: "user-1",
-      houseId: "house-1",
-      actualContextHouseId: "house-1",
-      actualContextUserId: "user-1",
-      smtSourceEsiid: "esiid-1",
-      seedIfMissing: false,
-      preferredActualSource: "GREEN_BUTTON",
-    });
+    expect(resolveUpstreamUsageTruthForSimulation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        preferredActualSource: "GREEN_BUTTON",
+        seedIfMissing: false,
+      })
+    );
     expect(json.sourceContext.userUsageBaselineContract).toEqual(
       expect.objectContaining({
         houseId: "house-1",
@@ -1037,7 +1058,7 @@ describe("admin one path sim route", () => {
         houseId: "house-1",
       })
     );
-    expect(buildUserUsageHouseContract).toHaveBeenCalledTimes(1);
+    expect(buildGreenButtonUserSiteParityContract).toHaveBeenCalledTimes(1);
     expect(json.sourceContext.userUsageBaselineView).toEqual(
       expect.objectContaining({
         summary: expect.objectContaining({
@@ -1209,12 +1230,7 @@ describe("admin one path sim route", () => {
     const json = await res.json();
 
     expect(res.status).toBe(200);
-    expect(adaptGreenButtonRawInput).toHaveBeenCalledTimes(1);
-    expect(adaptGreenButtonRawInput).toHaveBeenCalledWith(
-      expect.objectContaining({
-        preferredActualSource: "GREEN_BUTTON",
-      })
-    );
+    expect(adaptGreenButtonRawInput).not.toHaveBeenCalled();
     expect(adaptIntervalRawInput).not.toHaveBeenCalled();
     expect(buildGreenButtonUserSiteParityContract).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1226,16 +1242,7 @@ describe("admin one path sim route", () => {
     expect(runSharedSimulation).not.toHaveBeenCalled();
     expect(json.debugDiagnosticsIncluded).toBe(false);
     expect(json.runType).toBe("BASELINE_PASSTHROUGH");
-    expect(json.engineInput).toEqual(
-      expect.objectContaining({
-        inputType: "GREEN_BUTTON",
-        simulatorMode: "GREEN_BUTTON",
-        actualIntervalsReference: {
-          omittedForAdminResponse: true,
-          rowsCount: 0,
-        },
-      })
-    );
+    expect(json.engineInput).toBeNull();
     expect(json.runDisplayView).toBeTruthy();
     expect(json.artifact ?? null).toBeNull();
     expect(json.readModel).toEqual(
@@ -1250,7 +1257,7 @@ describe("admin one path sim route", () => {
 
   it("returns a structured timeout error for green button baseline stage overruns", async () => {
     const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
-    adaptGreenButtonRawInput.mockImplementationOnce(() => new Promise(() => {}));
+    buildGreenButtonUserSiteParityContract.mockImplementationOnce(() => new Promise(() => {}));
 
     const pending = POST(
       buildRequest({
@@ -1271,7 +1278,7 @@ describe("admin one path sim route", () => {
       expect.objectContaining({
         ok: false,
         error: "one_path_admin_timeout",
-        stage: "adapt_green_button_raw_input",
+        stage: "build_green_button_user_site_parity_contract",
         correlationId: expect.any(String),
         timeoutMs: 120_000,
       })
@@ -1583,13 +1590,15 @@ describe("admin one path sim route", () => {
       userId: "user-1",
       houseId: "house-1",
       scenarioId: "scenario-1",
-      readMode: "allow_rebuild",
+      readMode: "artifact_only",
       forceRebuildArtifact: false,
+      requireExactArtifactMatch: false,
       projectionMode: "baseline",
       readContext: {
-        artifactReadMode: "allow_rebuild",
+        artifactReadMode: "artifact_only",
         projectionMode: "baseline",
         compareSidecarRequest: true,
+        userSiteIsolation: true,
       },
     });
     expect(listOnePathScenarioEvents).toHaveBeenCalledWith({
@@ -2202,14 +2211,13 @@ describe("admin one path sim route", () => {
   });
 
   it("returns a distinct usage DB unavailable error for upstream truth failures when the usage env is missing", async () => {
-    buildGreenButtonUserSiteParityContract.mockResolvedValueOnce(null);
-    buildIntervalLikeBaselinePassthroughDataset.mockRejectedValueOnce(
+    adaptIntervalRawInput.mockRejectedValueOnce(
       new UpstreamUsageTruthMissingError({
         usageTruthSource: "missing_usage_truth",
         seedResult: null,
         upstreamUsageTruth: {
           title: "Upstream Usage Truth",
-          summary: "green button usage truth missing",
+          summary: "interval usage truth missing",
           currentRun: {},
           sharedOwners: [],
         },
@@ -2222,7 +2230,7 @@ describe("admin one path sim route", () => {
         action: "run",
         email: "customer@example.com",
         houseId: "house-1",
-        mode: "GREEN_BUTTON",
+        mode: "INTERVAL",
       })
     );
     const json = await res.json();
@@ -2459,15 +2467,7 @@ describe("admin one path sim route", () => {
     const json = await res.json();
 
     expect(res.status).toBe(200);
-    expect(adaptGreenButtonRawInput).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: "user-1",
-        houseId: "test-home-1",
-        actualContextHouseId: "test-home-1",
-        actualContextUserId: "user-1",
-        preferredActualSource: "GREEN_BUTTON",
-      })
-    );
+    expect(adaptGreenButtonRawInput).not.toHaveBeenCalled();
     expect(buildGreenButtonUserSiteParityContract).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "user-1",
@@ -2522,6 +2522,14 @@ describe("admin one path sim route", () => {
         userId: "user-1",
         house: expect.objectContaining({ id: "house-1", esiid: "esiid-1" }),
         weatherHouseId: "house-1",
+        resolvedUsage: expect.objectContaining({
+          dataset: expect.objectContaining({
+            summary: expect.objectContaining({ totalKwh: 3790 }),
+          }),
+        }),
+        weatherSensitivity: expect.objectContaining({
+          score: expect.objectContaining({ scoringMode: "INTERVAL_BASED" }),
+        }),
       })
     );
     expect(buildUserUsageHouseContract).toHaveBeenCalledTimes(1);
