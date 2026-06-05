@@ -312,7 +312,7 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(routeSource).toContain("one_path_admin_gb_past_run");
     expect(routeSource).toContain("resolveOnePathGbPastCachedArtifactInputHash");
     expect(onePathSource).toContain("skipOptionalEnrichment: isBaselineGreenButtonRun");
-    expect(onePathSource).toContain("skipLightweightInsightRecompute: true");
+    expect(routeSource).toContain("skipLightweightInsightRecompute: false");
     expect(routeSource).toContain("buildPastSimRunReadbackResponse");
     expect(routeSource).toContain("debugDiagnosticsSuppressedReason: \"past_sim_compact_response\"");
     expect(routeSource).toContain("effectiveRawInputBase.scenarioId && !isManualMode");

@@ -516,9 +516,12 @@ export function buildOnePathRunReadOnlyView(args: {
         ? (tuningSummary.validationMetricsSummary as Record<string, unknown>)
         : null;
 
+  const pastSummaryFromViewModel = !isBaselinePassthrough && Boolean(viewModel.coverage.hasSimulatedFill);
   const displayTotals = isBaselinePassthrough
     ? viewModel.derived.totals
-    : totalsFromDailyRows(dailyRows);
+    : pastSummaryFromViewModel
+      ? viewModel.derived.totals
+      : totalsFromDailyRows(dailyRows);
 
   return {
     summary: {
@@ -539,16 +542,24 @@ export function buildOnePathRunReadOnlyView(args: {
       hasSimulatedFill: Boolean(viewModel.coverage.hasSimulatedFill),
       totals: displayTotals,
       avgDailyKwh:
-        !isBaselinePassthrough && dailyRows.length > 0
-          ? round2(displayTotals.netKwh / dailyRows.length)
-          : viewModel.derived.avgDailyKwh,
+        pastSummaryFromViewModel || isBaselinePassthrough
+          ? viewModel.derived.avgDailyKwh
+          : dailyRows.length > 0
+            ? round2(displayTotals.netKwh / dailyRows.length)
+            : viewModel.derived.avgDailyKwh,
       baseload: viewModel.derived.baseload,
       baseloadDaily: viewModel.derived.baseloadDaily,
       baseloadMonthly: viewModel.derived.baseloadMonthly,
       peakDay: viewModel.derived.peakDay,
       peakHour: viewModel.derived.peakHour,
-      weekdayKwh: isBaselinePassthrough ? viewModel.derived.weekdayKwh : displayTotals.weekdayKwh,
-      weekendKwh: isBaselinePassthrough ? viewModel.derived.weekendKwh : displayTotals.weekendKwh,
+      weekdayKwh:
+        isBaselinePassthrough || pastSummaryFromViewModel
+          ? viewModel.derived.weekdayKwh
+          : displayTotals.weekdayKwh,
+      weekendKwh:
+        isBaselinePassthrough || pastSummaryFromViewModel
+          ? viewModel.derived.weekendKwh
+          : displayTotals.weekendKwh,
       timeOfDayBuckets: viewModel.derived.timeOfDayBuckets,
     },
     monthlyRows: viewModel.derived.monthly,

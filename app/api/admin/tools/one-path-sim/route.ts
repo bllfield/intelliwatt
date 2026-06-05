@@ -72,6 +72,8 @@ import {
   buildOnePathRunReadOnlyViewFromBaselineContract,
 } from "@/modules/onePathSim/baselineReadOnlyView";
 import { buildGreenButtonUserSiteParityContract } from "@/lib/usage/greenButtonUserSiteBaseline";
+import { resolveGreenButtonUploadRecordDateRange } from "@/lib/usage/greenButtonCoverage";
+import { getLatestGreenButtonFullDayDateKey } from "@/modules/realUsageAdapter/greenButton";
 import { ensureWorkspaceScenariosForHouse } from "@/lib/usage/ensureWorkspaceScenarios";
 import { buildKnownHouseScenarioPrereqStatus } from "@/modules/onePathSim/knownHouseScenarioPrereqs";
 import {
@@ -952,13 +954,29 @@ async function loadGreenButtonUploadSummary(houseId: string | null | undefined) 
         }
       : null;
 
+  const anchorEndDateKey = await getLatestGreenButtonFullDayDateKey({ houseId }).catch(() => null);
+  const displayDateRange =
+    anchorEndDateKey != null
+      ? resolveGreenButtonUploadRecordDateRange({
+          endDateKey: anchorEndDateKey,
+          fallbackStart: derivedCoverage?.start ?? latestUpload?.dateRangeStart ?? null,
+          fallbackEnd: derivedCoverage?.end ?? latestUpload?.dateRangeEnd ?? null,
+        })
+      : null;
+
   if (latestUpload) {
     return {
       ...latestUpload,
-      dateRangeStart: derivedCoverage?.start ?? latestUpload.dateRangeStart ?? null,
-      dateRangeEnd: derivedCoverage?.end ?? latestUpload.dateRangeEnd ?? null,
+      dateRangeStart:
+        displayDateRange?.dateRangeStart ??
+        derivedCoverage?.start ??
+        latestUpload.dateRangeStart ??
+        null,
+      dateRangeEnd:
+        displayDateRange?.dateRangeEnd ?? derivedCoverage?.end ?? latestUpload.dateRangeEnd ?? null,
       intervalCount: derivedCoverage?.count ?? 0,
       hasPersistedUsageIntervals: Boolean(derivedCoverage),
+      latestCompleteLocalDay: anchorEndDateKey,
     };
   }
 
@@ -969,8 +987,8 @@ async function loadGreenButtonUploadSummary(houseId: string | null | undefined) 
     updatedAt: derivedCoverage.end ?? null,
     parseStatus: "complete",
     parseMessage: null,
-    dateRangeStart: derivedCoverage.start,
-    dateRangeEnd: derivedCoverage.end,
+    dateRangeStart: displayDateRange?.dateRangeStart ?? derivedCoverage.start,
+    dateRangeEnd: displayDateRange?.dateRangeEnd ?? derivedCoverage.end,
     intervalMinutes: 15,
     fileName: "derived",
     fileSizeBytes: null,
@@ -2116,7 +2134,7 @@ export async function POST(request: NextRequest) {
             sourceHouse: gbParitySource.house,
             actualContextHouseId: effectiveRawInputBase.actualContextHouseId ?? defaultActualContextHouseId,
             lightweightActualUsage: true,
-            skipLightweightInsightRecompute: true,
+            skipLightweightInsightRecompute: false,
           }),
         });
         const baselineDataset = asRecord(
@@ -2183,7 +2201,7 @@ export async function POST(request: NextRequest) {
           sourceHouse: gbParitySource.house,
           actualContextHouseId: effectiveRawInputBase.actualContextHouseId ?? defaultActualContextHouseId,
           lightweightActualUsage: true,
-          skipLightweightInsightRecompute: true,
+          skipLightweightInsightRecompute: false,
         }).catch(() => null);
         const compactRunDisplayView =
           buildOnePathRunReadOnlyViewFromBaselineContract({ houseContract: gbParityContract }) ??
@@ -2728,7 +2746,7 @@ export async function POST(request: NextRequest) {
     : null;
   const lookupContractOpts = {
     lightweightActualUsage: true as const,
-    skipLightweightInsightRecompute: true as const,
+    skipLightweightInsightRecompute: (previewMode === "GREEN_BUTTON" ? false : true) as boolean,
   };
   const { resolveGreenButtonBaselineUsageForUserSite } = await import("@/lib/usage/greenButtonUserSiteBaseline");
   const { isGreenButtonPrimaryDataset } = await import("@/lib/usage/smtTailCoverage");
@@ -2744,7 +2762,7 @@ export async function POST(request: NextRequest) {
       layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
       esiid: resolved.selectedHouse.esiid ?? null,
       lightweightActualUsage: true,
-      skipLightweightInsightRecompute: true,
+      skipLightweightInsightRecompute: previewMode !== "GREEN_BUTTON",
     }).catch(() => null);
     if (sourceLayer && isGreenButtonPrimaryDataset(sourceLayer.dataset)) {
       sourceBaselineResolvedUsage = await resolveGreenButtonBaselineUsageForUserSite({

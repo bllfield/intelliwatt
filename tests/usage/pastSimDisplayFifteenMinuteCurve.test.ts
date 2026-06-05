@@ -45,10 +45,10 @@ describe("resolvePastSimDisplayFifteenMinuteCurve", () => {
 
     expect(viewModel?.derived.fifteenCurve).toEqual(adminView?.fifteenMinuteAverages);
     expect(adminView?.fifteenMinuteCurveSourceOwner).toContain("resolvePastSimFifteenMinuteCurveFromDataset");
-    expect(viewModel?.derived.fifteenCurve.find((row) => row.hhmm === "12:00")?.avgKw).toBe(8);
+    expect(viewModel?.derived.fifteenCurve.find((row) => row.hhmm === "12:00")?.avgKw).toBe(5.47);
   });
 
-  it("excludes travel/vacant days from the averaged curve", () => {
+  it("includes the final Past simulated interval series in the averaged curve", () => {
     const timezone = "America/Chicago";
     const result = resolvePastSimDisplayFifteenMinuteCurve({
       insightsFifteenMinuteAverages: [{ hhmm: "12:00", avgKw: 0.4 }],
@@ -68,7 +68,7 @@ describe("resolvePastSimDisplayFifteenMinuteCurve", () => {
       coverageEnd: "2026-06-03",
     });
 
-    expect(result.fifteenMinuteAverages.find((row) => row.hhmm === "12:00")?.avgKw).toBe(8);
+    expect(result.fifteenMinuteAverages.find((row) => row.hhmm === "12:00")?.avgKw).toBe(5.47);
   });
 
   it("Past simulated fill ignores upstream sage GB intervals (artifact series only)", () => {

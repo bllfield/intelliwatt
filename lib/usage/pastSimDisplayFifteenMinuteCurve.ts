@@ -12,10 +12,7 @@ import {
   shouldRebuildGreenButtonFifteenMinuteCurveFromSeries,
 } from "@/lib/time/greenButtonPersistedIntervalConvert";
 import { filterDisplayDailyExcludingGreenButtonShiftedTargets } from "@/lib/usage/greenButtonPastYearShiftMerge";
-import {
-  buildLoadCurveInsightsFromIntervalRows,
-  filterIntervalRowsToActualDailyDates,
-} from "@/lib/usage/fifteenMinuteLoadCurve";
+import { buildLoadCurveInsightsFromIntervalRows } from "@/lib/usage/fifteenMinuteLoadCurve";
 
 export type PastSimDisplayFifteenMinuteCurveInput = {
   insightsFifteenMinuteAverages?: Array<{ hhmm?: string; avgKw?: number }> | null;
@@ -103,7 +100,7 @@ function deriveFifteenMinuteAveragesFromIntervals(
     .sort((left, right) => (left.hhmm < right.hhmm ? -1 : left.hhmm > right.hhmm ? 1 : 0));
 }
 
-function buildActualDayLoadCurve(input: PastSimDisplayFifteenMinuteCurveInput): Array<{ hhmm: string; avgKw: number }> {
+function buildPastSimSeriesLoadCurve(input: PastSimDisplayFifteenMinuteCurveInput): Array<{ hhmm: string; avgKw: number }> {
   const intervals15 = Array.isArray(input.intervals15) ? input.intervals15 : [];
   if (!intervals15.length) return [];
 
@@ -112,14 +109,11 @@ function buildActualDayLoadCurve(input: PastSimDisplayFifteenMinuteCurveInput): 
       homeTimezone: input.timezone,
       meta: resolveGreenButtonPastDisplayMeta(input.meta ?? null),
       displayDaily: greenButtonDisplayDailyForLoadCurve(input),
-      filterToActualDailyDates: true,
+      filterToActualDailyDates: false,
     }).fifteenMinuteAverages;
   }
 
-  return buildLoadCurveInsightsFromIntervalRows(
-    filterIntervalRowsToActualDailyDates(intervals15, input.displayDaily, input.timezone),
-    input.timezone
-  ).fifteenMinuteAverages;
+  return buildLoadCurveInsightsFromIntervalRows(intervals15, input.timezone).fifteenMinuteAverages;
 }
 
 const GREEN_BUTTON_CURVE_OWNER =
@@ -180,7 +174,7 @@ function buildGreenButtonSeriesFifteenCurve(
       homeTimezone: String(input.timezone ?? "").trim() || "America/Chicago",
       meta: displayMeta,
       displayDaily: greenButtonDisplayDailyForLoadCurve(input),
-      filterToActualDailyDates: input.hasSimulatedFill,
+      filterToActualDailyDates: false,
     }).fifteenMinuteAverages
   );
 }
@@ -281,13 +275,13 @@ export function resolvePastSimDisplayFifteenMinuteCurve(
     }
   }
 
-  const actualDayLoadCurve =
+  const pastSimSeriesLoadCurve =
     input.hasSimulatedFill && intervals15.length > 0 && !greenButtonBacked
-      ? sortFifteenCurve(buildActualDayLoadCurve(input))
+      ? sortFifteenCurve(buildPastSimSeriesLoadCurve(input))
       : [];
 
   const rebuiltFifteenCurve =
-    insightFifteenCurve.length > 0 || actualDayLoadCurve.length > 0
+    insightFifteenCurve.length > 0 || pastSimSeriesLoadCurve.length > 0
       ? []
       : sortFifteenCurve(
           deriveFifteenMinuteAveragesFromIntervals(intervals15, {
@@ -297,10 +291,10 @@ export function resolvePastSimDisplayFifteenMinuteCurve(
           })
         );
 
-  if (actualDayLoadCurve.length > 0) {
+  if (pastSimSeriesLoadCurve.length > 0) {
     return {
-      fifteenMinuteAverages: actualDayLoadCurve,
-      sourceOwner: "resolvePastSimDisplayFifteenMinuteCurve(...).actualDayIntervals15",
+      fifteenMinuteAverages: pastSimSeriesLoadCurve,
+      sourceOwner: "resolvePastSimDisplayFifteenMinuteCurve(...).pastSimSeriesIntervals15",
     };
   }
   if (insightFifteenCurve.length > 0) {

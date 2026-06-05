@@ -32,7 +32,6 @@ import {
 } from "@/lib/time/greenButtonPersistedIntervalConvert";
 import {
   buildLoadCurveInsightsFromIntervalRows,
-  filterIntervalRowsToActualDailyDates,
   normalizeHomeTimezoneForLoadCurve,
 } from "@/lib/usage/fifteenMinuteLoadCurve";
 import { buildDisplayedMonthlyRows } from "@/modules/usageSimulator/monthlyCompareRows";
@@ -881,12 +880,9 @@ export function reconcileRestoredPastDatasetFromDecodedIntervals(args: {
           homeTimezone,
           meta: resolveGreenButtonPastDisplayMeta(datasetMeta),
           displayDaily: enrichedDaily,
-          filterToActualDailyDates: true,
+          filterToActualDailyDates: false,
         })
-      : buildLoadCurveInsightsFromIntervalRows(
-          filterIntervalRowsToActualDailyDates(intervalRowsForInsights, enrichedDaily, homeTimezone),
-          homeTimezone
-        );
+      : buildLoadCurveInsightsFromIntervalRows(intervalRowsForInsights, homeTimezone);
     (dataset.insights as any).fifteenMinuteAverages = loadCurveInsights.fifteenMinuteAverages;
     (dataset.insights as any).timeOfDayBuckets = loadCurveInsights.timeOfDayBuckets;
   }

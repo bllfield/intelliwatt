@@ -279,14 +279,21 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
   const totalsFromMonthly = monthly.length
     ? deriveTotalsFromRows(monthly.map((row: any) => ({ kwh: Number(row?.kwh) || 0 })))
     : null;
-  const totals =
+  const totalsFromDisplayDaily =
     hasSimulatedFill && displayDaily.length
-      ? totalsFromSeries
-      : totalsFromApi != null
+      ? {
+          importKwh: Number(totalsFromSeries.importKwh.toFixed(2)),
+          exportKwh: Number(totalsFromSeries.exportKwh.toFixed(2)),
+          netKwh: Number(totalsFromSeries.netKwh.toFixed(2)),
+        }
+      : null;
+  const totals =
+    totalsFromDisplayDaily ??
+    (totalsFromApi != null
         ? totalsFromMonthly != null && Math.abs((Number(totalsFromApi?.netKwh) || 0) - totalsFromMonthly.netKwh) > 0.05
           ? totalsFromMonthly
           : totalsFromApi
-        : totalsFromMonthly ?? totalsFromSeries;
+        : totalsFromMonthly ?? totalsFromSeries);
   const totalKwh = totals.netKwh;
   const recentDaily = displayDaily
     .slice()
@@ -304,8 +311,9 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
         .filter((row) => /^\d{4}-\d{2}$/.test(row.month))
         .sort((left, right) => (left.month < right.month ? -1 : left.month > right.month ? 1 : 0))
     : buildDisplayedMonthlyRows(dataset);
-  const weekdayWeekend = hasManualDisplayWindowStitch ? deriveWeekdayWeekendFromDaily(recentDaily) : null;
-  const timeOfDayBuckets = hasManualDisplayWindowStitch
+  const deriveSummaryFromDisplayDaily = hasManualDisplayWindowStitch || hasSimulatedFill;
+  const weekdayWeekend = deriveSummaryFromDisplayDaily ? deriveWeekdayWeekendFromDaily(recentDaily) : null;
+  const timeOfDayBuckets = deriveSummaryFromDisplayDaily
     ? deriveTimeOfDayBucketsFromIntervals(dataset?.series?.intervals15 ?? [], {
         start: coverageStart,
         end: coverageEnd,
