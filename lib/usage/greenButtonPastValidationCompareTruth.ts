@@ -127,7 +127,7 @@ function resolveGreenButtonSourceDateByTargetDate(
  * Green Button Past read: merge validation keys/actuals and backfill missing actual totals from persisted GB intervals.
  */
 export async function ensureGreenButtonValidationCompareMetaForRead(args: {
-  dataset: { meta?: Record<string, unknown> };
+  dataset: { meta?: Record<string, unknown> } & Record<string, unknown>;
   buildInputs?: Record<string, unknown> | null;
   houseId: string;
   esiid: string | null;
@@ -191,7 +191,7 @@ export async function ensureGreenButtonValidationCompareMetaForRead(args: {
       dateKeysLocal: missingKeys,
       preferredSource: "GREEN_BUTTON",
     });
-    for (const [dk, kwh] of fetched.entries()) {
+    for (const [dk, kwh] of Array.from(fetched.entries())) {
       if (Number.isFinite(kwh)) actualByDate[dk] = round2(kwh);
     }
     actualByDate = applyGreenButtonShiftedTargetActualTotals({

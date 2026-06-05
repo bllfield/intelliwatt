@@ -5,7 +5,11 @@ import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/vali
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { buildSimulatorInputs, travelRangesToExcludeDateKeys, type BaseKind, type BuildMode } from "@/modules/usageSimulator/build";
-import { computeRequirements, type SimulatorMode } from "@/modules/usageSimulator/requirements";
+import {
+  computeRequirements,
+  resolveSimulatorRequirementsMode,
+  type SimulatorMode,
+} from "@/modules/usageSimulator/requirements";
 import { hasActualIntervals, resolveActualUsageSourceAnchor } from "@/modules/realUsageAdapter/actual";
 import { loadGreenButtonPastProducerIntervals } from "@/lib/usage/greenButtonPastProducerLoad";
 import { SMT_SHAPE_DERIVATION_VERSION } from "@/modules/realUsageAdapter/smt";
@@ -505,7 +509,7 @@ async function getValidationActualDailyByDateForDataset(args: {
           dateKeysLocal: missingKeys,
           preferredSource: "GREEN_BUTTON",
         });
-        for (const [dk, kwh] of fetched.entries()) {
+        for (const [dk, kwh] of Array.from(fetched.entries())) {
           if (Number.isFinite(kwh)) map.set(dk, Math.round(kwh * 100) / 100);
         }
       }
@@ -8323,9 +8327,10 @@ export async function getSimulatorRequirements(args: { userId: string; houseId: 
     preferredSource,
   });
   const actualSource = actualSourceAnchor.source;
+  const requirementsMode = resolveSimulatorRequirementsMode({ mode: args.mode, hasActualIntervals: hasActual });
   const req = computeRequirements(
     { manualUsagePayload: manualUsagePayload as any, homeProfile: homeProfile as any, applianceProfile: applianceProfile as any, hasActualIntervals: hasActual },
-    args.mode,
+    requirementsMode,
   );
 
   return {

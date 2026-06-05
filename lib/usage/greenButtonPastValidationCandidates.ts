@@ -95,16 +95,17 @@ export function buildGreenButtonActualDailyKwhByHomeDateKey(args: {
   );
   if (wanted.size === 0) return {};
 
+  const wantedKeys = Array.from(wanted);
   const totals = new Map<string, number>();
   const hasHomeDateKeys = args.intervals.some((row) => asDateKey(row.homeDateKey));
   const shiftMap = args.sourceDateByTargetDate ?? {};
   const extraSourceKeys = new Set<string>();
-  for (const dk of wanted) {
+  for (const dk of wantedKeys) {
     if (totals.has(dk)) continue;
     const sourceKey = asDateKey(shiftMap[dk]);
     if (sourceKey && sourceKey !== dk) extraSourceKeys.add(sourceKey);
   }
-  const wantedOrShiftSources = new Set([...wanted, ...extraSourceKeys]);
+  const wantedOrShiftSources = new Set([...wantedKeys, ...Array.from(extraSourceKeys)]);
 
   if (hasHomeDateKeys) {
     for (const row of args.intervals) {
@@ -112,7 +113,7 @@ export function buildGreenButtonActualDailyKwhByHomeDateKey(args: {
       if (!dk || !wantedOrShiftSources.has(dk)) continue;
       totals.set(dk, (totals.get(dk) ?? 0) + Math.max(0, Number(row.kwh) || 0));
     }
-    for (const dk of wanted) {
+    for (const dk of wantedKeys) {
       if (totals.has(dk)) continue;
       const sourceKey = asDateKey(shiftMap[dk]);
       if (!sourceKey || sourceKey === dk || !totals.has(sourceKey)) continue;
@@ -139,7 +140,7 @@ export function buildGreenButtonActualDailyKwhByHomeDateKey(args: {
     if (!dk || !wantedOrShiftSources.has(dk)) continue;
     totals.set(dk, (totals.get(dk) ?? 0) + Math.max(0, Number(row.kwh) || 0));
   }
-  for (const dk of wanted) {
+  for (const dk of wantedKeys) {
     if (totals.has(dk)) continue;
     const sourceKey = asDateKey(shiftMap[dk]);
     if (!sourceKey || sourceKey === dk || !totals.has(sourceKey)) continue;

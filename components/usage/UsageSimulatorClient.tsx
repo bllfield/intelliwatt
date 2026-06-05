@@ -366,9 +366,13 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
     let cancelled = false;
     (async () => {
       try {
-        const r = await fetch(`/api/user/simulator/requirements?houseId=${encodeURIComponent(houseId)}&mode=${encodeURIComponent(mode)}`, {
+        const requirementsMode = hasActualIntervals && mode === "MANUAL_TOTALS" ? "SMT_BASELINE" : mode;
+        const r = await fetch(
+          `/api/user/simulator/requirements?houseId=${encodeURIComponent(houseId)}&mode=${encodeURIComponent(requirementsMode)}`,
+          {
           cache: "no-store",
-        });
+          }
+        );
         const j = (await r.json().catch(() => null)) as RequirementsResp | null;
         if (cancelled) return;
         if (!r.ok || !j?.ok) {
@@ -400,7 +404,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
     return () => {
       cancelled = true;
     };
-  }, [houseId, mode, refreshToken]);
+  }, [hasActualIntervals, houseId, mode, refreshToken]);
 
   useEffect(() => {
     let cancelled = false;

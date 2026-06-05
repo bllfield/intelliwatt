@@ -12,6 +12,18 @@ export type SimulatorInputs = {
   hasActualIntervals: boolean;
 };
 
+export const USAGE_SOURCE_REQUIREMENT_MESSAGE =
+  "Complete a usage source for this home (Smart Meter Texas, Green Button, manual totals, or new build estimate).";
+
+/** Interval-backed SMT/GB satisfies usage source even when the UI mode is still MANUAL_TOTALS. */
+export function resolveSimulatorRequirementsMode(args: {
+  mode: SimulatorMode;
+  hasActualIntervals: boolean;
+}): SimulatorMode {
+  if (args.mode === "MANUAL_TOTALS" && args.hasActualIntervals) return "SMT_BASELINE";
+  return args.mode;
+}
+
 export function computeRequirements(inputs: SimulatorInputs, mode: SimulatorMode): { canRecalc: boolean; missingItems: string[] } {
   const missingItems: string[] = [];
 
@@ -38,7 +50,7 @@ export function computeRequirements(inputs: SimulatorInputs, mode: SimulatorMode
 
   // MANUAL_TOTALS
   const manualOk = inputs.manualUsagePayload ? validateManualUsagePayload(inputs.manualUsagePayload).ok : false;
-  if (!manualOk) missingItems.unshift("Save manual usage totals (monthly or annual).");
+  if (!manualOk) missingItems.unshift(USAGE_SOURCE_REQUIREMENT_MESSAGE);
 
   return { canRecalc: missingItems.length === 0, missingItems };
 }
