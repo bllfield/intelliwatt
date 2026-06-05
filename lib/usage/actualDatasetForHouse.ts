@@ -21,6 +21,7 @@ import { applySmtLedgerToActualDataset } from "@/lib/usage/smtDayCoverageLedger"
 import {
   canonicalCoverageWindowUtcBounds,
   fillCanonicalDailyTotals,
+  fillCanonicalMonthlyTotals,
   coverageWindowEndingOnDateKey,
   resolveCanonicalUsage365CoverageWindow,
 } from "@/lib/usage/canonicalMetadataWindow";
@@ -1057,20 +1058,41 @@ async function fetchGreenButtonDataset(
       FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${window.cutoff} AND "timestamp" <= ${window.end}
       GROUP BY bucket ORDER BY bucket ASC
     `)) as Array<{ bucket: Date; kwh: number }>);
+    const coverageEndKey = gbConverted.homeCoverageEnd ?? (end ? chicagoDateKey(end) : null);
+    const displayWindow =
+      coverageEndKey != null
+        ? coverageWindowEndingOnDateKey(coverageEndKey, CANONICAL_COVERAGE_TOTAL_DAYS)
+        : null;
+    const coverageStartKey = displayWindow?.startDate ?? gbConverted.homeCoverageStart ?? null;
+    const coverageEndDateKey = displayWindow?.endDate ?? coverageEndKey;
+    const monthlyTotalsFilled =
+      displayWindow != null
+        ? fillCanonicalMonthlyTotals(
+            deriveMonthlyTotalsFromSeries(toSeriesPoint(monthlyRows)),
+            displayWindow
+          )
+        : deriveMonthlyTotalsFromSeries(toSeriesPoint(monthlyRows));
     return {
       summary: {
         source: "GREEN_BUTTON",
         intervalsCount: count,
         totalKwh,
-        start: gbConverted.homeCoverageStart ?? (start ? chicagoDateKey(start) : null),
-        end: gbConverted.homeCoverageEnd ?? (end ? chicagoDateKey(end) : null),
+        start: coverageStartKey,
+        end: coverageEndDateKey,
         latest: gbConverted.lastTsUtc ?? (end ? end.toISOString() : null),
       },
       series: {
         intervals15,
         hourly: toSeriesPoint(hourlyRows),
-        daily: fillDailyGaps(toSeriesPoint(dailyRows), start?.toISOString() ?? null, end?.toISOString() ?? null),
-        monthly: toSeriesPoint(monthlyRows),
+        daily: fillDailyGaps(
+          toSeriesPoint(dailyRows),
+          coverageStartKey ? `${coverageStartKey}T00:00:00.000Z` : start?.toISOString() ?? null,
+          coverageEndDateKey ? `${coverageEndDateKey}T00:00:00.000Z` : end?.toISOString() ?? null
+        ),
+        monthly: monthlyTotalsFilled.map((row) => ({
+          timestamp: `${row.month}-01T00:00:00.000Z`,
+          kwh: row.kwh,
+        })),
         annual: toSeriesPoint(annualRows),
       },
       insights: timeOfDayBuckets.length > 0 ? { timeOfDayBuckets } : null,
@@ -1477,8 +1499,9 @@ export async function getActualUsageDatasetForHouse(
         stitchedMonth,
       };
     }
+    const monthlyTotalsForDisplay = fillCanonicalMonthlyTotals(monthlyTotals, displayCoverageWindow);
     const canonicalMonths = buildDisplayCanonicalMonths({
-      monthlyTotals,
+      monthlyTotals: monthlyTotalsForDisplay,
       stitchedMonth,
     });
     const dailyTotalsForDataset = fillCanonicalDailyTotals(dailyTotals, displayCoverageWindow);
@@ -1513,7 +1536,7 @@ export async function getActualUsageDatasetForHouse(
       })();
     }
     const monthlyForDisplay = buildDisplayedMonthlyRows({
-      monthly: monthlyTotals,
+      monthly: monthlyTotalsForDisplay,
       insights: { stitchedMonth: insights.stitchedMonth ?? stitchedMonth ?? null },
     });
     const baseloadMonthlyForDisplay = baseloadMonthlyFromDisplayedMonthly(
@@ -1717,7 +1740,10 @@ export async function getActualUsageDatasetForHouse(
   const useStitched =
     stitched.length > 0 &&
     (stitchedNonZeroMonths >= 2 || (dbSum <= 1e-3) || (stitchedSum >= dbSum * 0.5));
-  const monthlyForDataset = useStitched ? stitched : fromDb;
+  const monthlyForDataset = fillCanonicalMonthlyTotals(
+    useStitched ? stitched : fromDb,
+    displayCoverageWindow
+  );
   const stitchedMonthForDataset =
     stitchedMonthMeta ??
     buildDisplayStitchedMonthMeta({

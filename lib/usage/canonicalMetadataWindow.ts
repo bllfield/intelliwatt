@@ -86,6 +86,41 @@ export function fillCanonicalDailyTotals<T extends { date: string; kwh: number }
   });
 }
 
+/** Every calendar month (YYYY-MM) from coverage start through end, inclusive. */
+export function enumerateMonthsInclusive(startDateKey: string, endDateKey: string): string[] {
+  const start = normalizeDateKey(startDateKey);
+  const end = normalizeDateKey(endDateKey);
+  if (!start || !end || end < start) return [];
+  const zone = "America/Chicago";
+  let cursor = DateTime.fromISO(start, { zone }).startOf("month");
+  const endMonth = DateTime.fromISO(end, { zone }).startOf("month");
+  if (!cursor.isValid || !endMonth.isValid) return [];
+  const out: string[] = [];
+  while (cursor <= endMonth) {
+    out.push(cursor.toFormat("yyyy-MM"));
+    cursor = cursor.plus({ months: 1 });
+  }
+  return out;
+}
+
+/** Ensure monthly rows include every month in the canonical window (zero-fill gaps). */
+export function fillCanonicalMonthlyTotals<T extends { month: string; kwh: number }>(
+  rows: ReadonlyArray<T>,
+  window: CoverageWindow
+): T[] {
+  const byMonth = new Map<string, T>();
+  for (const row of rows) {
+    const month = String(row.month ?? "").slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(month)) continue;
+    byMonth.set(month, { ...row, month, kwh: Number(row.kwh) || 0 });
+  }
+  return enumerateMonthsInclusive(window.startDate, window.endDate).map((month) => {
+    const existing = byMonth.get(month);
+    if (existing) return existing;
+    return { month, kwh: 0 } as T;
+  });
+}
+
 /** Inclusive local-day window ending on a fixed anchor date (same span math as canonical SMT window). */
 export function coverageWindowEndingOnDateKey(
   endDate: string,
