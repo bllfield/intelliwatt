@@ -56,7 +56,7 @@ function smtGreenButtonXmlReadings(dateKey: string, count: number, valueWh: numb
 const pipelineNow = new Date("2026-01-12T12:00:00.000Z");
 
 describe("runGreenButtonUsagePipeline", () => {
-  it("runs parse, normalize, and canonical today-anchored trim as one shared pipeline", () => {
+  it("runs parse, normalize, and newest-full-day file-anchor trim as one shared pipeline", () => {
     const readings = [
       ...chicagoCstReadings("2026-01-08", 96),
       ...chicagoCstReadings("2026-01-09", 96),

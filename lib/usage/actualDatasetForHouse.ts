@@ -20,14 +20,15 @@ import { CANONICAL_COVERAGE_TOTAL_DAYS } from "@/lib/usage/canonicalCoverageConf
 import { applySmtLedgerToActualDataset } from "@/lib/usage/smtDayCoverageLedger";
 import {
   canonicalCoverageWindowUtcBounds,
+  coverageWindowEndingOnDateKey,
   fillCanonicalDailyTotals,
   fillCanonicalMonthlyTotals,
-  coverageWindowEndingOnDateKey,
   resolveCanonicalUsage365CoverageWindow,
 } from "@/lib/usage/canonicalMetadataWindow";
 import {
   buildUtcRangeForChicagoLocalDateRange,
   resolveGreenButtonBaselineCoverageWindow,
+  resolveGreenButtonDisplayWindow,
 } from "@/lib/usage/greenButtonCoverage";
 import { resolveGreenButtonIntervalIngestReadiness } from "@/lib/usage/greenButtonIntervalReadiness";
 import { loadPersistedGreenButtonIntervalsForWindow } from "@/lib/usage/loadPersistedGreenButtonIntervals";
@@ -1061,7 +1062,7 @@ async function fetchGreenButtonDataset(
     const coverageEndKey = gbConverted.homeCoverageEnd ?? (end ? chicagoDateKey(end) : null);
     const displayWindow =
       coverageEndKey != null
-        ? coverageWindowEndingOnDateKey(coverageEndKey, CANONICAL_COVERAGE_TOTAL_DAYS)
+        ? resolveGreenButtonDisplayWindow(coverageEndKey, CANONICAL_COVERAGE_TOTAL_DAYS)
         : null;
     const coverageStartKey = displayWindow?.startDate ?? gbConverted.homeCoverageStart ?? null;
     const coverageEndDateKey = displayWindow?.endDate ?? coverageEndKey;

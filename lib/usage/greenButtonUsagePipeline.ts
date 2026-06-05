@@ -1,6 +1,6 @@
 import {
   resolveGreenButtonDataAvailableDateKeys,
-  trimGreenButtonIntervalsToCanonicalUsageWindow,
+  trimGreenButtonIntervalsForUsageIngest,
 } from "@/lib/usage/greenButtonCoverage";
 import {
   GREEN_BUTTON_INTERVAL_INGEST_VERSION,
@@ -162,10 +162,7 @@ export function runGreenButtonUsagePipeline(args: {
     startDateKey,
     endDateKey,
     window: displayWindow,
-  } = trimGreenButtonIntervalsToCanonicalUsageWindow(normalized, {
-    totalDays: windowDays,
-    now: args.now,
-  });
+  } = trimGreenButtonIntervalsForUsageIngest(normalized, windowDays);
   args.onStageComplete?.({
     stage: "trim",
     ms: Date.now() - stageStart,
@@ -197,8 +194,8 @@ export function runGreenButtonUsagePipeline(args: {
     appliedWindowDays: windowDays,
     coverageStartDateKey: startDateKey,
     coverageEndDateKey: endDateKey,
-    displayWindowStartDateKey: displayWindow.startDate,
-    displayWindowEndDateKey: displayWindow.endDate,
+    displayWindowStartDateKey: displayWindow?.startDate ?? startDateKey,
+    displayWindowEndDateKey: displayWindow?.endDate ?? endDateKey,
     dataAvailableStartDateKey: dataAvailable.startDateKey ?? undefined,
     dataAvailableEndDateKey: dataAvailable.endDateKey ?? undefined,
     warnings: parsed.warnings,

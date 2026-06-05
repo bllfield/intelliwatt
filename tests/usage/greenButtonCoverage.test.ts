@@ -3,7 +3,7 @@ import { DateTime } from "luxon";
 
 import {
   buildUtcRangeForChicagoLocalDateRange,
-  trimGreenButtonIntervalsToCanonicalUsageWindow,
+  trimGreenButtonIntervalsForUsageIngest,
   trimGreenButtonIntervalsToLatestLocalDays,
 } from "@/lib/usage/greenButtonCoverage";
 import { CANONICAL_COVERAGE_LAG_DAYS } from "@/lib/usage/canonicalCoverageConfig";
@@ -34,28 +34,25 @@ describe("green button coverage window", () => {
     vi.useRealTimers();
   });
 
-  it("trims ingest to the canonical today-anchored window (partial tail days kept)", () => {
-    const intervals = [
-      ...buildChicagoDateRangeIntervals("2024-11-01", 40),
-      ...buildChicagoDateRangeIntervals("2025-11-01", 40),
-    ];
+  it("trims ingest to the newest full-day file anchor and 365 days back", () => {
+    const intervals = buildChicagoDateRangeIntervals("2024-12-01", 366);
 
-    const out = trimGreenButtonIntervalsToCanonicalUsageWindow(intervals, { totalDays: 365 });
+    const out = trimGreenButtonIntervalsForUsageIngest(intervals, 365);
 
-    expect(out.endDateKey).toBe("2025-12-03");
-    expect(out.startDateKey).toBe("2024-12-04");
-    expect(out.trimmed.length).toBeGreaterThan(30 * 96);
-    expect(out.trimmed.length).toBeLessThan(intervals.length);
+    expect(out.endDateKey).toBe("2025-12-01");
+    expect(out.startDateKey).toBe("2024-12-02");
+    expect(out.window?.endDate).toBe("2025-12-01");
+    expect(out.trimmed).toHaveLength(365 * 96);
   });
 
-  it("keeps partial file tail inside the canonical window", () => {
+  it("drops partial tail days after the newest full day", () => {
     const partialDay = buildChicagoDayIntervals("2025-12-02").slice(0, 48);
     const intervals = [...buildChicagoDateRangeIntervals("2025-06-01", 180), ...partialDay];
 
-    const out = trimGreenButtonIntervalsToCanonicalUsageWindow(intervals, { totalDays: 365 });
+    const out = trimGreenButtonIntervalsForUsageIngest(intervals, 365);
 
-    expect(out.endDateKey).toBe("2025-12-03");
-    expect(out.trimmed.some((row) => getChicagoDateKey(row) === "2025-12-02")).toBe(true);
+    expect(out.endDateKey).toBe("2025-11-27");
+    expect(out.trimmed.some((row) => getChicagoDateKey(row) === "2025-12-02")).toBe(false);
   });
 
   it("builds UTC bounds from Chicago-local date keys", () => {

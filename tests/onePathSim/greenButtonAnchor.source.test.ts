@@ -32,9 +32,9 @@ describe("one path green button anchor wiring", () => {
     expect(onePathSource).toContain("usesGreenButtonAnchorWindow");
     expect(onePathSource).toContain("actualMeta.actualSource === \"GREEN_BUTTON\"");
     expect(actualDatasetSource).toContain("getLatestGreenButtonFullDayDateKey");
-    expect(actualDatasetSource).toContain("const greenButtonStartDate = prevCalendarDayDateKey(greenButtonAnchorEndDate, 364);");
+    expect(actualDatasetSource).toContain("resolveGreenButtonBaselineCoverageWindow");
     expect(actualDatasetSource).toContain("buildUtcRangeForChicagoLocalDateRange");
-    expect(actualDatasetSource).toContain("const selectedWindowStartDate = normalizeDateKey(selected?.summary?.start ?? null);");
+    expect(actualDatasetSource).toContain("const selectedWindowStartDate = displayCoverageWindow.startDate;");
     expect(actualDatasetSource).toContain("const rangeStart = selectedWindowStartDate ?? canonicalWindow.startDate;");
   });
 
@@ -57,9 +57,9 @@ describe("one path green button anchor wiring", () => {
 
     expect(userServiceSource).toContain("actualSource: built.source?.actualSource ?? actualSource ?? null");
     expect(onePathServiceSource).toContain("actualSource: built.source?.actualSource ?? actualSource ?? null");
-    expect(sharedPastSource).toContain('intervalActualSource !== "GREEN_BUTTON"');
-    expect(sharedPastSource).toContain("fetchGreenButtonIntervalsForCoverageWindow");
-    expect(onePathPastSource).toContain('intervalActualSource !== "GREEN_BUTTON"');
-    expect(onePathPastSource).toContain("fetchGreenButtonIntervalsForCoverageWindow");
+    expect(sharedPastSource).toContain('intervalActualSource === "GREEN_BUTTON"');
+    expect(sharedPastSource).toContain("loadGreenButtonPastProducerIntervals");
+    expect(onePathPastSource).toContain('intervalActualSource === "GREEN_BUTTON"');
+    expect(onePathPastSource).toContain("loadGreenButtonPastProducerIntervals");
   });
 });

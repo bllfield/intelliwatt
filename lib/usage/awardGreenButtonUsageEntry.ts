@@ -40,6 +40,7 @@ export function resolveGreenButtonExpirationAnchor(input: GreenButtonExpirationI
 /** Active through the end of the Chicago-local calendar day of the last file reading. */
 export function resolveGreenButtonConnectionExpiresAt(anchor: Date): Date {
   const dateKey = getChicagoDateKeyForTimestamp(anchor);
+  if (!dateKey) return anchor;
   const range = buildUtcRangeForChicagoLocalDateRange({ startDateKey: dateKey, endDateKey: dateKey });
   return range?.endInclusive ?? anchor;
 }
