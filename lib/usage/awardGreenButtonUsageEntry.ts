@@ -1,4 +1,5 @@
 import { EntryStatus } from "@prisma/client";
+import { DateTime } from "luxon";
 
 import { prisma } from "@/lib/db";
 import { refreshUserEntryStatuses } from "@/lib/hitthejackwatt/entryLifecycle";
@@ -19,7 +20,7 @@ export type GreenButtonExpirationInput = {
 };
 
 /**
- * Last day of meter data in the uploaded file — not upload time.
+ * Newest meter reading in the uploaded file (Chicago date) — not upload time.
  * SMT expiration is separate (`authorizationEndDate` on the subscription).
  */
 export function resolveGreenButtonExpirationAnchor(input: GreenButtonExpirationInput): Date {
@@ -37,12 +38,17 @@ export function resolveGreenButtonExpirationAnchor(input: GreenButtonExpirationI
   return input.createdAt;
 }
 
-/** Active through the end of the Chicago-local calendar day of the last file reading. */
+/** Active through the end of the Chicago-local day one calendar year after the newest file reading. */
 export function resolveGreenButtonConnectionExpiresAt(anchor: Date): Date {
   const dateKey = getChicagoDateKeyForTimestamp(anchor);
-  if (!dateKey) return anchor;
-  const range = buildUtcRangeForChicagoLocalDateRange({ startDateKey: dateKey, endDateKey: dateKey });
-  return range?.endInclusive ?? anchor;
+  if (!dateKey) return new Date(anchor.getTime() + 365 * 24 * 60 * 60 * 1000);
+  const expireDateKey = DateTime.fromISO(dateKey, { zone: "America/Chicago" }).plus({ years: 1 }).toISODate();
+  if (!expireDateKey) return new Date(anchor.getTime() + 365 * 24 * 60 * 60 * 1000);
+  const range = buildUtcRangeForChicagoLocalDateRange({
+    startDateKey: expireDateKey,
+    endDateKey: expireDateKey,
+  });
+  return range?.endInclusive ?? new Date(anchor.getTime() + 365 * 24 * 60 * 60 * 1000);
 }
 
 export function resolveGreenButtonConnectionExpiresAtForUpload(

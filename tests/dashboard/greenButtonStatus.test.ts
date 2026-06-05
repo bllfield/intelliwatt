@@ -62,7 +62,7 @@ describe("deriveGreenButtonStatus", () => {
     expect(status.label).toBe("ACTIVE");
     expect(status.message).toBe(GREEN_BUTTON_UPLOAD_COMPLETE_MESSAGE);
     expect(status.tone).toBe("success");
-    expect(status.expiresAt?.toLocaleDateString("en-US")).toBe("2/15/2026");
+    expect(status.expiresAt?.toLocaleDateString("en-US")).toBe("2/15/2027");
   });
 
   it("shows meter data span when file readings start after the display window", () => {
@@ -89,7 +89,7 @@ describe("deriveGreenButtonStatus", () => {
     expect(status.detail).toContain("Meter data:");
     expect(status.detail).toContain("4/28/2025");
     expect(status.detail).toContain("2/15/2026");
-    expect(status.expiresAt?.toLocaleDateString("en-US")).toBe("2/15/2026");
+    expect(status.expiresAt?.toLocaleDateString("en-US")).toBe("2/15/2027");
   });
 
   it("shows processing when old intervals exist during re-upload", () => {
