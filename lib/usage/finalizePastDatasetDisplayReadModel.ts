@@ -1,8 +1,5 @@
 import { sageActualDailyKwhByDate } from "@/lib/usage/sageActualDailyTruth";
-import {
-  applyPastSimDisplayTruthToDataset,
-  type DailyRowWithSource,
-} from "@/lib/usage/pastSimStaleIncompleteMeter";
+import { applyPastSimDisplayTruthToDataset } from "@/lib/usage/pastSimStaleIncompleteMeter";
 import { attachPastSimDisplayWeatherToDataset } from "@/lib/usage/pastSimDisplayWeather";
 import { reconcilePastDatasetDisplayTotals } from "@/lib/usage/reconcilePastDatasetDisplayTotals";
 
@@ -38,5 +35,3 @@ export async function finalizePastDatasetDisplayReadModel(args: {
     weatherHouseId: args.weatherHouseId,
   });
 }
-
-export type { DailyRowWithSource };
