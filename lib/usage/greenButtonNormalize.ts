@@ -62,6 +62,9 @@ export type GreenButtonRawReading = {
    * If omitted, we infer from magnitude.
    */
   unit?: string | null;
+
+  /** Diagnostic only (SMT sequential block ingest): raw ESPI timePeriod/start. */
+  rawXmlStartSeconds?: number | null;
 };
 
 /**

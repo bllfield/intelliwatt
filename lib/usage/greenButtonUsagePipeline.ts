@@ -16,7 +16,11 @@ import {
   GREEN_BUTTON_SEQUENTIAL_BLOCKS_PER_CHUNK,
   normalizeGreenButtonIntervalBlocksTo15MinChunked,
 } from "@/lib/usage/greenButtonSequentialBlockNormalize";
-import { parseGreenButtonBuffer, type ParsedGreenButtonResult } from "@/lib/usage/greenButtonParser";
+import {
+  parseGreenButtonBuffer,
+  type GreenButtonXmlParseMode,
+  type ParsedGreenButtonResult,
+} from "@/lib/usage/greenButtonParser";
 
 export const GREEN_BUTTON_USAGE_PIPELINE_WINDOW_DAYS = 365;
 export const GREEN_BUTTON_USAGE_MAX_KWH_PER_INTERVAL = 10;
@@ -67,7 +71,7 @@ export type GreenButtonUsagePipelineStageDetail = {
   rawReadings?: number;
   normalizedIntervals?: number;
   trimmedIntervals?: number;
-  parseMode?: "xml_full_tree" | "xml_interval_blocks";
+  parseMode?: GreenButtonXmlParseMode;
   chunkCount?: number;
 };
 
