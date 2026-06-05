@@ -168,8 +168,11 @@ export function auditUserAdminPastReadModelParity(args: { dataset: unknown }): {
   ok: boolean;
   violations: string[];
 } {
+  const datasetRecord = asRecord(args.dataset);
   const viewModel = buildUserUsageDashboardViewModel({ dataset: args.dataset });
-  const adminView = buildOnePathRunReadOnlyView({ dataset: args.dataset });
+  const adminView = buildOnePathRunReadOnlyView({
+    dataset: Object.keys(datasetRecord).length > 0 ? datasetRecord : null,
+  });
   const violations: string[] = [];
   if (!viewModel || !adminView) {
     return { ok: false, violations: ["missing user or admin read model"] };
@@ -188,10 +191,16 @@ export function auditUserAdminPastReadModelParity(args: { dataset: unknown }): {
   compareNumeric("avgDailyKwh", viewModel.derived.avgDailyKwh, adminView.summary.avgDailyKwh);
 
   const userBucketTotal = round2(
-    viewModel.derived.timeOfDayBuckets.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0)
+    viewModel.derived.timeOfDayBuckets.reduce(
+      (sum: number, row: { kwh?: unknown }) => sum + (Number(row.kwh) || 0),
+      0
+    )
   );
   const adminBucketTotal = round2(
-    adminView.summary.timeOfDayBuckets.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0)
+    adminView.summary.timeOfDayBuckets.reduce(
+      (sum: number, row: { kwh?: unknown }) => sum + (Number(row.kwh) || 0),
+      0
+    )
   );
   compareNumeric("timeOfDayBucketsTotal", userBucketTotal, adminBucketTotal);
 
