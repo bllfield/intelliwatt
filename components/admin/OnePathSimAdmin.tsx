@@ -15,10 +15,16 @@ import { buildOnePathSandboxHarnessSummary } from "@/modules/onePathSim/adminHar
 import { formatAdminToolErrorMessage } from "@/lib/admin/formatAdminToolError";
 import { buildOnePathTuningCycleSummary } from "@/modules/onePathSim/tuningCycleSummary";
 import {
+  buildKnownScenarioHarnessRunControls,
+  readTravelRangesFromLookupSourceContext,
+  type KnownScenarioHarnessRunControls,
+} from "@/modules/onePathSim/knownHouseScenarioHarness";
+import {
   DEFAULT_ONE_PATH_SCENARIO_PRESET_KEY,
   ONE_PATH_SCENARIO_PRESETS,
   getKnownHouseScenarioByKey,
   resolveKnownHouseScenarioSelection,
+  type OnePathKnownScenario,
 } from "@/modules/onePathSim/knownHouseScenarios";
 import { buildKnownHouseScenarioPrereqStatus } from "@/modules/onePathSim/knownHouseScenarioPrereqs";
 import { buildIntervalPastReadinessTrace } from "@/modules/onePathSim/intervalPastReadinessTrace";
@@ -712,6 +718,67 @@ export function OnePathSimAdmin() {
     []
   );
 
+  const applyKnownScenarioHarnessControls = useCallback(
+    (
+      controls: KnownScenarioHarnessRunControls,
+      options?: {
+        clearRunResult?: boolean;
+        selectedHouseIdOverride?: string;
+        actualContextHouseIdOverride?: string;
+      }
+    ) => {
+      setMode(controls.mode);
+      setWeatherPreference(controls.weatherPreference);
+      setValidationSelectionMode(controls.validationSelectionMode);
+      setValidationDayCount(String(controls.validationDayCount ?? 14));
+      setValidationOnlyDateKeysText(controls.validationOnlyDateKeysText);
+      setPersistRequested(controls.persistRequested);
+      setRunReason(controls.runReason);
+      setSelectedScenarioId(controls.selectedScenarioId);
+      setSelectedHouseId(options?.selectedHouseIdOverride ?? controls.selectedHouseId);
+      setActualContextHouseId(
+        options?.actualContextHouseIdOverride ??
+          (controls.actualContextHouseId ||
+            options?.selectedHouseIdOverride ||
+            controls.selectedHouseId)
+      );
+      setTravelRanges(controls.travelRanges);
+      if (options?.clearRunResult !== false) {
+        setRunResult(null);
+      }
+    },
+    []
+  );
+
+  const applyKnownScenarioPresetLocally = useCallback(
+    (
+      scenario: OnePathKnownScenario,
+      lookupJson: LookupResponse,
+      options?: { clearRunResult?: boolean; statusMessage?: string }
+    ) => {
+      const controls = buildKnownScenarioHarnessRunControls({
+        scenario,
+        lookup: lookupJson,
+        travelRangesFromDb: readTravelRangesFromLookupSourceContext(
+          asRecord(lookupJson.sourceContext) ?? undefined
+        ),
+      });
+      applyKnownScenarioHarnessControls(controls, {
+        clearRunResult: options?.clearRunResult,
+        selectedHouseIdOverride: lookupJson.selectedHouse?.id ?? controls.selectedHouseId,
+        actualContextHouseIdOverride:
+          controls.actualContextHouseId ||
+          lookupJson.selectedHouse?.id ||
+          controls.selectedHouseId,
+      });
+      if (options?.statusMessage) {
+        setStatus(options.statusMessage);
+      }
+      return controls;
+    },
+    [applyKnownScenarioHarnessControls]
+  );
+
   const requestLookup = useCallback(
     async (args?: {
       email?: string;
@@ -927,7 +994,6 @@ export function OnePathSimAdmin() {
       if (freshSelection) {
         setRunResult(null);
         setLastRunKnownScenarioKey("");
-        setSelectedKnownScenarioKey("");
         setSelectedHouseId("");
         setActualContextHouseId("");
         setSelectedScenarioId("");
@@ -953,9 +1019,25 @@ export function OnePathSimAdmin() {
                   : json.selectedHouse?.id ?? "",
             }
       );
-      setStatus("Lookup loaded.");
+      const scenarioAfterLookup = getKnownHouseScenarioByKey(selectedKnownScenarioKey);
+      if (scenarioAfterLookup) {
+        applyKnownScenarioPresetLocally(scenarioAfterLookup, json, {
+          clearRunResult: freshSelection,
+          statusMessage: `Lookup loaded. Preset ready: ${scenarioAfterLookup.label} — switch presets or Run without reloading.`,
+        });
+      } else {
+        setStatus("Lookup loaded.");
+      }
     },
-    [actualContextHouseId, applyLookupResponse, email, ensureOnePathTestHomeReady, requestLookup]
+    [
+      actualContextHouseId,
+      applyKnownScenarioPresetLocally,
+      applyLookupResponse,
+      email,
+      ensureOnePathTestHomeReady,
+      requestLookup,
+      selectedKnownScenarioKey,
+    ]
   );
 
   const runGreenButtonRehydrateFromRaw = useCallback(async () => {
@@ -1108,13 +1190,6 @@ export function OnePathSimAdmin() {
 
     setRunResult(null);
     setEmail(resolvedEmail);
-    setMode(selectedKnownScenario.mode);
-    setWeatherPreference(selectedKnownScenario.weatherPreference);
-    setValidationSelectionMode(selectedKnownScenario.validationSelectionMode ?? "stratified_weather_balanced");
-    setValidationDayCount(String(selectedKnownScenario.validationDayCount ?? 14));
-    setValidationOnlyDateKeysText(selectedKnownScenario.validationOnlyDateKeysLocal.join("\n"));
-    setPersistRequested(selectedKnownScenario.persistRequested);
-    setRunReason(`known_house:${selectedKnownScenario.scenarioKey}`);
     setGreenButtonUploadError(null);
     const useLightweightGreenButtonPresetLookup = selectedKnownScenario.scenarioType === "GREEN_BUTTON_TRUTH";
 
@@ -1206,23 +1281,14 @@ export function OnePathSimAdmin() {
       }
     }
 
-    applyLookupResponse(json, {
-      selectedHouseId: presetSelectedHouseId,
-      actualContextHouseId:
-        presetActualContextHouseId ||
-        String(json.selectedHouse?.id ?? "").trim() ||
-        effectiveActualContextHouseId,
-      selectedScenarioId: presetScenarioId,
-      travelRanges: selectedKnownScenario.travelRanges.length
-        ? selectedKnownScenario.travelRanges
-        : Array.isArray((json.sourceContext?.travelRangesFromDb as any[]))
-          ? (json.sourceContext.travelRangesFromDb as Array<{ startDate: string; endDate: string }>)
-          : [],
+    setLookup(json);
+    applyKnownScenarioPresetLocally(selectedKnownScenario, json, {
+      clearRunResult: false,
+      statusMessage: `Scenario preset reloaded from server: ${selectedKnownScenario.label}.`,
     });
-    setStatus(`Scenario preset loaded: ${selectedKnownScenario.label}.`);
   }, [
     actualContextHouseId,
-    applyLookupResponse,
+    applyKnownScenarioPresetLocally,
     email,
     greenButtonSelectedFile,
     lookup?.email,
@@ -1240,7 +1306,27 @@ export function OnePathSimAdmin() {
       setError("Load a user and select a house first.");
       return;
     }
-    const shouldApplyIntervalPastBlocker = mode === "INTERVAL";
+    const presetRunControls = selectedKnownScenario
+      ? buildKnownScenarioHarnessRunControls({
+          scenario: selectedKnownScenario,
+          lookup,
+          travelRangesFromDb: readTravelRangesFromLookupSourceContext(asRecord(lookup.sourceContext) ?? undefined),
+        })
+      : null;
+    if (presetRunControls) {
+      applyKnownScenarioHarnessControls(presetRunControls, { clearRunResult: false });
+    }
+    const effectiveMode = presetRunControls?.mode ?? mode;
+    const effectiveScenarioId = presetRunControls?.selectedScenarioId ?? selectedScenarioId;
+    const effectiveRunReason = presetRunControls?.runReason ?? runReason;
+    const effectiveWeatherPreference = presetRunControls?.weatherPreference ?? weatherPreference;
+    const effectiveValidationSelectionMode = presetRunControls?.validationSelectionMode ?? validationSelectionMode;
+    const effectiveValidationDayCount = presetRunControls?.validationDayCount ?? Number(validationDayCount) || null;
+    const effectiveValidationOnlyDateKeysLocal =
+      presetRunControls?.validationOnlyDateKeysLocal ?? validationOnlyDateKeysLocal;
+    const effectiveTravelRanges = presetRunControls?.travelRanges ?? travelRanges;
+    const effectivePersistRequested = presetRunControls?.persistRequested ?? persistRequested;
+    const shouldApplyIntervalPastBlocker = effectiveMode === "INTERVAL";
     const blockedPastRunSummary =
       shouldApplyIntervalPastBlocker &&
       intervalPastReadinessTrace?.applicableToCurrentPreset !== false &&
@@ -1252,47 +1338,20 @@ export function OnePathSimAdmin() {
       setError(`Past Sim blocked: ${blockedPastRunSummary}`);
       return;
     }
+    if (
+      selectedKnownScenario?.scenarioSelectionStrategy === "scenario_name" &&
+      !effectiveScenarioId
+    ) {
+      setStatus(null);
+      setError(
+        `Could not resolve a "${selectedKnownScenario.scenarioNameHint ?? "Past"}" scenario on the loaded house. Use Reload preset from server once, or Lookup again on a pinned test home.`
+      );
+      return;
+    }
     setRunResult(null);
     setBusy(true);
     setError(null);
-    setStatus(`Running canonical ${mode} through the One Path-owned ${activePathLabel}...`);
-    const presetScenarioSelection =
-      selectedKnownScenario && runReason.startsWith("known_house:")
-        ? resolveKnownHouseScenarioSelection({
-            scenario: selectedKnownScenario,
-            lookup,
-          })
-        : null;
-    const currentSelectedScenarioName = String(
-      (lookup.scenarios ?? []).find((scenario) => String(scenario.id ?? "") === String(selectedScenarioId ?? ""))?.name ?? ""
-    )
-      .trim()
-      .toLowerCase();
-    const presetScenarioHint = String(selectedKnownScenario?.scenarioNameHint ?? "")
-      .trim()
-      .toLowerCase();
-    const selectedScenarioMatchesKnownPreset =
-      !presetScenarioSelection || !selectedKnownScenario
-        ? true
-        : selectedKnownScenario.scenarioSelectionStrategy === "baseline"
-          ? !selectedScenarioId
-          : selectedKnownScenario.scenarioSelectionStrategy === "scenario_id"
-            ? String(selectedScenarioId ?? "") === String(selectedKnownScenario.scenarioId ?? "")
-            : !presetScenarioHint ||
-                currentSelectedScenarioName === presetScenarioHint ||
-                currentSelectedScenarioName.includes(presetScenarioHint);
-    const shouldRealignKnownPresetScenario =
-      Boolean(presetScenarioSelection) &&
-      Boolean(selectedKnownScenario) &&
-      (selectedKnownScenario?.scenarioSelectionStrategy === "baseline"
-        ? Boolean(selectedScenarioId)
-        : Boolean(presetScenarioSelection?.selectedScenarioId) && !selectedScenarioMatchesKnownPreset);
-    const effectiveScenarioId = shouldRealignKnownPresetScenario
-      ? presetScenarioSelection?.selectedScenarioId ?? ""
-      : selectedScenarioId;
-    if (shouldRealignKnownPresetScenario && effectiveScenarioId !== selectedScenarioId) {
-      setSelectedScenarioId(effectiveScenarioId);
-    }
+    setStatus(`Running canonical ${effectiveMode} through the One Path-owned ${activePathLabel}...`);
     let res: Response;
     let json: any = null;
     try {
@@ -1305,19 +1364,20 @@ export function OnePathSimAdmin() {
           sourceHouseId: effectiveHouseId,
           houseId: effectiveMutableHouseId,
           scenarioId: effectiveScenarioId || null,
-          mode,
+          mode: effectiveMode,
           actualContextHouseId: effectiveActualContextHouseId || null,
-          preferredActualSource: mode === "INTERVAL" ? "SMT" : mode === "GREEN_BUTTON" ? "GREEN_BUTTON" : null,
-          weatherPreference,
-          validationSelectionMode,
-          validationDayCount: Number(validationDayCount) || null,
-          validationOnlyDateKeysLocal,
-          travelRanges,
-          persistRequested,
-          runReason,
+          preferredActualSource:
+            effectiveMode === "INTERVAL" ? "SMT" : effectiveMode === "GREEN_BUTTON" ? "GREEN_BUTTON" : null,
+          weatherPreference: effectiveWeatherPreference,
+          validationSelectionMode: effectiveValidationSelectionMode,
+          validationDayCount: effectiveValidationDayCount,
+          validationOnlyDateKeysLocal: effectiveValidationOnlyDateKeysLocal,
+          travelRanges: effectiveTravelRanges,
+          persistRequested: effectivePersistRequested,
+          runReason: effectiveRunReason,
           includeDebugDiagnostics: effectiveIncludeDebugDiagnostics,
           rehydrateGreenButtonFromRaw:
-            mode === "GREEN_BUTTON" && rehydrateGreenButtonFromRaw ? true : undefined,
+            effectiveMode === "GREEN_BUTTON" && rehydrateGreenButtonFromRaw ? true : undefined,
         }),
       });
       json = await res.json().catch(() => null);
@@ -1364,6 +1424,7 @@ export function OnePathSimAdmin() {
     effectiveActualContextHouseId,
     effectiveHouseId,
     effectiveMutableHouseId,
+    applyKnownScenarioHarnessControls,
     lookup,
     mode,
     persistRequested,
@@ -1514,13 +1575,24 @@ export function OnePathSimAdmin() {
             <label className="text-sm text-slate-700 lg:col-span-2">
               <div className="font-semibold text-brand-navy">Scenario preset (by data mode)</div>
               <div className="mt-1 text-xs text-slate-500">
-                Generic tuning templates for Interval, Green Button, manual monthly/annual, and new build. Load an email
-                first—presets never bind to a fixed house or account.
+                Generic tuning templates for Interval, Green Button, manual monthly/annual, and new build. After Lookup,
+                changing this dropdown applies the preset locally (baseline → Past → Future) without reloading the house.
+                Use Reload preset from server only for Green Button upload, email/house change, or a fresh source-context
+                refresh.
               </div>
               <select
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
                 value={selectedKnownScenarioKey}
-                onChange={(event) => setSelectedKnownScenarioKey(event.target.value)}
+                onChange={(event) => {
+                  const nextKey = event.target.value;
+                  setSelectedKnownScenarioKey(nextKey);
+                  const nextScenario = getKnownHouseScenarioByKey(nextKey);
+                  if (nextScenario && lookup) {
+                    applyKnownScenarioPresetLocally(nextScenario, lookup, {
+                      statusMessage: `Preset applied: ${nextScenario.label}. Run without reloading the house.`,
+                    });
+                  }
+                }}
               >
                 <option value="">Select scenario preset</option>
                 {orderedKnownScenarios.map((scenario) => (
@@ -1536,7 +1608,7 @@ export function OnePathSimAdmin() {
                 <p className="mt-1 text-xs text-slate-600">
                   Green Button presets read usage-backed Green Button intervals only. If this loaded house already has a
                   Green Button file, you can load the preset immediately. Adding a file here is optional and only replaces
-                  the house&apos;s current Green Button usage for testing when you click <span className="font-semibold">Load known scenario preset</span>.
+                  the house&apos;s current Green Button usage for testing when you click <span className="font-semibold">Reload preset from server</span>.
                 </p>
                 <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-700">
                   {actualContextHasGreenButtonUsage ? (
@@ -1652,7 +1724,7 @@ export function OnePathSimAdmin() {
                 disabled={busy || greenButtonUploadBusy || !selectedKnownScenarioKey}
                 className="w-full rounded-lg bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-navy disabled:opacity-60"
               >
-                {greenButtonUploadBusy ? "Uploading Green Button file..." : "Load known scenario preset"}
+                {greenButtonUploadBusy ? "Uploading Green Button file..." : "Reload preset from server"}
               </button>
             </div>
             <label className="text-sm text-slate-700">

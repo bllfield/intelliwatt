@@ -44,7 +44,9 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("useState(DEFAULT_ONE_PATH_SCENARIO_PRESET_KEY)");
     expect(source).toContain("Debug diagnostics");
     expect(source).toContain("useState(true)");
-    expect(source).toContain("Load known scenario preset");
+    expect(source).toContain("Reload preset from server");
+    expect(source).toContain("buildKnownScenarioHarnessRunControls");
+    expect(source).toContain("applyKnownScenarioPresetLocally");
     expect(source).toContain("Chart / Window / Display Logic");
     expect(source).toContain("Manual Statement / Annual Logic");
     expect(source).toContain("One Path source-of-truth summary");
@@ -247,7 +249,7 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("if (freshSelection) {");
     expect(source).toContain('setRunResult(null);');
     expect(source).toContain('setLastRunKnownScenarioKey("");');
-    expect(source).toContain('setSelectedKnownScenarioKey("");');
+    expect(source).not.toContain('setSelectedKnownScenarioKey("");');
     expect(source).toContain('setSelectedHouseId("");');
     expect(source).toContain('setActualContextHouseId("");');
     expect(source).toContain('setSelectedScenarioId("");');
@@ -284,14 +286,15 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(routeSource).toContain("(!includeDebugDiagnostics || lightweightLookupRequested)");
   });
 
-  it("preserves refresh state but realigns stale known-preset scenario ids before run", () => {
+  it("resolves known-preset run controls locally before run without a server reload", () => {
     const source = readRepoFile("components/admin/OnePathSimAdmin.tsx");
 
     expect(source).toContain('setSelectedScenarioId((current) => overrides?.selectedScenarioId ?? current);');
-    expect(source).toContain('selectedKnownScenario && runReason.startsWith("known_house:")');
-    expect(source).toContain("const shouldRealignKnownPresetScenario =");
-    expect(source).toContain("setSelectedScenarioId(effectiveScenarioId);");
+    expect(source).toContain("buildKnownScenarioHarnessRunControls");
+    expect(source).toContain("const presetRunControls = selectedKnownScenario");
+    expect(source).toContain("applyKnownScenarioHarnessControls(presetRunControls");
     expect(source).toContain("scenarioId: effectiveScenarioId || null,");
+    expect(source).toContain("runReason: effectiveRunReason");
   });
 
   it("keeps Green Button Past Sim on the inline One Path run path", () => {
@@ -299,7 +302,7 @@ describe("One Path Sim Admin harness wiring", () => {
     const routeSource = readRepoFile("app/api/admin/tools/one-path-sim/route.ts");
     const onePathSource = readRepoFile("modules/onePathSim/onePathSim.ts");
 
-    expect(source).toContain('const shouldApplyIntervalPastBlocker = mode === "INTERVAL";');
+    expect(source).toContain('const shouldApplyIntervalPastBlocker = effectiveMode === "INTERVAL";');
     expect(source).toContain("shouldApplyIntervalPastBlocker &&");
     expect(source).toContain("catch (runError)");
     expect(routeSource).toContain("runSharedSimulation(engineInput)");
@@ -322,7 +325,7 @@ describe("One Path Sim Admin harness wiring", () => {
     const routeSource = readRepoFile("app/api/admin/tools/one-path-sim/route.ts");
     const serviceSource = readRepoFile("modules/onePathSim/usageSimulator/service.ts");
 
-    expect(source).toContain('preferredActualSource: mode === "INTERVAL" ? "SMT" : mode === "GREEN_BUTTON" ? "GREEN_BUTTON" : null');
+    expect(source).toContain('effectiveMode === "INTERVAL" ? "SMT" : effectiveMode === "GREEN_BUTTON" ? "GREEN_BUTTON" : null');
     expect(routeSource).toContain('mode === "INTERVAL"');
     expect(routeSource).toContain('? "SMT"');
     expect(routeSource).toContain('mode === "GREEN_BUTTON"');
