@@ -23,6 +23,7 @@ import {
   resolveGreenButtonPastValidationCandidateDateKeys,
   resolveGreenButtonPastValidationSelectionAfterSim,
 } from "@/lib/usage/greenButtonPastValidationCandidates";
+import { finalizeGreenButtonValidationCompareTruthSync } from "@/lib/usage/greenButtonPastValidationCompareTruth";
 import {
   expandGreenButtonPastTrustedHomeDateKeysWithShiftedTargets,
   resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals,
@@ -4059,6 +4060,42 @@ export function shouldEmitRecalcValidationSetupSuccess(args: {
   return !args.validationSetupFailed;
 }
 
+export function resolveShouldUsePastRecalcIntervalPreload(args: {
+  scenarioName: string | null | undefined;
+  simMode: SimulatorMode;
+  actualSource: "SMT" | "GREEN_BUTTON" | null;
+  preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
+}): boolean {
+  const isPastWorkspace = args.scenarioName === WORKSPACE_PAST_NAME;
+  if (!isPastWorkspace || args.simMode !== "SMT_BASELINE") return false;
+  const isGreenButtonActual =
+    args.actualSource === "GREEN_BUTTON" || args.preferredActualSource === "GREEN_BUTTON";
+  const isSmtActual =
+    args.actualSource === "SMT" ||
+    args.preferredActualSource === "SMT" ||
+    args.simMode === "SMT_BASELINE";
+  return isGreenButtonActual || isSmtActual;
+}
+
+export function resolveAnchorPeriodsFromLoadedActualDataset(
+  dataset: unknown
+): Array<{ id: string; startDate: string; endDate: string }> | null {
+  if (dataset == null || typeof dataset !== "object") return null;
+  const record = dataset as Record<string, unknown>;
+  const summary =
+    record.summary != null && typeof record.summary === "object"
+      ? (record.summary as Record<string, unknown>)
+      : null;
+  const meta =
+    record.meta != null && typeof record.meta === "object"
+      ? (record.meta as Record<string, unknown>)
+      : null;
+  return buildSmtAnchorPeriodsFromActualSummary({
+    summaryStart: summary?.start ?? meta?.coverageStart,
+    summaryEnd: summary?.end ?? meta?.coverageEnd,
+  });
+}
+
 export function buildSmtAnchorPeriodsFromActualSummary(args: {
   summaryStart: unknown;
   summaryEnd: unknown;
@@ -4664,12 +4701,13 @@ async function recalcSimulatorBuildImpl(args: {
     simulationVariableOverrides
   );
   const simulationVariablePolicy = simulationVariableResolution.effective;
+  let weatherSensitivityActualDataset: Record<string, unknown> | null = null;
   try {
     const shouldLoadWeatherSensitivityActualDataset =
       mode !== "MANUAL_TOTALS" &&
       typeof actualContextHouseId === "string" &&
       actualContextHouseId.trim().length > 0;
-    const weatherSensitivityActualDataset = shouldLoadWeatherSensitivityActualDataset
+    weatherSensitivityActualDataset = shouldLoadWeatherSensitivityActualDataset
       ? (
           await traceCoreContextStep("weather_actual_dataset_load", () =>
             getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null, {
@@ -5181,15 +5219,44 @@ async function recalcSimulatorBuildImpl(args: {
   let validationSetupFailed = false;
   if (simMode === "SMT_BASELINE") {
     try {
-      const actualResult = await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null, {
-        skipFullYearIntervalFetch: true,
-        preferredSource: preferredActualSource ?? null,
-        skipLightweightInsightRecompute: true,
-      });
-      const start = actualResult?.dataset?.summary?.start ? String(actualResult.dataset.summary.start).slice(0, 10) : null;
-      const end = actualResult?.dataset?.summary?.end ? String(actualResult.dataset.summary.end).slice(0, 10) : null;
-      if (start && end && /^\d{4}-\d{2}-\d{2}$/.test(start) && /^\d{4}-\d{2}-\d{2}$/.test(end)) {
-        smtAnchorPeriods = [{ id: "anchor", startDate: start, endDate: end }];
+      const anchorFromWeatherDataset = resolveAnchorPeriodsFromLoadedActualDataset(
+        weatherSensitivityActualDataset
+      );
+      if (anchorFromWeatherDataset) {
+        smtAnchorPeriods = anchorFromWeatherDataset;
+        logSimPipelineEvent("recalc_validation_setup_anchor_reused", {
+          correlationId: args.correlationId,
+          houseId,
+          actualContextHouseId,
+          scenarioId,
+          mode: simMode,
+          anchorSource: "weather_actual_dataset_load",
+          anchorStart: anchorFromWeatherDataset[0]?.startDate ?? null,
+          anchorEnd: anchorFromWeatherDataset[0]?.endDate ?? null,
+          duplicateActualDatasetLoadAvoided: true,
+          source: "recalcSimulatorBuildImpl",
+          memoryRssMb: getMemoryRssMb(),
+        });
+      } else {
+        const actualResult = await getActualUsageDatasetForHouse(actualContextHouseId, esiid ?? null, {
+          skipFullYearIntervalFetch: true,
+          preferredSource: preferredActualSource ?? null,
+          skipLightweightInsightRecompute: true,
+        });
+        const anchorFromFallback = resolveAnchorPeriodsFromLoadedActualDataset(actualResult?.dataset ?? null);
+        if (anchorFromFallback) {
+          smtAnchorPeriods = anchorFromFallback;
+        }
+        logSimPipelineEvent("recalc_validation_setup_anchor_fallback_load", {
+          correlationId: args.correlationId,
+          houseId,
+          actualContextHouseId,
+          scenarioId,
+          mode: simMode,
+          anchorResolved: Boolean(anchorFromFallback),
+          source: "recalcSimulatorBuildImpl",
+          memoryRssMb: getMemoryRssMb(),
+        });
       }
     } catch (e) {
       smtAnchorPeriods = undefined;
@@ -5224,19 +5291,23 @@ async function recalcSimulatorBuildImpl(args: {
   let timezoneForStoredBuild = (baselineInputsForRecalc as any)?.timezone ?? "America/Chicago";
   const pastSharedSimChainModes: SimulatorBuildInputsV1["mode"][] = ["SMT_BASELINE", "MANUAL_TOTALS", "NEW_BUILD_ESTIMATE"];
   const shouldUseSharedPastProducer = scenario?.name === WORKSPACE_PAST_NAME && pastSharedSimChainModes.includes(simMode);
-  const recalcIntervalPreload =
-    simMode === "SMT_BASELINE" &&
-    scenario?.name === WORKSPACE_PAST_NAME &&
-    actualSource !== "GREEN_BUTTON" &&
-    preferredActualSource !== "GREEN_BUTTON"
-      ? createRecalcIntervalPreloadContext({
-          houseId: actualContextHouseId,
-          esiid: esiid ?? null,
-          preferredSource: preferredActualSource ?? null,
-          correlationId: args.correlationId,
-          source: "recalcSimulatorBuildImpl",
-        })
-      : null;
+  const shouldUseIntervalPreload = resolveShouldUsePastRecalcIntervalPreload({
+    scenarioName: scenario?.name,
+    simMode,
+    actualSource,
+    preferredActualSource,
+  });
+  const recalcIntervalPreload = shouldUseIntervalPreload
+    ? createRecalcIntervalPreloadContext({
+        houseId: actualContextHouseId,
+        esiid: esiid ?? null,
+        preferredSource: preferredActualSource ?? actualSource ?? null,
+        correlationId: args.correlationId,
+        source: "recalcSimulatorBuildImpl",
+        timezone: timezoneForStoredBuild,
+        travelRanges: allTravelRanges,
+      })
+    : null;
   const sharedPastRecalcWindow =
     shouldUseSharedPastProducer
       ? resolveSharedPastRecalcWindow({
@@ -5265,6 +5336,10 @@ async function recalcSimulatorBuildImpl(args: {
   let validationActualDailyKwhByDateLocal: Record<string, number> | undefined;
   let greenButtonTrustedUtcDateKeysForBuild: string[] | undefined;
   let greenButtonTrustedHomeDateKeysForBuild: string[] | undefined;
+  let greenButtonValidationIntervalsForBuild:
+    | Array<{ timestamp: string; kwh: number; homeDateKey?: string }>
+    | undefined;
+  let greenButtonSourceDateByTargetDateForBuild: Record<string, string> | undefined;
   let effectiveValidationOnlyDateKeysLocal = new Set<string>(requestedValidationOnlyDateKeysLocal);
   if (
     effectiveValidationOnlyDateKeysLocal.size === 0 &&
@@ -5283,21 +5358,35 @@ async function recalcSimulatorBuildImpl(args: {
       const validationSelectionStartedAt = Date.now();
       let candidateDateKeys: string[] = [];
       let intervalsForValidationWindow: Array<{ timestamp: string; kwh: number }> = [];
+      let greenButtonProducerLoadCacheHit: boolean | undefined;
       const greenButtonPastProducerSource =
         preferredActualSource === "GREEN_BUTTON" || actualSource === "GREEN_BUTTON";
       if (greenButtonPastProducerSource) {
-        const loaded = await loadGreenButtonPastProducerIntervals({
-          houseId: actualContextHouseId,
-          esiid: esiid ?? null,
-          coverageStartDate: selectionStart,
-          coverageEndDate: selectionEnd,
-          timezone: timezoneForStoredBuild,
-        });
+        const gbProducerLoaded = recalcIntervalPreload
+          ? await recalcIntervalPreload.getGreenButtonPastProducerLoad({
+              startDate: selectionStart,
+              endDate: selectionEnd,
+            })
+          : {
+              load: await loadGreenButtonPastProducerIntervals({
+                houseId: actualContextHouseId,
+                esiid: esiid ?? null,
+                coverageStartDate: selectionStart,
+                coverageEndDate: selectionEnd,
+                timezone: timezoneForStoredBuild,
+                travelRanges: allTravelRanges,
+              }),
+              cacheHit: false,
+            };
+        greenButtonProducerLoadCacheHit = gbProducerLoaded.cacheHit;
+        const loaded = gbProducerLoaded.load;
         intervalsForValidationWindow = loaded.engineSourceIntervals.map((row) => ({
           timestamp: row.timestamp,
           kwh: row.kwh,
           homeDateKey: row.homeDateKey,
         }));
+        greenButtonValidationIntervalsForBuild = intervalsForValidationWindow;
+        greenButtonSourceDateByTargetDateForBuild = loaded.sourceDateByTargetDate;
         greenButtonTrustedUtcDateKeysForBuild = [...loaded.trustedUtcDateKeys];
         let trustedHomeForValidation = loaded.trustedHomeDateKeys;
         if (trustedHomeForValidation.size === 0 && loaded.engineSourceIntervals.length > 0) {
@@ -5374,6 +5463,7 @@ async function recalcSimulatorBuildImpl(args: {
               intervals: intervalsForValidationWindow,
               dateKeysLocal: effectiveValidationOnlyDateKeysLocal,
               timezone: timezoneForStoredBuild,
+              sourceDateByTargetDate: greenButtonSourceDateByTargetDateForBuild,
             })
           : buildActualDailyKwhByDateLocalFromIntervals({
               intervals: intervalsForValidationWindow,
@@ -5405,6 +5495,9 @@ async function recalcSimulatorBuildImpl(args: {
         preloadFetchCount: preloadStats?.fetchCount,
         preloadReuseCount: preloadStats?.reuseCount,
         preloadCachedWindowCount: preloadStats?.cachedWindowCount,
+        greenButtonProducerFetchCount: preloadStats?.greenButtonProducerFetchCount,
+        greenButtonProducerReuseCount: preloadStats?.greenButtonProducerReuseCount,
+        greenButtonProducerLoadCacheHit,
         memoryRssMb: getMemoryRssMb(),
         source: "recalcSimulatorBuildImpl",
       });
@@ -5463,6 +5556,24 @@ async function recalcSimulatorBuildImpl(args: {
     effectiveValidationOnlyDateKeysLocal,
     resolveCanonicalUsage365CoverageWindow()
   );
+  const greenButtonPastBuild =
+    preferredActualSource === "GREEN_BUTTON" || actualSource === "GREEN_BUTTON";
+  if (
+    greenButtonPastBuild &&
+    boundedValidationOnlyDateKeysLocal.size > 0 &&
+    greenButtonValidationIntervalsForBuild &&
+    greenButtonValidationIntervalsForBuild.length > 0
+  ) {
+    const finalized = finalizeGreenButtonValidationCompareTruthSync({
+      validationKeys: Array.from(boundedValidationOnlyDateKeysLocal),
+      existingActual: validationActualDailyKwhByDateLocal,
+      intervals: greenButtonValidationIntervalsForBuild,
+      timezone: timezoneForStoredBuild,
+      sourceDateByTargetDate: greenButtonSourceDateByTargetDateForBuild,
+    });
+    boundedValidationOnlyDateKeysLocal = new Set(finalized.validationKeys);
+    validationActualDailyKwhByDateLocal = finalized.actualByDate;
+  }
 
   const canonicalWindowForFp = canonicalWindowDateRange(built.canonicalMonths);
   const fingerprintWindowStart =
@@ -5585,11 +5696,21 @@ async function recalcSimulatorBuildImpl(args: {
       };
       let preloadedActualIntervalsForSim: Array<{ timestamp: string; kwh: number }> | undefined;
       let simulationPreloadCacheHit: boolean | undefined;
-      if (recalcIntervalPreload && simMode === "SMT_BASELINE") {
+      let actualIntervalPayloadSource: string | null = null;
+      if (
+        greenButtonPastBuild &&
+        greenButtonValidationIntervalsForBuild &&
+        greenButtonValidationIntervalsForBuild.length > 0
+      ) {
+        preloadedActualIntervalsForSim = greenButtonValidationIntervalsForBuild;
+        simulationPreloadCacheHit = true;
+        actualIntervalPayloadSource = "greenButtonValidationIntervalsForBuild";
+      } else if (recalcIntervalPreload && shouldUseIntervalPreload) {
         const simIntervalPreloadStartedAt = Date.now();
         const preloaded = await recalcIntervalPreload.getIntervals({ startDate, endDate });
         preloadedActualIntervalsForSim = preloaded.intervals;
         simulationPreloadCacheHit = preloaded.cacheHit;
+        actualIntervalPayloadSource = "recalcIntervalPreload";
         const reuseMissReason = preloaded.cacheHit
           ? null
           : !validationSelectionUsedSharedPreloadWindow
@@ -5616,6 +5737,20 @@ async function recalcSimulatorBuildImpl(args: {
           durationMs: Date.now() - simIntervalPreloadStartedAt,
           memoryRssMb: getMemoryRssMb(),
           source: "recalcSimulatorBuildImpl",
+        });
+      }
+      if (preloadedActualIntervalsForSim != null) {
+        logSimPipelineEvent("recalc_simulation_actual_interval_payload_attached", {
+          correlationId: args.correlationId,
+          houseId,
+          sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
+          actualIntervalPayloadAttached: preloadedActualIntervalsForSim.length > 0,
+          actualIntervalPayloadSource,
+          intervalRowCount: preloadedActualIntervalsForSim.length,
+          cacheHit: simulationPreloadCacheHit ?? null,
+          greenButtonPastBuild,
+          source: "recalcSimulatorBuildImpl",
+          memoryRssMb: getMemoryRssMb(),
         });
       }
       const result = await simulatePastUsageDataset({

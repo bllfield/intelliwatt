@@ -1,21 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const getActualIntervalsForRangeMock = vi.fn();
-const fetchGreenButtonIntervalsForCoverageWindowMock = vi.fn();
+const loadGreenButtonPastProducerIntervalsMock = vi.fn();
 
 vi.mock("@/lib/usage/actualDatasetForHouse", () => ({
   getActualIntervalsForRange: (...args: unknown[]) => getActualIntervalsForRangeMock(...args),
 }));
 
-vi.mock("@/modules/realUsageAdapter/greenButton", () => ({
-  fetchGreenButtonIntervalsForCoverageWindow: (...args: unknown[]) =>
-    fetchGreenButtonIntervalsForCoverageWindowMock(...args),
+vi.mock("@/lib/usage/greenButtonPastProducerLoad", () => ({
+  loadGreenButtonPastProducerIntervals: (...args: unknown[]) =>
+    loadGreenButtonPastProducerIntervalsMock(...args),
 }));
 
 describe("recalc interval preload context", () => {
   beforeEach(() => {
     getActualIntervalsForRangeMock.mockReset();
-    fetchGreenButtonIntervalsForCoverageWindowMock.mockReset();
+    loadGreenButtonPastProducerIntervalsMock.mockReset();
   });
 
   it("reuses full-window intervals for repeated same-window requests", async () => {
@@ -95,9 +95,20 @@ describe("recalc interval preload context", () => {
     expect(getActualIntervalsForRangeMock).toHaveBeenCalledTimes(1);
   });
 
-  it("rebases Green Button preload intervals onto the shared UTC day grid", async () => {
-    fetchGreenButtonIntervalsForCoverageWindowMock.mockResolvedValue({
-      intervals: [{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.4 }],
+  it("reuses Green Button producer loads across getIntervals and getGreenButtonPastProducerLoad", async () => {
+    loadGreenButtonPastProducerIntervalsMock.mockResolvedValue({
+      engineSourceIntervals: [
+        { timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.4, homeDateKey: "2026-01-01", homeSlot: 0 },
+      ],
+      trustedHomeDateKeys: new Set(["2026-01-01"]),
+      trustedUtcDateKeys: ["2026-01-01"],
+      sourceDateByTargetDate: {},
+      sourceIntervals: [],
+      displayWindowNote: null,
+      shiftedIntervalCount: 0,
+      shiftedDateCount: 0,
+      sourceCoverageStart: "2026-01-01",
+      sourceCoverageEnd: "2026-01-01",
     });
     const { createRecalcIntervalPreloadContext } = await import(
       "@/modules/usageSimulator/recalcIntervalPreload"
@@ -106,19 +117,34 @@ describe("recalc interval preload context", () => {
       houseId: "h1",
       esiid: "e1",
       preferredSource: "GREEN_BUTTON",
+      timezone: "America/Chicago",
+      travelRanges: [{ startDate: "2026-06-27", endDate: "2026-07-11" }],
       source: "test",
     });
+    const window = { startDate: "2026-01-01", endDate: "2026-12-31" };
 
-    const out = await ctx.getIntervals({ startDate: "2026-01-01", endDate: "2026-12-31" });
+    const producerFirst = await ctx.getGreenButtonPastProducerLoad(window);
+    const intervalSecond = await ctx.getIntervals(window);
 
-    expect(out.intervals).toEqual([{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.4 }]);
-    expect(fetchGreenButtonIntervalsForCoverageWindowMock).toHaveBeenCalledWith({
-      houseId: "h1",
-      coverageStartDate: "2026-01-01",
-      coverageEndDate: "2026-12-31",
-      timestampMode: "utcDayGrid",
-    });
+    expect(producerFirst.cacheHit).toBe(false);
+    expect(intervalSecond.cacheHit).toBe(true);
+    expect(intervalSecond.intervals).toEqual([{ timestamp: "2026-01-01T00:00:00.000Z", kwh: 0.4 }]);
+    expect(loadGreenButtonPastProducerIntervalsMock).toHaveBeenCalledTimes(1);
+    expect(loadGreenButtonPastProducerIntervalsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        houseId: "h1",
+        coverageStartDate: "2026-01-01",
+        coverageEndDate: "2026-12-31",
+        travelRanges: [{ startDate: "2026-06-27", endDate: "2026-07-11" }],
+      })
+    );
     expect(getActualIntervalsForRangeMock).not.toHaveBeenCalled();
+    expect(ctx.getStats()).toMatchObject({
+      greenButtonProducerFetchCount: 1,
+      greenButtonProducerReuseCount: 1,
+      fetchCount: 0,
+      reuseCount: 1,
+      cachedWindowCount: 1,
+    });
   });
 });
-

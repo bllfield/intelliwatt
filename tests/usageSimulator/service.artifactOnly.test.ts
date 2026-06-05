@@ -109,6 +109,8 @@ vi.mock("@/modules/weather/backfill", () => ({
 
 import {
   buildSmtAnchorPeriodsFromActualSummary,
+  resolveAnchorPeriodsFromLoadedActualDataset,
+  resolveShouldUsePastRecalcIntervalPreload,
   buildGapfillCompareSimShared,
   emitRecalcPreIntervalStageEvent,
   getSimulatedUsageForHouseScenario,
@@ -452,6 +454,63 @@ describe("buildSmtAnchorPeriodsFromActualSummary", () => {
         validationSetupFailed: out == null,
       })
     ).toBe(true);
+  });
+});
+
+describe("resolveShouldUsePastRecalcIntervalPreload", () => {
+  it("enables preload for Past workspace SMT and Green Button actual paths", () => {
+    expect(
+      resolveShouldUsePastRecalcIntervalPreload({
+        scenarioName: "Past (Corrected)",
+        simMode: "SMT_BASELINE",
+        actualSource: "GREEN_BUTTON",
+        preferredActualSource: "GREEN_BUTTON",
+      })
+    ).toBe(true);
+    expect(
+      resolveShouldUsePastRecalcIntervalPreload({
+        scenarioName: "Past (Corrected)",
+        simMode: "SMT_BASELINE",
+        actualSource: "SMT",
+        preferredActualSource: null,
+      })
+    ).toBe(true);
+  });
+
+  it("skips preload for manual past and non-past scenarios", () => {
+    expect(
+      resolveShouldUsePastRecalcIntervalPreload({
+        scenarioName: "Past (Corrected)",
+        simMode: "MANUAL_TOTALS",
+        actualSource: "SMT",
+        preferredActualSource: null,
+      })
+    ).toBe(false);
+    expect(
+      resolveShouldUsePastRecalcIntervalPreload({
+        scenarioName: "Baseline",
+        simMode: "SMT_BASELINE",
+        actualSource: "GREEN_BUTTON",
+        preferredActualSource: "GREEN_BUTTON",
+      })
+    ).toBe(false);
+  });
+});
+
+describe("resolveAnchorPeriodsFromLoadedActualDataset", () => {
+  it("prefers summary dates and falls back to meta coverage", () => {
+    expect(
+      resolveAnchorPeriodsFromLoadedActualDataset({
+        summary: { start: "2025-05-14", end: "2026-05-13" },
+        meta: { coverageStart: "ignored", coverageEnd: "ignored" },
+      })
+    ).toEqual([{ id: "anchor", startDate: "2025-05-14", endDate: "2026-05-13" }]);
+
+    expect(
+      resolveAnchorPeriodsFromLoadedActualDataset({
+        meta: { coverageStart: "2025-05-14", coverageEnd: "2026-05-13" },
+      })
+    ).toEqual([{ id: "anchor", startDate: "2025-05-14", endDate: "2026-05-13" }]);
   });
 });
 
