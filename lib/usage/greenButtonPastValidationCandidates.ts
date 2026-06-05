@@ -85,6 +85,8 @@ export function buildGreenButtonActualDailyKwhByHomeDateKey(args: {
   intervals: ReadonlyArray<{ timestamp: string; kwh: number; homeDateKey?: string }>;
   dateKeysLocal: Iterable<string>;
   timezone: string;
+  /** When target days lack direct intervals, use source-day totals from year-shift merge. */
+  sourceDateByTargetDate?: Record<string, string> | null;
 }): Record<string, number> {
   const wanted = new Set(
     Array.from(args.dateKeysLocal)
@@ -95,14 +97,30 @@ export function buildGreenButtonActualDailyKwhByHomeDateKey(args: {
 
   const totals = new Map<string, number>();
   const hasHomeDateKeys = args.intervals.some((row) => asDateKey(row.homeDateKey));
+  const shiftMap = args.sourceDateByTargetDate ?? {};
+  const extraSourceKeys = new Set<string>();
+  for (const dk of wanted) {
+    if (totals.has(dk)) continue;
+    const sourceKey = asDateKey(shiftMap[dk]);
+    if (sourceKey && sourceKey !== dk) extraSourceKeys.add(sourceKey);
+  }
+  const wantedOrShiftSources = new Set([...wanted, ...extraSourceKeys]);
+
   if (hasHomeDateKeys) {
     for (const row of args.intervals) {
       const dk = asDateKey(row.homeDateKey);
-      if (!dk || !wanted.has(dk)) continue;
+      if (!dk || !wantedOrShiftSources.has(dk)) continue;
       totals.set(dk, (totals.get(dk) ?? 0) + Math.max(0, Number(row.kwh) || 0));
+    }
+    for (const dk of wanted) {
+      if (totals.has(dk)) continue;
+      const sourceKey = asDateKey(shiftMap[dk]);
+      if (!sourceKey || sourceKey === dk || !totals.has(sourceKey)) continue;
+      totals.set(dk, totals.get(sourceKey)!);
     }
     return Object.fromEntries(
       Array.from(totals.entries())
+        .filter(([date]) => wanted.has(date))
         .map(([date, kwh]) => [date, Math.round(kwh * 100) / 100] as const)
         .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     );
@@ -118,12 +136,19 @@ export function buildGreenButtonActualDailyKwhByHomeDateKey(args: {
 
   for (const row of projected) {
     const dk = asDateKey(row.homeDateKey);
-    if (!dk || !wanted.has(dk)) continue;
+    if (!dk || !wantedOrShiftSources.has(dk)) continue;
     totals.set(dk, (totals.get(dk) ?? 0) + Math.max(0, Number(row.kwh) || 0));
+  }
+  for (const dk of wanted) {
+    if (totals.has(dk)) continue;
+    const sourceKey = asDateKey(shiftMap[dk]);
+    if (!sourceKey || sourceKey === dk || !totals.has(sourceKey)) continue;
+    totals.set(dk, totals.get(sourceKey)!);
   }
 
   return Object.fromEntries(
     Array.from(totals.entries())
+      .filter(([date]) => wanted.has(date))
       .map(([date, kwh]) => [date, Math.round(kwh * 100) / 100] as const)
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
   );
@@ -320,12 +345,14 @@ export function resolveGreenButtonPastValidationSelectionAfterSim(args: {
   if (selection.selectedDateKeys.length === 0) return null;
 
   const selectedSet = new Set(selection.selectedDateKeys);
+  const sourceDateByTargetDate = readGreenButtonSourceDateByTargetDateFromMeta(meta);
   return {
     validationOnlyDateKeysLocal: selection.selectedDateKeys,
     validationActualDailyKwhByDateLocal: buildGreenButtonActualDailyKwhByHomeDateKey({
       intervals: intervalsForValidation,
       dateKeysLocal: selectedSet,
       timezone,
+      sourceDateByTargetDate,
     }),
     effectiveValidationSelectionMode: policy.selectionMode,
     validationSelectionDiagnostics: selection.diagnostics,

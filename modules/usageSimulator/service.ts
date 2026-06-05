@@ -23,6 +23,11 @@ import {
   resolveGreenButtonPastValidationSelectionAfterSim,
 } from "@/lib/usage/greenButtonPastValidationCandidates";
 import {
+  ensureGreenButtonValidationCompareMetaForRead,
+  finalizeGreenButtonValidationCompareTruthSync,
+  mergeGreenButtonValidationActualDailyRecords,
+} from "@/lib/usage/greenButtonPastValidationCompareTruth";
+import {
   expandGreenButtonPastTrustedHomeDateKeysWithShiftedTargets,
   resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals,
 } from "@/lib/usage/greenButtonPastTrustedPool";
@@ -460,6 +465,9 @@ async function getValidationActualDailyByDateForDataset(args: {
     args.dataset?.meta && typeof args.dataset.meta === "object"
       ? ((args.dataset.meta as any).validationActualDailyKwhByDateLocal as Record<string, unknown> | undefined)
       : undefined;
+  const isGreenButtonPastValidation =
+    args.dataset?.meta?.actualSource === "GREEN_BUTTON" ||
+    args.dataset?.meta?.lockboxRunContext?.preferredActualSource === "GREEN_BUTTON";
   if (persistedActualDaily && typeof persistedActualDaily === "object") {
     const map = new Map<string, number>();
     for (const dk of validationKeys) {
@@ -467,7 +475,44 @@ async function getValidationActualDailyByDateForDataset(args: {
       const kwh = Number(raw);
       if (Number.isFinite(kwh)) map.set(dk, Math.round(kwh * 100) / 100);
     }
-    if (map.size > 0) return map;
+    if (!isGreenButtonPastValidation && map.size > 0) return map;
+    if (isGreenButtonPastValidation) {
+      const missingKeys = validationKeys.filter((dk) => !map.has(dk));
+      if (missingKeys.length === 0 && map.size > 0) return map;
+      if (missingKeys.length > 0) {
+        const actualContextHouseId = String(args.dataset?.meta?.actualContextHouseId ?? args.fallbackHouseId);
+        const persistedSourceEsiid = String(
+          args.dataset?.meta?.actualSourceEsiid ??
+            args.dataset?.meta?.lockboxInput?.sourceContext?.sourceEsiid ??
+            ""
+        ).trim();
+        let actualContextEsiid: string | null =
+          actualContextHouseId === args.fallbackHouseId
+            ? args.fallbackEsiid ?? (persistedSourceEsiid || null)
+            : null;
+        if (!actualContextEsiid && actualContextHouseId !== args.fallbackHouseId) {
+          const actualHouse = await (prisma as any).houseAddress
+            .findUnique({
+              where: { id: actualContextHouseId },
+              select: { esiid: true },
+            })
+            .catch(() => null);
+          actualContextEsiid = actualHouse?.esiid ?? (persistedSourceEsiid || null);
+        }
+        const fetched = await getActualDailyKwhForLocalDateKeys({
+          houseId: actualContextHouseId,
+          esiid: actualContextEsiid,
+          dateKeysLocal: missingKeys,
+          preferredSource: "GREEN_BUTTON",
+        });
+        for (const [dk, kwh] of fetched.entries()) {
+          if (Number.isFinite(kwh)) map.set(dk, Math.round(kwh * 100) / 100);
+        }
+      }
+      if (map.size > 0) return map;
+    } else if (map.size > 0) {
+      return map;
+    }
   }
 
   const actualContextHouseId = String(args.dataset?.meta?.actualContextHouseId ?? args.fallbackHouseId);
@@ -1490,13 +1535,21 @@ function rehydrateValidationCompareMetaFromBuildInputsForRead(args: {
     buildInputs && typeof buildInputs === "object"
       ? ((buildInputs as any).validationActualDailyKwhByDateLocal as Record<string, unknown> | undefined)
       : undefined;
-  if (
-    buildValidationActualDaily &&
-    typeof buildValidationActualDaily === "object" &&
-    !((prevMeta as any).validationActualDailyKwhByDateLocal &&
-      typeof (prevMeta as any).validationActualDailyKwhByDateLocal === "object")
-  ) {
-    (prevMeta as any).validationActualDailyKwhByDateLocal = buildValidationActualDaily;
+  if (buildValidationActualDaily && typeof buildValidationActualDaily === "object") {
+    if (buildActualSource === "GREEN_BUTTON") {
+      const merged = mergeGreenButtonValidationActualDailyRecords(
+        (prevMeta as any).validationActualDailyKwhByDateLocal as Record<string, unknown> | undefined,
+        buildValidationActualDaily
+      );
+      if (Object.keys(merged).length > 0) {
+        (prevMeta as any).validationActualDailyKwhByDateLocal = merged;
+      }
+    } else if (
+      !((prevMeta as any).validationActualDailyKwhByDateLocal &&
+        typeof (prevMeta as any).validationActualDailyKwhByDateLocal === "object")
+    ) {
+      (prevMeta as any).validationActualDailyKwhByDateLocal = buildValidationActualDaily;
+    }
   }
   if (!((prevMeta as any).actualSource === "SMT" || (prevMeta as any).actualSource === "GREEN_BUTTON") && buildActualSource) {
     (prevMeta as any).actualSource = buildActualSource;
@@ -5051,6 +5104,10 @@ async function recalcSimulatorBuildImpl(args: {
   let validationActualDailyKwhByDateLocal: Record<string, number> | undefined;
   let greenButtonTrustedUtcDateKeysForBuild: string[] | undefined;
   let greenButtonTrustedHomeDateKeysForBuild: string[] | undefined;
+  let greenButtonValidationIntervalsForBuild:
+    | Array<{ timestamp: string; kwh: number; homeDateKey?: string }>
+    | undefined;
+  let greenButtonSourceDateByTargetDateForBuild: Record<string, string> | undefined;
   let effectiveValidationOnlyDateKeysLocal = new Set<string>(requestedValidationOnlyDateKeysLocal);
   if (
     effectiveValidationOnlyDateKeysLocal.size === 0 &&
@@ -5084,6 +5141,8 @@ async function recalcSimulatorBuildImpl(args: {
           kwh: row.kwh,
           homeDateKey: row.homeDateKey,
         }));
+        greenButtonValidationIntervalsForBuild = intervalsForValidationWindow;
+        greenButtonSourceDateByTargetDateForBuild = loaded.sourceDateByTargetDate;
         greenButtonTrustedUtcDateKeysForBuild = [...loaded.trustedUtcDateKeys];
         let trustedHomeForValidation = loaded.trustedHomeDateKeys;
         if (trustedHomeForValidation.size === 0 && loaded.engineSourceIntervals.length > 0) {
@@ -5160,6 +5219,7 @@ async function recalcSimulatorBuildImpl(args: {
               intervals: intervalsForValidationWindow,
               dateKeysLocal: effectiveValidationOnlyDateKeysLocal,
               timezone: timezoneForStoredBuild,
+              sourceDateByTargetDate: greenButtonSourceDateByTargetDateForBuild,
             })
           : buildActualDailyKwhByDateLocalFromIntervals({
               intervals: intervalsForValidationWindow,
@@ -5249,6 +5309,24 @@ async function recalcSimulatorBuildImpl(args: {
     effectiveValidationOnlyDateKeysLocal,
     resolveCanonicalUsage365CoverageWindow()
   );
+  const greenButtonPastBuild =
+    preferredActualSource === "GREEN_BUTTON" || actualSource === "GREEN_BUTTON";
+  if (
+    greenButtonPastBuild &&
+    boundedValidationOnlyDateKeysLocal.size > 0 &&
+    greenButtonValidationIntervalsForBuild &&
+    greenButtonValidationIntervalsForBuild.length > 0
+  ) {
+    const finalized = finalizeGreenButtonValidationCompareTruthSync({
+      validationKeys: Array.from(boundedValidationOnlyDateKeysLocal),
+      existingActual: validationActualDailyKwhByDateLocal,
+      intervals: greenButtonValidationIntervalsForBuild,
+      timezone: timezoneForStoredBuild,
+      sourceDateByTargetDate: greenButtonSourceDateByTargetDateForBuild,
+    });
+    boundedValidationOnlyDateKeysLocal = new Set(finalized.validationKeys);
+    validationActualDailyKwhByDateLocal = finalized.actualByDate;
+  }
 
   const canonicalWindowForFp = canonicalWindowDateRange(built.canonicalMonths);
   const fingerprintWindowStart =
@@ -7242,6 +7320,12 @@ export async function getSimulatedUsageForHouseScenario(args: {
         return { ok: false, code: "INTERNAL_ERROR", message: quality.message };
       }
       rehydrateValidationCompareMetaFromBuildInputsForRead({ dataset: restored, buildInputs });
+      await ensureGreenButtonValidationCompareMetaForRead({
+        dataset: restored,
+        buildInputs,
+        houseId: args.houseId,
+        esiid: house.esiid ?? null,
+      });
       const projectedBaselineAware =
         readContext.projectionMode === "baseline"
           ? projectBaselineFromCanonicalDataset(
@@ -7887,6 +7971,12 @@ export async function getSimulatedUsageForHouseScenario(args: {
       return { ok: false, code: "INTERNAL_ERROR", message: quality.message };
     }
     rehydrateValidationCompareMetaFromBuildInputsForRead({ dataset, buildInputs });
+    await ensureGreenButtonValidationCompareMetaForRead({
+      dataset,
+      buildInputs,
+      houseId: args.houseId,
+      esiid: house.esiid ?? null,
+    });
     const projectedBaselineAware =
       readContext.projectionMode === "baseline"
         ? projectBaselineFromCanonicalDataset(

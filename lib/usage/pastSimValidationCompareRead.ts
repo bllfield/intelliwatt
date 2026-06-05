@@ -1,6 +1,10 @@
 import { isGreenButtonBackedDatasetMeta } from "@/lib/time/greenButtonPersistedIntervalConvert";
 import { resolveGreenButtonPastValidationOnlyDateKeysAtRead } from "@/lib/usage/greenButtonPastValidationCandidates";
 import {
+  isGreenButtonPastValidationCompareContext,
+  mergeGreenButtonValidationActualDailyRecords,
+} from "@/lib/usage/greenButtonPastValidationCompareTruth";
+import {
   attachValidationCompareProjection,
   buildValidationCompareProjectionFromDatasets,
   buildValidationCompareProjectionSidecar,
@@ -174,11 +178,22 @@ export function enrichPastDatasetValidationCompareMetaForRead(args: {
       if (/^\d{4}-\d{2}-\d{2}$/.test(dk) && Number.isFinite(kwh)) persistedActual[dk] = kwh;
     }
   };
-  mergeActualDailyKwh(
-    prevMeta.validationActualDailyKwhByDateLocal as Record<string, unknown> | undefined
-  );
-  mergeActualDailyKwh(buildActualDaily);
-  mergeActualDailyKwh(engineActualDaily);
+  if (isGreenButtonPastValidationCompareContext(prevMeta)) {
+    const mergedGbActual = mergeGreenButtonValidationActualDailyRecords(
+      prevMeta.validationActualDailyKwhByDateLocal as Record<string, unknown> | undefined,
+      buildActualDaily,
+      engineActualDaily
+    );
+    if (Object.keys(mergedGbActual).length > 0) {
+      prevMeta.validationActualDailyKwhByDateLocal = mergedGbActual;
+    }
+  } else {
+    mergeActualDailyKwh(
+      prevMeta.validationActualDailyKwhByDateLocal as Record<string, unknown> | undefined
+    );
+    mergeActualDailyKwh(buildActualDaily);
+    mergeActualDailyKwh(engineActualDaily);
+  }
 
   const keys = validationOnlyDateKeysFromMeta(prevMeta);
   if (
@@ -195,7 +210,7 @@ export function enrichPastDatasetValidationCompareMetaForRead(args: {
       }
     }
   }
-  if (Object.keys(persistedActual).length > 0) {
+  if (!isGreenButtonPastValidationCompareContext(prevMeta) && Object.keys(persistedActual).length > 0) {
     prevMeta.validationActualDailyKwhByDateLocal = persistedActual;
   }
 
