@@ -12,6 +12,7 @@ import {
 } from "../../lib/usage/greenButtonIntervalPersist";
 import { resolveGreenButtonUploadRecordDateRange } from "../../lib/usage/greenButtonCoverage";
 import { runGreenButtonUsagePipeline } from "../../lib/usage/greenButtonUsagePipeline";
+import { executeGreenButtonRehydrateFromStoredRaw } from "../../lib/usage/rehydrateGreenButtonIntervalsFromRaw";
 
 const PORT = Number(process.env.GREEN_BUTTON_UPLOAD_PORT || "8091");
 const MAX_BYTES = Number(process.env.GREEN_BUTTON_UPLOAD_MAX_BYTES || 500 * 1024 * 1024);
@@ -849,6 +850,7 @@ type UploadPayload = {
   v: number;
   userId: string;
   houseId: string;
+  rawId?: string;
   issuedAt?: string;
   expiresAt?: string;
 };
@@ -858,7 +860,158 @@ function decodePayload(encoded: string): UploadPayload {
   const json = buffer.toString("utf8");
   return JSON.parse(json) as UploadPayload;
 }
- 
+
+async function runGreenButtonRehydrateJob(args: {
+  houseId: string;
+  userId: string;
+  rawId?: string | null;
+}) {
+  let uploadRecordId: string | null = null;
+  try {
+    logEvent("rehydrate.job_start", {
+      houseId: args.houseId,
+      userId: args.userId,
+      rawId: args.rawId ?? null,
+    });
+    const latestUpload = await (prisma as any).greenButtonUpload.findFirst({
+      where: { houseId: args.houseId },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    });
+    uploadRecordId = latestUpload?.id ?? null;
+    if (uploadRecordId) {
+      await (prisma as any).greenButtonUpload.update({
+        where: { id: uploadRecordId },
+        data: {
+          parseStatus: "processing",
+          parseMessage: "rehydrate_from_raw",
+        },
+      });
+    }
+
+    const result = await executeGreenButtonRehydrateFromStoredRaw({
+      houseId: args.houseId,
+      userId: args.userId,
+      rawId: args.rawId ?? null,
+    });
+
+    if (!result.ok && uploadRecordId) {
+      await (prisma as any).greenButtonUpload.update({
+        where: { id: uploadRecordId },
+        data: {
+          parseStatus: "error",
+          parseMessage: result.error,
+        },
+      });
+    }
+
+    logEvent("rehydrate.job_complete", {
+      houseId: args.houseId,
+      ok: result.ok,
+      error: result.ok ? undefined : result.error,
+      intervalsWritten: result.ok ? result.intervalsWritten : undefined,
+    });
+  } catch (error) {
+    console.error("[green-button-upload] rehydrate job failed", error);
+    if (uploadRecordId) {
+      try {
+        await (prisma as any).greenButtonUpload.update({
+          where: { id: uploadRecordId },
+          data: {
+            parseStatus: "error",
+            parseMessage: String((error as Error)?.message || error),
+          },
+        });
+      } catch (updateErr) {
+        console.error("[green-button-upload] failed to mark rehydrate error", updateErr);
+      }
+    }
+  }
+}
+
+app.post("/rehydrate", express.json({ limit: "64kb" }), async (req: Request, res: Response) => {
+  try {
+    if (!SECRET) {
+      res.status(500).json({ ok: false, error: "server_not_configured" });
+      return;
+    }
+
+    const payloadEncoded =
+      typeof req.body?.payload === "string" ? req.body.payload : undefined;
+    const signature =
+      typeof req.body?.signature === "string" ? req.body.signature : undefined;
+    if (!payloadEncoded || !signature) {
+      res.status(401).json({ ok: false, error: "missing_signature" });
+      return;
+    }
+    if (!verifySignature(payloadEncoded, signature)) {
+      res.status(401).json({ ok: false, error: "invalid_signature" });
+      return;
+    }
+
+    let payload: UploadPayload;
+    try {
+      payload = decodePayload(payloadEncoded);
+    } catch (parseErr) {
+      res.status(400).json({
+        ok: false,
+        error: "invalid_payload",
+        detail: String((parseErr as Error)?.message || parseErr),
+      });
+      return;
+    }
+
+    if (!payload?.userId || !payload?.houseId) {
+      res.status(400).json({ ok: false, error: "payload_missing_fields" });
+      return;
+    }
+
+    if (payload.expiresAt) {
+      const expiresMs = Date.parse(payload.expiresAt);
+      if (Number.isFinite(expiresMs) && expiresMs < Date.now()) {
+        res.status(401).json({ ok: false, error: "upload_ticket_expired" });
+        return;
+      }
+    }
+
+    const house = await prisma.houseAddress.findFirst({
+      where: { id: payload.houseId, userId: payload.userId, archivedAt: null },
+      select: { id: true, userId: true },
+    });
+    if (!house) {
+      res.status(404).json({ ok: false, error: "home_not_found" });
+      return;
+    }
+
+    const rawId =
+      (typeof req.body?.rawId === "string" && req.body.rawId.trim()) ||
+      (typeof payload.rawId === "string" && payload.rawId.trim()) ||
+      null;
+
+    void runGreenButtonRehydrateJob({
+      houseId: house.id,
+      userId: house.userId,
+      rawId,
+    });
+
+    res.status(202).json({
+      ok: true,
+      accepted: true,
+      processing: true,
+      houseId: house.id,
+      message: "Green Button rehydrate accepted; processing continues in the background.",
+    });
+    logEvent("rehydrate.accepted_async", { houseId: house.id, rawId });
+  } catch (error) {
+    console.error("[green-button-upload] failed to handle rehydrate", error);
+    res.status(500).json({
+      ok: false,
+      error: "internal_error",
+      detail: String((error as Error)?.message || error),
+    });
+  }
+});
+
 app.post("/upload", upload.single("file"), async (req: Request, res: Response) => {
   let uploadRecordId: string | null = null;
   try {

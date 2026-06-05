@@ -25,9 +25,7 @@ describe("green button rehydrate vercel guard", () => {
     expect(isGreenButtonRehydrateBlockedOnVercel(10 * 1024 * 1024)).toBe(false);
   });
 
-  it("maps vercel size error to an actionable message", () => {
-    expect(greenButtonRehydrateUserMessage("raw_too_large_for_vercel_rehydrate")).toContain(
-      "uploads.intelliwatt.com"
-    );
+  it("maps vercel size error to droplet configuration guidance", () => {
+    expect(greenButtonRehydrateUserMessage("raw_too_large_for_vercel_rehydrate")).toContain("droplet");
   });
 });

@@ -1682,10 +1682,9 @@ export function OnePathSimAdmin() {
                   <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/60 p-4 text-sm text-slate-700">
                     <div className="font-semibold text-brand-navy">Green Button rehydrate from raw</div>
                     <p className="mt-1 text-xs text-slate-600">
-                      Re-runs the same canonical ingest pipeline as Droplet/Vercel upload on stored{" "}
-                      <code className="text-[11px]">rawGreenButton</code> bytes (overlap + slot repair + current ingest
-                      version). Use when intervals exist but the ingest gate reports stale data — no need to re-upload the
-                      XML file.
+                      Re-runs the same canonical ingest pipeline as the customer upload droplet on stored{" "}
+                      <code className="text-[11px]">rawGreenButton</code> bytes (not Vercel serverless ingest). Use when
+                      intervals exist but the ingest gate reports stale data — no need to re-upload the XML file.
                     </p>
                     <p className="mt-1 text-xs text-slate-500">
                       Target house: <span className="font-mono">{greenButtonPersistedUsageHouseId}</span>

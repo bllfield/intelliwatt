@@ -1,23 +1,34 @@
 /**
  * Re-run the canonical Green Button ingest pipeline from stored raw file bytes
  * and replace persisted interval rows (for houses uploaded before ingest v1).
+ *
+ * Production: delegates to the droplet uploader (same host as customer uploads),
+ * not Vercel serverless ingest.
  */
 
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
+import {
+  requestGreenButtonRehydrateOnDroplet,
+  resolveGreenButtonDropletConfig,
+} from "@/lib/usage/greenButtonDropletRehydrate";
 import { resolveGreenButtonUploadRecordDateRange } from "@/lib/usage/greenButtonCoverage";
 import {
   GREEN_BUTTON_INTERVAL_INGEST_VERSION,
   isGreenButtonIntervalIngestCurrent,
 } from "@/lib/usage/greenButtonIngestContract";
 import { createManyGreenButtonIntervalsInBatches } from "@/lib/usage/greenButtonIntervalPersist";
-import { runGreenButtonUsagePipeline } from "@/lib/usage/greenButtonUsagePipeline";
+import { GREEN_BUTTON_NORMALIZE_READINGS_PER_CHUNK } from "@/lib/usage/greenButtonNormalize";
+import {
+  GREEN_BUTTON_USAGE_PIPELINE_WINDOW_DAYS,
+  runGreenButtonUsagePipeline,
+} from "@/lib/usage/greenButtonUsagePipeline";
 
 const USAGE_DB_ENABLED = Boolean((process.env.USAGE_DATABASE_URL ?? "").trim());
 
-/** Year-scale GB XML ingest exceeds Vercel one-path-sim maxDuration (~300s). */
+/** Legacy guard retained for local-only fallback when droplet is not configured. */
 export const GREEN_BUTTON_REHYDRATE_RAW_MAX_BYTES_ON_VERCEL = 3 * 1024 * 1024;
 
 export function isGreenButtonRehydrateBlockedOnVercel(sizeBytes: number): boolean {
@@ -28,9 +39,24 @@ export function greenButtonRehydrateUserMessage(error: string): string {
   switch (error) {
     case "raw_too_large_for_vercel_rehydrate":
       return (
-        "This Green Button raw file is too large to rehydrate on Vercel (full-year ingest can take several minutes). " +
-        "Re-upload at uploads.intelliwatt.com so the droplet runs ingest, then retry One Path without “Rehydrate from raw”."
+        "Green Button rehydrate must run on the droplet ingest host, but droplet rehydrate is not configured. " +
+        "Set GREEN_BUTTON_UPLOAD_URL and GREEN_BUTTON_UPLOAD_SECRET, or re-upload at uploads.intelliwatt.com."
       );
+    case "green_button_droplet_unavailable":
+      return (
+        "Green Button droplet rehydrate is not configured (missing GREEN_BUTTON_UPLOAD_URL/SECRET). " +
+        "Re-upload at uploads.intelliwatt.com or configure the droplet uploader."
+      );
+    case "droplet_rehydrate_request_failed":
+      return "Could not reach the Green Button droplet rehydrate endpoint. Check uploads.intelliwatt.com health.";
+    case "droplet_rehydrate_failed":
+      return "Green Button droplet rehydrate failed. See droplet logs or re-upload the customer file.";
+    case "rehydrate_timeout":
+      return (
+        "Green Button rehydrate is still processing on the droplet. Wait a minute, confirm Usage shows current ingest, then retry."
+      );
+    case "rehydrate_parse_error":
+      return "Green Button rehydrate failed while parsing the stored raw file.";
     case "usage_db_disabled":
       return "Usage database is not configured; cannot rehydrate Green Button intervals.";
     case "missing_raw_green_button":
@@ -52,7 +78,7 @@ export type RehydrateGreenButtonIntervalsResult =
     }
   | { ok: false; error: string };
 
-export async function rehydrateGreenButtonIntervalsFromRawForHouse(args: {
+export async function executeGreenButtonRehydrateFromStoredRaw(args: {
   houseId: string;
   rawId?: string | null;
   userId?: string | null;
@@ -71,11 +97,8 @@ export async function rehydrateGreenButtonIntervalsFromRawForHouse(args: {
     const latest = await usageClient.rawGreenButton.findFirst({
       where: { homeId: houseId },
       orderBy: { createdAt: "desc" },
-      select: { id: true, sizeBytes: true },
+      select: { id: true },
     });
-    if (latest?.id && isGreenButtonRehydrateBlockedOnVercel(latest.sizeBytes ?? 0)) {
-      return { ok: false, error: "raw_too_large_for_vercel_rehydrate" };
-    }
     rawId = latest?.id ?? null;
   }
   if (!rawId) return { ok: false, error: "missing_raw_green_button" };
@@ -85,15 +108,17 @@ export async function rehydrateGreenButtonIntervalsFromRawForHouse(args: {
     select: { id: true, homeId: true, userId: true, filename: true, sizeBytes: true, content: true },
   });
   if (!raw) return { ok: false, error: "missing_raw_green_button" };
-  if (isGreenButtonRehydrateBlockedOnVercel(raw.sizeBytes ?? 0)) {
-    return { ok: false, error: "raw_too_large_for_vercel_rehydrate" };
-  }
   if (!raw.content) return { ok: false, error: "raw_content_missing" };
 
+  const readingsPerChunk = Number(
+    process.env.GREEN_BUTTON_READINGS_PER_CHUNK || String(GREEN_BUTTON_NORMALIZE_READINGS_PER_CHUNK)
+  );
   const pipeline = runGreenButtonUsagePipeline({
     buffer: Buffer.isBuffer(raw.content) ? raw.content : Buffer.from(raw.content),
     filename: raw.filename ?? null,
-    windowDays: args.windowDays ?? 365,
+    windowDays: args.windowDays ?? GREEN_BUTTON_USAGE_PIPELINE_WINDOW_DAYS,
+    maxKwhPerInterval: null,
+    readingsPerChunk,
   });
   if (!pipeline.ok) {
     return { ok: false, error: pipeline.error };
@@ -153,4 +178,54 @@ export async function rehydrateGreenButtonIntervalsFromRawForHouse(args: {
     coverageStartDateKey: startDateKey,
     coverageEndDateKey: endDateKey,
   };
+}
+
+export async function rehydrateGreenButtonIntervalsFromRawForHouse(args: {
+  houseId: string;
+  rawId?: string | null;
+  userId?: string | null;
+  windowDays?: number;
+  /** When true, skip droplet delegation (droplet endpoint calls local execution). */
+  executeLocally?: boolean;
+  waitForDropletCompletion?: boolean;
+  dropletWaitTimeoutMs?: number;
+}): Promise<RehydrateGreenButtonIntervalsResult> {
+  if (!USAGE_DB_ENABLED) {
+    return { ok: false, error: "usage_db_disabled" };
+  }
+
+  const houseId = String(args.houseId ?? "").trim();
+  if (!houseId) return { ok: false, error: "missing_houseId" };
+
+  const dropletConfig = args.executeLocally ? null : resolveGreenButtonDropletConfig();
+  if (dropletConfig) {
+    const userId =
+      args.userId?.trim() ||
+      (await prisma.houseAddress.findUnique({ where: { id: houseId }, select: { userId: true } }))?.userId ||
+      null;
+    if (!userId) return { ok: false, error: "missing_userId" };
+
+    return requestGreenButtonRehydrateOnDroplet({
+      houseId,
+      userId,
+      rawId: args.rawId ?? null,
+      config: dropletConfig,
+      waitForCompletion: args.waitForDropletCompletion !== false,
+      waitTimeoutMs: args.dropletWaitTimeoutMs,
+    });
+  }
+
+  if (process.env.VERCEL === "1") {
+    const usageClient = usagePrisma as any;
+    const latest = await usageClient.rawGreenButton.findFirst({
+      where: { homeId: houseId },
+      orderBy: { createdAt: "desc" },
+      select: { sizeBytes: true },
+    });
+    if (isGreenButtonRehydrateBlockedOnVercel(latest?.sizeBytes ?? 0)) {
+      return { ok: false, error: "raw_too_large_for_vercel_rehydrate" };
+    }
+  }
+
+  return executeGreenButtonRehydrateFromStoredRaw(args);
 }
