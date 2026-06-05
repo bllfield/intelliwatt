@@ -156,6 +156,48 @@ describe("dataset simulated day separation", () => {
     expect(dataset.meta.simulatedSourceDetailByDate?.["2025-11-01"]).toBe("SIMULATED_MANUAL_CONSTRAINED");
   });
 
+  it("keeps TRAVEL_VACANT simulated on GB trusted home days", () => {
+    const intervals = [
+      ...makeUtcDayIntervals("2025-06-27", 0.8),
+      ...makeUtcDayIntervals("2025-06-28", 0.1),
+    ];
+    const curve: SimulatedCurve = {
+      start: "2025-06-27",
+      end: "2025-06-28",
+      intervals,
+      monthlyTotals: [],
+      annualTotalKwh: 0,
+      meta: { excludedDays: 0, renormalized: false },
+    };
+    const dataset = buildSimulatedUsageDatasetFromCurve(
+      curve,
+      {
+        baseKind: "SMT_ACTUAL_BASELINE",
+        mode: "SMT_BASELINE",
+        canonicalEndMonth: "2025-06",
+      },
+      {
+        greenButtonTrustedHomeDateKeys: new Set(["2025-06-27", "2025-06-28"]),
+        simulatedDayResults: [
+          { localDate: "2025-06-27", displayDayKwh: 52.4, simulatedReasonCode: "TRAVEL_VACANT" } as any,
+          { localDate: "2025-06-28", displayDayKwh: 48.1, simulatedReasonCode: "TRAVEL_VACANT" } as any,
+        ],
+      }
+    );
+    const byDate = new Map(dataset.daily.map((row) => [row.date, row]));
+    expect(byDate.get("2025-06-27")).toMatchObject({
+      source: "SIMULATED",
+      sourceDetail: "SIMULATED_TRAVEL_VACANT",
+      kwh: 52.4,
+    });
+    expect(byDate.get("2025-06-28")).toMatchObject({
+      source: "SIMULATED",
+      sourceDetail: "SIMULATED_TRAVEL_VACANT",
+      kwh: 48.1,
+    });
+    expect(dataset.meta.simulatedTravelVacantDateKeysLocal).toEqual(["2025-06-27", "2025-06-28"]);
+  });
+
   it("labels simulated days using homeDateKey when UTC timestamp day differs from engine localDate", () => {
     const utcGrid = Array.from({ length: 96 }, (_, slot) => ({
       timestamp: new Date(new Date("2026-05-14T00:00:00.000Z").getTime() + slot * 15 * 60 * 1000),

@@ -11,6 +11,7 @@ import { buildSimulatedHomeDateKeysExcludedFromBaseload } from "@/lib/usage/simu
 import {
   filterSimulatedDateKeysWithoutGreenButtonTrustedHome,
   pruneGreenButtonTrustedDaysFromPastDatasetMeta,
+  readGreenButtonRetainSimulatedDateKeysFromPastMeta,
   readGreenButtonTrustedHomeDateKeysFromPastMeta,
   resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals,
   resolvePastDatasetMetaActualSource,
@@ -757,11 +758,13 @@ export function reconcileRestoredPastDatasetFromDecodedIntervals(args: {
       simDateKeys.delete(dk);
     }
   }
+  const greenButtonRetainSimulatedDateKeys = readGreenButtonRetainSimulatedDateKeysFromPastMeta(meta);
   if (greenButtonTrustedHomeDateKeys.size > 0 && meta && typeof meta === "object") {
     pruneGreenButtonTrustedDaysFromPastDatasetMeta(meta as Record<string, unknown>, greenButtonTrustedHomeDateKeys);
     simDateKeys = filterSimulatedDateKeysWithoutGreenButtonTrustedHome({
       simulatedDateKeys: simDateKeys,
       trustedHomeDateKeys: greenButtonTrustedHomeDateKeys,
+      retainSimulatedDateKeys: greenButtonRetainSimulatedDateKeys,
     });
   }
 
@@ -777,6 +780,7 @@ export function reconcileRestoredPastDatasetFromDecodedIntervals(args: {
       simDateKeys = filterSimulatedDateKeysWithoutGreenButtonTrustedHome({
         simulatedDateKeys: simDateKeys,
         trustedHomeDateKeys: greenButtonTrustedHomeDateKeys,
+        retainSimulatedDateKeys: greenButtonRetainSimulatedDateKeys,
       });
     }
   }
@@ -1492,7 +1496,7 @@ export function buildSimulatedUsageDatasetFromCurve(
     useUtcMonth?: boolean;
     /** Canonical simulated-day artifacts used for simulated-date daily display parity. */
     simulatedDayResults?: SimulatedDayResult[];
-    /** GB trusted home-local days stay ACTUAL even if a stale dayResult exists. */
+    /** GB trusted home-local days stay ACTUAL except travel/vacant modeled days and validation test days. */
     greenButtonTrustedHomeDateKeys?: Set<string>;
     /**
      * Gap-Fill lab_validation + sparse stitched curves: skip fifteen-minute profiles, time-of-day buckets,
@@ -1595,12 +1599,20 @@ export function buildSimulatedUsageDatasetFromCurve(
       for (const row of options?.simulatedDayResults ?? []) {
         const dk = String(row?.localDate ?? "").slice(0, 10);
         if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
-        if (trustedHome.has(dk) && !validationOnlyDateKeySet.has(dk)) continue;
+        const reason = String((row as any)?.simulatedReasonCode ?? "");
+        // GB trusted home days stay ACTUAL for stale incomplete-meter rows, but travel/vacant
+        // modeled days must still surface as SIMULATED_TRAVEL_VACANT in the stitched artifact.
+        if (
+          trustedHome.has(dk) &&
+          !validationOnlyDateKeySet.has(dk) &&
+          reason !== "TRAVEL_VACANT"
+        ) {
+          continue;
+        }
         nextSimulatedDisplayByDate.set(
           dk,
           Number(row.displayDayKwh ?? row.intervalSumKwh ?? row.finalDayKwh) || 0
         );
-        const reason = String((row as any)?.simulatedReasonCode ?? "");
         const detail: PastSimulatedDaySourceDetail =
           reason === "TRAVEL_VACANT"
             ? "SIMULATED_TRAVEL_VACANT"

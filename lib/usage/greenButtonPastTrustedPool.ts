@@ -271,11 +271,41 @@ export function pruneGreenButtonTrustedDaysFromPastDatasetMeta(
   }
 }
 
+/** Travel/vacant and validation test modeled days stay simulated on GB trusted home days. */
+export function readGreenButtonRetainSimulatedDateKeysFromPastMeta(meta: unknown): Set<string> {
+  const out = new Set<string>();
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return out;
+  const m = meta as Record<string, unknown>;
+  for (const key of ["simulatedTravelVacantDateKeysLocal", "simulatedTestModeledDateKeysLocal"] as const) {
+    const raw = m[key];
+    if (!Array.isArray(raw)) continue;
+    for (const entry of raw) {
+      const dk = String(entry ?? "").slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dk)) out.add(dk);
+    }
+  }
+  const byDetail = m.simulatedSourceDetailByDate;
+  if (byDetail && typeof byDetail === "object" && !Array.isArray(byDetail)) {
+    for (const [rawKey, rawDetail] of Object.entries(byDetail as Record<string, unknown>)) {
+      const dk = String(rawKey).slice(0, 10);
+      const detail = String(rawDetail ?? "").trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
+      if (detail === "SIMULATED_TRAVEL_VACANT" || detail === "SIMULATED_TEST_DAY") out.add(dk);
+    }
+  }
+  return out;
+}
+
 export function filterSimulatedDateKeysWithoutGreenButtonTrustedHome(args: {
   simulatedDateKeys: Set<string>;
   trustedHomeDateKeys: ReadonlySet<string>;
+  retainSimulatedDateKeys?: ReadonlySet<string>;
 }): Set<string> {
+  const retain = args.retainSimulatedDateKeys ?? new Set<string>();
   const out = new Set(args.simulatedDateKeys);
-  for (const dk of Array.from(args.trustedHomeDateKeys)) out.delete(dk);
+  for (const dk of Array.from(args.trustedHomeDateKeys)) {
+    if (retain.has(dk)) continue;
+    out.delete(dk);
+  }
   return out;
 }

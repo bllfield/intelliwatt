@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import { convertGreenButtonPersistedRowsToHome } from "@/lib/time/greenButtonPersistedIntervalConvert";
 import { homeProjectedIntervalFromRecord } from "@/lib/time/actualIntervalCalendar";
 import {
+  filterSimulatedDateKeysWithoutGreenButtonTrustedHome,
   materializeGreenButtonPastProducerIntervals,
   pruneGreenButtonTrustedDaysFromPastDatasetMeta,
+  readGreenButtonRetainSimulatedDateKeysFromPastMeta,
   resolveGreenButtonPastSimTrustedHomeDateKeys,
   resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals,
   resolvePastProducerIntervalActualSource,
@@ -193,6 +195,20 @@ describe("greenButtonPastTrustedPool", () => {
     expect(Object.keys(selection?.validationActualDailyKwhByDateLocal ?? {}).length).toBe(
       selection?.validationOnlyDateKeysLocal.length
     );
+  });
+
+  it("filterSimulatedDateKeysWithoutGreenButtonTrustedHome retains travel/vacant modeled days", () => {
+    const meta = {
+      simulatedTravelVacantDateKeysLocal: ["2025-06-28", "2025-07-05"],
+      simulatedTestModeledDateKeysLocal: ["2025-06-04"],
+    };
+    const retain = readGreenButtonRetainSimulatedDateKeysFromPastMeta(meta);
+    const filtered = filterSimulatedDateKeysWithoutGreenButtonTrustedHome({
+      simulatedDateKeys: new Set(["2025-06-04", "2025-06-28", "2025-07-05", "2025-11-02"]),
+      trustedHomeDateKeys: new Set(["2025-06-04", "2025-06-28", "2025-07-05", "2025-11-02"]),
+      retainSimulatedDateKeys: retain,
+    });
+    expect(Array.from(filtered).sort()).toEqual(["2025-06-04", "2025-06-28", "2025-07-05"]);
   });
 
   it("pruneGreenButtonTrustedDaysFromPastDatasetMeta drops incomplete-meter canonical only, not test-day compare truth", () => {
