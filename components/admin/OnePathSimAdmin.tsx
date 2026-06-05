@@ -533,7 +533,7 @@ export function OnePathSimAdmin() {
       includeSimRunAudit: includeSimRunAuditEnabled || debugDiagnosticsEnabled,
       performanceAudit:
         asRecord(runResult?.performanceAudit) ??
-        asRecord(asRecord(runResult?.readModel).performanceAudit) ??
+        asRecord(asRecord(runResult?.readModel)?.performanceAudit) ??
         null,
       smtIncompleteMeterRetry: asRecord(runResult?.smtIncompleteMeterRetry) ?? null,
       smtRefreshCheck: asRecord(runResult?.smtRefreshCheck) ?? null,
@@ -599,7 +599,7 @@ export function OnePathSimAdmin() {
       includeSimRunAudit: includeSimRunAuditEnabled || debugDiagnosticsEnabled,
       performanceAudit:
         asRecord(runResult?.performanceAudit) ??
-        asRecord(asRecord(runResult?.readModel).performanceAudit) ??
+        asRecord(asRecord(runResult?.readModel)?.performanceAudit) ??
         null,
       smtIncompleteMeterRetry: asRecord(runResult?.smtIncompleteMeterRetry) ?? null,
       smtRefreshCheck: asRecord(runResult?.smtRefreshCheck) ?? null,

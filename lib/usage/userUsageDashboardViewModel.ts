@@ -175,7 +175,9 @@ function sumTimeOfDayBucketKwh(
 }
 
 function mapInsightTimeOfDayBuckets(dataset: { insights?: { timeOfDayBuckets?: unknown } } | null | undefined) {
-  return (dataset?.insights?.timeOfDayBuckets ?? []).map((bucket: any) => ({
+  const raw = dataset?.insights?.timeOfDayBuckets;
+  if (!Array.isArray(raw)) return [];
+  return raw.map((bucket: any) => ({
     key: bucket.key,
     label: bucket.label,
     kwh: bucket.kwh,
