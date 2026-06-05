@@ -10,6 +10,7 @@ import {
   GREEN_BUTTON_INTERVAL_CREATE_PARALLEL,
   createManyGreenButtonIntervalsInBatches,
 } from "../../lib/usage/greenButtonIntervalPersist";
+import { resolveGreenButtonUploadRecordDateRange } from "../../lib/usage/greenButtonCoverage";
 import { runGreenButtonUsagePipeline } from "../../lib/usage/greenButtonUsagePipeline";
 
 const PORT = Number(process.env.GREEN_BUTTON_UPLOAD_PORT || "8091");
@@ -640,8 +641,26 @@ async function runGreenButtonIngestJob(args: GreenButtonIngestJobArgs): Promise<
       logEvent("ingest.pipeline_failed", { uploadRecordId, error: pipelineResult.error });
       return;
     }
-    const { trimmed, summary, parsed, earliest, latest } = pipelineResult;
+    const { trimmed, summary, parsed, earliest, latest, endDateKey, normalized } = pipelineResult;
+    const uploadDateRange = resolveGreenButtonUploadRecordDateRange({
+      endDateKey,
+      windowDays: MANUAL_USAGE_LIFETIME_DAYS,
+      fallbackStart: earliest,
+      fallbackEnd: latest,
+    });
     stageMs.pipeline = Date.now() - stageStart;
+    logEvent("ingest.pipeline_anchor", {
+      uploadRecordId,
+      totalRawReadings: summary.totalRawReadings,
+      normalizedBeforeTrim: summary.normalizedBeforeTrim ?? normalized.length,
+      trimmedIntervals: trimmed.length,
+      displayWindowStartDateKey: summary.displayWindowStartDateKey,
+      displayWindowEndDateKey: summary.displayWindowEndDateKey,
+      dataAvailableStartDateKey: summary.dataAvailableStartDateKey,
+      dataAvailableEndDateKey: summary.dataAvailableEndDateKey,
+      persistedCoverageStartDateKey: summary.coverageStartDateKey,
+      persistedCoverageEndDateKey: summary.coverageEndDateKey,
+    });
     logEvent("ingest.stage_complete", {
       uploadRecordId,
       stage: "pipeline",
@@ -739,8 +758,8 @@ async function runGreenButtonIngestJob(args: GreenButtonIngestJobArgs): Promise<
       data: {
         parseStatus: parsed.warnings.length > 0 ? "complete_with_warnings" : "complete",
         parseMessage: JSON.stringify(summary),
-        dateRangeStart: earliest,
-        dateRangeEnd: latest,
+        dateRangeStart: uploadDateRange?.dateRangeStart ?? earliest,
+        dateRangeEnd: uploadDateRange?.dateRangeEnd ?? latest,
         intervalMinutes: 15,
       },
     });

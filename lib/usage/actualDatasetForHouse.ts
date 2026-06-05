@@ -1535,10 +1535,9 @@ export async function getActualUsageDatasetForHouse(
         };
       })();
     }
-    const monthlyForDisplay = buildDisplayedMonthlyRows({
-      monthly: monthlyTotalsForDisplay,
-      insights: { stitchedMonth: insights.stitchedMonth ?? stitchedMonth ?? null },
-    });
+    const monthlyForDisplay = [...monthlyTotalsForDisplay].sort((left, right) =>
+      left.month < right.month ? -1 : left.month > right.month ? 1 : 0
+    );
     const baseloadMonthlyForDisplay = baseloadMonthlyFromDisplayedMonthly(
       monthlyTotals,
       insights.stitchedMonth ?? stitchedMonth ?? null,

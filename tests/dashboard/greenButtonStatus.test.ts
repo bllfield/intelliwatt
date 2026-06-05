@@ -52,6 +52,30 @@ describe("deriveGreenButtonStatus", () => {
     expect(status.expiresAt?.getFullYear()).toBe(2027);
   });
 
+  it("shows meter data span when file readings start after the display window", () => {
+    const status = deriveGreenButtonStatus({
+      id: "gb-1",
+      createdAt,
+      updatedAt: new Date("2026-01-15T12:05:00.000Z"),
+      parseStatus: "complete",
+      parseMessage: JSON.stringify({
+        intervalIngestVersion: GREEN_BUTTON_INTERVAL_INGEST_VERSION,
+        displayWindowStartDateKey: "2025-02-07",
+        displayWindowEndDateKey: "2026-02-06",
+        dataAvailableStartDateKey: "2025-04-28",
+        dataAvailableEndDateKey: "2026-02-15",
+      }),
+      dateRangeStart: new Date("2025-02-07T06:00:00.000Z"),
+      dateRangeEnd: new Date("2026-02-07T05:59:59.999Z"),
+      intervalMinutes: 15,
+      fileName: "usage.xml",
+      fileSizeBytes: 1000,
+      persistedIntervalCount: 35040,
+    });
+    expect(status.detail).toContain("Meter data:");
+    expect(status.detail).toContain("4/28/2025");
+  });
+
   it("shows processing when old intervals exist during re-upload", () => {
     const status = deriveGreenButtonStatus({
       id: "gb-1",

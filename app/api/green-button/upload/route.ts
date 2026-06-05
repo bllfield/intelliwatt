@@ -7,6 +7,7 @@ import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { awardGreenButtonUsageEntry } from "@/lib/usage/awardGreenButtonUsageEntry";
 import { normalizeEmail } from "@/lib/utils/email";
+import { resolveGreenButtonUploadRecordDateRange } from "@/lib/usage/greenButtonCoverage";
 import { runGreenButtonUsagePipeline } from "@/lib/usage/greenButtonUsagePipeline";
 import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
 import { runPlanPipelineForHome } from "@/lib/plan-engine/runPlanPipelineForHome";
@@ -240,14 +241,20 @@ export async function POST(request: Request) {
       const latest = trimmed[trimmed.length - 1]?.timestamp ?? null;
       coverageEnd = latest;
       parsedSummary = pipelineResult.summary;
+      const uploadDateRange = resolveGreenButtonUploadRecordDateRange({
+        endDateKey: pipelineResult.endDateKey,
+        windowDays: MANUAL_USAGE_LIFETIME_DAYS,
+        fallbackStart: earliest,
+        fallbackEnd: latest,
+      });
 
       await (prisma as any).greenButtonUpload.update({
         where: { id: uploadRecord.id },
         data: {
           parseStatus: pipelineResult.parsed.warnings.length > 0 ? "complete_with_warnings" : "complete",
           parseMessage: JSON.stringify(parsedSummary),
-          dateRangeStart: earliest,
-          dateRangeEnd: latest,
+          dateRangeStart: uploadDateRange?.dateRangeStart ?? earliest,
+          dateRangeEnd: uploadDateRange?.dateRangeEnd ?? latest,
           intervalMinutes: 15,
         },
       });

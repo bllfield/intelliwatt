@@ -1,4 +1,8 @@
-import { trimGreenButtonIntervalsToLatestLocalDays } from "@/lib/usage/greenButtonCoverage";
+import {
+  resolveGreenButtonDataAvailableDateKeys,
+  resolveGreenButtonDisplayWindow,
+  trimGreenButtonIntervalsToLatestLocalDays,
+} from "@/lib/usage/greenButtonCoverage";
 import {
   GREEN_BUTTON_INTERVAL_INGEST_VERSION,
   type GreenButtonUploadParseSummary,
@@ -172,14 +176,21 @@ export function runGreenButtonUsagePipeline(args: {
   }
 
   const totalKwh = trimmed.reduce((sum, row) => sum + row.consumptionKwh, 0);
+  const dataAvailable = resolveGreenButtonDataAvailableDateKeys(normalized);
+  const displayWindow = resolveGreenButtonDisplayWindow(endDateKey, windowDays);
   const summary: GreenButtonUsagePipelineSummary = {
     format: parsed.format,
     totalRawReadings: parsed.metadata.totalReadings,
     normalizedIntervals: trimmed.length,
+    normalizedBeforeTrim: normalized.length,
     totalKwh: Number(totalKwh.toFixed(6)),
     appliedWindowDays: windowDays,
     coverageStartDateKey: startDateKey,
     coverageEndDateKey: endDateKey,
+    displayWindowStartDateKey: displayWindow?.startDate,
+    displayWindowEndDateKey: displayWindow?.endDate,
+    dataAvailableStartDateKey: dataAvailable.startDateKey ?? undefined,
+    dataAvailableEndDateKey: dataAvailable.endDateKey ?? undefined,
     warnings: parsed.warnings,
     intervalIngestVersion: GREEN_BUTTON_INTERVAL_INGEST_VERSION,
   };

@@ -7,7 +7,10 @@ import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
-import { trimGreenButtonIntervalsToLatestLocalDays } from "@/lib/usage/greenButtonCoverage";
+import {
+  resolveGreenButtonUploadRecordDateRange,
+  trimGreenButtonIntervalsToLatestLocalDays,
+} from "@/lib/usage/greenButtonCoverage";
 import {
   GREEN_BUTTON_INTERVAL_INGEST_VERSION,
   isGreenButtonIntervalIngestCurrent,
@@ -124,6 +127,12 @@ export async function rehydrateGreenButtonIntervalsFromRawForHouse(args: {
     orderBy: { createdAt: "desc" },
     take: 5,
   });
+  const uploadDateRange = resolveGreenButtonUploadRecordDateRange({
+    endDateKey: pipeline.endDateKey,
+    windowDays: pipeline.summary.appliedWindowDays,
+    fallbackStart: pipeline.earliest,
+    fallbackEnd: pipeline.latest,
+  });
   for (const upload of uploads ?? []) {
     if (!isGreenButtonIntervalIngestCurrent(upload.parseMessage)) {
       await (prisma as any).greenButtonUpload.update({
@@ -132,8 +141,8 @@ export async function rehydrateGreenButtonIntervalsFromRawForHouse(args: {
           parseMessage: JSON.stringify(pipeline.summary),
           parseStatus: pipeline.parsed.warnings.length > 0 ? "complete_with_warnings" : "complete",
           intervalMinutes: 15,
-          dateRangeStart: pipeline.earliest,
-          dateRangeEnd: pipeline.latest,
+          dateRangeStart: uploadDateRange?.dateRangeStart ?? pipeline.earliest,
+          dateRangeEnd: uploadDateRange?.dateRangeEnd ?? pipeline.latest,
         },
       });
       break;

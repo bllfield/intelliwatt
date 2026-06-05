@@ -56,6 +56,57 @@ export async function resolveGreenButtonBaselineCoverageWindow(
   return window;
 }
 
+export function resolveGreenButtonDataAvailableDateKeys<T extends GreenButtonTimestampedInterval>(
+  intervals: T[]
+): { startDateKey: string | null; endDateKey: string | null } {
+  if (intervals.length === 0) return { startDateKey: null, endDateKey: null };
+  const sorted = [...intervals].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  return {
+    startDateKey: getChicagoDateKeyForTimestamp(sorted[0]!.timestamp),
+    endDateKey: getChicagoDateKeyForTimestamp(sorted[sorted.length - 1]!.timestamp),
+  };
+}
+
+export function resolveGreenButtonDisplayWindow(
+  endDateKey: string,
+  totalDays = CANONICAL_COVERAGE_TOTAL_DAYS
+): CoverageWindow | null {
+  return coverageWindowEndingOnDateKey(endDateKey, totalDays);
+}
+
+export function greenButtonUploadDateRangeFromChicagoDateKeys(args: {
+  startDateKey: string;
+  endDateKey: string;
+}): { dateRangeStart: Date; dateRangeEnd: Date } | null {
+  const range = buildUtcRangeForChicagoLocalDateRange(args);
+  if (!range) return null;
+  return { dateRangeStart: range.startInclusive, dateRangeEnd: range.endInclusive };
+}
+
+/** Upload record dates: full display window (dashboard parity), not first persisted interval only. */
+export function resolveGreenButtonUploadRecordDateRange(args: {
+  endDateKey: string;
+  windowDays?: number;
+  fallbackStart?: Date | null;
+  fallbackEnd?: Date | null;
+}): { dateRangeStart: Date; dateRangeEnd: Date } | null {
+  const displayWindow = resolveGreenButtonDisplayWindow(
+    args.endDateKey,
+    args.windowDays ?? CANONICAL_COVERAGE_TOTAL_DAYS
+  );
+  if (displayWindow) {
+    const fromWindow = greenButtonUploadDateRangeFromChicagoDateKeys({
+      startDateKey: displayWindow.startDate,
+      endDateKey: displayWindow.endDate,
+    });
+    if (fromWindow) return fromWindow;
+  }
+  if (args.fallbackStart && args.fallbackEnd) {
+    return { dateRangeStart: args.fallbackStart, dateRangeEnd: args.fallbackEnd };
+  }
+  return null;
+}
+
 export function trimGreenButtonIntervalsToLatestLocalDays<T extends GreenButtonTimestampedInterval>(
   intervals: T[],
   totalDays = 365

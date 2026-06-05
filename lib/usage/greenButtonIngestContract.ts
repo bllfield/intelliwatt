@@ -14,10 +14,19 @@ export type GreenButtonUploadParseSummary = {
   format?: string;
   totalRawReadings?: number;
   normalizedIntervals?: number;
+  /** Normalized 15-minute rows before Chicago trim (full file; chunking does not drop readings). */
+  normalizedBeforeTrim?: number;
   totalKwh?: number;
   appliedWindowDays?: number;
+  /** Persisted trim range (first/last Chicago days with data after trim). */
   coverageStartDateKey?: string;
   coverageEndDateKey?: string;
+  /** Customer-facing 365-day display window (matches Usage dashboard header). */
+  displayWindowStartDateKey?: string;
+  displayWindowEndDateKey?: string;
+  /** First/last Chicago calendar days present in the normalized file before trim. */
+  dataAvailableStartDateKey?: string;
+  dataAvailableEndDateKey?: string;
   warnings?: string[];
   /** Present when written by `runGreenButtonUsagePipeline` after 2026-05 ingest unification. */
   intervalIngestVersion?: number;

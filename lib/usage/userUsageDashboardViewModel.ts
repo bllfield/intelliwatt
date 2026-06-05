@@ -294,7 +294,15 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
     coverageStart && coverageEnd
       ? enumerateDateKeysInclusive(coverageStart, coverageEnd).length
       : recentDaily.length;
-  const monthlySorted = buildDisplayedMonthlyRows(dataset);
+  const monthlySorted = greenButtonActual
+    ? [...monthly]
+        .map((row: any) => ({
+          month: String(row?.month ?? "").slice(0, 7),
+          kwh: Number(row?.kwh) || 0,
+        }))
+        .filter((row) => /^\d{4}-\d{2}$/.test(row.month))
+        .sort((left, right) => (left.month < right.month ? -1 : left.month > right.month ? 1 : 0))
+    : buildDisplayedMonthlyRows(dataset);
   const weekdayWeekend = hasManualDisplayWindowStitch ? deriveWeekdayWeekendFromDaily(recentDaily) : null;
   const timeOfDayBuckets = hasManualDisplayWindowStitch
     ? deriveTimeOfDayBucketsFromIntervals(dataset?.series?.intervals15 ?? [], {

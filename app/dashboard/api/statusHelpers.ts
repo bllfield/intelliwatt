@@ -1,6 +1,12 @@
 import { UsageEntryContext } from "./context";
 import { resolveGreenButtonConnectionExpiresAt } from "@/lib/usage/awardGreenButtonUsageEntry";
 import {
+  greenButtonUploadDateRangeFromChicagoDateKeys,
+  resolveGreenButtonDisplayWindow,
+} from "@/lib/usage/greenButtonCoverage";
+import { CANONICAL_COVERAGE_TOTAL_DAYS } from "@/lib/usage/canonicalCoverageConfig";
+import { parseGreenButtonUploadParseSummary } from "@/lib/usage/greenButtonIngestContract";
+import {
   GREEN_BUTTON_UPLOAD_COMPLETE_MESSAGE,
   GREEN_BUTTON_UPLOAD_PROCESSING_MESSAGE,
 } from "@/lib/usage/greenButtonUserMessages";
@@ -120,6 +126,48 @@ export function deriveSmtStatus(
   };
 }
 
+function formatGreenButtonCoverageDetail(
+  upload: NonNullable<UsageEntryContext["greenButtonUpload"]>,
+  expiresAt: Date,
+): string | null {
+  if (!upload.dateRangeStart || !upload.dateRangeEnd) return null;
+
+  const summary = parseGreenButtonUploadParseSummary(upload.parseMessage);
+  const displayStartKey = summary?.displayWindowStartDateKey ?? null;
+  const displayEndKey = summary?.displayWindowEndDateKey ?? null;
+  const displayRange =
+    displayStartKey && displayEndKey
+      ? greenButtonUploadDateRangeFromChicagoDateKeys({
+          startDateKey: displayStartKey,
+          endDateKey: displayEndKey,
+        })
+      : null;
+  const coverageStart = displayRange?.dateRangeStart ?? upload.dateRangeStart;
+  const coverageEnd = displayRange?.dateRangeEnd ?? upload.dateRangeEnd;
+
+  const dataStartKey = summary?.dataAvailableStartDateKey ?? summary?.coverageStartDateKey ?? null;
+  const dataEndKey = summary?.dataAvailableEndDateKey ?? summary?.coverageEndDateKey ?? null;
+  const dataRange =
+    dataStartKey && dataEndKey
+      ? greenButtonUploadDateRangeFromChicagoDateKeys({
+          startDateKey: dataStartKey,
+          endDateKey: dataEndKey,
+        })
+      : null;
+  const meterDiffers =
+    dataRange &&
+    (dataStartKey !== displayStartKey ||
+      dataEndKey !== displayEndKey ||
+      dataRange.dateRangeStart.getTime() !== coverageStart.getTime() ||
+      dataRange.dateRangeEnd.getTime() !== coverageEnd.getTime());
+
+  const coverageLine = `Coverage: ${coverageStart.toLocaleDateString()} – ${coverageEnd.toLocaleDateString()}`;
+  const meterLine = meterDiffers
+    ? ` · Meter data: ${dataRange.dateRangeStart.toLocaleDateString()} – ${dataRange.dateRangeEnd.toLocaleDateString()}`
+    : "";
+  return `${coverageLine}${meterLine} · Expires ${expiresAt.toLocaleDateString()}`;
+}
+
 export function deriveGreenButtonStatus(
   upload: UsageEntryContext["greenButtonUpload"],
 ): EntryStatus {
@@ -170,7 +218,7 @@ export function deriveGreenButtonStatus(
   }
 
   const ready = isGreenButtonUsageIngestionReady(upload, persistedIntervalCount);
-  const hasCoverage = Boolean(upload.dateRangeStart && upload.dateRangeEnd);
+  const coverageDetail = formatGreenButtonCoverageDetail(upload, expiresAt);
 
   return {
     label: ready ? "ACTIVE" : "Upload received",
@@ -180,9 +228,7 @@ export function deriveGreenButtonStatus(
       : GREEN_BUTTON_UPLOAD_PROCESSING_MESSAGE,
     lastUpdated: upload.updatedAt ?? upload.createdAt,
     expiresAt,
-    detail: hasCoverage
-      ? `Coverage: ${upload.dateRangeStart!.toLocaleDateString()} – ${upload.dateRangeEnd!.toLocaleDateString()} · Expires ${expiresAt.toLocaleDateString()}`
-      : `Connection active until ${expiresAt.toLocaleDateString()}`,
+    detail: coverageDetail ?? `Connection active until ${expiresAt.toLocaleDateString()}`,
   };
 }
 

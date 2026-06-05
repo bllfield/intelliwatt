@@ -72,6 +72,11 @@ describe("runGreenButtonUsagePipeline", () => {
     if (!result.ok) return;
     expect(result.summary.coverageStartDateKey).toBe("2026-01-09");
     expect(result.summary.coverageEndDateKey).toBe("2026-01-10");
+    expect(result.summary.displayWindowStartDateKey).toBe("2026-01-09");
+    expect(result.summary.displayWindowEndDateKey).toBe("2026-01-10");
+    expect(result.summary.dataAvailableStartDateKey).toBe("2026-01-08");
+    expect(result.summary.dataAvailableEndDateKey).toBe("2026-01-11");
+    expect(result.summary.normalizedBeforeTrim).toBe(300);
     expect(result.normalized).toHaveLength(300);
     expect(result.trimmed).toHaveLength(192);
     expect(result.summary.totalKwh).toBe(48);
