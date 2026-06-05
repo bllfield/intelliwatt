@@ -171,15 +171,21 @@ describe("usage parity regression", () => {
         datasetKind: "SIMULATED",
         actualSource: "GREEN_BUTTON",
         timezone: "America/Chicago",
-        weatherSensitivityScore: {
+        pastDisplayWeatherSensitivityScore: {
+          scoringMode: "INTERVAL_BASED",
           weatherEfficiencyScore0to100: 48,
           coolingSensitivityScore0to100: 92,
           heatingSensitivityScore0to100: 82,
           confidenceScore0to100: 100,
+          excludedSimulatedDayCount: 0,
         },
       },
     };
-    const userVm = buildUserUsageDashboardViewModel({ dataset });
+    const userVm = buildUserUsageDashboardViewModel({
+      dataset,
+      weatherSensitivityScore: (dataset.meta as { pastDisplayWeatherSensitivityScore: unknown })
+        .pastDisplayWeatherSensitivityScore as never,
+    });
     const adminView = buildOnePathRunReadOnlyView({ dataset, readModel: { compareProjection: { metrics: { wape: 16.73, mae: 9.5, rmse: 14.46 } } } });
 
     expect(userVm).not.toBeNull();

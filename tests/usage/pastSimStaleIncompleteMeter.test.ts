@@ -102,6 +102,9 @@ describe("pastSimStaleIncompleteMeter", () => {
 
   it("applyPastSimDisplayTruthToDataset updates daily and series.daily", () => {
     const dataset: Record<string, unknown> = {
+      meta: { datasetKind: "SIMULATED" },
+      summary: { totalKwh: 33.48 },
+      totals: { netKwh: 33.48, importKwh: 33.48, exportKwh: 0 },
       daily: [
         {
           date: "2025-11-02",
@@ -122,5 +125,6 @@ describe("pastSimStaleIncompleteMeter", () => {
       source: "ACTUAL",
       kwh: 34.9,
     });
+    expect((dataset.totals as { netKwh: number }).netKwh).toBe(34.9);
   });
 });

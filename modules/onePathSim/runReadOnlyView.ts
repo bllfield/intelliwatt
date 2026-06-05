@@ -364,11 +364,13 @@ export function buildOnePathRunReadOnlyView(args: {
           },
         }
       : dataset;
-  const weatherScore =
-    args.weatherSensitivityScore ??
-    (meta?.weatherSensitivityScore as WeatherSensitivityScore | null | undefined) ??
-    null;
   const isBaselinePassthrough = meta?.baselinePassthrough === true;
+  const isPastSimulatedDisplay = meta?.datasetKind === "SIMULATED" && !isBaselinePassthrough;
+  const weatherScore = isPastSimulatedDisplay
+    ? ((meta?.pastDisplayWeatherSensitivityScore as WeatherSensitivityScore | null | undefined) ?? null)
+    : (args.weatherSensitivityScore ??
+      (meta?.weatherSensitivityScore as WeatherSensitivityScore | null | undefined) ??
+      null);
   const viewModel = buildUserUsageDashboardViewModel({
     dataset: datasetForDisplay,
     weatherSensitivityScore: weatherScore,

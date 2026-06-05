@@ -340,4 +340,29 @@ describe("reconcileRestoredPastDatasetFromDecodedIntervals", () => {
     const may2026 = displayed.find((row) => row.month === "2026-05");
     expect(may2026?.kwh).toBe(25);
   });
+
+  it("syncs stale totals to interval-derived daily truth on restore", () => {
+    const intervals = [
+      { timestamp: "2020-06-01T00:00:00.000Z", kwh: 10 },
+      { timestamp: "2020-06-02T00:00:00.000Z", kwh: 20 },
+    ];
+    const dataset: any = {
+      summary: { end: "2020-06-02", totalKwh: 25 },
+      meta: { datasetKind: "SIMULATED" },
+      daily: [],
+      monthly: [{ month: "2020-06", kwh: 25 }],
+      series: { daily: [], monthly: [], annual: [{ kwh: 25 }] },
+      insights: { weekdayVsWeekend: { weekday: 0, weekend: 0 }, peakDay: null, stitchedMonth: null },
+      totals: { importKwh: 25, netKwh: 25, exportKwh: 0 },
+    };
+
+    reconcileRestoredPastDatasetFromDecodedIntervals({
+      dataset,
+      decodedIntervals: intervals,
+      fallbackEndDate: "2020-06-02",
+    });
+
+    expect(dataset.totals.netKwh).toBe(30);
+    expect(dataset.summary.totalKwh).toBe(30);
+  });
 });

@@ -72,8 +72,11 @@ vi.mock("@/modules/onePathSim/runtime", () => ({
   resolveOnePathUpstreamUsageTruthForSimulation: vi.fn().mockResolvedValue(null),
 }));
 
+vi.mock("@/lib/usage/finalizePastDatasetDisplayReadModel", () => ({
+  finalizePastDatasetDisplayReadModel: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("@/lib/usage/pastSimStaleIncompleteMeter", () => ({
-  applyPastSimDisplayTruthToDataset: vi.fn(),
   resolveStaleIncompleteMeterSlotCompleteDateKeys: vi.fn().mockResolvedValue(new Set()),
 }));
 

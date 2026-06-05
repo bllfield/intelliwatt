@@ -11,6 +11,7 @@ import {
   resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals,
   resolvePastDatasetMetaActualSource,
 } from "@/lib/usage/greenButtonPastTrustedPool";
+import { reconcilePastDatasetDisplayTotals } from "@/lib/usage/reconcilePastDatasetDisplayTotals";
 import { loadSmtWindowDayStatus } from "@/lib/usage/smtWindowStatus";
 
 const INCOMPLETE_METER_DETAIL = "SIMULATED_INCOMPLETE_METER";
@@ -164,6 +165,7 @@ export function applyPastSimDisplayTruthToDataset(
       };
     });
   }
+  reconcilePastDatasetDisplayTotals(dataset);
 }
 
 export function applyPastSimDisplayTruthOverlay<T extends DailyRowWithSource>(

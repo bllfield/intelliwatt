@@ -8,6 +8,7 @@ import {
 } from "@/lib/usage/pastIntervalDailyKey";
 import { resolveHomeTimezone } from "@/lib/time/resolveHomeTimezone";
 import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
+import { reconcilePastDatasetDisplayTotals } from "@/lib/usage/reconcilePastDatasetDisplayTotals";
 import {
   filterSimulatedDateKeysWithoutGreenButtonTrustedHome,
   pruneGreenButtonTrustedDaysFromPastDatasetMeta,
@@ -898,22 +899,12 @@ export function reconcileRestoredPastDatasetFromDecodedIntervals(args: {
   }
 
   if (!dataset.summary || typeof dataset.summary !== "object") (dataset as any).summary = {};
-  if ((dataset.summary as any).totalKwh == null) {
-    (dataset.summary as any).totalKwh = recomputed.intervalSumKwh;
-  }
   if ((dataset.summary as any).intervalsCount == null) {
     (dataset.summary as any).intervalsCount = recomputed.intervalCount;
   }
-  if (!dataset.totals || typeof dataset.totals !== "object") (dataset as any).totals = {};
-  if ((dataset.totals as any).importKwh == null) {
-    (dataset.totals as any).importKwh = recomputed.intervalSumKwh;
-  }
-  if ((dataset.totals as any).netKwh == null) {
-    (dataset.totals as any).netKwh = recomputed.intervalSumKwh;
-  }
-  if ((dataset.totals as any).exportKwh == null) {
-    (dataset.totals as any).exportKwh = 0;
-  }
+  reconcilePastDatasetDisplayTotals(dataset as Record<string, unknown>, {
+    fallbackTotalKwh: recomputed.intervalSumKwh,
+  });
 }
 
 function buildMonthlyTotalsFromIntervals(intervals: Array<{ timestamp: string; consumption_kwh: number }>) {
@@ -1873,9 +1864,9 @@ export function buildSimulatedUsageDatasetFromCurve(
       weekdayVsWeekend: { weekday: round2(weekdaySum), weekend: round2(weekendSum) },
     },
     totals: {
-      importKwh: totalFromMonthly,
+      importKwh: totalFromIntervals,
       exportKwh: 0,
-      netKwh: totalFromMonthly,
+      netKwh: totalFromIntervals,
     },
     meta: {
       datasetKind: "SIMULATED",

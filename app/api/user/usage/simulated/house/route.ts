@@ -9,11 +9,8 @@ import { resolveIntervalsLayer } from "@/lib/usage/resolveIntervalsLayer";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import { ensureUsageShapeProfileForUserHouse } from "@/modules/usageShapeProfile/autoBuild";
 import { createSimCorrelationId } from "@/modules/onePathSim/usageSimulator/simObservability";
-import {
-  applyPastSimDisplayTruthToDataset,
-  resolveStaleIncompleteMeterSlotCompleteDateKeys,
-} from "@/lib/usage/pastSimStaleIncompleteMeter";
-import { sageActualDailyKwhByDate } from "@/lib/usage/sageActualDailyTruth";
+import { finalizePastDatasetDisplayReadModel } from "@/lib/usage/finalizePastDatasetDisplayReadModel";
+import { resolveStaleIncompleteMeterSlotCompleteDateKeys } from "@/lib/usage/pastSimStaleIncompleteMeter";
 import { isPersistedAdminLabTestHomeLabel } from "@/lib/usage/userSiteSimulationIsolation";
 import { resolveHouseCommittedUsageSource } from "@/lib/usage/houseCommittedUsageSource";
 import type { ActualUsageSource } from "@/modules/realUsageAdapter/actual";
@@ -254,44 +251,48 @@ export async function GET(request: NextRequest) {
           meta: datasetAny?.meta,
         }),
       ]);
-      applyPastSimDisplayTruthToDataset(datasetAny, {
-        sageByDate: sageActualDailyKwhByDate(sageTruth?.dataset),
-        smtSlotCompleteDateKeys,
-      });
       const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRec?.appliancesJson as any) ?? null);
-      const persistedScore = (datasetAny?.meta as any)?.weatherSensitivityScore ?? null;
-      const persistedDerivedInput = (datasetAny?.meta as any)?.weatherEfficiencyDerivedInput ?? null;
       const isPastSimulatedDataset = (datasetAny?.meta as any)?.datasetKind === "SIMULATED";
-      const weatherSensitivity =
-        persistedScore != null
-          ? {
-              score: persistedScore,
-              derivedInput: persistedDerivedInput ?? buildWeatherEfficiencyDerivedInput(persistedScore),
-            }
-          : isPastSimulatedDataset
-            ? { score: null, derivedInput: null }
-            : await (async () => {
-                const actualDatasetForSharedScore =
-                  house?.id != null
-                    ? (
-                        await resolveIntervalsLayer({
-                          userId: u.user.id,
-                          houseId: house.id,
-                          layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
-                          scenarioId: null,
-                          esiid: house.esiid ?? null,
-                          preferredActualSource: preferredActualSource ?? null,
-                        }).catch(() => null)
-                      )?.dataset ?? null
-                    : null;
-                return resolveSharedWeatherSensitivityEnvelope({
-                  actualDataset: actualDatasetForSharedScore,
-                  manualUsagePayload: manualUsageRec?.payload ?? null,
-                  homeProfile,
-                  applianceProfile,
-                  weatherHouseId: houseId,
-                }).catch(() => ({ score: null, derivedInput: null }));
-              })();
+      await finalizePastDatasetDisplayReadModel({
+        dataset: datasetAny,
+        sageActualDataset: sageTruth?.dataset ?? null,
+        smtSlotCompleteDateKeys,
+        homeProfile,
+        applianceProfile,
+        weatherHouseId: houseId,
+      });
+      const pastDisplayScore = (datasetAny?.meta as any)?.pastDisplayWeatherSensitivityScore ?? null;
+      const pastDisplayDerivedInput =
+        (datasetAny?.meta as any)?.pastDisplayWeatherEfficiencyDerivedInput ?? null;
+      const weatherSensitivity = isPastSimulatedDataset
+        ? {
+            score: pastDisplayScore,
+            derivedInput:
+              pastDisplayDerivedInput ??
+              (pastDisplayScore ? buildWeatherEfficiencyDerivedInput(pastDisplayScore) : null),
+          }
+        : await (async () => {
+            const actualDatasetForSharedScore =
+              house?.id != null
+                ? (
+                    await resolveIntervalsLayer({
+                      userId: u.user.id,
+                      houseId: house.id,
+                      layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
+                      scenarioId: null,
+                      esiid: house.esiid ?? null,
+                      preferredActualSource: preferredActualSource ?? null,
+                    }).catch(() => null)
+                  )?.dataset ?? null
+                : null;
+            return resolveSharedWeatherSensitivityEnvelope({
+              actualDataset: actualDatasetForSharedScore,
+              manualUsagePayload: manualUsageRec?.payload ?? null,
+              homeProfile,
+              applianceProfile,
+              weatherHouseId: houseId,
+            }).catch(() => ({ score: null, derivedInput: null }));
+          })();
       const successBody = {
         ...out,
         compareProjection,

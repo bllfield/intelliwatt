@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { finalizePastDatasetDisplayReadModel } from "@/lib/usage/finalizePastDatasetDisplayReadModel";
 import { resolveStaleIncompleteMeterSlotCompleteDateKeys } from "@/lib/usage/pastSimStaleIncompleteMeter";
 import { sageActualDailyRowsFromDataset } from "@/lib/usage/sageActualDailyTruth";
 import { buildUserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
@@ -681,6 +682,29 @@ function sageRunDisplayViewArgsFromTruth(
   return sageDisplayViewArgsFromDataset(truth?.dataset);
 }
 
+async function preparePastArtifactDatasetForDisplay(args: {
+  userId: string;
+  houseId: string;
+  dataset: Record<string, unknown> | null | undefined;
+  sageActualDataset?: Record<string, unknown> | null;
+  smtSlotCompleteDateKeys?: ReadonlySet<string>;
+}) {
+  if (!args.dataset) return;
+  const [homeProfile, applianceProfileRec] = await Promise.all([
+    getHomeProfileSimulatedByUserHouse({ userId: args.userId, houseId: args.houseId }),
+    getApplianceProfileSimulatedByUserHouse({ userId: args.userId, houseId: args.houseId }),
+  ]);
+  const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRec?.appliancesJson as any) ?? null);
+  await finalizePastDatasetDisplayReadModel({
+    dataset: args.dataset,
+    sageActualDataset: args.sageActualDataset ?? null,
+    smtSlotCompleteDateKeys: args.smtSlotCompleteDateKeys,
+    homeProfile,
+    applianceProfile,
+    weatherHouseId: args.houseId,
+  });
+}
+
 async function sageAndStaleIncompleteDisplayArgs(args: {
   sageDataset: unknown;
   datasetForMeta: Record<string, unknown> | null | undefined;
@@ -843,6 +867,13 @@ async function buildPastSimRunReadbackResponse(args: {
     datasetForMeta: asRecord(readback.dataset),
     smtSourceEsiid: args.smtSourceEsiid ?? args.smtPostSimHealing?.sourceEsiid ?? null,
     preferredActualSource: preferredActualSourceForCompare,
+  });
+  await preparePastArtifactDatasetForDisplay({
+    userId: args.userId,
+    houseId: args.houseId,
+    dataset: asRecord(readback.dataset),
+    sageActualDataset: asRecord(sageTruth?.dataset),
+    smtSlotCompleteDateKeys: sageDisplayArgs.smtSlotCompleteDateKeys,
   });
   const runDisplayViewBase =
     buildOnePathRunReadOnlyView({
@@ -2326,6 +2357,13 @@ export async function POST(request: NextRequest) {
           buildInputs: buildInputsForCompare,
           engineInput: asRecord(engineInput),
         });
+        await preparePastArtifactDatasetForDisplay({
+          userId: effectiveUserId,
+          houseId: effectiveHouseId,
+          dataset: artifactDataset,
+          sageActualDataset: asRecord(sageTruthForPastDisplay?.dataset),
+          smtSlotCompleteDateKeys: sageDisplayArgsForPast.smtSlotCompleteDateKeys,
+        });
         const compactRunDisplayView =
           buildOnePathRunReadOnlyView({
             dataset: artifactDataset,
@@ -2397,13 +2435,29 @@ export async function POST(request: NextRequest) {
             smtSourceEsiid,
           })
         : sageDisplayArgsForPast;
+      if (manualPastReadResult?.ok) {
+        await preparePastArtifactDatasetForDisplay({
+          userId: effectiveUserId,
+          houseId: effectiveHouseId,
+          dataset: asRecord(manualPastReadResult.displayDataset),
+          sageActualDataset: asRecord(actualDatasetForManualRun),
+          smtSlotCompleteDateKeys: manualSageDisplayArgs.smtSlotCompleteDateKeys,
+        });
+      } else if (effectiveRawInputBase.scenarioId) {
+        await preparePastArtifactDatasetForDisplay({
+          userId: effectiveUserId,
+          houseId: effectiveHouseId,
+          dataset: asRecord(readModel.dataset),
+          sageActualDataset: asRecord(sageTruthForPastDisplay?.dataset),
+          smtSlotCompleteDateKeys: sageDisplayArgsForPast.smtSlotCompleteDateKeys,
+        });
+      }
       const manualRunDisplayView =
         manualPastReadResult && manualPastReadResult.ok
           ? buildOnePathRunReadOnlyView({
               dataset: asRecord(manualPastReadResult.displayDataset),
               engineInput: asRecord(engineInput),
               readModel: { compareProjection: manualPastReadResult.compareProjection },
-              weatherSensitivityScore: engineInput.weatherSensitivityScore ?? null,
               ...manualSageDisplayArgs,
             })
           : null;
@@ -2413,7 +2467,6 @@ export async function POST(request: NextRequest) {
           dataset: asRecord(readModel.dataset),
           engineInput: asRecord(engineInput),
           readModel: asRecord(readModel),
-          weatherSensitivityScore: engineInput.weatherSensitivityScore ?? null,
           ...sageDisplayArgsForPast,
         }) ??
         null;
