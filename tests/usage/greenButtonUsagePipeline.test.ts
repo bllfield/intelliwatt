@@ -53,8 +53,10 @@ function smtGreenButtonXmlReadings(dateKey: string, count: number, valueWh: numb
 </feed>`;
 }
 
+const pipelineNow = new Date("2026-01-12T12:00:00.000Z");
+
 describe("runGreenButtonUsagePipeline", () => {
-  it("runs parse, normalize, and latest full Chicago-day trim as one shared pipeline", () => {
+  it("runs parse, normalize, and canonical today-anchored trim as one shared pipeline", () => {
     const readings = [
       ...chicagoCstReadings("2026-01-08", 96),
       ...chicagoCstReadings("2026-01-09", 96),
@@ -66,6 +68,7 @@ describe("runGreenButtonUsagePipeline", () => {
       buffer: Buffer.from(readingsToCsv(readings)),
       filename: "usage.csv",
       windowDays: 2,
+      now: pipelineNow,
     });
 
     expect(result.ok).toBe(true);
@@ -96,7 +99,7 @@ describe("runGreenButtonUsagePipeline", () => {
   });
 
   it("chunked normalize matches single-pass normalize for the same readings", () => {
-    const readings = chicagoCstReadings("2026-02-01", 96);
+    const readings = chicagoCstReadings("2026-01-08", 96);
     const buffer = Buffer.from(readingsToCsv(readings));
     const parsed = parseGreenButtonBuffer(buffer, "usage.csv");
     const single = normalizeGreenButtonReadingsTo15Min(parsed.readings, { maxKwhPerInterval: 10 });
@@ -105,6 +108,7 @@ describe("runGreenButtonUsagePipeline", () => {
       buffer,
       filename: "usage.csv",
       windowDays: 365,
+      now: pipelineNow,
       readingsPerChunk: 32,
       onNormalizeChunkComplete: (p) => chunkedStages.push(p),
     });
@@ -151,9 +155,10 @@ describe("runGreenButtonUsagePipeline", () => {
 
   it("inherits ESPI uom=72 as Wh so SMT Green Button values under 100 are not dropped as kWh outliers", () => {
     const result = runGreenButtonUsagePipeline({
-      buffer: Buffer.from(smtGreenButtonXmlReadings("2025-11-30", 96, 89)),
+      buffer: Buffer.from(smtGreenButtonXmlReadings("2026-01-10", 96, 89)),
       filename: "IntervalMeterUsage.xml",
       windowDays: 1,
+      now: pipelineNow,
     });
 
     expect(result.ok).toBe(true);

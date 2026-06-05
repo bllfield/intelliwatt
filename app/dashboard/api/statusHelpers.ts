@@ -1,5 +1,5 @@
 import { UsageEntryContext } from "./context";
-import { resolveGreenButtonConnectionExpiresAt } from "@/lib/usage/awardGreenButtonUsageEntry";
+import { resolveGreenButtonConnectionExpiresAtForUpload } from "@/lib/usage/awardGreenButtonUsageEntry";
 import {
   greenButtonUploadDateRangeFromChicagoDateKeys,
   resolveGreenButtonDisplayWindow,
@@ -179,8 +179,14 @@ export function deriveGreenButtonStatus(
     };
   }
 
-  const expiresAt = resolveGreenButtonConnectionExpiresAt(upload.createdAt);
-  const expired = expiresAt.getTime() < Date.now();
+  const summary = parseGreenButtonUploadParseSummary(upload.parseMessage);
+  const hasKnownMeterEnd = Boolean(summary?.dataAvailableEndDateKey || upload.meterDataEnd);
+  const expiresAt = resolveGreenButtonConnectionExpiresAtForUpload({
+    createdAt: upload.createdAt,
+    parseMessage: upload.parseMessage,
+    meterDataEnd: upload.meterDataEnd ?? null,
+  });
+  const expired = hasKnownMeterEnd && expiresAt.getTime() < Date.now();
 
   if (isGreenButtonUploadParseError(upload.parseStatus)) {
     return {

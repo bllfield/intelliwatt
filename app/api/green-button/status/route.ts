@@ -8,7 +8,8 @@ import {
   isGreenButtonUsageIngestionProcessing,
   isGreenButtonUsageIngestionReady,
 } from "@/lib/usage/greenButtonUploadStatus";
-import { resolveGreenButtonConnectionExpiresAt } from "@/lib/usage/awardGreenButtonUsageEntry";
+import { resolveGreenButtonConnectionExpiresAtForUpload } from "@/lib/usage/awardGreenButtonUsageEntry";
+import { parseGreenButtonUploadParseSummary } from "@/lib/usage/greenButtonIngestContract";
 import { normalizeEmail } from "@/lib/utils/email";
 
 export const dynamic = "force-dynamic";
@@ -91,8 +92,18 @@ export async function GET(request: Request) {
     const ready = isGreenButtonUsageIngestionReady(upload, persistedIntervalCount);
     const processing = isGreenButtonUsageIngestionProcessing(upload, persistedIntervalCount);
     const errored = isGreenButtonUploadParseError(upload?.parseStatus ?? null);
-    const expiresAt = upload ? resolveGreenButtonConnectionExpiresAt(upload.createdAt) : null;
-    const expired = Boolean(expiresAt && expiresAt.getTime() < Date.now());
+    const expiresAt = upload
+      ? resolveGreenButtonConnectionExpiresAtForUpload({
+          createdAt: upload.createdAt,
+          parseMessage: upload.parseMessage,
+          meterDataEnd: coverage?._max?.timestamp ?? null,
+        })
+      : null;
+    const summary = parseGreenButtonUploadParseSummary(upload?.parseMessage);
+    const hasKnownMeterEnd = Boolean(summary?.dataAvailableEndDateKey || coverage?._max?.timestamp);
+    const expired = Boolean(
+      expiresAt && hasKnownMeterEnd && expiresAt.getTime() < Date.now()
+    );
 
     return NextResponse.json({
       ok: true,

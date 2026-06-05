@@ -132,16 +132,32 @@ type XmlParseResult = {
   parseMode?: "xml_full_tree" | "xml_interval_blocks";
 };
 
+/** ESPI uom 72 = watt-hours; ReadingType often appears after IntervalReading blocks on SMT exports. */
+function resolveEspiWhKwhFromUom72(xml: string): "Wh" | "kWh" | null {
+  if (!/<uom>\s*72\s*<\/uom>/i.test(xml)) return null;
+  if (/<powerOfTenMultiplier>\s*3\s*<\/powerOfTenMultiplier>/i.test(xml)) return "kWh";
+  return "Wh";
+}
+
 function resolveXmlDefaultReadingUnitFromHeader(xml: string): string | null {
+  const fromUom = resolveEspiWhKwhFromUom72(xml);
+  if (fromUom) return fromUom;
+
   const head = xml.slice(0, 250_000);
-  if (/<uom>\s*72\s*<\/uom>/i.test(head)) {
-    if (/<powerOfTenMultiplier>\s*3\s*<\/powerOfTenMultiplier>/i.test(head)) return "kWh";
+  const tail = xml.length > head.length ? xml.slice(-250_000) : "";
+  for (const slice of tail === head ? [head] : [head, tail]) {
+    const fromSliceUom = resolveEspiWhKwhFromUom72(slice);
+    if (fromSliceUom) return fromSliceUom;
+    const titleMatch = slice.match(/<title>([^<]*)<\/title>/i);
+    const title = titleMatch?.[1] ?? null;
+    if (/\bKWH\b/i.test(String(title ?? ""))) return "kWh";
+    if (/\bWH\b/i.test(String(title ?? ""))) return "Wh";
+  }
+
+  if (/SMT Green Button Report:\s*Interval/i.test(head)) {
     return "Wh";
   }
-  const titleMatch = head.match(/<title>([^<]*)<\/title>/i);
-  const title = titleMatch?.[1] ?? null;
-  if (/\bKWH\b/i.test(String(title ?? ""))) return "kWh";
-  if (/\bWH\b/i.test(String(title ?? ""))) return "Wh";
+
   return null;
 }
 

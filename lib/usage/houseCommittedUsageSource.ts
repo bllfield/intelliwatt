@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { pickBestSmtAuthorization } from "@/lib/smt/authorizationSelection";
 import { readHouseCommittedUsageSource } from "@/lib/usage/commitHouseUsageSource";
-import { resolveGreenButtonConnectionExpiresAt } from "@/lib/usage/awardGreenButtonUsageEntry";
+import { resolveGreenButtonConnectionExpiresAtForUpload } from "@/lib/usage/awardGreenButtonUsageEntry";
 import { isGreenButtonUploadParseError } from "@/lib/usage/greenButtonUploadStatus";
 import { getLatestUsableRawGreenButtonIdForHouse } from "@/modules/realUsageAdapter/greenButton";
 import type { ActualUsageSource } from "@/modules/realUsageAdapter/actual";
@@ -44,14 +44,31 @@ async function inferLegacyCommittedUsageSource(args: {
     .findFirst({
       where: { houseId },
       orderBy: { createdAt: "desc" },
-      select: { parseStatus: true, createdAt: true },
+      select: { parseStatus: true, createdAt: true, parseMessage: true },
     })
     .catch(() => null);
+
+  const meterDataEnd = await (async () => {
+    try {
+      const { usagePrisma } = await import("@/lib/db/usageClient");
+      const agg = await usagePrisma.greenButtonInterval.aggregate({
+        where: { homeId: houseId },
+        _max: { timestamp: true },
+      });
+      return agg._max?.timestamp ?? null;
+    } catch {
+      return null;
+    }
+  })();
 
   const gbUploadActive =
     upload &&
     !isGreenButtonUploadParseError(upload.parseStatus) &&
-    resolveGreenButtonConnectionExpiresAt(upload.createdAt).getTime() >= Date.now() &&
+    resolveGreenButtonConnectionExpiresAtForUpload({
+      createdAt: upload.createdAt,
+      parseMessage: upload.parseMessage,
+      meterDataEnd,
+    }).getTime() >= Date.now() &&
     (await houseHasUsableGreenButton(houseId));
 
   if (gbUploadActive) return "GREEN_BUTTON";

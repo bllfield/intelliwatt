@@ -2,16 +2,56 @@ import { EntryStatus } from "@prisma/client";
 
 import { prisma } from "@/lib/db";
 import { refreshUserEntryStatuses } from "@/lib/hitthejackwatt/entryLifecycle";
+import {
+  buildUtcRangeForChicagoLocalDateRange,
+  greenButtonUploadDateRangeFromChicagoDateKeys,
+} from "@/lib/usage/greenButtonCoverage";
+import { getChicagoDateKeyForTimestamp } from "@/lib/usage/greenButtonLocalSlot";
+import { parseGreenButtonUploadParseSummary } from "@/lib/usage/greenButtonIngestContract";
 
-/** Green Button uploads stay active for one year from ingest time. */
-export function resolveGreenButtonConnectionExpiresAt(anchor: Date = new Date()): Date {
-  const expiresAt = new Date(anchor.getTime());
-  expiresAt.setFullYear(expiresAt.getFullYear() + 1);
-  return expiresAt;
+export type GreenButtonExpirationInput = {
+  createdAt: Date;
+  parseMessage?: string | null;
+  /** Latest persisted interval timestamp (DB aggregate fallback). */
+  meterDataEnd?: Date | null;
+  /** Last reading timestamp at ingest (`pipeline.latest`). */
+  coverageEnd?: Date | null;
+};
+
+/**
+ * Last day of meter data in the uploaded file — not upload time.
+ * SMT expiration is separate (`authorizationEndDate` on the subscription).
+ */
+export function resolveGreenButtonExpirationAnchor(input: GreenButtonExpirationInput): Date {
+  const summary = parseGreenButtonUploadParseSummary(input.parseMessage);
+  const dataEndKey = summary?.dataAvailableEndDateKey;
+  if (dataEndKey) {
+    const range = greenButtonUploadDateRangeFromChicagoDateKeys({
+      startDateKey: dataEndKey,
+      endDateKey: dataEndKey,
+    });
+    if (range) return range.dateRangeEnd;
+  }
+  if (input.coverageEnd) return input.coverageEnd;
+  if (input.meterDataEnd) return input.meterDataEnd;
+  return input.createdAt;
+}
+
+/** Active through the end of the Chicago-local calendar day of the last file reading. */
+export function resolveGreenButtonConnectionExpiresAt(anchor: Date): Date {
+  const dateKey = getChicagoDateKeyForTimestamp(anchor);
+  const range = buildUtcRangeForChicagoLocalDateRange({ startDateKey: dateKey, endDateKey: dateKey });
+  return range?.endInclusive ?? anchor;
+}
+
+export function resolveGreenButtonConnectionExpiresAtForUpload(
+  input: GreenButtonExpirationInput
+): Date {
+  return resolveGreenButtonConnectionExpiresAt(resolveGreenButtonExpirationAnchor(input));
 }
 
 /**
- * Records the 12-month Green Button usage-entry placeholder and keeps the smart_meter_connect entry active.
+ * Records the Green Button usage-entry placeholder and keeps the smart_meter_connect entry active.
  */
 export async function awardGreenButtonUsageEntry(args: {
   userId: string;
@@ -24,7 +64,13 @@ export async function awardGreenButtonUsageEntry(args: {
   coverageEnd?: Date | null;
 }): Promise<{ manualUsageId: string }> {
   const now = new Date();
-  const expiresAt = resolveGreenButtonConnectionExpiresAt(now);
+  const parseMessage =
+    args.summary && typeof args.summary === "object" ? JSON.stringify(args.summary) : null;
+  const expiresAt = resolveGreenButtonConnectionExpiresAtForUpload({
+    createdAt: now,
+    parseMessage,
+    coverageEnd: args.coverageEnd ?? null,
+  });
 
   await (prisma as any).manualUsageUpload
     .deleteMany({ where: { houseId: args.houseId, source: "green_button" } })

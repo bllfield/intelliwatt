@@ -1,7 +1,6 @@
 import {
   resolveGreenButtonDataAvailableDateKeys,
-  resolveGreenButtonDisplayWindow,
-  trimGreenButtonIntervalsToLatestLocalDays,
+  trimGreenButtonIntervalsToCanonicalUsageWindow,
 } from "@/lib/usage/greenButtonCoverage";
 import {
   GREEN_BUTTON_INTERVAL_INGEST_VERSION,
@@ -80,9 +79,13 @@ export function runGreenButtonUsagePipeline(args: {
   onNormalizeChunkStart?: (progress: Pick<GreenButtonNormalizeChunkProgress, "chunkIndex" | "chunkCount" | "readingsInChunk">) => void;
   onNormalizeChunkComplete?: (progress: GreenButtonNormalizeChunkProgress) => void;
   onXmlParseProgress?: (detail: { blocksScanned: number; readingsFound: number }) => void;
+  /** Chicago canonical window anchor (defaults to `new Date()`). */
+  now?: Date;
 }): GreenButtonUsagePipelineResult {
   const windowDays = args.windowDays ?? GREEN_BUTTON_USAGE_PIPELINE_WINDOW_DAYS;
   const maxKwhPerInterval = args.maxKwhPerInterval ?? GREEN_BUTTON_USAGE_MAX_KWH_PER_INTERVAL;
+  // maxKwhPerInterval is ignored by finalize (repair-only); kept for API compat.
+  void maxKwhPerInterval;
 
   let stageStart = Date.now();
   const parsed = parseGreenButtonBuffer(args.buffer, args.filename, {
@@ -154,7 +157,15 @@ export function runGreenButtonUsagePipeline(args: {
   }
 
   stageStart = Date.now();
-  const { trimmed, startDateKey, endDateKey } = trimGreenButtonIntervalsToLatestLocalDays(normalized, windowDays);
+  const {
+    trimmed,
+    startDateKey,
+    endDateKey,
+    window: displayWindow,
+  } = trimGreenButtonIntervalsToCanonicalUsageWindow(normalized, {
+    totalDays: windowDays,
+    now: args.now,
+  });
   args.onStageComplete?.({
     stage: "trim",
     ms: Date.now() - stageStart,
@@ -177,7 +188,6 @@ export function runGreenButtonUsagePipeline(args: {
 
   const totalKwh = trimmed.reduce((sum, row) => sum + row.consumptionKwh, 0);
   const dataAvailable = resolveGreenButtonDataAvailableDateKeys(normalized);
-  const displayWindow = resolveGreenButtonDisplayWindow(endDateKey, windowDays);
   const summary: GreenButtonUsagePipelineSummary = {
     format: parsed.format,
     totalRawReadings: parsed.metadata.totalReadings,
@@ -187,8 +197,8 @@ export function runGreenButtonUsagePipeline(args: {
     appliedWindowDays: windowDays,
     coverageStartDateKey: startDateKey,
     coverageEndDateKey: endDateKey,
-    displayWindowStartDateKey: displayWindow?.startDate,
-    displayWindowEndDateKey: displayWindow?.endDate,
+    displayWindowStartDateKey: displayWindow.startDate,
+    displayWindowEndDateKey: displayWindow.endDate,
     dataAvailableStartDateKey: dataAvailable.startDateKey ?? undefined,
     dataAvailableEndDateKey: dataAvailable.endDateKey ?? undefined,
     warnings: parsed.warnings,

@@ -7,10 +7,7 @@ import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
-import {
-  resolveGreenButtonUploadRecordDateRange,
-  trimGreenButtonIntervalsToLatestLocalDays,
-} from "@/lib/usage/greenButtonCoverage";
+import { resolveGreenButtonUploadRecordDateRange } from "@/lib/usage/greenButtonCoverage";
 import {
   GREEN_BUTTON_INTERVAL_INGEST_VERSION,
   isGreenButtonIntervalIngestCurrent,

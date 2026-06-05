@@ -57,6 +57,8 @@ export type UsageEntryContext = {
     fileName: string;
     fileSizeBytes: number | null;
     persistedIntervalCount?: number;
+    /** Latest interval in DB — used for Green Button expiration (file end), not display window end. */
+    meterDataEnd?: Date | null;
   } | null;
   manualUsageUpload: {
     id: string;
@@ -226,6 +228,7 @@ export async function loadUsageEntryContext(): Promise<UsageEntryContext> {
             ? greenButtonUpload.dateRangeEnd
             : (greenButtonUpload.dateRangeEnd ?? gbCoverage?.end ?? null),
           persistedIntervalCount: gbCoverage?.count ?? 0,
+          meterDataEnd: gbCoverage?.end ?? null,
         }
       : gbCoverage
         ? {
@@ -240,6 +243,7 @@ export async function loadUsageEntryContext(): Promise<UsageEntryContext> {
             fileName: "derived",
             fileSizeBytes: null,
             persistedIntervalCount: gbCoverage.count,
+            meterDataEnd: gbCoverage.end,
           }
         : null;
 

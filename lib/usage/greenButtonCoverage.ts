@@ -1,8 +1,12 @@
 import { DateTime } from "luxon";
 
-import { getLatestGreenButtonFullDayDateKey } from "@/modules/realUsageAdapter/greenButton";
 import { enumerateDateKeysInclusive, prevCalendarDayDateKey } from "@/lib/time/chicago";
-import { coverageWindowEndingOnDateKey, type CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
+import {
+  coverageWindowEndingOnDateKey,
+  resolveCanonicalUsage365CoverageWindow,
+  type CanonicalCoverageWindowPolicy,
+  type CoverageWindow,
+} from "@/lib/usage/canonicalMetadataWindow";
 import { CANONICAL_COVERAGE_TOTAL_DAYS } from "@/lib/usage/canonicalCoverageConfig";
 import {
   countDistinctLocalSlotsByDateKey,
@@ -38,22 +42,61 @@ export function resolveLatestCompleteOrAvailableGreenButtonDateKey<T extends Gre
 }
 
 /**
- * Baseline / Usage Green Button display window: 365 inclusive local days ending on the
- * latest complete day in the uploaded file (not the SMT canonical lag window).
- * Past Sim producer loads home-local intervals via loadGreenButtonPastProducerIntervals()
- * (same path as getActualIntervalsForRange / Usage dashboard), not utcDayGrid rebasing.
+ * Usage Green Button display window: 365 inclusive Chicago days ending near today
+ * (canonical lag), same framing as the usage dashboard — not last complete file day.
  */
 export async function resolveGreenButtonBaselineCoverageWindow(
-  houseId: string,
-  totalDays = CANONICAL_COVERAGE_TOTAL_DAYS
+  _houseId: string,
+  totalDays = CANONICAL_COVERAGE_TOTAL_DAYS,
+  now: Date = new Date(),
+  policy?: CanonicalCoverageWindowPolicy
 ): Promise<CoverageWindow | null> {
-  const anchorEndDate = await getLatestGreenButtonFullDayDateKey({ houseId: String(houseId ?? "").trim() });
-  if (!anchorEndDate) return null;
-  const window = coverageWindowEndingOnDateKey(anchorEndDate, totalDays);
-  if (!window) return null;
+  const window = resolveCanonicalUsage365CoverageWindow(now, {
+    ...policy,
+    canonicalCoverageTotalDays: policy?.canonicalCoverageTotalDays ?? totalDays,
+  });
   const dayCount = enumerateDateKeysInclusive(window.startDate, window.endDate).length;
   if (dayCount !== Math.max(1, Math.trunc(totalDays))) return null;
   return window;
+}
+
+/** Ingest trim: keep all normalized file intervals inside the canonical today-anchored window (partial days OK). */
+export function trimGreenButtonIntervalsToCanonicalUsageWindow<T extends GreenButtonTimestampedInterval>(
+  intervals: T[],
+  args?: {
+    now?: Date;
+    totalDays?: number;
+    policy?: CanonicalCoverageWindowPolicy;
+  }
+): {
+  trimmed: T[];
+  startDateKey: string;
+  endDateKey: string;
+  window: CoverageWindow;
+} {
+  const totalDays = args?.totalDays ?? CANONICAL_COVERAGE_TOTAL_DAYS;
+  const window = resolveCanonicalUsage365CoverageWindow(args?.now ?? new Date(), {
+    ...args?.policy,
+    canonicalCoverageTotalDays: args?.policy?.canonicalCoverageTotalDays ?? totalDays,
+  });
+  const range = buildUtcRangeForChicagoLocalDateRange({
+    startDateKey: window.startDate,
+    endDateKey: window.endDate,
+  });
+  if (!range) {
+    return { trimmed: [], startDateKey: window.startDate, endDateKey: window.endDate, window };
+  }
+  const trimmed = intervals.filter(
+    (interval) =>
+      interval.timestamp.getTime() >= range.startInclusive.getTime() &&
+      interval.timestamp.getTime() <= range.endInclusive.getTime()
+  );
+  return {
+    trimmed,
+    startDateKey: window.startDate,
+    endDateKey: window.endDate,
+    window,
+  };
 }
 
 export function resolveGreenButtonDataAvailableDateKeys<T extends GreenButtonTimestampedInterval>(

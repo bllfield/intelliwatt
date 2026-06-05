@@ -603,7 +603,7 @@ async function runGreenButtonIngestJob(args: GreenButtonIngestJobArgs): Promise<
       buffer,
       filename,
       windowDays: MANUAL_USAGE_LIFETIME_DAYS,
-      maxKwhPerInterval: 10,
+      maxKwhPerInterval: null,
       readingsPerChunk,
       onStageComplete: (detail) => {
         logEvent("ingest.pipeline_progress", { uploadRecordId, ...detail });

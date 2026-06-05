@@ -137,14 +137,12 @@ export function finalizeGreenButtonBuckets(
   buckets: Map<number, GreenButtonBucketCell>,
   options?: GreenButtonNormalizeOptions
 ): GreenButton15MinInterval[] {
-  const maxKwh = options?.maxKwhPerInterval ?? null;
   repairGreenButtonHomeLocalBuckets(buckets, GREEN_BUTTON_HOME);
 
   const results: GreenButton15MinInterval[] = [];
   buckets.forEach((cell, ms) => {
     const kwh = cell.kwh;
     if (!isFinite(kwh) || kwh < 0) return;
-    if (maxKwh != null && kwh > maxKwh) return;
     results.push({
       timestamp: new Date(ms),
       consumptionKwh: kwh,
