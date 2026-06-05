@@ -531,6 +531,10 @@ export function OnePathSimAdmin() {
       intervalPastReadinessTrace: intervalPastReadinessTrace,
       readOnlyAudit: asRecord(lookup?.sourceContext?.readOnlyAudit),
       includeSimRunAudit: includeSimRunAuditEnabled || debugDiagnosticsEnabled,
+      performanceAudit:
+        asRecord(runResult?.performanceAudit) ??
+        asRecord(asRecord(runResult?.readModel).performanceAudit) ??
+        null,
       smtIncompleteMeterRetry: asRecord(runResult?.smtIncompleteMeterRetry) ?? null,
       smtRefreshCheck: asRecord(runResult?.smtRefreshCheck) ?? null,
       currentControls: {
@@ -593,6 +597,10 @@ export function OnePathSimAdmin() {
       intervalPastReadinessTrace: intervalPastReadinessTrace,
       readOnlyAudit: asRecord(lookup?.sourceContext?.readOnlyAudit),
       includeSimRunAudit: includeSimRunAuditEnabled || debugDiagnosticsEnabled,
+      performanceAudit:
+        asRecord(runResult?.performanceAudit) ??
+        asRecord(asRecord(runResult?.readModel).performanceAudit) ??
+        null,
       smtIncompleteMeterRetry: asRecord(runResult?.smtIncompleteMeterRetry) ?? null,
       smtRefreshCheck: asRecord(runResult?.smtRefreshCheck) ?? null,
       currentControls: {
@@ -1615,11 +1623,18 @@ export function OnePathSimAdmin() {
                   {actualContextHasGreenButtonUsage ? (
                     <div>
                       Existing Green Button usage is available for this actual context house.
-                      {actualContextGreenButtonUpload?.dateRangeStart && actualContextGreenButtonUpload?.dateRangeEnd ? (
+                      {actualContextGreenButtonUpload?.latestCompleteLocalDay ? (
                         <span>
                           {" "}
-                          Coverage: {String(actualContextGreenButtonUpload.dateRangeStart).slice(0, 10)} to{" "}
-                          {String(actualContextGreenButtonUpload.dateRangeEnd).slice(0, 10)}.
+                          Available latest full local day: {String(actualContextGreenButtonUpload.latestCompleteLocalDay).slice(0, 10)}.
+                        </span>
+                      ) : null}
+                      {actualContextGreenButtonUpload?.baselineWindowStartKey &&
+                      actualContextGreenButtonUpload?.baselineWindowEndKey ? (
+                        <span>
+                          {" "}
+                          Selected baseline window: {String(actualContextGreenButtonUpload.baselineWindowStartKey).slice(0, 10)} →{" "}
+                          {String(actualContextGreenButtonUpload.baselineWindowEndKey).slice(0, 10)}.
                         </span>
                       ) : null}
                     </div>

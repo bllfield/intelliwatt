@@ -10,6 +10,12 @@ import type { OnePathKnownScenario } from "@/modules/onePathSim/knownHouseScenar
 import { buildOnePathOwnershipAudit } from "@/modules/onePathSim/onePathOwnershipAudit";
 import { buildOnePathTuningCycleSummary } from "@/modules/onePathSim/tuningCycleSummary";
 import { buildUsageDisplayTotalsAudit } from "@/modules/onePathSim/usageDisplayTotalsAudit";
+import {
+  buildPerformanceAuditSnapshot,
+  buildUsageParityAudit,
+  buildValidationTargetsSnapshot,
+} from "@/lib/usage/usageParityAudit";
+import type { UserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
 import type { WeatherSensitivityScore } from "@/modules/weatherSensitivity/shared";
 
 export type SimulationVariablePolicyResponseShape = {
@@ -327,6 +333,7 @@ export function buildSimulationVariableCopyPayload(args: {
   intervalPastReadinessTrace?: Record<string, unknown> | null;
   readOnlyAudit?: Record<string, unknown> | null;
   includeSimRunAudit?: boolean;
+  performanceAudit?: Record<string, unknown> | null;
   smtIncompleteMeterRetry?: Record<string, unknown> | null;
   smtRefreshCheck?: Record<string, unknown> | null;
 }): Record<string, unknown> {
@@ -650,6 +657,25 @@ export function buildSimulationVariableCopyPayload(args: {
           }))
           .filter((row) => /^\d{4}-\d{2}$/.test(row.month) && Number.isFinite(row.kwh))
     : [];
+  const parityAudit = buildUsageParityAudit({
+    userUsagePageBaselineContract: (dashboardContract as UserUsageHouseContract | null) ?? null,
+    runDisplayView: effectiveRunDisplayView,
+    pastDataset: pastSim ? readModelDataset : null,
+    displayTotalsDataset: displayTotalsDataset,
+  });
+  const performanceAudit =
+    args.performanceAudit ??
+    (includeSimRunAudit
+      ? buildPerformanceAuditSnapshot({
+          readModel,
+          stageTimingsMs: asRecord(readModel.performanceAudit).stageDurationsMs as Record<string, number> | undefined,
+          routeTotalDurationMs:
+            typeof asRecord(readModel.performanceAudit).totalDurationMs === "number"
+              ? (asRecord(readModel.performanceAudit).totalDurationMs as number)
+              : null,
+        })
+      : null);
+  const validationTargets = buildValidationTargetsSnapshot(compareMetrics);
   const runDisplayContract = effectiveRunDisplayView
     ? {
         sourceOwner: "buildOnePathRunReadOnlyView",
@@ -703,9 +729,11 @@ export function buildSimulationVariableCopyPayload(args: {
       lookupOnly,
       baselinePassthrough,
       pastSim,
-      includesDashboardViewModel: Boolean(copiedDashboardViewModel),
+      includesDashboardViewModel: Boolean(copiedDashboardViewModel || runDisplayContract),
       includesRunDisplayContract: Boolean(runDisplayContract),
-      includesParitySections: Boolean(baselineParityReport || baselineParityAudit),
+      includesParitySections: Boolean(
+        includeSimRunAudit || baselineParityReport || baselineParityAudit || parityAudit
+      ),
       includesEnvReadinessTraceSections: Boolean(runtimeEnvParityTrace || intervalPastReadinessTrace),
       includesReadOnlyAudit: Boolean(readOnlyAudit),
       includesAllModesVariableFamilies: true,
@@ -719,6 +747,9 @@ export function buildSimulationVariableCopyPayload(args: {
     runDisplayContract,
     baselineParityReport,
     baselineParityAudit,
+    parityAudit,
+    performanceAudit: includeSimRunAudit ? performanceAudit : null,
+    validationTargets: includeSimRunAudit ? validationTargets : null,
     displayTotalsAudit,
     runtimeEnvParityTrace,
     intervalPastReadinessTrace,

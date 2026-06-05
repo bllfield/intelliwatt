@@ -90,7 +90,8 @@ export async function resolveGreenButtonBaselineUsageForUserSite(args: {
 }
 
 /**
- * Same Green Button baseline contract path as the user usage dashboard and One Path lookup.
+ * Same Green Button actual contract path as `/api/user/usage` (Energy Usage + Usage Simulator Usage).
+ * Does not run One Path baseline passthrough — admin baseline parity is actual-dashboard parity only.
  */
 export async function buildGreenButtonUserSiteParityContract(args: {
   userId: string;
@@ -111,33 +112,21 @@ export async function buildGreenButtonUserSiteParityContract(args: {
     houseId,
     layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
     esiid: args.sourceHouse.esiid ?? null,
-    lightweightActualUsage: args.lightweightActualUsage === true,
-    skipLightweightInsightRecompute: args.skipLightweightInsightRecompute === true,
+    userUsageDashboardLoad: true,
   }).catch(() => null);
 
-  let resolvedUsage: ResolvedUsageLayer | null = sourceLayer
+  const resolvedUsage: ResolvedUsageLayer | null = sourceLayer
     ? {
         dataset: sourceLayer.dataset ?? null,
         alternatives: sourceLayer.alternatives ?? { smt: null, greenButton: null },
       }
     : null;
 
-  if (resolvedUsage && isGreenButtonPrimaryDataset(resolvedUsage.dataset)) {
-    resolvedUsage = await resolveGreenButtonBaselineUsageForUserSite({
-      userId,
-      houseId,
-      actualContextHouseId,
-      resolvedUsage,
-    }).catch(() => resolvedUsage);
-  }
-
   return buildUserUsageHouseContract({
     userId,
     house: args.sourceHouse,
     weatherHouseId: actualContextHouseId,
     resolvedUsage,
-    lightweightActualUsage: args.lightweightActualUsage === true,
-    skipLightweightInsightRecompute: args.skipLightweightInsightRecompute === true,
     homeProfile: args.homeProfile,
     applianceProfileRecord: args.applianceProfileRecord,
   }).catch(() => null);

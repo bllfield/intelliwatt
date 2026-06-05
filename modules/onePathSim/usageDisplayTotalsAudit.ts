@@ -43,6 +43,14 @@ function sumKwhRows(rows: Array<Record<string, unknown>>): number | null {
 }
 
 export type UsageDisplayTotalsAudit = {
+  /** Unrounded canonical total from daily rows or interval series. */
+  canonicalTotalKwh: number | null;
+  /** Sum of raw `dataset.monthly` buckets (unrounded). */
+  monthlyRawTotalKwh: number | null;
+  /** Sum of displayed monthly rows (may stitch/gapfill). */
+  monthlyDisplayTotalKwh: number | null;
+  monthlyDisplayRowsAreRounded: boolean;
+  monthlyDisplayDeltaFromCanonicalKwh: number | null;
   rawIntervalTotalKwh: number | null;
   summaryTotalKwh: number | null;
   datasetTotalsImportKwh: number | null;
@@ -72,6 +80,8 @@ export function buildUsageDisplayTotalsAudit(args: { dataset: unknown }): UsageD
   const stitchedMonth = asRecord(insights.stitchedMonth);
   const intervals15 = asArray<Record<string, unknown>>(series.intervals15);
   const dailyRows = asArray<Record<string, unknown>>(dataset.daily);
+  const rawMonthlyRows = asArray<Record<string, unknown>>(dataset.monthly);
+  const monthlyRawTotalKwh = rawMonthlyRows.length ? sumKwhRows(rawMonthlyRows) : null;
   const displayedMonthlyRows = buildDisplayedMonthlyRows(dataset as never);
   const weekdayWeekend = asRecord(insights.weekdayVsWeekend);
   const timeOfDayBuckets = asArray<Record<string, unknown>>(insights.timeOfDayBuckets);
@@ -114,10 +124,18 @@ export function buildUsageDisplayTotalsAudit(args: { dataset: unknown }): UsageD
         }
       : null;
 
-  const rawIntervalTotalKwh =
+  const canonicalTotalKwh =
     rawTotalFromDailyKwh != null
       ? rawTotalFromDailyKwh
       : previewIntervalTotalKwh ?? datasetTotalsNetKwh ?? summaryTotalKwh;
+  const rawIntervalTotalKwh = canonicalTotalKwh;
+  const monthlyDisplayTotalKwh = monthlyDisplayedTotalKwh;
+  const monthlyDisplayDeltaFromCanonicalKwh =
+    canonicalTotalKwh != null && monthlyDisplayTotalKwh != null
+      ? round2(monthlyDisplayTotalKwh - canonicalTotalKwh)
+      : null;
+  const monthlyDisplayRowsAreRounded =
+    monthlyDisplayDeltaFromCanonicalKwh != null && Math.abs(monthlyDisplayDeltaFromCanonicalKwh) > 0.05;
 
   let dashboardHeadlineTotalKwh: number | null = null;
   let dashboardHeadlineTotalOwner = "UsageDashboard.tsx :: interval fallback";
@@ -174,6 +192,11 @@ export function buildUsageDisplayTotalsAudit(args: { dataset: unknown }): UsageD
   }
 
   return {
+    canonicalTotalKwh,
+    monthlyRawTotalKwh,
+    monthlyDisplayTotalKwh,
+    monthlyDisplayRowsAreRounded,
+    monthlyDisplayDeltaFromCanonicalKwh,
     rawIntervalTotalKwh,
     summaryTotalKwh,
     datasetTotalsImportKwh,

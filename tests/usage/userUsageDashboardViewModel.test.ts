@@ -356,7 +356,7 @@ describe("user usage dashboard view model", () => {
       datasetError: null,
     });
 
-    expect(viewModel?.derived.fifteenCurve.find((row) => row.hhmm === "12:00")?.avgKw).toBe(8);
+    expect(viewModel?.derived.fifteenCurve.find((row) => row.hhmm === "12:00")?.avgKw).toBeCloseTo(5.47, 2);
     expect(viewModel?.derived.fifteenCurve.find((row) => row.hhmm === "12:00")?.avgKw).not.toBe(0.4);
   });
 });

@@ -261,34 +261,37 @@ export async function GET(request: NextRequest) {
       const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRec?.appliancesJson as any) ?? null);
       const persistedScore = (datasetAny?.meta as any)?.weatherSensitivityScore ?? null;
       const persistedDerivedInput = (datasetAny?.meta as any)?.weatherEfficiencyDerivedInput ?? null;
+      const isPastSimulatedDataset = (datasetAny?.meta as any)?.datasetKind === "SIMULATED";
       const weatherSensitivity =
         persistedScore != null
           ? {
               score: persistedScore,
               derivedInput: persistedDerivedInput ?? buildWeatherEfficiencyDerivedInput(persistedScore),
             }
-          : await (async () => {
-              const actualDatasetForSharedScore =
-                house?.id != null
-                  ? (
-                      await resolveIntervalsLayer({
-                        userId: u.user.id,
-                        houseId: house.id,
-                        layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
-                        scenarioId: null,
-                        esiid: house.esiid ?? null,
-                        preferredActualSource: preferredActualSource ?? null,
-                      }).catch(() => null)
-                    )?.dataset ?? null
-                  : null;
-              return resolveSharedWeatherSensitivityEnvelope({
-                actualDataset: actualDatasetForSharedScore,
-                manualUsagePayload: manualUsageRec?.payload ?? null,
-                homeProfile,
-                applianceProfile,
-                weatherHouseId: houseId,
-              }).catch(() => ({ score: null, derivedInput: null }));
-            })();
+          : isPastSimulatedDataset
+            ? { score: null, derivedInput: null }
+            : await (async () => {
+                const actualDatasetForSharedScore =
+                  house?.id != null
+                    ? (
+                        await resolveIntervalsLayer({
+                          userId: u.user.id,
+                          houseId: house.id,
+                          layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
+                          scenarioId: null,
+                          esiid: house.esiid ?? null,
+                          preferredActualSource: preferredActualSource ?? null,
+                        }).catch(() => null)
+                      )?.dataset ?? null
+                    : null;
+                return resolveSharedWeatherSensitivityEnvelope({
+                  actualDataset: actualDatasetForSharedScore,
+                  manualUsagePayload: manualUsageRec?.payload ?? null,
+                  homeProfile,
+                  applianceProfile,
+                  weatherHouseId: houseId,
+                }).catch(() => ({ score: null, derivedInput: null }));
+              })();
       const successBody = {
         ...out,
         compareProjection,

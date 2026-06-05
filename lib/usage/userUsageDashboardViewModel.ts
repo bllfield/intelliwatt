@@ -7,6 +7,7 @@ import { enumerateDateKeysInclusive } from "@/lib/time/chicago";
 import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
 import { readPastValidationPolicyRevisionFromMeta } from "@/lib/usage/pastSimulationCoreLabel";
 import { buildDisplayedMonthlyRows } from "@/modules/usageSimulator/monthlyCompareRows";
+import { buildUsageDisplayTotalsAudit } from "@/modules/onePathSim/usageDisplayTotalsAudit";
 import type { UserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
 import { derivePeakHourFromFifteenMinuteCurve } from "@/lib/usage/fifteenMinuteLoadCurve";
 
@@ -166,7 +167,22 @@ function deriveWeekdayWeekendFromDaily(rows: DailyRow[]) {
   };
 }
 
-function deriveTimeOfDayBucketsFromIntervals(
+function sumTimeOfDayBucketKwh(
+  buckets: Array<{ kwh?: unknown }> | null | undefined
+): number {
+  if (!Array.isArray(buckets) || buckets.length === 0) return 0;
+  return buckets.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0);
+}
+
+function mapInsightTimeOfDayBuckets(dataset: { insights?: { timeOfDayBuckets?: unknown } } | null | undefined) {
+  return (dataset?.insights?.timeOfDayBuckets ?? []).map((bucket: any) => ({
+    key: bucket.key,
+    label: bucket.label,
+    kwh: bucket.kwh,
+  }));
+}
+
+export function deriveTimeOfDayBucketsFromIntervals(
   rows: Array<{ timestamp?: unknown; kwh?: unknown; consumption_kwh?: unknown }>,
   options?: { start?: string | null; end?: string | null; timezone?: string }
 ) {
@@ -302,24 +318,39 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
     coverageStart && coverageEnd
       ? enumerateDateKeysInclusive(coverageStart, coverageEnd).length
       : recentDaily.length;
-  const monthlySorted = greenButtonActual
-    ? [...monthly]
-        .map((row: any) => ({
-          month: String(row?.month ?? "").slice(0, 7),
-          kwh: Number(row?.kwh) || 0,
-        }))
-        .filter((row) => /^\d{4}-\d{2}$/.test(row.month))
-        .sort((left, right) => (left.month < right.month ? -1 : left.month > right.month ? 1 : 0))
-    : buildDisplayedMonthlyRows(dataset);
+  const hasStitchedMonth =
+    dataset?.insights?.stitchedMonth != null &&
+    typeof dataset.insights.stitchedMonth === "object" &&
+    !Array.isArray(dataset.insights.stitchedMonth);
+  const monthlySorted =
+    greenButtonActual && !hasStitchedMonth
+      ? [...monthly]
+          .map((row: any) => ({
+            month: String(row?.month ?? "").slice(0, 7),
+            kwh: Number(row?.kwh) || 0,
+          }))
+          .filter((row) => /^\d{4}-\d{2}$/.test(row.month))
+          .sort((left, right) => (left.month < right.month ? -1 : left.month > right.month ? 1 : 0))
+      : buildDisplayedMonthlyRows(dataset);
   const deriveSummaryFromDisplayDaily = hasManualDisplayWindowStitch || hasSimulatedFill;
   const weekdayWeekend = deriveSummaryFromDisplayDaily ? deriveWeekdayWeekendFromDaily(recentDaily) : null;
-  const timeOfDayBuckets = deriveSummaryFromDisplayDaily
+  const derivedTimeOfDayBuckets = deriveSummaryFromDisplayDaily
     ? deriveTimeOfDayBucketsFromIntervals(dataset?.series?.intervals15 ?? [], {
         start: coverageStart,
         end: coverageEnd,
         timezone,
       })
     : null;
+  const insightTimeOfDayBuckets = mapInsightTimeOfDayBuckets(dataset);
+  const derivedTimeOfDayTotal = sumTimeOfDayBucketKwh(derivedTimeOfDayBuckets);
+  const timeOfDayBuckets =
+    derivedTimeOfDayBuckets &&
+    derivedTimeOfDayBuckets.length > 0 &&
+    derivedTimeOfDayTotal > 0.01
+      ? derivedTimeOfDayBuckets
+      : insightTimeOfDayBuckets.length > 0
+        ? insightTimeOfDayBuckets
+        : derivedTimeOfDayBuckets;
   const peakDay = hasManualDisplayWindowStitch
     ? recentDaily.length > 0
       ? recentDaily.reduce(
@@ -328,8 +359,11 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
       : null
     : null;
 
+  const displayTotals = buildUsageDisplayTotalsAudit({ dataset });
+
   return {
     coverage,
+    displayTotals,
     derived: {
       monthly: monthlySorted,
       stitchedMonth: dataset?.insights?.stitchedMonth ?? null,
@@ -344,13 +378,7 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
           : 0,
       weekdayKwh: weekdayWeekend?.weekday ?? dataset?.insights?.weekdayVsWeekend?.weekday ?? 0,
       weekendKwh: weekdayWeekend?.weekend ?? dataset?.insights?.weekdayVsWeekend?.weekend ?? 0,
-      timeOfDayBuckets: timeOfDayBuckets && timeOfDayBuckets.length
-        ? timeOfDayBuckets
-        : (dataset?.insights?.timeOfDayBuckets ?? []).map((bucket: any) => ({
-        key: bucket.key,
-        label: bucket.label,
-        kwh: bucket.kwh,
-      })),
+      timeOfDayBuckets: timeOfDayBuckets ?? [],
       peakDay: peakDay ?? dataset?.insights?.peakDay ?? null,
       peakHour:
         derivePeakHourFromFifteenMinuteCurve(fifteenCurve) ?? dataset?.insights?.peakHour ?? null,

@@ -70,7 +70,10 @@ import {
   buildOnePathRunReadOnlyViewFromBaselineContract,
 } from "@/modules/onePathSim/baselineReadOnlyView";
 import { buildGreenButtonUserSiteParityContract } from "@/lib/usage/greenButtonUserSiteBaseline";
-import { resolveGreenButtonUploadRecordDateRange } from "@/lib/usage/greenButtonCoverage";
+import {
+  resolveGreenButtonDisplayWindow,
+  resolveGreenButtonUploadRecordDateRange,
+} from "@/lib/usage/greenButtonCoverage";
 import { getLatestGreenButtonFullDayDateKey } from "@/modules/realUsageAdapter/greenButton";
 import { ensureWorkspaceScenariosForHouse } from "@/lib/usage/ensureWorkspaceScenarios";
 import { buildKnownHouseScenarioPrereqStatus } from "@/modules/onePathSim/knownHouseScenarioPrereqs";
@@ -103,6 +106,7 @@ import {
 import { resolveSmtPersistedCoverageSpan } from "@/lib/usage/smtWindowStatus";
 import { buildRuntimeEnvParityTrace } from "@/modules/onePathSim/runtimeEnvParityTrace";
 import { listScenarios } from "@/modules/usageSimulator/service";
+import { buildPerformanceAuditSnapshot } from "@/lib/usage/usageParityAudit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -111,6 +115,20 @@ const GREEN_BUTTON_ROUTE_STAGE_TIMEOUT_MS = 120_000;
 /** Same heal profile as POST /api/user/usage/refresh. */
 /** Lookup/load must wait for full canonical SMT coverage (admin waits), not the short user-session tail budget. */
 const ONE_PATH_SMT_HEAL_PROFILE = "admin_sim" as const;
+
+function withRunPerformanceAudit(args: {
+  readModel: Record<string, unknown> | null | undefined;
+  stageTimingsMs: Record<string, number>;
+  routeStartedAt: number;
+}): Record<string, unknown> | null {
+  if (!args.readModel) return null;
+  const performanceAudit = buildPerformanceAuditSnapshot({
+    readModel: args.readModel,
+    stageTimingsMs: args.stageTimingsMs,
+    routeTotalDurationMs: Date.now() - args.routeStartedAt,
+  });
+  return { ...args.readModel, performanceAudit };
+}
 
 class AdminRouteStageTimeoutError extends Error {
   code = "one_path_admin_timeout" as const;
@@ -985,6 +1003,8 @@ async function loadGreenButtonUploadSummary(houseId: string | null | undefined) 
         })
       : null;
 
+  const displayWindow = anchorEndDateKey != null ? resolveGreenButtonDisplayWindow(anchorEndDateKey) : null;
+
   if (latestUpload) {
     return {
       ...latestUpload,
@@ -998,6 +1018,8 @@ async function loadGreenButtonUploadSummary(houseId: string | null | undefined) 
       intervalCount: derivedCoverage?.count ?? 0,
       hasPersistedUsageIntervals: Boolean(derivedCoverage),
       latestCompleteLocalDay: anchorEndDateKey,
+      baselineWindowStartKey: displayWindow?.startDate ?? null,
+      baselineWindowEndKey: displayWindow?.endDate ?? null,
     };
   }
 
@@ -1015,6 +1037,9 @@ async function loadGreenButtonUploadSummary(houseId: string | null | undefined) 
     fileSizeBytes: null,
     intervalCount: derivedCoverage.count,
     hasPersistedUsageIntervals: true,
+    latestCompleteLocalDay: anchorEndDateKey,
+    baselineWindowStartKey: displayWindow?.startDate ?? null,
+    baselineWindowEndKey: displayWindow?.endDate ?? null,
   };
 }
 
@@ -1812,6 +1837,7 @@ export async function POST(request: NextRequest) {
   if (action === "run") {
     const mode = normalizeMode(body?.mode);
     const correlationId = createSimCorrelationId();
+    const routeStartedAt = Date.now();
     const stageTimingsMs: Record<string, number> = {};
     let runScenarioId =
       typeof body?.scenarioId === "string" && body.scenarioId.trim() ? body.scenarioId.trim() : null;
@@ -2146,14 +2172,18 @@ export async function POST(request: NextRequest) {
           null;
         const compactReadModel =
           compactRunDisplayView || baselineDataset
-            ? {
-                dataset: buildCompactRunReadModelDataset({
-                  artifactDataset: baselineDataset,
-                  artifactDatasetMeta: baselineDatasetMeta,
-                  runDisplayView: compactRunDisplayView,
-                  forceBaselinePassthrough: true,
-                }),
-              }
+            ? withRunPerformanceAudit({
+                readModel: {
+                  dataset: buildCompactRunReadModelDataset({
+                    artifactDataset: baselineDataset,
+                    artifactDatasetMeta: baselineDatasetMeta,
+                    runDisplayView: compactRunDisplayView,
+                    forceBaselinePassthrough: true,
+                  }),
+                },
+                stageTimingsMs,
+                routeStartedAt,
+              })
             : null;
         return NextResponse.json({
           ok: true,
@@ -2165,6 +2195,7 @@ export async function POST(request: NextRequest) {
           runDisplayView: compactRunDisplayView,
           artifact: null,
           readModel: compactReadModel,
+          performanceAudit: compactReadModel?.performanceAudit ?? null,
         });
       }
       let engineInput =
@@ -2228,14 +2259,18 @@ export async function POST(request: NextRequest) {
           null;
         const compactReadModel =
           compactRunDisplayView || artifactDataset
-            ? {
-                dataset: buildCompactRunReadModelDataset({
-                  artifactDataset,
-                  artifactDatasetMeta,
-                  runDisplayView: compactRunDisplayView,
-                  forceBaselinePassthrough: true,
-                }),
-              }
+            ? withRunPerformanceAudit({
+                readModel: {
+                  dataset: buildCompactRunReadModelDataset({
+                    artifactDataset,
+                    artifactDatasetMeta,
+                    runDisplayView: compactRunDisplayView,
+                    forceBaselinePassthrough: true,
+                  }),
+                },
+                stageTimingsMs,
+                routeStartedAt,
+              })
             : null;
         return NextResponse.json({
           ok: true,
@@ -2246,6 +2281,7 @@ export async function POST(request: NextRequest) {
           runDisplayView: compactRunDisplayView,
           artifact: null,
           readModel: compactReadModel,
+          performanceAudit: compactReadModel?.performanceAudit ?? null,
         });
       }
       const shouldReturnCompactPastResponse = Boolean(effectiveRawInputBase.scenarioId && !isManualMode);
@@ -2390,6 +2426,11 @@ export async function POST(request: NextRequest) {
           compareProjection: readModel.compareProjection,
           forceBaselinePassthrough: Boolean(artifactDatasetMeta?.baselinePassthrough),
         });
+        const compactReadModelWithPerf = withRunPerformanceAudit({
+          readModel: compactReadModel,
+          stageTimingsMs,
+          routeStartedAt,
+        });
         return NextResponse.json({
           ok: true,
           debugDiagnosticsIncluded: false,
@@ -2403,10 +2444,16 @@ export async function POST(request: NextRequest) {
           manualStageOneView: readModel.manualStageOneView ?? null,
           runDisplayView,
           artifact: null,
-          readModel: compactReadModel,
+          readModel: compactReadModelWithPerf,
+          performanceAudit: compactReadModelWithPerf?.performanceAudit ?? null,
           greenButtonRehydrateFromRaw,
         });
       }
+      const readModelWithPerf = withRunPerformanceAudit({
+        readModel: readModel as Record<string, unknown>,
+        stageTimingsMs,
+        routeStartedAt,
+      });
       return NextResponse.json({
         ok: true,
         debugDiagnosticsIncluded: true,
@@ -2418,9 +2465,10 @@ export async function POST(request: NextRequest) {
               : "BASELINE_OR_UNSET",
         engineInput: slimEngineInput,
         artifact,
-        readModel,
+        readModel: readModelWithPerf,
         manualStageOneView: readModel.manualStageOneView ?? null,
         runDisplayView,
+        performanceAudit: readModelWithPerf?.performanceAudit ?? null,
         greenButtonRehydrateFromRaw,
       });
     } catch (error) {

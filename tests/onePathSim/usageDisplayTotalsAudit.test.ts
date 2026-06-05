@@ -41,8 +41,11 @@ describe("one path usage display totals audit", () => {
       },
     });
 
+    expect(audit.canonicalTotalKwh).toBe(13542.3);
     expect(audit.rawIntervalTotalKwh).toBe(13542.3);
+    expect(audit.monthlyRawTotalKwh).toBe(13546.3);
     expect(audit.monthlyDisplayedTotalKwh).toBe(13546.3);
+    expect(audit.monthlyDisplayRowsAreRounded).toBe(true);
     expect(audit.dashboardHeadlineTotalKwh).toBe(13546.3);
     expect(audit.weekdayWeekendBreakdownTotalKwh).toBe(13542.3);
     expect(audit.timeOfDayBucketTotalKwh).toBe(13542.3);

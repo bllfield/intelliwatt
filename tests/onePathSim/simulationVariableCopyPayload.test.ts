@@ -633,8 +633,13 @@ describe("one path simulation variable copy payload", () => {
       expect.objectContaining({
         includesAllModesVariableFamilies: true,
         includesSimRunAudit: true,
+        includesDashboardViewModel: true,
+        includesParitySections: true,
       })
     );
+    expect(payload).toHaveProperty("parityAudit");
+    expect(payload).toHaveProperty("performanceAudit");
+    expect(payload).toHaveProperty("validationTargets");
     expect((payload.allModesVariableFamilies as any).INTERVAL[0].fields[0]).toEqual(
       expect.objectContaining({ key: "coolingWeight", resolvedValue: 0.72 })
     );

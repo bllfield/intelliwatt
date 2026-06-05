@@ -138,6 +138,17 @@ export function auditIntervalReadModelInvariants(args: {
   ) {
     violations.push(`time-of-day buckets ${timeOfDayBucketTotalKwh} != net usage ${netUsageKwh}`);
   }
+  const intervalsCount = Number(summary.intervalsCount);
+  if (
+    Number.isFinite(intervalsCount) &&
+    intervalsCount > 0 &&
+    netUsageKwh != null &&
+    netUsageKwh > 0 &&
+    timeOfDayBucketTotalKwh != null &&
+    timeOfDayBucketTotalKwh <= INTERVAL_READ_MODEL_TOLERANCE_KWH
+  ) {
+    violations.push("time-of-day buckets are zero despite interval-backed net usage");
+  }
   if (
     fifteenMinuteAverages.length >= 96 &&
     averageDailyKwh != null &&

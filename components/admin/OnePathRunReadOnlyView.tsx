@@ -80,7 +80,7 @@ export function OnePathRunReadOnlyView(props: {
     [props.dataset, props.engineInput, props.readModel, readModel.sageActualDataset, readModel.sageActualDaily]
   );
   const suppliedView = isRenderableRunReadOnlyView(props.view) ? props.view : null;
-  const view = props.dataset && props.readModel ? (derivedView ?? suppliedView) : (suppliedView ?? derivedView);
+  const view = suppliedView ?? derivedView;
 
   if (!view) return null;
 
