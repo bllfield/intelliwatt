@@ -264,8 +264,8 @@ describe("usage parity regression", () => {
       userUsagePageBaselineContract: contract as any,
       runDisplayView: buildOnePathRunReadOnlyViewFromBaselineContract({ houseContract: contract as any }),
     });
-    expect(audit.actualUserVsSimulatorUsage.ok).toBe(true);
-    expect(audit.actualUserVsAdminBaseline.ok).toBe(true);
+    expect(audit.actualUserVsSimulatorUsage.pass).toBe(true);
+    expect(audit.actualUserVsAdminBaseline.pass).toBe(true);
   });
 
   it("exposes validation pass/fail without tuning WAPE thresholds", () => {

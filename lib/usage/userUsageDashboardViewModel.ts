@@ -8,6 +8,7 @@ import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMet
 import { readPastValidationPolicyRevisionFromMeta } from "@/lib/usage/pastSimulationCoreLabel";
 import { buildDisplayedMonthlyRows } from "@/modules/usageSimulator/monthlyCompareRows";
 import { buildUsageDisplayTotalsAudit } from "@/modules/onePathSim/usageDisplayTotalsAudit";
+import { localDateKeyInHomeTimezone } from "@/lib/usage/fifteenMinuteLoadCurve";
 import type { UserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
 import { derivePeakHourFromFifteenMinuteCurve } from "@/lib/usage/fifteenMinuteLoadCurve";
 
@@ -192,7 +193,7 @@ export function deriveTimeOfDayBucketsFromIntervals(
   const sums = { overnight: 0, morning: 0, afternoon: 0, evening: 0 };
   for (const row of rows) {
     const timestamp = String(row?.timestamp ?? "");
-    const dateKey = asDateKey(timestamp);
+    const dateKey = localDateKeyInHomeTimezone(timestamp, timezone) ?? asDateKey(timestamp);
     if (!dateKey) continue;
     if (options?.start && dateKey < options.start) continue;
     if (options?.end && dateKey > options.end) continue;
@@ -297,8 +298,14 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
   const totalsFromMonthly = monthly.length
     ? deriveTotalsFromRows(monthly.map((row: any) => ({ kwh: Number(row?.kwh) || 0 })))
     : null;
+  const isPastSimulatedDisplay = datasetKind === "SIMULATED" && meta.baselinePassthrough !== true;
+  const artifactBackedPastHeadline =
+    isPastSimulatedDisplay &&
+    typeof meta.pastDisplayInsightsSyncedAt === "string" &&
+    meta.pastDisplayInsightsSyncedAt.trim().length > 0 &&
+    totalsFromApi != null;
   const totalsFromDisplayDaily =
-    hasSimulatedFill && displayDaily.length
+    hasSimulatedFill && displayDaily.length && !artifactBackedPastHeadline
       ? {
           importKwh: Number(totalsFromSeries.importKwh.toFixed(2)),
           exportKwh: Number(totalsFromSeries.exportKwh.toFixed(2)),
@@ -306,12 +313,15 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
         }
       : null;
   const totals =
-    totalsFromDisplayDaily ??
-    (totalsFromApi != null
-        ? totalsFromMonthly != null && Math.abs((Number(totalsFromApi?.netKwh) || 0) - totalsFromMonthly.netKwh) > 0.05
-          ? totalsFromMonthly
-          : totalsFromApi
-        : totalsFromMonthly ?? totalsFromSeries);
+    artifactBackedPastHeadline
+      ? totalsFromApi
+      : totalsFromDisplayDaily ??
+        (totalsFromApi != null
+          ? totalsFromMonthly != null &&
+            Math.abs((Number(totalsFromApi?.netKwh) || 0) - totalsFromMonthly.netKwh) > 0.05
+            ? totalsFromMonthly
+            : totalsFromApi
+          : totalsFromMonthly ?? totalsFromSeries);
   const totalKwh = totals.netKwh;
   const recentDaily = displayDaily
     .slice()
@@ -334,21 +344,43 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
           .filter((row) => /^\d{4}-\d{2}$/.test(row.month))
           .sort((left, right) => (left.month < right.month ? -1 : left.month > right.month ? 1 : 0))
       : buildDisplayedMonthlyRows(dataset);
-  const deriveSummaryFromDisplayDaily = hasManualDisplayWindowStitch || hasSimulatedFill;
-  const weekdayWeekend = deriveSummaryFromDisplayDaily ? deriveWeekdayWeekendFromDaily(recentDaily) : null;
-  const derivedTimeOfDayBuckets = deriveSummaryFromDisplayDaily
-    ? deriveTimeOfDayBucketsFromIntervals(dataset?.series?.intervals15 ?? [], {
-        start: coverageStart,
-        end: coverageEnd,
-        timezone,
-      })
-    : null;
+  const deriveSummaryFromDisplayDaily =
+    (hasManualDisplayWindowStitch || hasSimulatedFill) && !artifactBackedPastHeadline;
+  const weekdayWeekendInsights =
+    dataset?.insights?.weekdayVsWeekend &&
+    typeof dataset.insights.weekdayVsWeekend === "object" &&
+    !Array.isArray(dataset.insights.weekdayVsWeekend)
+      ? (dataset.insights.weekdayVsWeekend as Record<string, unknown>)
+      : {};
+  const weekdayWeekend =
+    isPastSimulatedDisplay &&
+    typeof weekdayWeekendInsights.weekday === "number" &&
+    typeof weekdayWeekendInsights.weekend === "number"
+      ? {
+          weekday: Number(weekdayWeekendInsights.weekday),
+          weekend: Number(weekdayWeekendInsights.weekend),
+        }
+      : deriveSummaryFromDisplayDaily
+        ? deriveWeekdayWeekendFromDaily(recentDaily)
+        : null;
   const insightTimeOfDayBuckets = mapInsightTimeOfDayBuckets(dataset);
+  const insightTimeOfDayTotal = sumTimeOfDayBucketKwh(insightTimeOfDayBuckets);
+  const hasPersistedPastTimeOfDay =
+    isPastSimulatedDisplay && insightTimeOfDayBuckets.length > 0 && insightTimeOfDayTotal > 0.01;
+  const derivedTimeOfDayBuckets =
+    (deriveSummaryFromDisplayDaily || isPastSimulatedDisplay) && !hasPersistedPastTimeOfDay
+      ? deriveTimeOfDayBucketsFromIntervals(dataset?.series?.intervals15 ?? [], {
+          start: isPastSimulatedDisplay ? null : coverageStart,
+          end: isPastSimulatedDisplay ? null : coverageEnd,
+          timezone,
+        })
+      : null;
   const derivedTimeOfDayTotal = sumTimeOfDayBucketKwh(derivedTimeOfDayBuckets);
-  const timeOfDayBuckets =
-    derivedTimeOfDayBuckets &&
-    derivedTimeOfDayBuckets.length > 0 &&
-    derivedTimeOfDayTotal > 0.01
+  const timeOfDayBuckets = hasPersistedPastTimeOfDay
+    ? insightTimeOfDayBuckets
+    : derivedTimeOfDayBuckets &&
+        derivedTimeOfDayBuckets.length > 0 &&
+        derivedTimeOfDayTotal > 0.01
       ? derivedTimeOfDayBuckets
       : insightTimeOfDayBuckets.length > 0
         ? insightTimeOfDayBuckets

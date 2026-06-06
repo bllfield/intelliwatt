@@ -18,6 +18,10 @@ import {
 import { redistributeGreenButtonGridZeroSamples } from "@/modules/onePathSim/greenButtonIntervalCorrections";
 import { isSimulatedDailySourceForCompare } from "@/lib/usage/dailySourceNotation";
 import { resolveStaleIncompleteMeterSlotCompleteDateKeys } from "@/lib/usage/pastSimStaleIncompleteMeter";
+import { attachPastSimDisplayWeatherToDataset } from "@/lib/usage/pastSimDisplayWeather";
+import { reconcilePastDatasetDisplayTotals } from "@/lib/usage/reconcilePastDatasetDisplayTotals";
+import { syncPastSimDisplayInsightsFromCanonicalIntervals } from "@/lib/usage/pastSimCanonicalDisplayInsights";
+import { applyPastSimValidationBaselineProjectionToDataset } from "@/lib/usage/pastSimValidationBaselineProjection";
 import {
   buildGreenButtonActualDailyKwhByHomeDateKey,
   resolveGreenButtonPastValidationCandidateDateKeys,
@@ -6469,6 +6473,24 @@ async function recalcSimulatorBuildImpl(args: {
       (dataset.meta as any).lockboxPerRunTrace = perRunTrace;
       (dataset.meta as any).lockboxPerDayTrace = perDayTrace;
       (dataset.meta as any).fullChainHash = fullChainHash;
+      const validationActualByDate = await getValidationActualDailyByDateForDataset({
+        dataset,
+        fallbackHouseId: houseId,
+        fallbackEsiid: esiid,
+      }).catch(() => null);
+      applyPastSimValidationBaselineProjectionToDataset({
+        dataset: dataset as Record<string, unknown>,
+        actualDailyByDate: validationActualByDate,
+      });
+      reconcilePastDatasetDisplayTotals(dataset as Record<string, unknown>);
+      syncPastSimDisplayInsightsFromCanonicalIntervals(dataset as Record<string, unknown>);
+      reconcilePastDatasetDisplayTotals(dataset as Record<string, unknown>);
+      await attachPastSimDisplayWeatherToDataset({
+        dataset: dataset as Record<string, unknown>,
+        homeProfile: homeProfile as any,
+        applianceProfile: applianceProfile as any,
+        weatherHouseId: houseId,
+      });
       const datasetJsonForStorage = buildPastArtifactDatasetJsonForStorage({
         dataset: {
           ...dataset,

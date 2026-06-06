@@ -392,7 +392,21 @@ export function buildSimulationVariableCopyPayload(args: {
     : null;
   const dashboardContract =
     loadedSourceContext.userUsagePageBaselineContract ?? loadedSourceContext.userUsageBaselineContract ?? null;
-  const dashboardViewModel = buildUserUsageDashboardViewModel((dashboardContract as any) ?? null);
+  const readModelDatasetEarly = asNullableRecord(readModel.dataset);
+  const readModelDatasetMetaEarly = asRecord(readModelDatasetEarly?.meta);
+  const likelyPastSim =
+    readModelDatasetMetaEarly.datasetKind === "SIMULATED" &&
+    readModelDatasetMetaEarly.baselinePassthrough !== true;
+  const pastSimDatasetContract =
+    likelyPastSim && readModelDatasetEarly && Object.keys(readModelDatasetEarly).length > 0
+      ? {
+          dataset: readModelDatasetEarly,
+          weatherSensitivityScore: readModelDatasetMetaEarly.pastDisplayWeatherSensitivityScore ?? null,
+        }
+      : null;
+  const dashboardViewModel = buildUserUsageDashboardViewModel(
+    ((likelyPastSim && pastSimDatasetContract ? pastSimDatasetContract : dashboardContract) as any) ?? null
+  );
   const weatherScore = asRecord(asRecord(dashboardContract).weatherSensitivityScore);
   const copiedDashboardViewModel = dashboardViewModel
     ? {
@@ -439,9 +453,11 @@ export function buildSimulationVariableCopyPayload(args: {
       }
     : null;
   const displayTotalsDataset =
-    asRecord(asRecord(dashboardContract).dataset).summary != null
-      ? asRecord(dashboardContract).dataset
-      : readModel.dataset ?? null;
+    likelyPastSim && readModelDatasetEarly
+      ? readModelDatasetEarly
+      : asRecord(asRecord(dashboardContract).dataset).summary != null
+        ? asRecord(dashboardContract).dataset
+        : readModel.dataset ?? null;
   const displayTotalsAudit =
     displayTotalsDataset && Object.keys(asRecord(displayTotalsDataset)).length
       ? buildUsageDisplayTotalsAudit({ dataset: displayTotalsDataset })
@@ -659,15 +675,18 @@ export function buildSimulationVariableCopyPayload(args: {
     : [];
   const parityAudit = buildUsageParityAudit({
     userUsagePageBaselineContract: (dashboardContract as UserUsageHouseContract | null) ?? null,
-    runDisplayView: effectiveRunDisplayView,
+    runDisplayView: baselinePassthrough ? effectiveRunDisplayView : null,
     pastDataset: pastSim ? readModelDataset : null,
+    pastRunDisplayView: pastSim ? effectiveRunDisplayView : null,
     displayTotalsDataset: displayTotalsDataset,
+    engineInput: asRecord(args.engineInput),
   });
   const performanceAudit =
     args.performanceAudit ??
     (includeSimRunAudit
       ? buildPerformanceAuditSnapshot({
           readModel,
+          engineInput: asRecord(args.engineInput),
           stageTimingsMs: asRecord(readModel.performanceAudit).stageDurationsMs as Record<string, number> | undefined,
           routeTotalDurationMs:
             typeof asRecord(readModel.performanceAudit).totalDurationMs === "number"
@@ -732,7 +751,7 @@ export function buildSimulationVariableCopyPayload(args: {
       includesDashboardViewModel: Boolean(copiedDashboardViewModel || runDisplayContract),
       includesRunDisplayContract: Boolean(runDisplayContract),
       includesParitySections: Boolean(
-        includeSimRunAudit || baselineParityReport || baselineParityAudit || parityAudit
+        includeSimRunAudit || baselineParityReport || baselineParityAudit
       ),
       includesEnvReadinessTraceSections: Boolean(runtimeEnvParityTrace || intervalPastReadinessTrace),
       includesReadOnlyAudit: Boolean(readOnlyAudit),

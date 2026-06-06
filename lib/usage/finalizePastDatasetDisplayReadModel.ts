@@ -1,5 +1,7 @@
 import { sageActualDailyKwhByDate } from "@/lib/usage/sageActualDailyTruth";
+import { applyPastSimValidationBaselineProjectionToDataset } from "@/lib/usage/pastSimValidationBaselineProjection";
 import { applyPastSimDisplayTruthToDataset } from "@/lib/usage/pastSimStaleIncompleteMeter";
+import { syncPastSimDisplayInsightsFromCanonicalIntervals } from "@/lib/usage/pastSimCanonicalDisplayInsights";
 import { attachPastSimDisplayWeatherToDataset } from "@/lib/usage/pastSimDisplayWeather";
 import { reconcilePastDatasetDisplayTotals } from "@/lib/usage/reconcilePastDatasetDisplayTotals";
 
@@ -22,16 +24,30 @@ export async function finalizePastDatasetDisplayReadModel(args: {
   const meta = asRecord(dataset.meta);
   if (meta.datasetKind !== "SIMULATED" || meta.baselinePassthrough === true) return;
 
+  applyPastSimValidationBaselineProjectionToDataset({
+    dataset,
+    sageActualDataset: args.sageActualDataset,
+  });
   applyPastSimDisplayTruthToDataset(dataset, {
     sageByDate: sageActualDailyKwhByDate(args.sageActualDataset),
     smtSlotCompleteDateKeys: args.smtSlotCompleteDateKeys,
     greenButtonTrustedHomeDateKeys: args.greenButtonTrustedHomeDateKeys,
   });
   reconcilePastDatasetDisplayTotals(dataset);
-  await attachPastSimDisplayWeatherToDataset({
-    dataset,
-    homeProfile: args.homeProfile,
-    applianceProfile: args.applianceProfile,
-    weatherHouseId: args.weatherHouseId,
-  });
+  syncPastSimDisplayInsightsFromCanonicalIntervals(dataset);
+  reconcilePastDatasetDisplayTotals(dataset);
+
+  const refreshedMeta = asRecord(dataset.meta);
+  const pastDisplayWeather = asRecord(refreshedMeta.pastDisplayWeatherSensitivityScore);
+  if (
+    Object.keys(pastDisplayWeather).length === 0 &&
+    (args.homeProfile != null || args.weatherHouseId != null)
+  ) {
+    await attachPastSimDisplayWeatherToDataset({
+      dataset,
+      homeProfile: args.homeProfile,
+      applianceProfile: args.applianceProfile,
+      weatherHouseId: args.weatherHouseId,
+    });
+  }
 }

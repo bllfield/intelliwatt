@@ -1,5 +1,6 @@
 import { buildDisplayedMonthlyRows } from "@/modules/usageSimulator/monthlyCompareRows";
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
+import { readPastSimDisplayWeatherSensitivityScore } from "@/lib/usage/pastSimDisplayWeather";
 import { buildOnePathRunReadOnlyView } from "@/modules/onePathSim/runReadOnlyView";
 import type { UserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
 
@@ -175,18 +176,64 @@ export function auditIntervalReadModelInvariants(args: {
   };
 }
 
+function weatherCardValuesFromScore(score: unknown): {
+  weatherEfficiency: number | null;
+  cooling: number | null;
+  heating: number | null;
+  confidence: number | null;
+} {
+  const record = asRecord(score);
+  const derived = asRecord(record.derivedInput ?? record.weatherEfficiencyDerivedInput);
+  const pick = (value: unknown): number | null =>
+    typeof value === "number" && Number.isFinite(value) ? value : null;
+  return {
+    weatherEfficiency: pick(record.weatherEfficiencyScore0to100),
+    cooling:
+      pick(derived.coolingSensitivityScore0to100) ??
+      pick(derived.coolingSensitivity) ??
+      pick(record.coolingSensitivityScore0to100),
+    heating:
+      pick(derived.heatingSensitivityScore0to100) ??
+      pick(derived.heatingSensitivity) ??
+      pick(record.heatingSensitivityScore0to100),
+    confidence:
+      pick(derived.confidenceScore0to100) ??
+      pick(derived.confidence) ??
+      pick(record.confidenceScore0to100),
+  };
+}
+
 export function auditUserAdminPastReadModelParity(args: { dataset: unknown }): {
   ok: boolean;
   violations: string[];
+  weatherCards: {
+    pass: boolean;
+    user: ReturnType<typeof weatherCardValuesFromScore>;
+    admin: ReturnType<typeof weatherCardValuesFromScore>;
+    sourceOwner: string;
+  };
 } {
   const datasetRecord = asRecord(args.dataset);
-  const viewModel = buildUserUsageDashboardViewModel({ dataset: args.dataset });
+  const pastDisplayWeather = readPastSimDisplayWeatherSensitivityScore(datasetRecord);
+  const viewModel = buildUserUsageDashboardViewModel({
+    dataset: args.dataset,
+    weatherSensitivityScore: pastDisplayWeather as never,
+  });
   const adminView = buildOnePathRunReadOnlyView({
     dataset: Object.keys(datasetRecord).length > 0 ? datasetRecord : null,
   });
   const violations: string[] = [];
   if (!viewModel || !adminView) {
-    return { ok: false, violations: ["missing user or admin read model"] };
+    return {
+      ok: false,
+      violations: ["missing user or admin read model"],
+      weatherCards: {
+        pass: false,
+        user: weatherCardValuesFromScore(null),
+        admin: weatherCardValuesFromScore(null),
+        sourceOwner: "meta.pastDisplayWeatherSensitivityScore",
+      },
+    };
   }
 
   const compareNumeric = (label: string, left: number | null, right: number | null) => {
@@ -215,11 +262,35 @@ export function auditUserAdminPastReadModelParity(args: { dataset: unknown }): {
   );
   compareNumeric("timeOfDayBucketsTotal", userBucketTotal, adminBucketTotal);
 
+  if (JSON.stringify(viewModel.derived.timeOfDayBuckets) !== JSON.stringify(adminView.summary.timeOfDayBuckets)) {
+    violations.push("timeOfDayBuckets mismatch");
+  }
+
   if (JSON.stringify(viewModel.derived.fifteenCurve) !== JSON.stringify(adminView.fifteenMinuteAverages)) {
     violations.push("fifteenMinuteAverages mismatch");
   }
 
-  return { ok: violations.length === 0, violations };
+  const userWeather = weatherCardValuesFromScore(pastDisplayWeather);
+  const adminWeather = weatherCardValuesFromScore(adminView.weatherScore);
+  const weatherPass =
+    userWeather.weatherEfficiency === adminWeather.weatherEfficiency &&
+    userWeather.cooling === adminWeather.cooling &&
+    userWeather.heating === adminWeather.heating &&
+    userWeather.confidence === adminWeather.confidence;
+  if (!weatherPass) {
+    violations.push("weather cards mismatch");
+  }
+
+  return {
+    ok: violations.length === 0,
+    violations,
+    weatherCards: {
+      pass: weatherPass,
+      user: userWeather,
+      admin: adminWeather,
+      sourceOwner: "meta.pastDisplayWeatherSensitivityScore",
+    },
+  };
 }
 
 export function auditUserUsageHouseContractParity(args: {

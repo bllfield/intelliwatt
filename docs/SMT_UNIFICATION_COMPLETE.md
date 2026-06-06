@@ -58,6 +58,12 @@ Command: `npx tsx scripts/audit-smt-day-coverage.ts <esiid> <dateKey>`
 
 Raw row counts, distinct Chicago slot counts, coverage loader, and ledger reconcile agree on all three days.
 
+## Green Button Past display parity (artifact-backed read model)
+
+- Canonical Past simulates **Travel/Vacant** dates only; validation/test **simulated** day totals stay **compare-only** (`compareProjection` / `canonicalArtifactSimulatedDayTotalsByDate`).
+- Validation/test days contribute **actual** kWh to the user/admin Past curve via `projectBaselineFromCanonicalDataset` at artifact save and read finalize.
+- Persisted Past headline totals, weather cards, time-of-day buckets, and `displayTotalsAudit` owners are written at artifact save and read from `meta.pastDisplayInsightsSyncedAt` / `meta.pastDisplayWeatherSensitivityScore` — user and admin surfaces share the same artifact-backed read model.
+
 ## Related docs
 
 - Implementation detail: `docs/SMT_UNIFICATION_PLAN.md`

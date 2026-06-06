@@ -69,10 +69,18 @@ export type UsageDisplayTotalsAudit = {
     | "unexpected_display_owner_mismatch";
   stitchedMonth: Record<string, unknown> | null;
   note: string;
+  timeOfDayTotalKwh: number | null;
+  timeOfDayVsCanonicalDeltaKwh: number | null;
+  timeOfDayDroppedIntervalCount: number;
+  timeOfDayUnbucketedKwh: number;
+  timeOfDaySourceOwner: string | null;
+  weekdayWeekendTotalKwh: number | null;
 };
 
 export function buildUsageDisplayTotalsAudit(args: { dataset: unknown }): UsageDisplayTotalsAudit {
   const dataset = asRecord(args.dataset);
+  const meta = asRecord(dataset.meta);
+  const isPastSimulatedDisplay = meta.datasetKind === "SIMULATED" && meta.baselinePassthrough !== true;
   const summary = asRecord(dataset.summary);
   const totals = asRecord(dataset.totals);
   const insights = asRecord(dataset.insights);
@@ -102,6 +110,20 @@ export function buildUsageDisplayTotalsAudit(args: { dataset: unknown }): UsageD
   const timeOfDayBucketTotalKwh = timeOfDayBuckets.length
     ? round2(timeOfDayBuckets.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0))
     : null;
+  const timeOfDayDroppedIntervalCount =
+    typeof meta.pastDisplayTimeOfDayDroppedIntervalCount === "number" &&
+    Number.isFinite(meta.pastDisplayTimeOfDayDroppedIntervalCount)
+      ? meta.pastDisplayTimeOfDayDroppedIntervalCount
+      : 0;
+  const timeOfDayUnbucketedKwh =
+    typeof meta.pastDisplayTimeOfDayUnbucketedKwh === "number" &&
+    Number.isFinite(meta.pastDisplayTimeOfDayUnbucketedKwh)
+      ? round2(meta.pastDisplayTimeOfDayUnbucketedKwh)
+      : 0;
+  const timeOfDaySourceOwner =
+    typeof meta.pastDisplayInsightsSourceOwner === "string" && meta.pastDisplayInsightsSourceOwner.trim()
+      ? meta.pastDisplayInsightsSourceOwner
+      : "dataset.insights.timeOfDayBuckets";
 
   const totalsFromApi =
     datasetTotalsNetKwh != null || datasetTotalsImportKwh != null
@@ -124,11 +146,20 @@ export function buildUsageDisplayTotalsAudit(args: { dataset: unknown }): UsageD
         }
       : null;
 
+  const artifactBackedPastHeadline =
+    isPastSimulatedDisplay &&
+    typeof meta.pastDisplayInsightsSyncedAt === "string" &&
+    meta.pastDisplayInsightsSyncedAt.trim().length > 0 &&
+    datasetTotalsNetKwh != null
+      ? datasetTotalsNetKwh
+      : null;
   const canonicalTotalKwh =
-    rawTotalFromDailyKwh != null
+    artifactBackedPastHeadline ??
+    (rawTotalFromDailyKwh != null
       ? rawTotalFromDailyKwh
-      : previewIntervalTotalKwh ?? datasetTotalsNetKwh ?? summaryTotalKwh;
-  const rawIntervalTotalKwh = canonicalTotalKwh;
+      : previewIntervalTotalKwh ?? datasetTotalsNetKwh ?? summaryTotalKwh);
+  const rawIntervalTotalKwh =
+    previewIntervalTotalKwh ?? artifactBackedPastHeadline ?? canonicalTotalKwh;
   const monthlyDisplayTotalKwh = monthlyDisplayedTotalKwh;
   const monthlyDisplayDeltaFromCanonicalKwh =
     canonicalTotalKwh != null && monthlyDisplayTotalKwh != null
@@ -157,14 +188,42 @@ export function buildUsageDisplayTotalsAudit(args: { dataset: unknown }): UsageD
     dashboardHeadlineTotalKwh = totalsFromSeries.netKwh;
   }
 
+  const timeOfDayVsCanonicalDeltaKwh =
+    canonicalTotalKwh != null && timeOfDayBucketTotalKwh != null
+      ? round2(timeOfDayBucketTotalKwh - canonicalTotalKwh)
+      : null;
+
   let firstDivergenceOwner: string | null = null;
   let mismatchClassification: UsageDisplayTotalsAudit["mismatchClassification"] = "aligned";
   let note = "Displayed totals are aligned across summary, dashboard, monthly, and breakdown owners.";
 
   if (
+    isPastSimulatedDisplay &&
+    artifactBackedPastHeadline != null &&
+    approxEqual(artifactBackedPastHeadline, summaryTotalKwh) &&
+    approxEqual(artifactBackedPastHeadline, datasetTotalsNetKwh) &&
+    approxEqual(artifactBackedPastHeadline, weekdayWeekendBreakdownTotalKwh) &&
+    approxEqual(artifactBackedPastHeadline, timeOfDayBucketTotalKwh)
+  ) {
+    mismatchClassification = "aligned";
+    note =
+      "Past artifact-backed headline totals reconcile across summary, totals, weekday/weekend, and time-of-day owners.";
+  } else if (
+    isPastSimulatedDisplay &&
+    approxEqual(rawIntervalTotalKwh, summaryTotalKwh) &&
+    approxEqual(rawIntervalTotalKwh, datasetTotalsNetKwh) &&
+    approxEqual(rawIntervalTotalKwh, monthlyRawTotalKwh) &&
+    approxEqual(rawIntervalTotalKwh, weekdayWeekendBreakdownTotalKwh) &&
+    approxEqual(rawIntervalTotalKwh, timeOfDayBucketTotalKwh)
+  ) {
+    mismatchClassification = "aligned";
+    note =
+      "Past simulated display totals reconcile across daily, monthly raw, weekday/weekend, and time-of-day owners.";
+  } else if (
     !approxEqual(rawIntervalTotalKwh, summaryTotalKwh) ||
     !approxEqual(rawIntervalTotalKwh, datasetTotalsNetKwh) ||
-    !approxEqual(rawIntervalTotalKwh, monthlyDisplayedTotalKwh)
+    (!isPastSimulatedDisplay && !approxEqual(rawIntervalTotalKwh, monthlyDisplayedTotalKwh)) ||
+    (isPastSimulatedDisplay && !approxEqual(rawIntervalTotalKwh, monthlyRawTotalKwh))
   ) {
     firstDivergenceOwner = "lib/usage/actualDatasetForHouse.ts :: totalsForDataset / summary.totalKwh";
     if (
@@ -211,5 +270,11 @@ export function buildUsageDisplayTotalsAudit(args: { dataset: unknown }): UsageD
     mismatchClassification,
     stitchedMonth: Object.keys(stitchedMonth).length > 0 ? stitchedMonth : null,
     note,
+    timeOfDayTotalKwh: timeOfDayBucketTotalKwh,
+    timeOfDayVsCanonicalDeltaKwh,
+    timeOfDayDroppedIntervalCount,
+    timeOfDayUnbucketedKwh,
+    timeOfDaySourceOwner,
+    weekdayWeekendTotalKwh: weekdayWeekendBreakdownTotalKwh,
   };
 }

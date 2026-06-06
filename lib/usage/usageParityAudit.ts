@@ -4,6 +4,8 @@ import {
   auditUserUsageHouseContractParity,
   INTERVAL_READ_MODEL_TOLERANCE_KWH,
 } from "@/lib/usage/intervalReadModelInvariants";
+import { readPastSimDisplayWeatherSensitivityScore } from "@/lib/usage/pastSimDisplayWeather";
+import { computePastSimCanonicalOwnershipAudit } from "@/lib/usage/pastSimValidationBaselineProjection";
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
 import { buildUsageDisplayTotalsAudit } from "@/modules/onePathSim/usageDisplayTotalsAudit";
 import type { UserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
@@ -120,39 +122,101 @@ export function buildUsageParitySnapshotFromRunDisplayView(view: unknown): Usage
   };
 }
 
-function compareParitySnapshots(left: UsageParitySnapshot | null, right: UsageParitySnapshot | null) {
-  const violations: string[] = [];
-  if (!left || !right) {
-    return { ok: false, violations: ["missing parity snapshot"] };
+type ParityFieldComparison = {
+  field: string;
+  left: unknown;
+  right: unknown;
+  delta: number | null;
+  tolerance: number | null;
+  pass: boolean;
+};
+
+function numericDelta(left: unknown, right: unknown): number | null {
+  const a = pickNumber(left);
+  const b = pickNumber(right);
+  if (a == null || b == null) return null;
+  return Math.round((a - b) * 100) / 100;
+}
+
+function fieldPass(left: unknown, right: unknown, tolerance = INTERVAL_READ_MODEL_TOLERANCE_KWH): boolean {
+  const a = pickNumber(left);
+  const b = pickNumber(right);
+  if (a != null && b != null) {
+    return Math.abs(a - b) <= tolerance;
   }
-  const compare = (label: string, a: unknown, b: unknown) => {
-    if (JSON.stringify(a) !== JSON.stringify(b)) {
-      violations.push(`${label} mismatch`);
-    }
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function buildStructuredParityGroup(args: {
+  label: string;
+  left: UsageParitySnapshot | null;
+  right: UsageParitySnapshot | null;
+  sourceOwner: string;
+  numericFields?: string[];
+}) {
+  const violations: string[] = [];
+  const fields: ParityFieldComparison[] = [];
+  const numericFields = args.numericFields ?? [
+    "intervalsCount",
+    "netKwh",
+    "avgDailyKwh",
+    "weatherEfficiencyScore0to100",
+    "coolingSensitivity",
+    "heatingSensitivity",
+    "confidence",
+    "baseload15MinKwh",
+    "baseloadDailyKwh",
+    "baseloadMonthlyKwh",
+    "weekdayKwh",
+    "weekendKwh",
+  ];
+  if (!args.left || !args.right) {
+    return {
+      label: args.label,
+      pass: false,
+      violations: ["missing parity snapshot"],
+      valuesCompared: fields,
+      sourceOwner: args.sourceOwner,
+    };
+  }
+
+  const compareField = (field: string, leftValue: unknown, rightValue: unknown, tolerance?: number) => {
+    const pass = fieldPass(leftValue, rightValue, tolerance);
+    fields.push({
+      field,
+      left: leftValue,
+      right: rightValue,
+      delta: numericDelta(leftValue, rightValue),
+      tolerance: tolerance ?? (pickNumber(leftValue) != null ? INTERVAL_READ_MODEL_TOLERANCE_KWH : null),
+      pass,
+    });
+    if (!pass) violations.push(`${field} mismatch`);
   };
-  compare("coverage", left.coverage, right.coverage);
-  compare("intervalsCount", left.intervalsCount, right.intervalsCount);
-  compare("netKwh", left.netKwh, right.netKwh);
-  compare("avgDailyKwh", left.avgDailyKwh, right.avgDailyKwh);
-  compare("weatherEfficiencyScore0to100", left.weatherEfficiencyScore0to100, right.weatherEfficiencyScore0to100);
-  compare("coolingSensitivity", left.coolingSensitivity, right.coolingSensitivity);
-  compare("heatingSensitivity", left.heatingSensitivity, right.heatingSensitivity);
-  compare("confidence", left.confidence, right.confidence);
-  compare("baseload15MinKwh", left.baseload15MinKwh, right.baseload15MinKwh);
-  compare("baseloadDailyKwh", left.baseloadDailyKwh, right.baseloadDailyKwh);
-  compare("baseloadMonthlyKwh", left.baseloadMonthlyKwh, right.baseloadMonthlyKwh);
-  compare("weekdayKwh", left.weekdayKwh, right.weekdayKwh);
-  compare("weekendKwh", left.weekendKwh, right.weekendKwh);
-  compare("timeOfDayBuckets", left.timeOfDayBuckets, right.timeOfDayBuckets);
-  compare("monthlyRows", left.monthlyRows, right.monthlyRows);
-  return { ok: violations.length === 0, violations };
+
+  compareField("coverage", args.left.coverage, args.right.coverage, 0);
+  for (const field of numericFields) {
+    compareField(field, (args.left as Record<string, unknown>)[field], (args.right as Record<string, unknown>)[field]);
+  }
+  compareField("timeOfDayBuckets", args.left.timeOfDayBuckets, args.right.timeOfDayBuckets, 0);
+  compareField("monthlyRows", args.left.monthlyRows, args.right.monthlyRows, 0);
+
+  return {
+    label: args.label,
+    pass: violations.length === 0,
+    violations,
+    valuesCompared: fields,
+    sourceOwner: args.sourceOwner,
+  };
 }
 
 export function buildUsageParityAudit(args: {
   userUsagePageBaselineContract?: UserUsageHouseContract | null;
   runDisplayView?: unknown;
   pastDataset?: unknown;
+  pastRunDisplayView?: unknown;
   displayTotalsDataset?: unknown;
+  engineInput?: Record<string, unknown> | null;
+  compareMetrics?: Record<string, unknown> | null;
 }) {
   const actualSnapshot = buildUsageParitySnapshotFromHouseContract(args.userUsagePageBaselineContract);
   const simulatorUsageSnapshot = actualSnapshot;
@@ -160,14 +224,105 @@ export function buildUsageParityAudit(args: {
     ? buildUsageParitySnapshotFromRunDisplayView(args.runDisplayView)
     : actualSnapshot;
 
-  const actualUserVsSimulatorUsage = compareParitySnapshots(actualSnapshot, simulatorUsageSnapshot);
-  const actualUserVsAdminBaseline = compareParitySnapshots(actualSnapshot, adminBaselineSnapshot);
+  const actualUserVsSimulatorUsage = buildStructuredParityGroup({
+    label: "actualUserVsSimulatorUsage",
+    left: actualSnapshot,
+    right: simulatorUsageSnapshot,
+    sourceOwner: "buildUserUsageDashboardViewModel",
+  });
+  const actualUserVsAdminBaseline = buildStructuredParityGroup({
+    label: "actualUserVsAdminBaseline",
+    left: actualSnapshot,
+    right: adminBaselineSnapshot,
+    sourceOwner: "buildOnePathRunReadOnlyView",
+  });
 
-  const pastUserVsAdmin = args.pastDataset
+  const pastDatasetRecord = asRecord(args.pastDataset);
+  const pastUserSnapshot = Object.keys(pastDatasetRecord).length
+    ? buildUsageParitySnapshotFromHouseContract({
+        dataset: args.pastDataset,
+        weatherSensitivityScore: readPastSimDisplayWeatherSensitivityScore(pastDatasetRecord) as never,
+      } as UserUsageHouseContract)
+    : null;
+  const pastAdminSnapshot = args.pastRunDisplayView
+    ? buildUsageParitySnapshotFromRunDisplayView(args.pastRunDisplayView)
+    : args.runDisplayView
+      ? buildUsageParitySnapshotFromRunDisplayView(args.runDisplayView)
+      : null;
+
+  const pastReadModelAudit = Object.keys(pastDatasetRecord).length
     ? auditUserAdminPastReadModelParity({ dataset: args.pastDataset })
-    : { ok: true, violations: [] as string[] };
+    : {
+        ok: true,
+        violations: [] as string[],
+        weatherCards: {
+          pass: true,
+          user: { weatherEfficiency: null, cooling: null, heating: null, confidence: null },
+          admin: { weatherEfficiency: null, cooling: null, heating: null, confidence: null },
+          sourceOwner: "meta.pastDisplayWeatherSensitivityScore",
+        },
+      };
 
-  const totalsDataset = args.displayTotalsDataset ?? args.pastDataset ?? asRecord(args.userUsagePageBaselineContract).dataset;
+  const pastUserVsAdminCore = buildStructuredParityGroup({
+    label: "pastUserVsAdmin",
+    left: pastUserSnapshot,
+    right: pastAdminSnapshot,
+    sourceOwner: "meta.pastDisplayWeatherSensitivityScore + insights.timeOfDayBuckets",
+  });
+
+  const canonicalOwnership =
+    Object.keys(pastDatasetRecord).length > 0
+      ? computePastSimCanonicalOwnershipAudit({
+          dataset: args.pastDataset,
+          compareMetrics:
+            args.compareMetrics ??
+            asRecord(asRecord(args.pastRunDisplayView).compare).metrics ??
+            asRecord(asRecord(args.runDisplayView).compare).metrics,
+        })
+      : null;
+
+  const pastUserVsAdmin = {
+    ...pastUserVsAdminCore,
+    ok:
+      pastUserVsAdminCore.pass &&
+      pastReadModelAudit.ok &&
+      pastReadModelAudit.weatherCards.pass &&
+      canonicalOwnership?.canonicalPastIncludesValidationTestSimulation !== true,
+    weatherCards: {
+      pass: pastReadModelAudit.weatherCards.pass,
+      valuesCompared: {
+        weatherEfficiency: {
+          user: pastReadModelAudit.weatherCards.user.weatherEfficiency,
+          admin: pastReadModelAudit.weatherCards.admin.weatherEfficiency,
+        },
+        cooling: {
+          user: pastReadModelAudit.weatherCards.user.cooling,
+          admin: pastReadModelAudit.weatherCards.admin.cooling,
+        },
+        heating: {
+          user: pastReadModelAudit.weatherCards.user.heating,
+          admin: pastReadModelAudit.weatherCards.admin.heating,
+        },
+        confidence: {
+          user: pastReadModelAudit.weatherCards.user.confidence,
+          admin: pastReadModelAudit.weatherCards.admin.confidence,
+        },
+      },
+      tolerance: 0,
+      sourceOwner: pastReadModelAudit.weatherCards.sourceOwner,
+    },
+    readModelAudit: {
+      pass: pastReadModelAudit.ok,
+      violations: pastReadModelAudit.violations,
+      sourceOwner: "auditUserAdminPastReadModelParity",
+    },
+    canonicalOwnership,
+  };
+
+  const totalsDataset =
+    args.displayTotalsDataset ??
+    args.pastDataset ??
+    asRecord(args.userUsagePageBaselineContract).dataset;
   const intervalInvariants = totalsDataset
     ? auditIntervalReadModelInvariants({ dataset: totalsDataset })
     : { ok: true, violations: [] as string[], netUsageKwh: null, timeOfDayBucketTotalKwh: null };
@@ -190,6 +345,22 @@ export function buildUsageParityAudit(args: {
       invariants.push("monthly raw total diverged from canonical total");
     }
   }
+  if (displayTotalsAudit?.timeOfDayVsCanonicalDeltaKwh != null) {
+    if (Math.abs(displayTotalsAudit.timeOfDayVsCanonicalDeltaKwh) > INTERVAL_READ_MODEL_TOLERANCE_KWH) {
+      invariants.push(
+        `time-of-day total diverged from canonical by ${displayTotalsAudit.timeOfDayVsCanonicalDeltaKwh} kWh`
+      );
+    }
+  }
+  if (!pastUserVsAdmin.weatherCards.pass) {
+    invariants.push("past user vs admin weather cards differ");
+  }
+  if (canonicalOwnership?.canonicalPastIncludesValidationTestSimulation) {
+    invariants.push("canonical past curve includes simulated validation/test day totals");
+  }
+  if (displayTotalsAudit?.mismatchClassification === "unexpected_display_owner_mismatch") {
+    invariants.push("display totals audit reported unexpected display owner mismatch");
+  }
   if (args.userUsagePageBaselineContract) {
     const contractParity = auditUserUsageHouseContractParity({
       left: args.userUsagePageBaselineContract,
@@ -200,7 +371,40 @@ export function buildUsageParityAudit(args: {
     }
   }
 
+  const datasetMeta = asRecord(asRecord(totalsDataset).meta);
+  const engineInput = asRecord(args.engineInput);
+  const runContext = asRecord(engineInput.runtime).runContext
+    ? asRecord(asRecord(engineInput.runtime).runContext)
+    : asRecord(datasetMeta.lockboxRunContext);
+  const actualSource =
+    String(engineInput.actualSource ?? datasetMeta.actualSource ?? runContext.preferredActualSource ?? "")
+      .trim()
+      .toUpperCase() || null;
+  const preferredActualSource =
+    String(runContext.preferredActualSource ?? datasetMeta.preferredActualSource ?? actualSource ?? "")
+      .trim()
+      .toUpperCase() || null;
+  const internalLegacyMode =
+    String(engineInput.simulatorMode ?? datasetMeta.simulatorMode ?? datasetMeta.mode ?? "").trim() || null;
+  const selectedMode =
+    actualSource === "GREEN_BUTTON" || preferredActualSource === "GREEN_BUTTON"
+      ? "GREEN_BUTTON"
+      : actualSource ?? preferredActualSource ?? internalLegacyMode;
+
+  const parityPass =
+    actualUserVsSimulatorUsage.pass &&
+    actualUserVsAdminBaseline.pass &&
+    pastUserVsAdmin.ok &&
+    invariants.length === 0;
+
   return {
+    pass: parityPass,
+    selectedMode,
+    simulatorMode: selectedMode,
+    internalLegacyMode:
+      internalLegacyMode && internalLegacyMode !== selectedMode ? internalLegacyMode : null,
+    actualSource,
+    preferredActualSource,
     actualUserVsSimulatorUsage,
     actualUserVsAdminBaseline,
     pastUserVsAdmin,
@@ -232,12 +436,32 @@ export function buildPerformanceAuditSnapshot(args: {
   stageTimingsMs?: Record<string, number> | null;
   readModel?: Record<string, unknown> | null;
   routeTotalDurationMs?: number | null;
+  engineInput?: Record<string, unknown> | null;
 }) {
   const readModel = asRecord(args.readModel);
   const datasetMeta = asRecord(asRecord(readModel.dataset).meta);
   const sharedDiagnostics = asRecord(readModel.sharedDiagnostics);
   const lockboxSummary = asRecord(sharedDiagnostics.lockboxExecutionSummary);
   const lockboxTrace = asRecord(datasetMeta.lockboxPerRunTrace);
+  const engineInput = asRecord(args.engineInput);
+  const runContext = asRecord(engineInput.runtime).runContext
+    ? asRecord(asRecord(engineInput.runtime).runContext)
+    : asRecord(datasetMeta.lockboxRunContext);
+  const actualSource =
+    String(engineInput.actualSource ?? datasetMeta.actualSource ?? runContext.preferredActualSource ?? "")
+      .trim()
+      .toUpperCase() || null;
+  const preferredActualSource =
+    String(runContext.preferredActualSource ?? datasetMeta.preferredActualSource ?? actualSource ?? "")
+      .trim()
+      .toUpperCase() || null;
+  const internalLegacyMode =
+    String(engineInput.simulatorMode ?? datasetMeta.simulatorMode ?? datasetMeta.mode ?? "").trim() || null;
+  const selectedMode =
+    actualSource === "GREEN_BUTTON" || preferredActualSource === "GREEN_BUTTON"
+      ? "GREEN_BUTTON"
+      : actualSource ?? preferredActualSource ?? internalLegacyMode;
+
   const stageDurationsMs = {
     ...asRecord(lockboxSummary.stageTimings),
     ...asRecord(lockboxTrace.stageTimingsMs),
@@ -259,6 +483,12 @@ export function buildPerformanceAuditSnapshot(args: {
 
   return {
     totalDurationMs,
+    selectedMode,
+    simulatorMode: selectedMode,
+    internalLegacyMode:
+      internalLegacyMode && internalLegacyMode !== selectedMode ? internalLegacyMode : null,
+    actualSource,
+    preferredActualSource,
     cacheStatus:
       preloadReuse != null && preloadReuse > 0
         ? "hit"
@@ -268,6 +498,10 @@ export function buildPerformanceAuditSnapshot(args: {
     getActualUsageDatasetForHouseCount:
       pickNumber(lockboxTrace.getActualUsageDatasetForHouseCount) ?? pickNumber(preloadFetch) ?? 0,
     loadGreenButtonPastProducerIntervalsCount: gbProducerFetch ?? gbProducerReuse ?? 0,
+    greenButtonProducerFetchCount: gbProducerFetch ?? 0,
+    greenButtonProducerReuseCount: gbProducerReuse ?? 0,
+    actualIntervalPayloadAttached: datasetMeta.actualIntervalPayloadAttached ?? null,
+    actualIntervalPayloadSource: datasetMeta.actualIntervalPayloadSource ?? null,
     intervalPreloadEnabled: preloadFetch != null || preloadReuse != null || gbProducerFetch != null,
     reusedForValidation: (preloadReuse ?? 0) > 0,
     reusedForSimulation: (gbProducerReuse ?? 0) > 0,
