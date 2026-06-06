@@ -369,6 +369,12 @@ describe("one path simulation variable copy payload", () => {
             },
             meta: { actualSource: "SMT" },
           },
+          weatherSensitivityScore: {
+            weatherEfficiencyScore0to100: 48,
+            coolingSensitivityScore0to100: 95,
+            heatingSensitivityScore0to100: 79,
+            confidenceScore0to100: 100,
+          },
         },
       } as any,
       readModel: {
@@ -407,6 +413,13 @@ describe("one path simulation variable copy payload", () => {
           },
           meta: {
             datasetKind: "SIMULATED",
+            pastDisplayWeatherSensitivityScore: {
+              weatherEfficiencyScore0to100: 51,
+              coolingSensitivityScore0to100: 92,
+              heatingSensitivityScore0to100: 76,
+              confidenceScore0to100: 100,
+              sourceOwner: "past_artifact_build",
+            },
           },
         },
       } as any,
@@ -422,7 +435,16 @@ describe("one path simulation variable copy payload", () => {
       { month: "2026-04", kwh: 419.69 },
     ]);
     expect((payload.runDisplayContract as any)?.monthlyRowsDifferFromRaw).toBe(true);
-    expect((payload.userUsageDashboardViewModel as any)?.monthlyRows).toEqual([{ month: "2025-04", kwh: 10 }]);
+    expect((payload.userUsageDashboardViewModel as any)?.monthlyRows).toEqual([
+      { month: "2025-05", kwh: 100 },
+      { month: "2026-04", kwh: 943.22 },
+    ]);
+    expect((payload.userUsageDashboardViewModel as any)?.weatherScoreDisplay?.displayOwner).toBe(
+      "past_artifact_build"
+    );
+    expect((payload.userUsageDashboardViewModel as any)?.baselineWeatherScoreDisplay?.label).toBe(
+      "baselineWeatherScoreDisplay"
+    );
   });
 
   it("treats compact baseline passthrough responses as canonical run output", () => {

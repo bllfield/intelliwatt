@@ -408,7 +408,14 @@ export function buildSimulationVariableCopyPayload(args: {
   const dashboardViewModel = buildUserUsageDashboardViewModel(
     ((likelyPastSim && pastSimDatasetContract ? pastSimDatasetContract : dashboardContract) as any) ?? null
   );
-  const weatherScore = asRecord(asRecord(dashboardContract).weatherSensitivityScore);
+  const pastDisplayWeatherScore = likelyPastSim
+    ? asRecord(readModelDatasetMetaEarly.pastDisplayWeatherSensitivityScore)
+    : asRecord({});
+  const baselineWeatherScore = asRecord(asRecord(dashboardContract).weatherSensitivityScore);
+  const weatherScoreForDisplay =
+    likelyPastSim && Object.keys(pastDisplayWeatherScore).length > 0
+      ? pastDisplayWeatherScore
+      : baselineWeatherScore;
   const copiedDashboardViewModel = dashboardViewModel
     ? {
         coverage: dashboardViewModel.coverage,
@@ -440,17 +447,35 @@ export function buildSimulationVariableCopyPayload(args: {
           weatherBasisLabel: dashboardViewModel.coverage?.weatherBasisLabel ?? null,
           sourceOwner: "buildUserUsageDashboardViewModel(...).derived.fifteenCurve",
         },
-        weatherScoreDisplay: Object.keys(weatherScore).length
+        weatherScoreDisplay: Object.keys(weatherScoreForDisplay).length
           ? {
-              scoringMode: weatherScore.scoringMode ?? null,
+              displayOwner: likelyPastSim ? "past_artifact_build" : "actual_usage_weather_score",
+              outputField: likelyPastSim
+                ? "meta.pastDisplayWeatherSensitivityScore"
+                : "contract.weatherSensitivityScore",
+              scoringMode: weatherScoreForDisplay.scoringMode ?? null,
               scoringModeLabel:
-                weatherScore.scoringMode === "BILLING_PERIOD_BASED" ? "Billing-period based" : "Interval based",
-              weatherEfficiencyScore0to100: weatherScore.weatherEfficiencyScore0to100 ?? null,
-              explanationSummary: weatherScore.explanationSummary ?? null,
-              estimatedWeatherDrivenLoadShare: weatherScore.estimatedWeatherDrivenLoadShare ?? null,
-              estimatedBaseloadShare: weatherScore.estimatedBaseloadShare ?? null,
+                weatherScoreForDisplay.scoringMode === "BILLING_PERIOD_BASED"
+                  ? "Billing-period based"
+                  : "Interval based",
+              weatherEfficiencyScore0to100: weatherScoreForDisplay.weatherEfficiencyScore0to100 ?? null,
+              explanationSummary: weatherScoreForDisplay.explanationSummary ?? null,
+              estimatedWeatherDrivenLoadShare: weatherScoreForDisplay.estimatedWeatherDrivenLoadShare ?? null,
+              estimatedBaseloadShare: weatherScoreForDisplay.estimatedBaseloadShare ?? null,
             }
           : null,
+        baselineWeatherScoreDisplay:
+          likelyPastSim && Object.keys(baselineWeatherScore).length
+            ? {
+                displayOwner: "actual_usage_weather_score",
+                label: "baselineWeatherScoreDisplay",
+                outputField: "contract.weatherSensitivityScore",
+                weatherEfficiencyScore0to100: baselineWeatherScore.weatherEfficiencyScore0to100 ?? null,
+                coolingSensitivityScore0to100: baselineWeatherScore.coolingSensitivityScore0to100 ?? null,
+                heatingSensitivityScore0to100: baselineWeatherScore.heatingSensitivityScore0to100 ?? null,
+                confidenceScore0to100: baselineWeatherScore.confidenceScore0to100 ?? null,
+              }
+            : null,
       }
     : null;
   const displayTotalsDataset =
@@ -682,6 +707,9 @@ export function buildSimulationVariableCopyPayload(args: {
     displayTotalsDataset: displayTotalsDataset,
     engineInput: asRecord(args.engineInput),
     userPastScenarioName: pastSim ? WORKSPACE_PAST_SCENARIO_NAME : null,
+    aiCopyWeatherScoreDisplay:
+      (copiedDashboardViewModel?.weatherScoreDisplay as Record<string, unknown> | null | undefined) ?? null,
+    isPastSimCopy: pastSim,
   });
   const performanceAudit =
     args.performanceAudit ??

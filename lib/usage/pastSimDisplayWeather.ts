@@ -1,8 +1,12 @@
 import {
   buildWeatherEfficiencyDerivedInput,
-  resolveSharedWeatherSensitivityEnvelope,
   type WeatherSensitivityEnvelope,
 } from "@/modules/weatherSensitivity/shared";
+import {
+  PAST_DISPLAY_WEATHER_META_FIELD,
+  persistPastDisplayWeatherScoringAudit,
+  resolvePastDisplayWeatherScore,
+} from "@/lib/usage/weatherScoringOwnership";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -23,24 +27,8 @@ export async function resolvePastSimDisplayWeatherSensitivityEnvelope(args: {
   applianceProfile?: unknown;
   weatherHouseId?: string | null;
 }): Promise<WeatherSensitivityEnvelope> {
-  const daily = Array.isArray(args.dataset.daily) ? args.dataset.daily : [];
-  const scoringDataset = {
-    daily: daily.map((row) => {
-      const record = asRecord(row);
-      return {
-        ...record,
-        source: "ACTUAL",
-        sourceDetail: "ACTUAL",
-      };
-    }),
-    dailyWeather: args.dataset.dailyWeather,
-  };
-  return resolveSharedWeatherSensitivityEnvelope({
-    actualDataset: scoringDataset,
-    homeProfile: args.homeProfile,
-    applianceProfile: args.applianceProfile,
-    weatherHouseId: args.weatherHouseId ?? null,
-  });
+  const { audit: _audit, ...envelope } = await resolvePastDisplayWeatherScore(args);
+  return envelope;
 }
 
 export function hasPersistedPastDisplayWeatherScore(dataset: Record<string, unknown> | null | undefined): boolean {
@@ -78,22 +66,25 @@ export async function attachPastSimDisplayWeatherToDataset(args: {
     };
   }
 
-  const envelope = await resolvePastSimDisplayWeatherSensitivityEnvelope(args);
-  if (!isPastSimulatedDisplayDataset(args.dataset)) return envelope;
+  const scored = await resolvePastDisplayWeatherScore(args);
+  if (!isPastSimulatedDisplayDataset(args.dataset)) return scored;
 
   const meta = asRecord(args.dataset.meta);
-  if (envelope.score) {
+  if (scored.score) {
     meta.pastDisplayWeatherSensitivityScore = {
-      ...envelope.score,
+      ...scored.score,
       sourceOwner: "past_artifact_build",
+      displayOwner: "past_artifact_build",
+      scoringContext: "PAST_DISPLAY",
     };
     meta.pastDisplayWeatherEfficiencyDerivedInput =
-      envelope.derivedInput ?? buildWeatherEfficiencyDerivedInput(envelope.score);
+      scored.derivedInput ?? buildWeatherEfficiencyDerivedInput(scored.score);
     meta.displayWeatherCardsSourceOwner = "past_artifact_build";
     meta.displayWeatherRecomputeCount = 1;
+    persistPastDisplayWeatherScoringAudit(args.dataset, scored.audit);
     args.dataset.meta = meta;
   }
-  return envelope;
+  return scored;
 }
 
 export function readPastSimDisplayWeatherSensitivityScore(
@@ -103,5 +94,8 @@ export function readPastSimDisplayWeatherSensitivityScore(
   const meta = asRecord(dataset.meta);
   const pastDisplay = asRecord(meta.pastDisplayWeatherSensitivityScore);
   if (Object.keys(pastDisplay).length > 0) return pastDisplay;
+  // Past display datasets must never fall back to pre-sim build diagnostic scores.
   return isPastSimulatedDisplayDataset(dataset) ? null : asRecord(meta.weatherSensitivityScore);
 }
+
+export { PAST_DISPLAY_WEATHER_META_FIELD };

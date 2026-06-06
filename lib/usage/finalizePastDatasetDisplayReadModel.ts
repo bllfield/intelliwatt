@@ -20,6 +20,8 @@ export async function finalizePastDatasetDisplayReadModel(args: {
   homeProfile?: unknown;
   applianceProfile?: unknown;
   weatherHouseId?: string | null;
+  /** When true, never recompute past display weather (warm artifact read). */
+  skipWeatherRecompute?: boolean;
 }): Promise<void> {
   const dataset = args.dataset;
   if (!dataset || typeof dataset !== "object") return;
@@ -50,6 +52,8 @@ export async function finalizePastDatasetDisplayReadModel(args: {
     dataset.meta = refreshedMeta;
     return;
   }
+
+  if (args.skipWeatherRecompute) return;
 
   const pastDisplayWeather = asRecord(refreshedMeta.pastDisplayWeatherSensitivityScore);
   if (

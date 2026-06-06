@@ -7,11 +7,13 @@ import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import { toPublicHouseLabel } from "@/modules/usageSimulator/houseLabel";
 import { weatherSensitivityFromPassthroughDataset } from "@/lib/usage/greenButtonUserSiteBaseline";
 import {
-  buildWeatherEfficiencyDerivedInput,
-  resolveSharedWeatherSensitivityEnvelope,
   type WeatherEfficiencyDerivedInput,
   type WeatherSensitivityScore,
 } from "@/modules/weatherSensitivity/shared";
+import {
+  resolveActualUsageWeatherScore,
+  stampActualUsageWeatherOnContractScore,
+} from "@/lib/usage/weatherScoringOwnership";
 
 export type UserUsageHouseSelection = {
   id: string;
@@ -106,16 +108,26 @@ export async function buildUserUsageHouseContract(args: {
   const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRecord?.appliancesJson as any) ?? null);
   const weatherHouseId = String(args.weatherHouseId ?? args.house.id ?? "").trim() || args.house.id;
   const passthroughWeather = weatherSensitivityFromPassthroughDataset(resolvedUsage?.dataset ?? null);
-  const weatherSensitivity =
-    args.weatherSensitivity ??
-    passthroughWeather ??
-    (await resolveSharedWeatherSensitivityEnvelope({
-      actualDataset: resolvedUsage?.dataset ?? null,
+  let weatherScore: WeatherSensitivityScore | null = null;
+  let weatherDerived: WeatherEfficiencyDerivedInput | null = null;
+  if (args.weatherSensitivity) {
+    weatherScore = stampActualUsageWeatherOnContractScore(args.weatherSensitivity.score);
+    weatherDerived = args.weatherSensitivity.derivedInput;
+  } else if (passthroughWeather) {
+    weatherScore = stampActualUsageWeatherOnContractScore(passthroughWeather.score);
+    weatherDerived = passthroughWeather.derivedInput;
+  } else {
+    const envelope = await resolveActualUsageWeatherScore({
+      scoringDataset: resolvedUsage?.dataset ?? null,
       manualUsagePayload: (manualUsageRecord?.payload as any) ?? null,
       homeProfile,
       applianceProfile,
       weatherHouseId,
-    }).catch(() => ({ score: null, derivedInput: null })));
+    }).catch(() => ({ score: null, derivedInput: null, audit: null as never }));
+    weatherScore = stampActualUsageWeatherOnContractScore(envelope.score);
+    weatherDerived = envelope.derivedInput;
+  }
+  const weatherSensitivity = { score: weatherScore, derivedInput: weatherDerived };
 
   return {
     houseId: args.house.id,
@@ -140,7 +152,7 @@ export async function buildUserUsageHouseContract(args: {
               "We could not load interval usage for this home right now. This can happen when SMT/Green Button data is still syncing or temporarily unavailable.",
           }
         : null,
-    weatherSensitivityScore: weatherSensitivity?.score ?? null,
-    weatherEfficiencyDerivedInput: weatherSensitivity?.derivedInput ?? null,
+    weatherSensitivityScore: weatherSensitivity.score,
+    weatherEfficiencyDerivedInput: weatherSensitivity.derivedInput,
   };
 }

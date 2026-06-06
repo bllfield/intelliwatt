@@ -224,6 +224,9 @@ export function buildUsageParityAudit(args: {
   engineInput?: Record<string, unknown> | null;
   compareMetrics?: Record<string, unknown> | null;
   userPastScenarioName?: string | null;
+  /** AI copy payload weatherScoreDisplay for Past Sim ownership checks. */
+  aiCopyWeatherScoreDisplay?: Record<string, unknown> | null;
+  isPastSimCopy?: boolean;
 }) {
   const actualSnapshot = buildUsageParitySnapshotFromHouseContract(args.userUsagePageBaselineContract);
   const simulatorUsageSnapshot = actualSnapshot;
@@ -265,10 +268,12 @@ export function buildUsageParityAudit(args: {
       ? buildUsageParitySnapshotFromRunDisplayView(args.runDisplayView)
       : null;
 
+  const actualBaselineWeatherScore = args.userUsagePageBaselineContract?.weatherSensitivityScore ?? null;
   const pastReadModelAudit = Object.keys(pastDatasetRecord).length
     ? auditUserAdminPastReadModelParity({
         dataset: args.pastDataset,
         scenarioName: userPastScenarioName,
+        actualBaselineWeatherScore,
       })
     : {
         ok: true,
@@ -277,10 +282,13 @@ export function buildUsageParityAudit(args: {
           pass: true,
           user: { weatherEfficiency: null, cooling: null, heating: null, confidence: null },
           admin: { weatherEfficiency: null, cooling: null, heating: null, confidence: null },
-          sourceOwner: "user_past_visible_api_weather",
+          sourceOwner: "meta.pastDisplayWeatherSensitivityScore",
           userVisibleSourceOwner: "not_past_workspace",
           adminVisibleSourceOwner: "missing_admin_read_model",
+          outputField: "meta.pastDisplayWeatherSensitivityScore",
+          ownerViolation: null,
         },
+        weatherScoringAudit: null,
       };
 
   const pastUserVsAdminCore = buildStructuredParityGroup({
@@ -339,6 +347,7 @@ export function buildUsageParityAudit(args: {
       violations: pastReadModelAudit.violations,
       sourceOwner: "auditUserAdminPastReadModelParity",
     },
+    weatherScoringAudit: pastReadModelAudit.weatherScoringAudit,
     canonicalOwnership,
   };
 
@@ -377,6 +386,22 @@ export function buildUsageParityAudit(args: {
   }
   if (!pastUserVsAdmin.weatherCards.pass) {
     invariants.push("past user vs admin weather cards differ");
+  }
+  if (pastReadModelAudit.weatherCards.ownerViolation) {
+    invariants.push(pastReadModelAudit.weatherCards.ownerViolation);
+  }
+  if (
+    userPastVisibleWeather?.sourceOwner &&
+    userPastVisibleWeather.sourceOwner !== "past_artifact_build" &&
+    userPastVisibleWeather.sourceOwner !== "not_past_workspace"
+  ) {
+    invariants.push(`past user weather display owner is ${userPastVisibleWeather.sourceOwner}, expected past_artifact_build`);
+  }
+  if (args.isPastSimCopy && args.aiCopyWeatherScoreDisplay) {
+    const aiOwner = String(args.aiCopyWeatherScoreDisplay.displayOwner ?? "").trim();
+    if (aiOwner !== "past_artifact_build") {
+      invariants.push("AI Past weatherScoreDisplay must use past_artifact_build, not baseline Actual weather");
+    }
   }
   if (canonicalOwnership?.canonicalPastIncludesValidationTestSimulation) {
     invariants.push("canonical past curve includes simulated validation/test day totals");

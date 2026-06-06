@@ -8,8 +8,16 @@ import {
   type SimulationVariablePolicy,
 } from "@/modules/usageSimulator/simulationVariablePolicy";
 
-const SCORE_VERSION = "weather-sensitivity-v1";
-const CALCULATION_VERSION = "weather-sensitivity-v1";
+export const WEATHER_SCORE_VERSION = "weather-sensitivity-v1";
+export const WEATHER_CALCULATION_VERSION = "weather-sensitivity-v1";
+const SCORE_VERSION = WEATHER_SCORE_VERSION;
+const CALCULATION_VERSION = WEATHER_CALCULATION_VERSION;
+
+export type WeatherScoringContext =
+  | "ACTUAL_USAGE"
+  | "PAST_DISPLAY"
+  | "FINGERPRINT"
+  | "SIMULATION_BUILD";
 
 type DailyWeatherLike = {
   tAvgF?: number | null;
@@ -60,6 +68,10 @@ export type WeatherSensitivityScore = {
   };
   explanationSummary: string;
   nextDetailPromptType: "NONE" | "ADD_APPLIANCE_DETAILS" | "ADD_ENVELOPE_DETAILS";
+  /** Set by resolveSharedWeatherSensitivityEnvelope when scoringContext/displayOwner are provided. */
+  scoringContext?: WeatherScoringContext;
+  displayOwner?: string;
+  sourceOwner?: string;
 };
 
 export type WeatherEfficiencyDerivedInput = {
@@ -104,6 +116,10 @@ type SharedScoreArgs = {
 
 type ResolveSharedScoreArgs = SharedScoreArgs & {
   weatherHouseId?: string | null;
+  /** Preferred alias for actualDataset; same scoring input. */
+  scoringDataset?: any;
+  scoringContext?: WeatherScoringContext;
+  displayOwner?: string;
 };
 
 type FactorContext = {
@@ -649,14 +665,29 @@ export async function resolveSharedWeatherSensitivityEnvelope(
 ): Promise<WeatherSensitivityEnvelope> {
   const simulationVariablePolicy =
     args.simulationVariablePolicy ?? (await getSimulationVariablePolicy()).effectiveByMode.INTERVAL;
-  const dailyWeather = await maybeLoadWeatherRecord(args);
+  const scoringDataset = args.scoringDataset ?? args.actualDataset;
+  const dailyWeather = await maybeLoadWeatherRecord({
+    ...args,
+    actualDataset: scoringDataset,
+  });
   const score = buildSharedWeatherSensitivityScore({
     ...args,
+    actualDataset: scoringDataset,
     simulationVariablePolicy,
     dailyWeather,
   });
+  const stampedScore =
+    score && (args.scoringContext || args.displayOwner)
+      ? {
+          ...score,
+          ...(args.scoringContext ? { scoringContext: args.scoringContext } : {}),
+          ...(args.displayOwner
+            ? { displayOwner: args.displayOwner, sourceOwner: args.displayOwner }
+            : {}),
+        }
+      : score;
   return {
-    score,
-    derivedInput: buildWeatherEfficiencyDerivedInput(score),
+    score: stampedScore,
+    derivedInput: buildWeatherEfficiencyDerivedInput(stampedScore),
   };
 }

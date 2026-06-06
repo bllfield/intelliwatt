@@ -1,7 +1,12 @@
 import { buildDisplayedMonthlyRows } from "@/modules/usageSimulator/monthlyCompareRows";
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
-import { readPastSimDisplayWeatherSensitivityScore } from "@/lib/usage/pastSimDisplayWeather";
 import { resolveUserPastVisibleWeatherSensitivityScore } from "@/lib/usage/userPastVisibleWeather";
+import {
+  buildWeatherScoringAudit,
+  detectPastVisibleWeatherOwnerViolation,
+  PAST_DISPLAY_WEATHER_META_FIELD,
+  scoreCardValues,
+} from "@/lib/usage/weatherScoringOwnership";
 import { WORKSPACE_PAST_SCENARIO_NAME } from "@/lib/usage/onePathPastUserSiteParityTypes";
 import { buildOnePathRunReadOnlyView } from "@/modules/onePathSim/runReadOnlyView";
 import type { UserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
@@ -208,6 +213,7 @@ function weatherCardValuesFromScore(score: unknown): {
 export function auditUserAdminPastReadModelParity(args: {
   dataset: unknown;
   scenarioName?: string | null;
+  actualBaselineWeatherScore?: unknown;
 }): {
   ok: boolean;
   violations: string[];
@@ -218,7 +224,10 @@ export function auditUserAdminPastReadModelParity(args: {
     sourceOwner: string;
     userVisibleSourceOwner: string;
     adminVisibleSourceOwner: string;
+    outputField: string;
+    ownerViolation: string | null;
   };
+  weatherScoringAudit: ReturnType<typeof buildWeatherScoringAudit> | null;
 } {
   const datasetRecord = asRecord(args.dataset);
   const userPastVisibleWeather = resolveUserPastVisibleWeatherSensitivityScore({
@@ -282,24 +291,57 @@ export function auditUserAdminPastReadModelParity(args: {
     violations.push("fifteenMinuteAverages mismatch");
   }
 
-  const userWeather = weatherCardValuesFromScore(userPastVisibleWeather.score);
-  const adminWeather = weatherCardValuesFromScore(adminView.weatherScore);
+  const userWeather = scoreCardValues(userPastVisibleWeather.score);
+  const adminWeather = scoreCardValues(adminView.weatherScore);
+  const ownerViolation = detectPastVisibleWeatherOwnerViolation({
+    meta: asRecord(datasetRecord.meta),
+    visibleScore: userPastVisibleWeather.score,
+    visibleSourceOwner: userPastVisibleWeather.sourceOwner,
+    actualBaselineScore: args.actualBaselineWeatherScore,
+  });
+  const adminOwnerViolation =
+    adminView.weatherScore &&
+    detectPastVisibleWeatherOwnerViolation({
+      meta: asRecord(datasetRecord.meta),
+      visibleScore: adminView.weatherScore,
+      visibleSourceOwner: "past_artifact_build",
+      actualBaselineScore: args.actualBaselineWeatherScore,
+    });
   const weatherPass =
     userWeather.weatherEfficiency === adminWeather.weatherEfficiency &&
     userWeather.cooling === adminWeather.cooling &&
     userWeather.heating === adminWeather.heating &&
     userWeather.confidence === adminWeather.confidence &&
-    userPastVisibleWeather.sourceOwner !== "missing_past_display_weather" &&
-    userPastVisibleWeather.sourceOwner !== "not_past_workspace";
+    userPastVisibleWeather.sourceOwner === "past_artifact_build" &&
+    ownerViolation == null &&
+    adminOwnerViolation == null;
   if (!weatherPass) {
     violations.push("weather cards mismatch");
   }
-  if (
-    userPastVisibleWeather.sourceOwner === "missing_past_display_weather" ||
-    userPastVisibleWeather.sourceOwner === "not_past_workspace"
-  ) {
+  if (ownerViolation) {
+    violations.push(ownerViolation);
+  }
+  if (adminOwnerViolation) {
+    violations.push(`admin past weather: ${adminOwnerViolation}`);
+  }
+  if (userPastVisibleWeather.sourceOwner !== "past_artifact_build") {
     violations.push(`user past weather sourceOwner=${userPastVisibleWeather.sourceOwner}`);
   }
+
+  const persistedAudit = asRecord(asRecord(datasetRecord.meta).pastDisplayWeatherScoringAudit);
+  const weatherScoringAudit =
+    Object.keys(persistedAudit).length > 0
+      ? (persistedAudit as ReturnType<typeof buildWeatherScoringAudit>)
+      : buildWeatherScoringAudit({
+          scoringContext: "PAST_DISPLAY",
+          scoringDataset: datasetRecord,
+          datasetKind: "SIMULATED",
+          outputField: PAST_DISPLAY_WEATHER_META_FIELD,
+          envelope: {
+            score: adminView.weatherScore as never,
+            derivedInput: null,
+          },
+        });
 
   return {
     ok: violations.length === 0,
@@ -308,10 +350,13 @@ export function auditUserAdminPastReadModelParity(args: {
       pass: weatherPass,
       user: userWeather,
       admin: adminWeather,
-      sourceOwner: "user_past_visible_api_weather",
+      sourceOwner: PAST_DISPLAY_WEATHER_META_FIELD,
       userVisibleSourceOwner: userPastVisibleWeather.sourceOwner,
-      adminVisibleSourceOwner: "buildOnePathRunReadOnlyView.weatherScore",
+      adminVisibleSourceOwner: "past_artifact_build",
+      outputField: PAST_DISPLAY_WEATHER_META_FIELD,
+      ownerViolation,
     },
+    weatherScoringAudit,
   };
 }
 
