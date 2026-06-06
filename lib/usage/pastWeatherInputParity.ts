@@ -450,7 +450,7 @@ export function buildPastWeatherCrossSurfaceAcceptanceProof(args: {
   return {
     ok,
     ...proof,
-    violations: [...new Set(violations)],
+    violations: Array.from(new Set(violations)),
     user,
     admin,
     profileFingerprints,

@@ -18,6 +18,7 @@ import { scoreCardValues } from "@/lib/usage/weatherScoringOwnership";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
+import type { CachedPastDataset } from "@/modules/onePathSim/usageSimulator/pastCache";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -209,9 +210,9 @@ export async function auditPastWeatherCrossSurfaceParity(args: {
   let adminRawDataset: Record<string, unknown> | null = null;
   let adminDatasetForParity = args.adminDataset;
   if (args.adminScenarioId) {
-    const adminCandidates: Array<Awaited<ReturnType<typeof getLatestCachedPastDatasetByScenario>>> = [];
+    const adminCandidates: CachedPastDataset[] = [];
     const seenHashes = new Set<string>();
-    const pushCandidate = (row: Awaited<ReturnType<typeof getLatestCachedPastDatasetByScenario>>) => {
+    const pushCandidate = (row: CachedPastDataset | null | undefined) => {
       if (!row?.datasetJson) return;
       const hash = String(row.inputHash ?? "").trim();
       if (hash && seenHashes.has(hash)) return;
@@ -252,9 +253,7 @@ export async function auditPastWeatherCrossSurfaceParity(args: {
     });
     if (latest) pushCandidate(latest);
 
-    const scoreAdminCandidate = (
-      row: Awaited<ReturnType<typeof getLatestCachedPastDatasetByScenario>> | null | undefined
-    ) => {
+    const scoreAdminCandidate = (row: CachedPastDataset | null | undefined) => {
       if (!row?.datasetJson) return -1;
       const dataset = row.datasetJson as Record<string, unknown>;
       const lockboxProfileHouseId = resolvePastWeatherHouseIdFromDataset({
