@@ -488,10 +488,9 @@ export function mapSmtAgreementStatus(
   rawStatus: string | null | undefined,
 ): LocalSmtStatus {
   if (!rawStatus) return "ERROR";
-  const s = rawStatus.toLowerCase();
+  const s = rawStatus.toLowerCase().trim();
 
   if (s.includes("pending")) return "PENDING";
-  if (s === "act" || s.includes("active")) return "ACTIVE";
   if (
     s.includes("not accepted") ||
     s.includes("declined") ||
@@ -499,7 +498,11 @@ export function mapSmtAgreementStatus(
   ) {
     return "DECLINED";
   }
+  // SMT returns strings like "Non Active - Terminated by CSP"; never treat those as ACTIVE.
   if (
+    s.includes("non active") ||
+    s.includes("not active") ||
+    s.includes("inactive") ||
     s.includes("completed") ||
     s.includes("expire in last 45 days") ||
     s.includes("terminated in last 45 days") ||
@@ -507,6 +510,7 @@ export function mapSmtAgreementStatus(
   ) {
     return "EXPIRED";
   }
+  if (s === "act" || /\bactive\b/.test(s) || s.startsWith("active")) return "ACTIVE";
 
   return "ERROR";
 }
@@ -532,6 +536,13 @@ function resolveAgreementStatus(
     return { localStatus: fromStatus, displayStatus: status ?? statusReason ?? null };
   }
   return { localStatus: fromReason, displayStatus: statusReason ?? status ?? null };
+}
+
+export function isActiveSmtAgreementSummary(agreement: SmtAgreementSummary): boolean {
+  return (
+    resolveAgreementStatus(agreement.status ?? null, agreement.statusReason ?? null).localStatus ===
+    "ACTIVE"
+  );
 }
 
 export interface SmtAgreementSummary {
@@ -1191,9 +1202,6 @@ export async function findAgreementForEsiid(
     throw new Error("findAgreementForEsiid: esiid is required");
   }
 
-  const response = await getSmtAgreementStatus(sanitized, opts);
-  let rawResponse = response;
-  let agreements = extractAgreementSummaries(response);
   const normalizedTarget = normalizeEsiid(sanitized);
   const requestedAgreementNumber =
     opts?.agreementNumber !== undefined && opts?.agreementNumber !== null
@@ -1212,12 +1220,7 @@ export async function findAgreementForEsiid(
 
     // When multiple SMT agreements exist for the same ESIID, prefer ACTIVE so we don't
     // get stuck on a newer pending duplicate while an older approved authorization exists.
-    const activeForEsiid =
-      sameEsiid.find((agreement) => {
-        const statusActive = mapSmtAgreementStatus(agreement.status ?? null) === "ACTIVE";
-        const reasonActive = mapSmtAgreementStatus(agreement.statusReason ?? null) === "ACTIVE";
-        return statusActive || reasonActive;
-      }) ?? null;
+    const activeForEsiid = sameEsiid.find((agreement) => isActiveSmtAgreementSummary(agreement)) ?? null;
 
     const requestedForEsiid =
       Number.isFinite(requestedAgreementNumber)
@@ -1225,13 +1228,8 @@ export async function findAgreementForEsiid(
         : null;
 
     // Some SMT payloads omit ESIID fields in list records; still prefer an ACTIVE agreement
-    // globally before falling back to a pending agreement number.
-    const activeAny =
-      list.find((agreement) => {
-        const statusActive = mapSmtAgreementStatus(agreement.status ?? null) === "ACTIVE";
-        const reasonActive = mapSmtAgreementStatus(agreement.statusReason ?? null) === "ACTIVE";
-        return statusActive || reasonActive;
-      }) ?? null;
+    // globally before falling back to a pinned agreement number.
+    const activeAny = list.find((agreement) => isActiveSmtAgreementSummary(agreement)) ?? null;
 
     const requestedAny =
       Number.isFinite(requestedAgreementNumber)
@@ -1249,27 +1247,43 @@ export async function findAgreementForEsiid(
     );
   };
 
+  const fetchAgreements = async (includePinnedAgreementNumber: boolean) => {
+    const response = await getSmtAgreementStatus(sanitized, {
+      ...(includePinnedAgreementNumber && Number.isFinite(requestedAgreementNumber)
+        ? { agreementNumber: requestedAgreementNumber }
+        : {}),
+      retailCustomerEmail: opts?.retailCustomerEmail ?? null,
+      statusReason: opts?.statusReason ?? null,
+    });
+    return {
+      response,
+      agreements: extractAgreementSummaries(response),
+    };
+  };
+
+  // Broad lookup first: pinning agreementNumber makes SMT return only that row, which can be a
+  // terminated duplicate while another ACTIVE agreement still exists for the same ESIID.
+  let { response: rawResponse, agreements } = await fetchAgreements(false);
   let matched = pickMatch(agreements);
 
-  // If we queried with a pinned agreement number and got a non-active result, re-query without
-  // agreementNumber so we can detect another ACTIVE agreement for this ESIID.
-  if (Number.isFinite(requestedAgreementNumber)) {
-    const matchedStatus = resolveAgreementStatus(
-      matched?.status ?? null,
-      matched?.statusReason ?? null,
-    ).localStatus;
-    if (matchedStatus !== "ACTIVE") {
-      const broadResponse = await getSmtAgreementStatus(sanitized, {
-        retailCustomerEmail: opts?.retailCustomerEmail ?? null,
-        statusReason: opts?.statusReason ?? null,
-      });
-      const broadAgreements = extractAgreementSummaries(broadResponse);
-      if (broadAgreements.length > 0) {
-        rawResponse = broadResponse;
-        agreements = broadAgreements;
-        matched = pickMatch(agreements);
-      }
-    }
+  if (!matched && Number.isFinite(requestedAgreementNumber)) {
+    const pinned = await fetchAgreements(true);
+    rawResponse = pinned.response;
+    agreements = pinned.agreements;
+    matched = pickMatch(agreements);
+  }
+
+  if (
+    matched &&
+    Number.isFinite(requestedAgreementNumber) &&
+    Number(matched.agreementNumber) !== requestedAgreementNumber &&
+    isActiveSmtAgreementSummary(matched)
+  ) {
+    console.info("[SMT] findAgreementForEsiid: using active agreement instead of stored id", {
+      esiid: sanitized,
+      storedAgreementNumber: requestedAgreementNumber,
+      activeAgreementNumber: matched.agreementNumber ?? null,
+    });
   }
 
   return {
