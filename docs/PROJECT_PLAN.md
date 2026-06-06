@@ -86,40 +86,57 @@
 
 ---
 
-## PC-2026-09 — Past visible weather parity (OPEN — 2026-05-20)
+## PC-2026-09 — Past visible weather parity (COMPLETE — 2026-06-06)
 
-**Status:** OPEN. Sim totals/TOD/WAPE aligned on GB keeper; **visible weather cards diverge**.
+**Status:** **Complete.** GB Past keeper cross-surface weather **input parity** and visible cards aligned. Score match alone is **not** sufficient — acceptance requires `pastWeatherCrossSurfaceParity.ok` and `acceptanceProof.ok`.
 
-**Keeper:** `bllfield32@icloud.com` · source `0bbd25b6-9b8b-40ba-9382-dd85a1e1eda4` · test home `29a3d820-2593-4673-9dd6-cd161bbd7f6f`.
+**Keeper:** `bllfield32@icloud.com` · source `0bbd25b6-9b8b-40ba-9382-dd85a1e1eda4` · test home `29a3d820-2593-4673-9dd6-cd161bbd7f6f` · Past scenarios `334ee842-…` (user) / `fe6e00ef-…` (test).
 
-| Surface | Weather cards | Notes |
-|---------|---------------|-------|
-| User UI (browser) | 50 / 97 / 73 | Matches bundle **B** cooling/heating |
-| Admin UI | 50 / 93 / 76 | Matches bundle **C** |
-| In-process audit script | 44 / 100 / 79 | **Invalid User proof** — accidental prod rebuild |
+### Post-deploy visible (2026-06-06)
 
-**Shipped (insufficient alone):**
+| Check | User | Admin |
+|-------|------|-------|
+| Weather cards | 50 / 97 / 73 / 100 | 50 / 97 / 73 / 100 |
+| Net usage | 14,459.8 kWh | 14,460 kWh |
+| TOD buckets | unchanged | unchanged |
+| WAPE | 10.28% | 10.28% |
 
-- `e2168768` — shared `resolvePastVisibleWeatherScore` for User + Admin API routes.
-- `03d1b2b9` — finalize weather with source-house profiles (diagnosis disputed).
+Both surfaces: visible = bundle **C** (`meta.pastDisplayWeatherSensitivityScore`). User artifact source-profile stamped; user recalc uses source house as `actualContextHouseId`.
 
-**Known gaps:**
+### Acceptance source of truth (read-only)
 
-1. **Three weather paths** — browser User, browser Admin, in-process script disagree; only browser Network is authoritative for User.
-2. **Bundle fork** — User visible 97/73 ≈ `meta.weatherSensitivityScore` (B); Admin 93/76 = `meta.pastDisplayWeatherSensitivityScore` (C). Past cards must use C (`lib/usage/weatherScoringOwnership.ts`).
-3. **False green audit** — `auditUserAdminPastReadModelParity()` re-reads admin dataset twice; does not call live User API.
-4. **Profile fingerprints differ** in DB despite `syncOnePathMissingProfilesFromSource` — investigate before assuming profile-house fix.
-5. **Proof script side effect** — `tmp-live-past-weather-proof.mjs` used `allow_rebuild` and wrote source-house artifact (`Z_WI8d9…`).
+Run:
 
-**Proof rules (locked until fixed):**
+```bash
+PROOF_AUDIT_ONLY=1 npx tsx --require ./scripts/register-server-only-stub.cjs scripts/tmp-prod-past-weather-parity-proof.mjs
+```
 
-- User Past proof = **browser DevTools Network** response consumed by visible Past tab.
-- Audit scripts: **read-only**, `artifact_only`, **fail closed** if artifact missing — no prod rebuilds.
-- Do not force User → Admin until live User network response captured.
+Output: `scripts/tmp-prod-past-weather-parity-proof-output.json`. **Pass** requires:
 
-**Owners:** `resolvePastVisibleWeatherScore.ts`, `userPastApiWeatherResponse.ts`, `finalizePastDatasetDisplayReadModel.ts`, `UsageSimulatorClient.tsx`, `OnePathRunReadOnlyView.tsx`, `intervalReadModelInvariants.ts`.
+- `pastWeatherCrossSurfaceParity.ok === true`
+- `acceptanceProof.ok === true`
+- `finalizedDailyRowsHash`, computed `displayTruthRevision`, profile fingerprints, `usageShapeProfileIdentity`, `dailyWeatherHash`, validation/travel-vacant fingerprints, scorer/calculation versions match across legs
 
-**Handoff:** `docs/PAST_WEATHER_PARITY_AGENT_BOOTSTRAP.md` · **Mode testing:** `docs/MODE_TESTING_HANDOFF_BOOTSTRAP.md`.
+**No prod HTTP leg** in audit-only mode; no cache writes.
+
+### Shipped fixes (commits)
+
+| Commit | What |
+|--------|------|
+| `32cc85d0` | Cross-surface input parity gates, `resolvePastProfileLoadContext`, raw artifact compare |
+| `5abd8197` | Read-only admin finalize (`persistDisplayWeatherToCache: false`), fingerprint parity, `PROOF_AUDIT_ONLY` |
+| `fd1de033` | Vercel type-check fixes for cross-surface audit |
+
+### Regression rules (locked)
+
+1. **User proof for visible cards** = browser Network **or** read-only acceptance script above — not score-only checks.
+2. **Audit scripts:** `PROOF_AUDIT_ONLY=1`, no `allow_rebuild`, no display-weather cache persist on read-only admin runs.
+3. **One Path test-home recalc:** source `profileHouseId`, source `actualContextHouseId` for GB Past, source WholeHome fingerprint read (no cross-house fingerprint writes).
+4. Do **not** accept visible weather parity without `acceptanceProof.ok`.
+
+**Owners:** `pastWeatherCrossSurfaceParity.server.ts`, `pastWeatherInputParity.ts`, `pastVisibleWeatherReadDiagnostics.ts`, `finalizePastDatasetDisplayReadModel.ts`, `one-path-sim/route.ts`, `modules/onePathSim/usageSimulator/service.ts` (fingerprint + persist).
+
+**Handoff (historical):** `docs/PAST_WEATHER_PARITY_AGENT_BOOTSTRAP.md` · **Regression only** — no further weather debugging unless acceptance proof fails.
 
 ---
 

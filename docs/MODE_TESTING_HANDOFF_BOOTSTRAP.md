@@ -1,8 +1,8 @@
 # Mode testing handoff — paste into new Cursor chat
 
-**Created:** 2026-05-20 · **Updated:** 2026-05-20 · **Branch:** `main` · **Active work:** verify all One Path + Usage modes; **OPEN:** GB Past weather card parity (User vs Admin).
+**Created:** 2026-05-20 · **Updated:** 2026-06-06 · **Branch:** `main` · **Active work:** verify all One Path + Usage modes; **GB Past weather parity: COMPLETE** (regression proof only).
 
-**Focused handoff (GB Past weather):** `docs/PAST_WEATHER_PARITY_AGENT_BOOTSTRAP.md` — paste that block if taking over weather parity specifically.
+**Focused handoff (GB Past weather):** `docs/PAST_WEATHER_PARITY_AGENT_BOOTSTRAP.md` — acceptance record + regression commands.
 
 ---
 
@@ -24,7 +24,7 @@ Read these in order and confirm in your first reply that you read them:
 7. docs/SURFACE_PARITY_OWNERS.md
 8. docs/SMT_UNIFICATION_COMPLETE.md + docs/PROJECT_PLAN.md → PC-2026-05
 9. docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md + docs/PROJECT_PLAN.md → PC-2026-08 (ingest once, read persisted only)
-10. docs/PROJECT_PLAN.md → PC-2026-09 (open Past weather parity)
+10. docs/PROJECT_PLAN.md → PC-2026-09 (Past weather parity — **COMPLETE**)
 11. .cursor/rules/one-path-dual-run-lock.mdc
 12. .cursor/rules/smt-unification-lock.mdc
 13. .cursor/rules/usage-interval-ingest-lock.mdc
@@ -100,20 +100,24 @@ For each mode, user pastes **One Path AI copy payload** (`canonical_run_response
 
 **GREEN_BUTTON PAST_SIM (v10) — last known good:** `2026-05-14` ACTUAL (shifted), `2026-05-17` INCOMPLETE_METER → simulated, `2026-05-18` PENDING_SMT → `SIMULATED_INTERVALS_NOT_AVAILABLE_YET`.
 
-## OPEN — GB Past weather cards (User vs Admin)
+## COMPLETE — GB Past weather (2026-06-06)
 
 **Keeper:** `bllfield32@icloud.com` · source `0bbd25b6-…` · test home `29a3d820-…`
 
 | Surface | Weather | Net | Sim parity |
 |---------|---------|-----|------------|
-| User UI (browser) | **50 / 97 / 73** | 14,460 | WAPE/TOD match Admin |
-| Admin UI | **50 / 93 / 76** | 14,460 | same |
-| In-process `tmp-live-past-weather-proof.mjs` | 44 / 100 / 79 | — | **INVALID User proof** (rebuild + no auth) |
+| User UI | **50 / 97 / 73 / 100** (bundle C) | 14,459.8 kWh | WAPE 10.28%, TOD unchanged |
+| Admin UI | **50 / 97 / 73 / 100** (bundle C) | 14,460 kWh | matches User |
 
-- User **97/73** matches bundle **B** (`meta.weatherSensitivityScore`); Admin **93/76** matches bundle **C** (`meta.pastDisplayWeatherSensitivityScore`).
-- `auditUserAdminPastReadModelParity` is a **false green** — never calls live User API.
-- **Next proof:** browser Network response on User Past tab (see `PAST_WEATHER_PARITY_AGENT_BOOTSTRAP.md`).
-- **Audit scripts:** read-only, `artifact_only`, fail closed — no prod rebuilds.
+**Regression (authoritative):**
+
+```bash
+PROOF_AUDIT_ONLY=1 npx tsx --require ./scripts/register-server-only-stub.cjs scripts/tmp-prod-past-weather-parity-proof.mjs
+```
+
+Pass = `pastWeatherCrossSurfaceParity.ok` + `acceptanceProof.ok` in `scripts/tmp-prod-past-weather-parity-proof-output.json`. Visible score match alone is **not** sufficient.
+
+**Deprecated:** `scripts/tmp-live-past-weather-proof.mjs` (rebuild risk).
 
 ## Key code owners (touches for open bugs)
 
@@ -123,13 +127,14 @@ For each mode, user pastes **One Path AI copy payload** (`canonical_run_response
 | Usage 5/18 simulated wrongly | Same + pending-day labeling; compare to `smtDayLedger` / `resolveSmtWindowStatus` |
 | One Path baseline empty 15-min curve | `modules/onePathSim/runReadOnlyView.ts`, `simulationVariablePresentation.ts`, ensure `buildUserUsageDashboardViewModel` gets full dataset with `insights.fifteenMinuteAverages` |
 | Baseline passthrough labels | User expects passthrough **behavior** (read DB, no sim); `ACTUAL` display on rows may be correct — clarify vs literal "PASSTHROUGH" label |
-| GB Past weather 97/73 vs 93/76 | `lib/usage/resolvePastVisibleWeatherScore.ts`, `userPastApiWeatherResponse.ts`, `UsageSimulatorClient.tsx`, `finalizePastDatasetDisplayReadModel.ts`, `intervalReadModelInvariants.ts` |
+| GB Past weather regression | `pastWeatherCrossSurfaceParity.server.ts`, `pastWeatherInputParity.ts`, `tmp-prod-past-weather-parity-proof.mjs` |
 
 ## Scripts (repo)
 
 - `scripts/tmp-audit-transcript-lines.mjs` — audit pasted payload lines from transcript
 - `scripts/tmp-audit-baseline-full.mjs` — deep baseline payload audit
-- `scripts/tmp-live-past-weather-proof.mjs` — **deprecated for User proof** (rebuild risk); output in `tmp-live-past-weather-proof-output.json`
+- `scripts/tmp-prod-past-weather-parity-proof.mjs` — **authoritative** read-only acceptance (`PROOF_AUDIT_ONLY=1`)
+- `scripts/tmp-live-past-weather-proof.mjs` — **deprecated** (rebuild risk)
 - `npx tsx scripts/audit-smt-day-coverage.ts <esiid> <dateKey>` — DB slot count for a day
 
 ## Rules

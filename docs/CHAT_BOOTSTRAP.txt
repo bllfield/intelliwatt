@@ -5,10 +5,10 @@ ACTIVE WORK (2026-05-20) — MODE TESTING HANDOFF
 ========================================
 
 - **Start here for a new chat:** `docs/MODE_TESTING_HANDOFF_BOOTSTRAP.md` — paste the block into Cursor; all-mode checklist + open bugs.
-- **GB Past weather parity (OPEN):** `docs/PAST_WEATHER_PARITY_AGENT_BOOTSTRAP.md` — paste if taking over User 50/97/73 vs Admin 50/93/76. **User proof = browser Network only**; in-process audit scripts are not valid User proof and must not rebuild prod artifacts.
+- **GB Past weather parity (COMPLETE — 2026-06-06):** `docs/PAST_WEATHER_PARITY_AGENT_BOOTSTRAP.md` · `docs/PROJECT_PLAN.md` → PC-2026-09. Regression: `PROOF_AUDIT_ONLY=1` + `scripts/tmp-prod-past-weather-parity-proof.mjs` — require `pastWeatherCrossSurfaceParity.ok` and `acceptanceProof.ok`; visible 50/97/73/100 on both surfaces is necessary but not sufficient alone.
 - **One Path Past lab goal (authoritative):** `docs/ONE_PATH_DUAL_RUN_GOAL.md` — two independent runs through one shared pipeline (user home + test home); identical inputs → identical engine output; **not** copy user Past artifacts to the test home. Agent lock: `.cursor/rules/one-path-dual-run-lock.mdc`. Copy-first code in `onePathPastUserSiteParity.ts` is **drift** to remove.
 - **Goal:** test all modes (Usage read path, One Path INTERVAL/GREEN_BUTTON/MANUAL baseline + Past Sim) for correct labels, SMT lifecycle, Usage ↔ baseline analytics passthrough, and Past visible weather card parity.
-- **Open bugs:** (1) GB Past weather — User UI 50/97/73 vs Admin 50/93/76 while sim totals match; bundle B vs C fork; `auditUserAdminPastReadModelParity` false green. (2) INTERVAL baseline — User Usage tail kWh fixed 2026-05-20; One Path baseline UI may still miss 15-min curve; confirm houseId (`8a6fe8b9` source vs `29a3d820` lab context).
+- **Open bugs:** (1) ~~GB Past weather~~ **CLOSED 2026-06-06** — acceptance proof green; regression via `PROOF_AUDIT_ONLY=1` proof script. (2) INTERVAL baseline — User Usage tail kWh fixed 2026-05-20; One Path baseline UI may still miss 15-min curve; confirm houseId (`8a6fe8b9` source vs `29a3d820` lab context).
 - **SMT heal (shipped):** incomplete days healed only within persisted SMT span (`resolveSmtPersistedCoverageSpan`); full-window admin re-ingest on One Path admin.
 - **Past weather bundles:** bundle B = `meta.weatherSensitivityScore` (diagnostic); bundle C = `meta.pastDisplayWeatherSensitivityScore` (Past display owner). Visible Past cards must use C only. Ownership matrix: `lib/usage/weatherScoringOwnership.ts`.
 

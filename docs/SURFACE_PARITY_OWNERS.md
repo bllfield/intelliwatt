@@ -116,7 +116,7 @@ Two parallel module trees exist for historical reasons. **Any Past Sim parity fi
 - `docs/SMT_UNIFICATION_COMPLETE.md` — SMT owners (shipped)
 - `docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md` — GB + SMT ingest/read SoT (shipped PC-2026-08)
 - `docs/SMT_UNIFICATION_AGENT_BOOTSTRAP.md` — maintenance bootstrap
-- `docs/PAST_WEATHER_PARITY_AGENT_BOOTSTRAP.md` — GB Past weather parity handoff (OPEN)
-- `docs/PROJECT_PLAN.md` → PC-2026-09 — Past visible weather parity tracker
+- `docs/PAST_WEATHER_PARITY_AGENT_BOOTSTRAP.md` — GB Past weather parity (**COMPLETE** — regression proof only)
+- `docs/PROJECT_PLAN.md` → PC-2026-09 — Past visible weather parity (**COMPLETE**)
 - `.cursor/rules/smt-unification-lock.mdc` — permanent constraints
 - `.cursor/rules/usage-interval-ingest-lock.mdc` — GB/SMT ingest/read constraints
