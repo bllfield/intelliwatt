@@ -72,8 +72,12 @@ function weatherFieldsFromScore(score: unknown): {
   };
 }
 
+type UsageParityDashboardInput = Pick<UserUsageHouseContract, "dataset"> & {
+  weatherSensitivityScore?: UserUsageHouseContract["weatherSensitivityScore"];
+};
+
 export function buildUsageParitySnapshotFromHouseContract(
-  contract: UserUsageHouseContract | null | undefined
+  contract: UsageParityDashboardInput | UserUsageHouseContract | null | undefined
 ): UsageParitySnapshot | null {
   const viewModel = buildUserUsageDashboardViewModel(contract ?? null);
   if (!viewModel) return null;
@@ -240,9 +244,11 @@ export function buildUsageParityAudit(args: {
   const pastDatasetRecord = asRecord(args.pastDataset);
   const pastUserSnapshot = Object.keys(pastDatasetRecord).length
     ? buildUsageParitySnapshotFromHouseContract({
-        dataset: args.pastDataset,
-        weatherSensitivityScore: readPastSimDisplayWeatherSensitivityScore(pastDatasetRecord) as never,
-      } as UserUsageHouseContract)
+        dataset: args.pastDataset as UserUsageHouseContract["dataset"],
+        weatherSensitivityScore: readPastSimDisplayWeatherSensitivityScore(
+          pastDatasetRecord
+        ) as UserUsageHouseContract["weatherSensitivityScore"],
+      })
     : null;
   const pastAdminSnapshot = args.pastRunDisplayView
     ? buildUsageParitySnapshotFromRunDisplayView(args.pastRunDisplayView)
@@ -270,14 +276,15 @@ export function buildUsageParityAudit(args: {
     sourceOwner: "meta.pastDisplayWeatherSensitivityScore + insights.timeOfDayBuckets",
   });
 
+  const compareMetricsForOwnership =
+    args.compareMetrics ??
+    asRecord(asRecord(args.pastRunDisplayView).compare).metrics ??
+    asRecord(asRecord(args.runDisplayView).compare).metrics;
   const canonicalOwnership =
     Object.keys(pastDatasetRecord).length > 0
       ? computePastSimCanonicalOwnershipAudit({
           dataset: args.pastDataset,
-          compareMetrics:
-            args.compareMetrics ??
-            asRecord(asRecord(args.pastRunDisplayView).compare).metrics ??
-            asRecord(asRecord(args.runDisplayView).compare).metrics,
+          compareMetrics: asRecord(compareMetricsForOwnership),
         })
       : null;
 
