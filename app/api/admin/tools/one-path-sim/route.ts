@@ -38,6 +38,7 @@ import { listOnePathScenarioEvents, readOnePathSimulatedUsageScenario } from "@/
 import { dispatchPastSimRecalc } from "@/modules/usageSimulator/pastSimRecalcDispatch";
 import { resolvePastValidationPolicy } from "@/lib/usage/pastValidationPolicy";
 import { resolveOnePathGbPastCachedArtifactInputHash } from "@/lib/usage/onePathGbPastArtifactRun";
+import { findPastScenarioId } from "@/lib/usage/onePathPastUserSiteParity";
 import {
   assertOnePathGreenButtonPersistedUsage,
   greenButtonUploadHasPersistedUsage,
@@ -716,11 +717,10 @@ async function preparePastArtifactDatasetForDisplay(args: {
 }): Promise<PastDisplayWeatherFinalizeOutcome | null> {
   if (!args.dataset) return null;
   const meta = asRecord(args.dataset.meta) ?? {};
-  const lockbox = asRecord(meta.lockboxRunContext) ?? {};
-  const weatherHouseId =
-    String(meta.actualContextHouseId ?? lockbox.actualContextHouseId ?? args.houseId).trim() || args.houseId;
-  // Score Past display weather with source-house profiles (same as user Past route), not the pinned test home.
-  const profileHouseId = weatherHouseId;
+  const weatherHouseId = resolvePastWeatherHouseIdFromDataset({
+    dataset: args.dataset,
+    fallbackHouseId: args.houseId,
+  });
   const [homeProfile, applianceProfileRec] = await Promise.all([
     getHomeProfileSimulatedByUserHouse({ userId: args.userId, houseId: profileHouseId }),
     getApplianceProfileSimulatedByUserHouse({ userId: args.userId, houseId: profileHouseId }),
@@ -794,6 +794,9 @@ async function buildPastSimRunReadbackResponse(args: {
   actualContextHouseId?: string | null;
   preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
   smtSourceEsiid?: string | null;
+  linkedSourceUserId?: string | null;
+  linkedSourceHouseId?: string | null;
+  linkedSourceScenarioId?: string | null;
 }) {
   const startedAt = Date.now();
   const readScenarioDataset = (
@@ -986,6 +989,23 @@ async function buildPastSimRunReadbackResponse(args: {
         }
       : null;
   const pastWeatherApiFields = buildAdminPastWeatherApiFields(pastWeather);
+  const pastWeatherCrossSurfaceParity =
+    args.linkedSourceUserId &&
+    args.linkedSourceHouseId &&
+    args.linkedSourceScenarioId &&
+    artifactDataset
+      ? await (
+          await import("@/lib/usage/pastWeatherInputParity")
+        ).auditPastWeatherCrossSurfaceParity({
+          sourceUserId: args.linkedSourceUserId,
+          sourceHouseId: args.linkedSourceHouseId,
+          sourceScenarioId: args.linkedSourceScenarioId,
+          sourceArtifactInputHash: null,
+          adminDataset: artifactDataset,
+          adminUserId: args.userId,
+          adminHouseId: args.houseId,
+        })
+      : null;
   return {
     ok: true as const,
     debugDiagnosticsIncluded: false,
@@ -996,6 +1016,7 @@ async function buildPastSimRunReadbackResponse(args: {
     manualStageOneView: null,
     runDisplayView: compactRunDisplayView,
     ...pastWeatherApiFields,
+    pastWeatherCrossSurfaceParity,
     artifact: null,
     readModel: {
       ...buildCompactSimulationReadModel({
@@ -2222,6 +2243,13 @@ export async function POST(request: NextRequest) {
             exactArtifactInputHash = recalcDispatched.result.canonicalArtifactInputHash ?? null;
           }
         }
+        const linkedSourceScenarioId =
+          onePathTestHomeState.linkedSourceUserId && onePathTestHomeState.linkedSourceHouseId
+            ? await findPastScenarioId({
+                userId: onePathTestHomeState.linkedSourceUserId,
+                houseId: onePathTestHomeState.linkedSourceHouseId,
+              })
+            : null;
         const readback = await buildPastSimRunReadbackResponse({
           userId: effectiveUserId,
           houseId: effectiveHouseId,
@@ -2232,6 +2260,9 @@ export async function POST(request: NextRequest) {
           smtSourceEsiid,
           exactArtifactInputHash,
           readMode: exactArtifactInputHash ? "artifact_only" : undefined,
+          linkedSourceUserId: onePathTestHomeState.linkedSourceUserId,
+          linkedSourceHouseId: onePathTestHomeState.linkedSourceHouseId,
+          linkedSourceScenarioId,
         });
         if (!readback.ok) {
           const status =

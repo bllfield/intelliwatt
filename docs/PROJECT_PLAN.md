@@ -86,6 +86,43 @@
 
 ---
 
+## PC-2026-09 — Past visible weather parity (OPEN — 2026-05-20)
+
+**Status:** OPEN. Sim totals/TOD/WAPE aligned on GB keeper; **visible weather cards diverge**.
+
+**Keeper:** `bllfield32@icloud.com` · source `0bbd25b6-9b8b-40ba-9382-dd85a1e1eda4` · test home `29a3d820-2593-4673-9dd6-cd161bbd7f6f`.
+
+| Surface | Weather cards | Notes |
+|---------|---------------|-------|
+| User UI (browser) | 50 / 97 / 73 | Matches bundle **B** cooling/heating |
+| Admin UI | 50 / 93 / 76 | Matches bundle **C** |
+| In-process audit script | 44 / 100 / 79 | **Invalid User proof** — accidental prod rebuild |
+
+**Shipped (insufficient alone):**
+
+- `e2168768` — shared `resolvePastVisibleWeatherScore` for User + Admin API routes.
+- `03d1b2b9` — finalize weather with source-house profiles (diagnosis disputed).
+
+**Known gaps:**
+
+1. **Three weather paths** — browser User, browser Admin, in-process script disagree; only browser Network is authoritative for User.
+2. **Bundle fork** — User visible 97/73 ≈ `meta.weatherSensitivityScore` (B); Admin 93/76 = `meta.pastDisplayWeatherSensitivityScore` (C). Past cards must use C (`lib/usage/weatherScoringOwnership.ts`).
+3. **False green audit** — `auditUserAdminPastReadModelParity()` re-reads admin dataset twice; does not call live User API.
+4. **Profile fingerprints differ** in DB despite `syncOnePathMissingProfilesFromSource` — investigate before assuming profile-house fix.
+5. **Proof script side effect** — `tmp-live-past-weather-proof.mjs` used `allow_rebuild` and wrote source-house artifact (`Z_WI8d9…`).
+
+**Proof rules (locked until fixed):**
+
+- User Past proof = **browser DevTools Network** response consumed by visible Past tab.
+- Audit scripts: **read-only**, `artifact_only`, **fail closed** if artifact missing — no prod rebuilds.
+- Do not force User → Admin until live User network response captured.
+
+**Owners:** `resolvePastVisibleWeatherScore.ts`, `userPastApiWeatherResponse.ts`, `finalizePastDatasetDisplayReadModel.ts`, `UsageSimulatorClient.tsx`, `OnePathRunReadOnlyView.tsx`, `intervalReadModelInvariants.ts`.
+
+**Handoff:** `docs/PAST_WEATHER_PARITY_AGENT_BOOTSTRAP.md` · **Mode testing:** `docs/MODE_TESTING_HANDOFF_BOOTSTRAP.md`.
+
+---
+
 ## PC-2026-05 — SMT interval coverage unification (8 phases, COMPLETE)
 
 **Status:** **Complete** (2026-05-20). **Record:** `docs/SMT_UNIFICATION_COMPLETE.md`. **Ongoing enforcement:** `.cursor/rules/smt-unification-lock.mdc` (always apply) + this section.

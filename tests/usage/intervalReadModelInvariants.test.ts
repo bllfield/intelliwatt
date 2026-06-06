@@ -86,6 +86,7 @@ describe("interval read model invariants", () => {
   it("matches user and admin Past read models for summary, buckets, and load curve", () => {
     const parity = auditUserAdminPastReadModelParity({
       dataset: buildPastSimDatasetWithTravelFill(),
+      allowSameDatasetStructuralAudit: true,
     });
     expect(parity.ok).toBe(true);
     expect(parity.violations).toEqual([]);

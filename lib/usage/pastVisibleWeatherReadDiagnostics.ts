@@ -179,6 +179,13 @@ export function resolvePastWeatherHouseIdFromDataset(args: {
 }): string {
   const meta = asRecord(args.dataset.meta);
   const lockbox = asRecord(meta.lockboxRunContext);
+  const lockboxInput = asRecord(meta.lockboxInput);
+  const profileContext = asRecord(lockboxInput.profileContext);
+  const sourceContext = asRecord(lockboxInput.sourceContext);
+  // Past weather scoring profiles follow the sim build profile house, not GB actual-context house.
+  const profileHouseId =
+    String(profileContext.profileHouseId ?? sourceContext.sourceHouseId ?? "").trim() || null;
+  if (profileHouseId) return profileHouseId;
   return (
     String(meta.actualContextHouseId ?? lockbox.actualContextHouseId ?? args.fallbackHouseId).trim() ||
     args.fallbackHouseId

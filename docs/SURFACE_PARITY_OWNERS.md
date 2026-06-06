@@ -86,6 +86,29 @@ Two parallel module trees exist for historical reasons. **Any Past Sim parity fi
 
 ---
 
+## Past Sim visible weather (bundle ownership)
+
+**Matrix owner:** `lib/usage/weatherScoringOwnership.ts` · **Shared resolver:** `lib/usage/resolvePastVisibleWeatherScore.ts`
+
+| Bundle | Meta field | Owner | Used for Past visible cards? |
+|--------|------------|-------|------------------------------|
+| **A** | actual baseline contract | `actual_usage_weather_score` | No |
+| **B** | `meta.weatherSensitivityScore` | `simulation_build_diagnostic` | **No** — diagnostic only |
+| **C** | `meta.pastDisplayWeatherSensitivityScore` | `past_artifact_build` | **Yes** — post-finalize display truth |
+
+**Finalize owner:** `lib/usage/finalizePastDatasetDisplayReadModel.ts` → `attachPastSimDisplayWeatherToDataset` recomputes C from finalized display daily rows.
+
+| Surface | API route | Client guard |
+|---------|-----------|--------------|
+| User Past | `app/api/user/usage/simulated/house/route.ts` | `UsageSimulatorClient.tsx` → `resolvePastWeatherScoreFromHouseApiBody` |
+| Admin Past | `app/api/admin/tools/one-path-sim/route.ts` | `OnePathRunReadOnlyView.tsx` |
+
+**OPEN (PC-2026-09):** GB keeper User UI shows **50/97/73** (B cooling/heating); Admin shows **50/93/76** (C). Sim totals match. **User proof = browser Network only** — see `docs/PAST_WEATHER_PARITY_AGENT_BOOTSTRAP.md`.
+
+**False green:** `auditUserAdminPastReadModelParity` in `intervalReadModelInvariants.ts` does not call live User API.
+
+---
+
 ## Related docs
 
 - `docs/ONE_PATH_DUAL_RUN_GOAL.md` — **canonical** One Path vs user Past lab model
@@ -93,5 +116,7 @@ Two parallel module trees exist for historical reasons. **Any Past Sim parity fi
 - `docs/SMT_UNIFICATION_COMPLETE.md` — SMT owners (shipped)
 - `docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md` — GB + SMT ingest/read SoT (shipped PC-2026-08)
 - `docs/SMT_UNIFICATION_AGENT_BOOTSTRAP.md` — maintenance bootstrap
+- `docs/PAST_WEATHER_PARITY_AGENT_BOOTSTRAP.md` — GB Past weather parity handoff (OPEN)
+- `docs/PROJECT_PLAN.md` → PC-2026-09 — Past visible weather parity tracker
 - `.cursor/rules/smt-unification-lock.mdc` — permanent constraints
 - `.cursor/rules/usage-interval-ingest-lock.mdc` — GB/SMT ingest/read constraints

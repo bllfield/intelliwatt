@@ -1,5 +1,6 @@
 import { buildDisplayedMonthlyRows } from "@/modules/usageSimulator/monthlyCompareRows";
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
+import { auditPastWeatherInputParity } from "@/lib/usage/pastWeatherInputParity";
 import { resolveUserPastVisibleWeatherSensitivityScore } from "@/lib/usage/userPastVisibleWeather";
 import {
   buildWeatherScoringAudit,
@@ -211,12 +212,20 @@ function weatherCardValuesFromScore(score: unknown): {
 }
 
 export function auditUserAdminPastReadModelParity(args: {
-  dataset: unknown;
+  /** @deprecated Same-dataset audit is a false green for cross-surface parity. Pass userDataset + adminDataset. */
+  dataset?: unknown;
+  userDataset?: unknown;
+  adminDataset?: unknown;
   scenarioName?: string | null;
   actualBaselineWeatherScore?: unknown;
+  userProfileFingerprints?: { homeProfile?: string | null; applianceProfile?: string | null };
+  adminProfileFingerprints?: { homeProfile?: string | null; applianceProfile?: string | null };
+  /** When true, same in-memory dataset audit is allowed (read-model structural checks only). */
+  allowSameDatasetStructuralAudit?: boolean;
 }): {
   ok: boolean;
   violations: string[];
+  inputParity: ReturnType<typeof auditPastWeatherInputParity> | null;
   weatherCards: {
     pass: boolean;
     user: ReturnType<typeof weatherCardValuesFromScore>;
@@ -229,23 +238,52 @@ export function auditUserAdminPastReadModelParity(args: {
   };
   weatherScoringAudit: ReturnType<typeof buildWeatherScoringAudit> | null;
 } {
-  const datasetRecord = asRecord(args.dataset);
+  const userDatasetRecord = asRecord(args.userDataset ?? args.dataset);
+  const adminDatasetRecord = asRecord(args.adminDataset ?? args.dataset);
+  const sameDatasetAudit =
+    args.userDataset == null &&
+    args.adminDataset == null &&
+    args.allowSameDatasetStructuralAudit !== true;
   const userPastVisibleWeather = resolveUserPastVisibleWeatherSensitivityScore({
-    dataset: datasetRecord,
+    dataset: userDatasetRecord,
+    scenarioName: args.scenarioName ?? WORKSPACE_PAST_SCENARIO_NAME,
+  });
+  const adminPastVisibleWeather = resolveUserPastVisibleWeatherSensitivityScore({
+    dataset: adminDatasetRecord,
     scenarioName: args.scenarioName ?? WORKSPACE_PAST_SCENARIO_NAME,
   });
   const viewModel = buildUserUsageDashboardViewModel({
-    dataset: args.dataset,
+    dataset: userDatasetRecord,
     weatherSensitivityScore: userPastVisibleWeather.score as never,
   });
   const adminView = buildOnePathRunReadOnlyView({
-    dataset: Object.keys(datasetRecord).length > 0 ? datasetRecord : null,
+    dataset: Object.keys(adminDatasetRecord).length > 0 ? adminDatasetRecord : null,
   });
   const violations: string[] = [];
+  if (sameDatasetAudit) {
+    violations.push(
+      "auditUserAdminPastReadModelParity used same in-memory dataset for user and admin — not cross-surface proof"
+    );
+  }
+  const inputParity =
+    args.userDataset != null &&
+    args.adminDataset != null &&
+    args.userDataset !== args.adminDataset
+      ? auditPastWeatherInputParity({
+          userDataset: userDatasetRecord,
+          adminDataset: adminDatasetRecord,
+          userProfileFingerprints: args.userProfileFingerprints,
+          adminProfileFingerprints: args.adminProfileFingerprints,
+        })
+      : null;
+  if (inputParity && !inputParity.ok) {
+    violations.push(...inputParity.violations);
+  }
   if (!viewModel || !adminView) {
     return {
       ok: false,
-      violations: ["missing user or admin read model"],
+      violations: [...violations, "missing user or admin read model"],
+      inputParity,
       weatherCards: {
         pass: false,
         user: weatherCardValuesFromScore(null),
@@ -295,29 +333,32 @@ export function auditUserAdminPastReadModelParity(args: {
   }
 
   const userWeather = scoreCardValues(userPastVisibleWeather.score);
-  const adminWeather = scoreCardValues(adminView.weatherScore);
+  const adminWeather = scoreCardValues(adminPastVisibleWeather.score ?? adminView.weatherScore);
   const ownerViolation = detectPastVisibleWeatherOwnerViolation({
-    meta: asRecord(datasetRecord.meta),
+    meta: asRecord(userDatasetRecord.meta),
     visibleScore: userPastVisibleWeather.score,
     visibleSourceOwner: userPastVisibleWeather.sourceOwner,
     actualBaselineScore: args.actualBaselineWeatherScore,
   });
   const adminOwnerViolation =
-    adminView.weatherScore &&
+    (adminPastVisibleWeather.score ?? adminView.weatherScore) &&
     detectPastVisibleWeatherOwnerViolation({
-      meta: asRecord(datasetRecord.meta),
-      visibleScore: adminView.weatherScore,
-      visibleSourceOwner: "past_artifact_build",
+      meta: asRecord(adminDatasetRecord.meta),
+      visibleScore: adminPastVisibleWeather.score ?? adminView.weatherScore,
+      visibleSourceOwner: adminPastVisibleWeather.sourceOwner,
       actualBaselineScore: args.actualBaselineWeatherScore,
     });
   const weatherPass =
-    userWeather.weatherEfficiency === adminWeather.weatherEfficiency &&
-    userWeather.cooling === adminWeather.cooling &&
-    userWeather.heating === adminWeather.heating &&
-    userWeather.confidence === adminWeather.confidence &&
-    userPastVisibleWeather.sourceOwner === "past_artifact_build" &&
-    ownerViolation == null &&
-    adminOwnerViolation == null;
+    args.allowSameDatasetStructuralAudit === true
+      ? true
+      : userWeather.weatherEfficiency === adminWeather.weatherEfficiency &&
+        userWeather.cooling === adminWeather.cooling &&
+        userWeather.heating === adminWeather.heating &&
+        userWeather.confidence === adminWeather.confidence &&
+        userPastVisibleWeather.sourceOwner === "past_artifact_build" &&
+        adminPastVisibleWeather.sourceOwner === "past_artifact_build" &&
+        ownerViolation == null &&
+        adminOwnerViolation == null;
   if (!weatherPass) {
     violations.push("weather cards mismatch");
   }
@@ -327,21 +368,26 @@ export function auditUserAdminPastReadModelParity(args: {
   if (adminOwnerViolation) {
     violations.push(`admin past weather: ${adminOwnerViolation}`);
   }
-  if (userPastVisibleWeather.sourceOwner !== "past_artifact_build") {
-    violations.push(`user past weather sourceOwner=${userPastVisibleWeather.sourceOwner}`);
+  if (args.allowSameDatasetStructuralAudit !== true) {
+    if (userPastVisibleWeather.sourceOwner !== "past_artifact_build") {
+      violations.push(`user past weather sourceOwner=${userPastVisibleWeather.sourceOwner}`);
+    }
+    if (adminPastVisibleWeather.sourceOwner !== "past_artifact_build") {
+      violations.push(`admin past weather sourceOwner=${adminPastVisibleWeather.sourceOwner}`);
+    }
   }
 
-  const persistedAudit = asRecord(asRecord(datasetRecord.meta).pastDisplayWeatherScoringAudit);
+  const persistedAudit = asRecord(asRecord(adminDatasetRecord.meta).pastDisplayWeatherScoringAudit);
   const weatherScoringAudit =
     Object.keys(persistedAudit).length > 0
       ? (persistedAudit as ReturnType<typeof buildWeatherScoringAudit>)
       : buildWeatherScoringAudit({
           scoringContext: "PAST_DISPLAY",
-          scoringDataset: datasetRecord,
+          scoringDataset: adminDatasetRecord,
           datasetKind: "SIMULATED",
           outputField: PAST_DISPLAY_WEATHER_META_FIELD,
           envelope: {
-            score: adminView.weatherScore as never,
+            score: (adminPastVisibleWeather.score ?? adminView.weatherScore) as never,
             derivedInput: null,
           },
         });
@@ -349,13 +395,14 @@ export function auditUserAdminPastReadModelParity(args: {
   return {
     ok: violations.length === 0,
     violations,
+    inputParity,
     weatherCards: {
       pass: weatherPass,
       user: userWeather,
       admin: adminWeather,
       sourceOwner: PAST_DISPLAY_WEATHER_META_FIELD,
       userVisibleSourceOwner: userPastVisibleWeather.sourceOwner,
-      adminVisibleSourceOwner: "past_artifact_build",
+      adminVisibleSourceOwner: adminPastVisibleWeather.sourceOwner,
       outputField: PAST_DISPLAY_WEATHER_META_FIELD,
       ownerViolation,
     },

@@ -69,17 +69,9 @@ async function main() {
     projectionMode: "baseline",
     readContext: { artifactReadMode: "artifact_only", projectionMode: "baseline", userSiteIsolation: true },
   });
-  if (!readback.ok && readback.code === "ARTIFACT_MISSING") {
-    readback = await readOnePathSimulatedUsageScenario({
-      userId: user.id,
-      houseId,
-      scenarioId: scenario.id,
-      readMode: "allow_rebuild",
-      projectionMode: "baseline",
-      readContext: { artifactReadMode: "allow_rebuild", projectionMode: "baseline", userSiteIsolation: true },
-    });
+  if (!readback.ok) {
+    throw new Error(`artifact read failed (read-only): ${readback.code} ${readback.message}`);
   }
-  if (!readback.ok) throw new Error(`artifact read failed: ${readback.code} ${readback.message}`);
 
   const cloneDataset = () => structuredClone(readback.dataset) as Record<string, unknown>;
   const [homeProfile, applianceProfileRec] = await Promise.all([

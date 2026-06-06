@@ -1,6 +1,8 @@
 # Mode testing handoff — paste into new Cursor chat
 
-**Created:** 2026-05-20 · **Branch:** `main` · **Active work:** verify all One Path + Usage modes behave correctly end-to-end.
+**Created:** 2026-05-20 · **Updated:** 2026-05-20 · **Branch:** `main` · **Active work:** verify all One Path + Usage modes; **OPEN:** GB Past weather card parity (User vs Admin).
+
+**Focused handoff (GB Past weather):** `docs/PAST_WEATHER_PARITY_AGENT_BOOTSTRAP.md` — paste that block if taking over weather parity specifically.
 
 ---
 
@@ -14,16 +16,19 @@ You are taking over IntelliWatt mode-testing and Usage ↔ One Path parity work.
 Read these in order and confirm in your first reply that you read them:
 
 1. docs/MODE_TESTING_HANDOFF_BOOTSTRAP.md (this file — current state + open bugs)
-2. docs/ONE_PATH_DUAL_RUN_GOAL.md (One Path vs user Past — two runs, one pipeline; NOT artifact copy)
-3. docs/CHAT_BOOTSTRAP.txt (house rules + architecture; do not recreate, follow)
-4. docs/ONE_PATH_SIM_ARCHITECTURE.md
-5. docs/USAGE_LAYER_MAP.md
-6. docs/SMT_UNIFICATION_COMPLETE.md + docs/PROJECT_PLAN.md → PC-2026-05
-7. docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md + docs/PROJECT_PLAN.md → PC-2026-08 (ingest once, read persisted only)
-8. .cursor/rules/one-path-dual-run-lock.mdc
-9. .cursor/rules/smt-unification-lock.mdc
-10. .cursor/rules/usage-interval-ingest-lock.mdc
-11. .cursor/rules/shared-sim-window-lock.mdc
+2. docs/PAST_WEATHER_PARITY_AGENT_BOOTSTRAP.md (GB Past weather — three paths, browser Network proof rules)
+3. docs/ONE_PATH_DUAL_RUN_GOAL.md (One Path vs user Past — two runs, one pipeline; NOT artifact copy)
+4. docs/CHAT_BOOTSTRAP.txt (house rules + architecture; do not recreate, follow)
+5. docs/ONE_PATH_SIM_ARCHITECTURE.md
+6. docs/USAGE_LAYER_MAP.md
+7. docs/SURFACE_PARITY_OWNERS.md
+8. docs/SMT_UNIFICATION_COMPLETE.md + docs/PROJECT_PLAN.md → PC-2026-05
+9. docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md + docs/PROJECT_PLAN.md → PC-2026-08 (ingest once, read persisted only)
+10. docs/PROJECT_PLAN.md → PC-2026-09 (open Past weather parity)
+11. .cursor/rules/one-path-dual-run-lock.mdc
+12. .cursor/rules/smt-unification-lock.mdc
+13. .cursor/rules/usage-interval-ingest-lock.mdc
+14. .cursor/rules/shared-sim-window-lock.mdc
 
 Then skim modules/usageSimulator/kinds.ts for IntervalSeriesKind and the One Path admin route:
 app/api/admin/tools/one-path-sim/route.ts
@@ -95,6 +100,21 @@ For each mode, user pastes **One Path AI copy payload** (`canonical_run_response
 
 **GREEN_BUTTON PAST_SIM (v10) — last known good:** `2026-05-14` ACTUAL (shifted), `2026-05-17` INCOMPLETE_METER → simulated, `2026-05-18` PENDING_SMT → `SIMULATED_INTERVALS_NOT_AVAILABLE_YET`.
 
+## OPEN — GB Past weather cards (User vs Admin)
+
+**Keeper:** `bllfield32@icloud.com` · source `0bbd25b6-…` · test home `29a3d820-…`
+
+| Surface | Weather | Net | Sim parity |
+|---------|---------|-----|------------|
+| User UI (browser) | **50 / 97 / 73** | 14,460 | WAPE/TOD match Admin |
+| Admin UI | **50 / 93 / 76** | 14,460 | same |
+| In-process `tmp-live-past-weather-proof.mjs` | 44 / 100 / 79 | — | **INVALID User proof** (rebuild + no auth) |
+
+- User **97/73** matches bundle **B** (`meta.weatherSensitivityScore`); Admin **93/76** matches bundle **C** (`meta.pastDisplayWeatherSensitivityScore`).
+- `auditUserAdminPastReadModelParity` is a **false green** — never calls live User API.
+- **Next proof:** browser Network response on User Past tab (see `PAST_WEATHER_PARITY_AGENT_BOOTSTRAP.md`).
+- **Audit scripts:** read-only, `artifact_only`, fail closed — no prod rebuilds.
+
 ## Key code owners (touches for open bugs)
 
 | Bug area | Likely owners |
@@ -103,19 +123,23 @@ For each mode, user pastes **One Path AI copy payload** (`canonical_run_response
 | Usage 5/18 simulated wrongly | Same + pending-day labeling; compare to `smtDayLedger` / `resolveSmtWindowStatus` |
 | One Path baseline empty 15-min curve | `modules/onePathSim/runReadOnlyView.ts`, `simulationVariablePresentation.ts`, ensure `buildUserUsageDashboardViewModel` gets full dataset with `insights.fifteenMinuteAverages` |
 | Baseline passthrough labels | User expects passthrough **behavior** (read DB, no sim); `ACTUAL` display on rows may be correct — clarify vs literal "PASSTHROUGH" label |
+| GB Past weather 97/73 vs 93/76 | `lib/usage/resolvePastVisibleWeatherScore.ts`, `userPastApiWeatherResponse.ts`, `UsageSimulatorClient.tsx`, `finalizePastDatasetDisplayReadModel.ts`, `intervalReadModelInvariants.ts` |
 
 ## Scripts (repo)
 
 - `scripts/tmp-audit-transcript-lines.mjs` — audit pasted payload lines from transcript
 - `scripts/tmp-audit-baseline-full.mjs` — deep baseline payload audit
+- `scripts/tmp-live-past-weather-proof.mjs` — **deprecated for User proof** (rebuild risk); output in `tmp-live-past-weather-proof-output.json`
 - `npx tsx scripts/audit-smt-day-coverage.ts <esiid> <dateKey>` — DB slot count for a day
 
 ## Rules
 
 - Minimal diffs; one owner per concern
+- **User Past weather proof = browser Network only** — not in-process scripts
+- **Audit scripts: read-only, fail closed** — never `allow_rebuild` on prod
 - Do not change shared-window ownership without explicit user OK (`.cursor/rules/shared-sim-window-lock.mdc`)
 - Do not commit unless user asks
-- After contract changes: update COMPLETE + PROJECT_PLAN PC-2026-05 + this file in same pass
+- After contract changes: update COMPLETE + PROJECT_PLAN + this file in same pass
 
 ## Your first reply should include
 
@@ -139,6 +163,8 @@ For each mode, user pastes **One Path AI copy payload** (`canonical_run_response
 When mode-testing fixes land, update in the same PR:
 
 - This file (checklist + known-good dates)
+- `docs/PAST_WEATHER_PARITY_AGENT_BOOTSTRAP.md` if Past weather proof rules or known outputs change
 - `docs/ONE_PATH_DUAL_RUN_GOAL.md` if Past lab / dual-run semantics change
+- `docs/SURFACE_PARITY_OWNERS.md` if weather bundle or surface owners change
 - `docs/CHAT_BOOTSTRAP.txt` (pointer only — keep lean)
-- `docs/SMT_UNIFICATION_COMPLETE.md` / `docs/PROJECT_PLAN.md` if SMT/heal/display semantics change
+- `docs/SMT_UNIFICATION_COMPLETE.md` / `docs/PROJECT_PLAN.md` (PC-2026-05 / PC-2026-09) if SMT/heal/display/weather semantics change

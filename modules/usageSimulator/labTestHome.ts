@@ -658,11 +658,30 @@ export async function syncOnePathMissingProfilesFromSource(args: {
   const sourceHomeProfileForPersistence = normalizeHomeProfileForPersistence(sourceHomeProfile);
   const targetHomeProfileReady = isPastCapableHomeProfile(targetHomeProfile);
   const shouldRepairTargetHomeProfile = !targetHomeProfileReady;
+  const { computeSimulatedProfileFingerprint } = await import("@/lib/usage/pastWeatherInputParity");
+  const sourceProfileFingerprint = sourceHomeProfile
+    ? computeSimulatedProfileFingerprint({
+        homeProfile: sourceHomeProfile,
+        applianceProfileJson: sourceApplianceProfile?.appliancesJson ?? null,
+      })
+    : null;
+  const targetProfileFingerprint =
+    targetHomeProfile || targetApplianceProfile
+      ? computeSimulatedProfileFingerprint({
+          homeProfile: targetHomeProfile,
+          applianceProfileJson: targetApplianceProfile?.appliancesJson ?? null,
+        })
+      : null;
+  const profileFingerprintMismatch =
+    sourceProfileFingerprint != null &&
+    targetProfileFingerprint != null &&
+    sourceProfileFingerprint !== targetProfileFingerprint;
 
   if (
     sourceHomeProfileForPersistence &&
     (!syncedHomeProfile ||
       (shouldRepairTargetHomeProfile && JSON.stringify(syncedHomeProfile) !== JSON.stringify(sourceHomeProfile)) ||
+      (profileFingerprintMismatch && JSON.stringify(syncedHomeProfile) !== JSON.stringify(sourceHomeProfile)) ||
       (shouldOverwriteExisting && JSON.stringify(syncedHomeProfile) !== JSON.stringify(sourceHomeProfile)))
   ) {
     await (homeDetailsPrisma as any).homeProfileSimulated.upsert({
@@ -682,6 +701,9 @@ export async function syncOnePathMissingProfilesFromSource(args: {
   if (
     sourceApplianceProfile?.appliancesJson &&
     (!syncedApplianceProfile?.appliancesJson ||
+      (profileFingerprintMismatch &&
+        JSON.stringify(syncedApplianceProfile.appliancesJson) !==
+          JSON.stringify(sourceApplianceProfile.appliancesJson)) ||
       (shouldOverwriteExisting &&
         JSON.stringify(syncedApplianceProfile.appliancesJson) !== JSON.stringify(sourceApplianceProfile.appliancesJson)))
   ) {
