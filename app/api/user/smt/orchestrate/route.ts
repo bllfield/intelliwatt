@@ -18,6 +18,7 @@ import {
   type SmtUserProcessingStage,
 } from "@/lib/usage/smtUserProcessingStage";
 import { isHouseCommittedToGreenButton } from "@/lib/usage/houseCommittedUsageSource";
+import { syncHouseIdentifiersFromAuthorization } from "@/lib/house/syncIdentifiers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -421,14 +422,10 @@ export async function POST(req: NextRequest) {
   // If the house doesn't have an ESIID yet but the authorization does, hydrate it so the
   // dashboard session house record becomes the source of truth going forward.
   if (!houseEsiid && authEsiid) {
-    try {
-      await prisma.houseAddress.update({
-        where: { id: house.id },
-        data: { esiid: authEsiid },
-      });
-    } catch {
-      // non-fatal; we'll still use the authorization ESIID for this request
-    }
+    await syncHouseIdentifiersFromAuthorization({
+      houseAddressId: house.id,
+      esiid: authEsiid,
+    });
   }
 
   if (!effectiveEsiid) {
