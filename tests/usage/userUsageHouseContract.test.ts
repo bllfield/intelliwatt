@@ -28,9 +28,13 @@ vi.mock("@/modules/manualUsage/store", () => ({
   getManualUsageInputForUserHouse: (...args: any[]) => getManualUsageInputForUserHouse(...args),
 }));
 
-vi.mock("@/modules/weatherSensitivity/shared", () => ({
-  resolveSharedWeatherSensitivityEnvelope: (...args: any[]) => resolveSharedWeatherSensitivityEnvelope(...args),
-}));
+vi.mock("@/modules/weatherSensitivity/shared", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/modules/weatherSensitivity/shared")>();
+  return {
+    ...actual,
+    resolveSharedWeatherSensitivityEnvelope: (...args: any[]) => resolveSharedWeatherSensitivityEnvelope(...args),
+  };
+});
 
 describe("user usage house contract", () => {
   beforeEach(() => {

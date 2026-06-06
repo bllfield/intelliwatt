@@ -138,7 +138,7 @@ import { displayProfilesFromModelMeta } from "@/modules/usageSimulator/profileDi
 import { classifySimulationFailure, recordSimulationDataAlert } from "@/modules/usageSimulator/simulationDataAlerts";
 import { toPublicHouseLabel } from "@/modules/usageSimulator/houseLabel";
 import { normalizePastProducerBuildPathKind } from "@/modules/simulatedUsage/pastProducerBuildPath";
-import { resolveSharedWeatherSensitivityEnvelope } from "@/modules/weatherSensitivity/shared";
+import { resolveSimulationBuildDiagnosticWeatherScore } from "@/lib/usage/weatherScoringOwnership";
 import {
   ensureUsageShapeProfileForSharedSimulation,
   simulatePastFullWindowShared,
@@ -4566,12 +4566,13 @@ async function recalcSimulatorBuildImpl(args: {
         )?.dataset ?? null
       : null;
     const weatherSensitivityEnvelope = await traceCoreContextStep("weather_sensitivity_envelope", () =>
-      resolveSharedWeatherSensitivityEnvelope({
-        actualDataset: weatherSensitivityActualDataset,
+      resolveSimulationBuildDiagnosticWeatherScore({
+        scoringDataset: weatherSensitivityActualDataset,
         manualUsagePayload: manualUsagePayload as any,
         homeProfile,
         applianceProfile,
         weatherHouseId: actualContextHouseId,
+        preferredActualSource: preferredActualSource ?? null,
         simulationVariablePolicy,
       })
     );

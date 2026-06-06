@@ -20,17 +20,21 @@ import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import { getManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
-import { buildWeatherEfficiencyDerivedInput } from "@/modules/weatherSensitivity/shared";
+import {
+  buildWeatherEfficiencyDerivedInput,
+  type WeatherSensitivityEnvelope,
+} from "@/modules/weatherSensitivity/shared";
 import { hasPersistedPastDisplayWeatherScore } from "@/lib/usage/pastSimDisplayWeather";
 import {
   buildWeatherScoringAudit,
   PAST_DISPLAY_WEATHER_META_FIELD,
+  resolveActualUsageWeatherScore,
+  resolveUsageSourceTypeFromDataset,
 } from "@/lib/usage/weatherScoringOwnership";
 import {
   resolveUserPastVisibleWeatherSensitivityScore,
   shouldUsePastDisplayWeatherCards,
 } from "@/lib/usage/userPastVisibleWeather";
-import { resolveSharedWeatherSensitivityEnvelope } from "@/modules/weatherSensitivity/shared";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -288,63 +292,68 @@ export async function GET(request: NextRequest) {
       });
       const pastDisplayDerivedInput =
         (datasetAny?.meta as any)?.pastDisplayWeatherEfficiencyDerivedInput ?? null;
-      const weatherSensitivity = usePastDisplayWeather
-        ? {
-            score: pastVisibleWeather.score,
-            derivedInput:
-              pastDisplayDerivedInput ??
-              (pastVisibleWeather.score
-                ? buildWeatherEfficiencyDerivedInput(pastVisibleWeather.score as never)
-                : null),
-          }
-        : await (async () => {
-            const actualDatasetForSharedScore =
-              actualDatasetForCompare ??
-              (house?.id != null
-                ? (
-                    await resolveIntervalsLayer({
-                      userId: u.user.id,
-                      houseId: house.id,
-                      layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
-                      scenarioId: null,
-                      esiid: house.esiid ?? null,
-                      preferredActualSource: preferredActualSource ?? null,
-                    }).catch(() => null)
-                  )?.dataset ?? null
-                : null);
-            return resolveSharedWeatherSensitivityEnvelope({
-              scoringDataset: actualDatasetForSharedScore,
-              actualDataset: actualDatasetForSharedScore,
-              manualUsagePayload: manualUsageRec?.payload ?? null,
-              homeProfile,
-              applianceProfile,
-              weatherHouseId: houseId,
-              scoringContext: "ACTUAL_USAGE",
-              displayOwner: "actual_usage_weather_score",
-            }).catch(() => ({ score: null, derivedInput: null }));
-          })();
-      const weatherScoringAudit = usePastDisplayWeather
-        ? ((datasetAny?.meta as any)?.pastDisplayWeatherScoringAudit ??
+      const pastSourceType = resolveUsageSourceTypeFromDataset(datasetAny, {
+        preferredActualSource: preferredActualSource ?? null,
+      });
+      let weatherSensitivity: WeatherSensitivityEnvelope;
+      let weatherScoringAudit: ReturnType<typeof buildWeatherScoringAudit>;
+      if (usePastDisplayWeather) {
+        weatherSensitivity = {
+          score: pastVisibleWeather.score as WeatherSensitivityEnvelope["score"],
+          derivedInput:
+            pastDisplayDerivedInput ??
+            (pastVisibleWeather.score
+              ? buildWeatherEfficiencyDerivedInput(pastVisibleWeather.score as never)
+              : null),
+        };
+        weatherScoringAudit =
+          (datasetAny?.meta as any)?.pastDisplayWeatherScoringAudit ??
           buildWeatherScoringAudit({
             scoringContext: "PAST_DISPLAY",
             scoringDataset: datasetAny,
             datasetKind: "SIMULATED",
+            sourceType: pastSourceType,
+            preferredActualSource: preferredActualSource ?? null,
             outputField: PAST_DISPLAY_WEATHER_META_FIELD,
-            envelope: {
-              score: pastVisibleWeather.score as never,
-              derivedInput:
-                pastDisplayDerivedInput ??
-                (pastVisibleWeather.score
-                  ? buildWeatherEfficiencyDerivedInput(pastVisibleWeather.score as never)
-                  : null),
-            },
-          }))
-        : buildWeatherScoringAudit({
+            envelope: weatherSensitivity,
+          });
+      } else {
+        const actualDatasetForSharedScore =
+          actualDatasetForCompare ??
+          (house?.id != null
+            ? (
+                await resolveIntervalsLayer({
+                  userId: u.user.id,
+                  houseId: house.id,
+                  layerKind: IntervalSeriesKind.ACTUAL_USAGE_INTERVALS,
+                  scenarioId: null,
+                  esiid: house.esiid ?? null,
+                  preferredActualSource: preferredActualSource ?? null,
+                }).catch(() => null)
+              )?.dataset ?? null
+            : null);
+        const actualWeather = await resolveActualUsageWeatherScore({
+          scoringDataset: actualDatasetForSharedScore,
+          manualUsagePayload: manualUsageRec?.payload ?? null,
+          homeProfile,
+          applianceProfile,
+          weatherHouseId: houseId,
+          preferredActualSource: preferredActualSource ?? null,
+        }).catch(() => ({ score: null, derivedInput: null, audit: null as never }));
+        weatherSensitivity = {
+          score: actualWeather.score,
+          derivedInput: actualWeather.derivedInput,
+        };
+        weatherScoringAudit =
+          actualWeather.audit ??
+          buildWeatherScoringAudit({
             scoringContext: "ACTUAL_USAGE",
             scoringDataset: actualDatasetForCompare,
             datasetKind: "ACTUAL",
+            preferredActualSource: preferredActualSource ?? null,
             envelope: weatherSensitivity,
           });
+      }
       const successBody = {
         ...out,
         compareProjection,

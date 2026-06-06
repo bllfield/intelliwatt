@@ -253,7 +253,10 @@ export function auditUserAdminPastReadModelParity(args: {
         sourceOwner: "user_past_visible_api_weather",
         userVisibleSourceOwner: userPastVisibleWeather.sourceOwner,
         adminVisibleSourceOwner: "missing_admin_read_model",
+        outputField: PAST_DISPLAY_WEATHER_META_FIELD,
+        ownerViolation: "missing user or admin read model",
       },
+      weatherScoringAudit: null,
     };
   }
 

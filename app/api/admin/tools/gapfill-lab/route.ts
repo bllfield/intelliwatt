@@ -94,7 +94,10 @@ import {
   getManualUsageInputForUserHouse,
   saveManualUsageInputForUserHouse,
 } from "@/modules/manualUsage/store";
-import { resolveSharedWeatherSensitivityEnvelope } from "@/modules/weatherSensitivity/shared";
+import {
+  resolveActualUsageWeatherScore,
+  resolveFingerprintDiagnosticWeatherScore,
+} from "@/lib/usage/weatherScoringOwnership";
 import { buildManualUsagePastSimReadResult } from "@/modules/manualUsage/pastSimReadResult";
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
 import { buildSharedPastSimDiagnostics } from "@/modules/usageSimulator/sharedDiagnostics";
@@ -525,18 +528,19 @@ async function buildManualMonthlyWeatherCompare(args: {
   }).catch(() => ({ homeProfile: null, applianceProfile: null }));
 
   const [sourceInterval, manualMonthly] = await Promise.all([
-    resolveSharedWeatherSensitivityEnvelope({
-      actualDataset: args.sourceActualDataset,
+    resolveFingerprintDiagnosticWeatherScore({
+      scoringDataset: args.sourceActualDataset,
       homeProfile: sourceProfiles.homeProfile,
       applianceProfile: sourceProfiles.applianceProfile,
       weatherHouseId: args.sourceHouse.id,
-    }).catch(() => ({ score: null, derivedInput: null })),
-    resolveSharedWeatherSensitivityEnvelope({
+    }).catch(() => ({ score: null, derivedInput: null, audit: null as never })),
+    resolveActualUsageWeatherScore({
+      scoringDataset: null,
       manualUsagePayload: args.manualUsagePayload,
       homeProfile: args.testHomeProfile,
       applianceProfile: args.testHomeApplianceProfile,
       weatherHouseId: args.sourceHouse.id,
-    }).catch(() => ({ score: null, derivedInput: null })),
+    }).catch(() => ({ score: null, derivedInput: null, audit: null as never })),
   ]);
 
   return {

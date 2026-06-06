@@ -26,6 +26,7 @@ export async function resolvePastSimDisplayWeatherSensitivityEnvelope(args: {
   homeProfile?: unknown;
   applianceProfile?: unknown;
   weatherHouseId?: string | null;
+  preferredActualSource?: string | null;
 }): Promise<WeatherSensitivityEnvelope> {
   const { audit: _audit, ...envelope } = await resolvePastDisplayWeatherScore(args);
   return envelope;
@@ -45,6 +46,7 @@ export async function attachPastSimDisplayWeatherToDataset(args: {
   homeProfile?: unknown;
   applianceProfile?: unknown;
   weatherHouseId?: string | null;
+  preferredActualSource?: string | null;
   forceRecompute?: boolean;
 }): Promise<WeatherSensitivityEnvelope> {
   if (!args.forceRecompute && hasPersistedPastDisplayWeatherScore(args.dataset)) {

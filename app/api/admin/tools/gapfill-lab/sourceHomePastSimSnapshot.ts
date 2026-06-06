@@ -8,7 +8,7 @@ import { buildSharedPastSimDiagnostics } from "@/modules/usageSimulator/sharedDi
 import { boundDateKeysToCoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 import { travelRangesToExcludeDateKeys } from "@/modules/usageSimulator/build";
 import { ensureUsageShapeProfileForUserHouse } from "@/modules/usageShapeProfile/autoBuild";
-import { resolveSharedWeatherSensitivityEnvelope } from "@/modules/weatherSensitivity/shared";
+import { resolveSimulationBuildDiagnosticWeatherScore } from "@/lib/usage/weatherScoringOwnership";
 
 type SourceHouseRef = {
   id: string;
@@ -193,12 +193,12 @@ export async function buildSourceHomePastSimSnapshot(args: {
         boundedExcludedDateKeysFingerprint,
       })
     : null;
-  const sourceWeatherSensitivity = await resolveSharedWeatherSensitivityEnvelope({
-    actualDataset: sourceActualUsageResult?.dataset ?? null,
+  const sourceWeatherSensitivity = await resolveSimulationBuildDiagnosticWeatherScore({
+    scoringDataset: sourceActualUsageResult?.dataset ?? null,
     homeProfile: sourceProfiles.homeProfile,
     applianceProfile: sourceProfiles.applianceProfile,
     weatherHouseId: args.sourceHouse.id,
-  }).catch(() => ({ score: null, derivedInput: null }));
+  }).catch(() => ({ score: null, derivedInput: null, audit: null as never }));
   const baselineDatasetWithWeather = baselineDataset
     ? attachWeatherSensitivityMeta({
         dataset: baselineDataset,

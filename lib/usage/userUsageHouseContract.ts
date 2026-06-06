@@ -13,6 +13,7 @@ import {
 import {
   resolveActualUsageWeatherScore,
   stampActualUsageWeatherOnContractScore,
+  type WeatherScoringAudit,
 } from "@/lib/usage/weatherScoringOwnership";
 
 export type UserUsageHouseSelection = {
@@ -57,6 +58,7 @@ export type UserUsageHouseContract = {
   usageIngestion?: UserUsageIngestionStatus | null;
   weatherSensitivityScore: WeatherSensitivityScore | null;
   weatherEfficiencyDerivedInput: WeatherEfficiencyDerivedInput | null;
+  weatherScoringAudit: WeatherScoringAudit | null;
 };
 
 type ResolvedUsageLayer = {
@@ -108,8 +110,13 @@ export async function buildUserUsageHouseContract(args: {
   const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRecord?.appliancesJson as any) ?? null);
   const weatherHouseId = String(args.weatherHouseId ?? args.house.id ?? "").trim() || args.house.id;
   const passthroughWeather = weatherSensitivityFromPassthroughDataset(resolvedUsage?.dataset ?? null);
+  const datasetMeta = (resolvedUsage?.dataset as { meta?: Record<string, unknown> } | null)?.meta ?? null;
+  const preferredActualSource = String(
+    datasetMeta?.preferredActualSource ?? datasetMeta?.actualSource ?? ""
+  ).trim() || null;
   let weatherScore: WeatherSensitivityScore | null = null;
   let weatherDerived: WeatherEfficiencyDerivedInput | null = null;
+  let weatherScoringAudit: WeatherScoringAudit | null = null;
   if (args.weatherSensitivity) {
     weatherScore = stampActualUsageWeatherOnContractScore(args.weatherSensitivity.score);
     weatherDerived = args.weatherSensitivity.derivedInput;
@@ -123,9 +130,11 @@ export async function buildUserUsageHouseContract(args: {
       homeProfile,
       applianceProfile,
       weatherHouseId,
+      preferredActualSource,
     }).catch(() => ({ score: null, derivedInput: null, audit: null as never }));
     weatherScore = stampActualUsageWeatherOnContractScore(envelope.score);
     weatherDerived = envelope.derivedInput;
+    weatherScoringAudit = envelope.audit ?? null;
   }
   const weatherSensitivity = { score: weatherScore, derivedInput: weatherDerived };
 
@@ -154,5 +163,6 @@ export async function buildUserUsageHouseContract(args: {
         : null,
     weatherSensitivityScore: weatherSensitivity.score,
     weatherEfficiencyDerivedInput: weatherSensitivity.derivedInput,
+    weatherScoringAudit,
   };
 }

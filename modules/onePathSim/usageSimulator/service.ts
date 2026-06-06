@@ -158,7 +158,7 @@ import { displayProfilesFromModelMeta } from "@/modules/onePathSim/usageSimulato
 import { classifySimulationFailure, recordSimulationDataAlert } from "@/modules/onePathSim/usageSimulator/simulationDataAlerts";
 import { toPublicHouseLabel } from "@/modules/onePathSim/usageSimulator/houseLabel";
 import { normalizePastProducerBuildPathKind } from "@/modules/onePathSim/simulatedUsage/pastProducerBuildPath";
-import { resolveSharedWeatherSensitivityEnvelope } from "@/modules/onePathSim/weatherSensitivityShared";
+import { resolveSimulationBuildDiagnosticWeatherScore } from "@/lib/usage/weatherScoringOwnership";
 import {
   ensureUsageShapeProfileForSharedSimulation,
   simulatePastFullWindowShared,
@@ -4815,12 +4815,13 @@ async function recalcSimulatorBuildImpl(args: {
         )?.dataset ?? null
       : null;
     const weatherSensitivityEnvelope = await traceCoreContextStep("weather_sensitivity_envelope", () =>
-      resolveSharedWeatherSensitivityEnvelope({
-        actualDataset: weatherSensitivityActualDataset,
+      resolveSimulationBuildDiagnosticWeatherScore({
+        scoringDataset: weatherSensitivityActualDataset,
         manualUsagePayload: manualUsagePayload as any,
         homeProfile,
         applianceProfile,
         weatherHouseId: actualContextHouseId,
+        preferredActualSource: preferredActualSource ?? null,
         simulationVariablePolicy,
         dailyWeather: preSimCachedDailyWeather,
       })
@@ -6617,6 +6618,7 @@ async function recalcSimulatorBuildImpl(args: {
         homeProfile: homeProfile as any,
         applianceProfile: applianceProfile as any,
         weatherHouseId: houseId,
+        preferredActualSource: preferredActualSource ?? null,
       });
       const datasetJsonForStorage = buildPastArtifactDatasetJsonForStorage({
         dataset: {

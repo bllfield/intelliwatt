@@ -63,11 +63,18 @@ export async function finalizePastDatasetDisplayReadModel(args: {
     refreshedMeta.displayWeatherCardsSourceOwner = "fallback_recompute";
     refreshedMeta.displayWeatherRecomputeCount = 1;
     dataset.meta = refreshedMeta;
+    const preferredActualSource = String(
+      refreshedMeta.preferredActualSource ??
+        asRecord(refreshedMeta.lockboxRunContext).preferredActualSource ??
+        asRecord(dataset.summary).source ??
+        ""
+    ).trim() || null;
     await attachPastSimDisplayWeatherToDataset({
       dataset,
       homeProfile: args.homeProfile,
       applianceProfile: args.applianceProfile,
       weatherHouseId: args.weatherHouseId,
+      preferredActualSource,
       forceRecompute: true,
     });
   }

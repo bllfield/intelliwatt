@@ -134,9 +134,13 @@ vi.mock("@/modules/manualUsage/store", () => ({
   saveManualUsageInputForUserHouse: (...args: any[]) => saveManualUsageInputForUserHouse(...args),
 }));
 
-vi.mock("@/modules/weatherSensitivity/shared", () => ({
-  resolveSharedWeatherSensitivityEnvelope: (...args: any[]) => resolveSharedWeatherSensitivityEnvelope(...args),
-}));
+vi.mock("@/modules/weatherSensitivity/shared", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/modules/weatherSensitivity/shared")>();
+  return {
+    ...actual,
+    resolveSharedWeatherSensitivityEnvelope: (...args: any[]) => resolveSharedWeatherSensitivityEnvelope(...args),
+  };
+});
 
 vi.mock("@/modules/usageSimulator/validationSelection", () => ({
   VALIDATION_DAY_SELECTION_MODES: [

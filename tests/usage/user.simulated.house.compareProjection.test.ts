@@ -116,10 +116,14 @@ vi.mock("@/modules/applianceProfile/validation", () => ({
   normalizeStoredApplianceProfile: (value: unknown) => value,
 }));
 
-vi.mock("@/modules/weatherSensitivity/shared", () => ({
-  buildWeatherEfficiencyDerivedInput: vi.fn((score: any) => score),
-  resolveSharedWeatherSensitivityEnvelope: (...args: any[]) => resolveSharedWeatherSensitivityEnvelope(...args),
-}));
+vi.mock("@/modules/weatherSensitivity/shared", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/modules/weatherSensitivity/shared")>();
+  return {
+    ...actual,
+    buildWeatherEfficiencyDerivedInput: vi.fn((score: any) => score),
+    resolveSharedWeatherSensitivityEnvelope: (...args: any[]) => resolveSharedWeatherSensitivityEnvelope(...args),
+  };
+});
 
 describe("user simulated house compare projection", () => {
   beforeEach(() => {
