@@ -1,5 +1,6 @@
 import { readPastValidationPolicyRevisionFromMeta } from "@/lib/usage/pastSimulationCoreLabel";
 import { readPastSimDisplayWeatherSensitivityScore } from "@/lib/usage/pastSimDisplayWeather";
+import { readOnePathUserSiteParityLock } from "@/lib/usage/onePathPastUserSiteParityLock";
 import {
   PAST_DISPLAY_WEATHER_META_FIELD,
   readPreSimBuildDiagnosticScore,
@@ -190,6 +191,50 @@ export function resolvePastWeatherHouseIdFromDataset(args: {
     String(meta.actualContextHouseId ?? lockbox.actualContextHouseId ?? args.fallbackHouseId).trim() ||
     args.fallbackHouseId
   );
+}
+
+/** Profile + usage-shape + weather-identity owner for Past sim builds and parity gates. */
+export function resolvePastProfileHouseIdFromBuildInputs(args: {
+  buildInputs: Record<string, unknown>;
+  requestHouseId: string;
+}): string {
+  const direct = String(args.buildInputs.profileHouseId ?? "").trim();
+  if (direct) return direct;
+  const parity = asRecord(args.buildInputs.onePathUserSiteParity);
+  const fromParity = String(parity.sourceHouseId ?? "").trim();
+  if (fromParity) return fromParity;
+  return String(args.buildInputs.actualContextHouseId ?? args.requestHouseId).trim() || args.requestHouseId;
+}
+
+/** User/house pair for loading home + appliance profiles used in Past weather scoring. */
+export function resolvePastProfileLoadContext(args: {
+  buildInputs?: Record<string, unknown> | null;
+  dataset?: Record<string, unknown> | null;
+  requestUserId: string;
+  requestHouseId: string;
+  sourceUserId?: string | null;
+}): { profileUserId: string; profileHouseId: string } {
+  const buildInputs =
+    args.buildInputs ??
+    (args.dataset ? asRecord(asRecord(args.dataset.meta).lockboxInput) : null);
+  const profileHouseId = buildInputs
+    ? resolvePastProfileHouseIdFromBuildInputs({
+        buildInputs,
+        requestHouseId: args.requestHouseId,
+      })
+    : args.dataset
+      ? resolvePastWeatherHouseIdFromDataset({
+          dataset: args.dataset,
+          fallbackHouseId: args.requestHouseId,
+        })
+      : args.requestHouseId;
+  const parity = buildInputs ? readOnePathUserSiteParityLock(buildInputs) : null;
+  const linkedSourceUserId = String(args.sourceUserId ?? parity?.sourceUserId ?? "").trim();
+  const profileUserId =
+    linkedSourceUserId && parity?.sourceHouseId === profileHouseId
+      ? linkedSourceUserId
+      : args.requestUserId;
+  return { profileUserId, profileHouseId };
 }
 
 export function resolvePreferredActualSourceFromDataset(dataset: Record<string, unknown>): string | null {

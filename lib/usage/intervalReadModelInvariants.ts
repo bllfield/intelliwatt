@@ -222,6 +222,7 @@ export function auditUserAdminPastReadModelParity(args: {
   adminProfileFingerprints?: { homeProfile?: string | null; applianceProfile?: string | null };
   /** When true, same in-memory dataset audit is allowed (read-model structural checks only). */
   allowSameDatasetStructuralAudit?: boolean;
+  crossSurfaceWeatherInputsOnly?: boolean;
 }): {
   ok: boolean;
   violations: string[];
@@ -274,6 +275,7 @@ export function auditUserAdminPastReadModelParity(args: {
           adminDataset: adminDatasetRecord,
           userProfileFingerprints: args.userProfileFingerprints,
           adminProfileFingerprints: args.adminProfileFingerprints,
+          crossSurfaceWeatherInputsOnly: args.crossSurfaceWeatherInputsOnly,
         })
       : null;
   if (inputParity && !inputParity.ok) {

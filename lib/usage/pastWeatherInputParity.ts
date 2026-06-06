@@ -165,6 +165,7 @@ export function buildPastWeatherInputFingerprint(args: {
   weatherHouseId?: string | null;
   profileFingerprint?: string | null;
   applianceProfileFingerprint?: string | null;
+  forceComputedDisplayTruthRevision?: boolean;
 }): PastWeatherInputFingerprint {
   const meta = asRecord(args.dataset.meta);
   const lockbox = asRecord(meta.lockboxInput);
@@ -180,9 +181,10 @@ export function buildPastWeatherInputFingerprint(args: {
   return {
     artifactInputHash: readArtifactInputHash(meta),
     fullChainHash: String(meta.fullChainHash ?? "").trim() || null,
-    displayTruthRevision:
-      String(meta.pastDisplayWeatherDisplayTruthRevision ?? "").trim() ||
-      computePastDisplayTruthRevision({ dataset: args.dataset, weatherHouseId }),
+    displayTruthRevision: args.forceComputedDisplayTruthRevision
+      ? computePastDisplayTruthRevision({ dataset: args.dataset, weatherHouseId })
+      : String(meta.pastDisplayWeatherDisplayTruthRevision ?? "").trim() ||
+        computePastDisplayTruthRevision({ dataset: args.dataset, weatherHouseId }),
     finalizedDailyRowsHash: hashFinalizedDailyRows(args.dataset),
     dailyWeatherHash: hashDailyWeather(args.dataset, meta),
     greenButtonTrustedDateKeys: Array.from(readGreenButtonTrustedHomeDateKeysFromPastMeta(meta)).sort().join(","),
@@ -254,38 +256,51 @@ export function auditPastWeatherInputParity(args: {
   adminWeatherHouseId?: string | null;
   userProfileFingerprints?: { homeProfile?: string | null; applianceProfile?: string | null };
   adminProfileFingerprints?: { homeProfile?: string | null; applianceProfile?: string | null };
+  /** Dual-run cross-surface: enforce weather-scoring inputs only (not house-local artifact identity). */
+  crossSurfaceWeatherInputsOnly?: boolean;
 }): PastWeatherInputParityResult {
+  const crossSurfaceOnly = args.crossSurfaceWeatherInputsOnly === true;
   const user = buildPastWeatherInputFingerprint({
     dataset: args.userDataset,
     weatherHouseId: args.userWeatherHouseId,
     profileFingerprint: args.userProfileFingerprints?.homeProfile ?? null,
     applianceProfileFingerprint: args.userProfileFingerprints?.applianceProfile ?? null,
+    forceComputedDisplayTruthRevision: crossSurfaceOnly,
   });
   const admin = buildPastWeatherInputFingerprint({
     dataset: args.adminDataset,
     weatherHouseId: args.adminWeatherHouseId,
     profileFingerprint: args.adminProfileFingerprints?.homeProfile ?? null,
     applianceProfileFingerprint: args.adminProfileFingerprints?.applianceProfile ?? null,
+    forceComputedDisplayTruthRevision: crossSurfaceOnly,
   });
   const violations: string[] = [];
 
-  compareField(violations, "artifactInputHash", user.artifactInputHash, admin.artifactInputHash);
+  if (!crossSurfaceOnly) {
+    compareField(violations, "artifactInputHash", user.artifactInputHash, admin.artifactInputHash);
+  }
   compareField(violations, "displayTruthRevision", user.displayTruthRevision, admin.displayTruthRevision);
   compareField(violations, "finalizedDailyRowsHash", user.finalizedDailyRowsHash, admin.finalizedDailyRowsHash);
   compareField(violations, "dailyWeatherHash", user.dailyWeatherHash, admin.dailyWeatherHash);
   compareField(violations, "usageShapeProfileIdentity", user.usageShapeProfileIdentity, admin.usageShapeProfileIdentity);
-  compareField(violations, "resolvedSimFingerprint", user.resolvedSimFingerprint, admin.resolvedSimFingerprint);
-  compareField(violations, "intervalDataFingerprint", user.intervalDataFingerprint, admin.intervalDataFingerprint);
-  compareField(violations, "usageFingerprint", user.usageFingerprint, admin.usageFingerprint);
-  compareField(violations, "weatherIdentity", user.weatherIdentity, admin.weatherIdentity);
+  if (!crossSurfaceOnly) {
+    compareField(violations, "resolvedSimFingerprint", user.resolvedSimFingerprint, admin.resolvedSimFingerprint);
+    compareField(violations, "intervalDataFingerprint", user.intervalDataFingerprint, admin.intervalDataFingerprint);
+    compareField(violations, "usageFingerprint", user.usageFingerprint, admin.usageFingerprint);
+    compareField(violations, "weatherIdentity", user.weatherIdentity, admin.weatherIdentity);
+  }
   compareField(violations, "validationKeys", user.validationKeys, admin.validationKeys);
   compareField(violations, "travelVacantFingerprint", user.travelVacantFingerprint, admin.travelVacantFingerprint);
-  compareField(violations, "simulationVariableVersion", user.simulationVariableVersion, admin.simulationVariableVersion);
-  compareField(violations, "simVersion", user.simVersion, admin.simVersion);
+  if (!crossSurfaceOnly) {
+    compareField(violations, "simulationVariableVersion", user.simulationVariableVersion, admin.simulationVariableVersion);
+    compareField(violations, "simVersion", user.simVersion, admin.simVersion);
+  }
   compareField(violations, "scorerVersion", user.scorerVersion, admin.scorerVersion);
   compareField(violations, "calculationVersion", user.calculationVersion, admin.calculationVersion);
   compareField(violations, "finalizeVersion", user.finalizeVersion, admin.finalizeVersion);
-  compareField(violations, "greenButtonTrustedDateKeys", user.greenButtonTrustedDateKeys, admin.greenButtonTrustedDateKeys);
+  if (!crossSurfaceOnly) {
+    compareField(violations, "greenButtonTrustedDateKeys", user.greenButtonTrustedDateKeys, admin.greenButtonTrustedDateKeys);
+  }
 
   const homeProfilesMatch =
     args.userProfileFingerprints?.homeProfile != null && args.adminProfileFingerprints?.homeProfile != null
@@ -358,4 +373,86 @@ export function computeSimulatedProfileFingerprint(args: {
     appliancesJson: args.applianceProfileJson ?? null,
   });
   return createHash("sha256").update(canonical, "utf8").digest("base64url").slice(0, 16);
+}
+
+function bundleCValuesEqual(
+  left: ReturnType<typeof scoreCardValues>,
+  right: ReturnType<typeof scoreCardValues>
+): boolean {
+  return (
+    left.weatherEfficiency === right.weatherEfficiency &&
+    left.cooling === right.cooling &&
+    left.heating === right.heating &&
+    left.confidence === right.confidence
+  );
+}
+
+export function buildPastWeatherCrossSurfaceAcceptanceProof(args: {
+  inputParity: PastWeatherInputParityResult;
+  userVisibleBundleC: ReturnType<typeof scoreCardValues> | null;
+  adminVisibleBundleC: ReturnType<typeof scoreCardValues> | null;
+}): {
+  ok: boolean;
+  profileFingerprintsMatch: boolean;
+  usageShapeProfileIdentityMatch: boolean;
+  displayTruthRevisionMatch: boolean;
+  finalizedDailyRowsHashMatch: boolean;
+  dailyWeatherHashMatch: boolean;
+  validationKeysMatch: boolean;
+  travelVacantFingerprintMatch: boolean;
+  scorerVersionMatch: boolean;
+  calculationVersionMatch: boolean;
+  userVisibleEqualsUserBundleC: boolean;
+  adminVisibleEqualsAdminBundleC: boolean;
+  userBundleCEqualsAdminBundleC: boolean;
+  violations: string[];
+  user: PastWeatherInputFingerprint;
+  admin: PastWeatherInputFingerprint;
+  profileFingerprints: PastWeatherInputParityResult["profileFingerprints"];
+} {
+  const { user, admin, profileFingerprints } = args.inputParity;
+  const userVisible = args.userVisibleBundleC ?? user.bundleC;
+  const adminVisible = args.adminVisibleBundleC ?? admin.bundleC;
+  const proof = {
+    profileFingerprintsMatch: profileFingerprints.homeProfilesMatch === true,
+    usageShapeProfileIdentityMatch: user.usageShapeProfileIdentity === admin.usageShapeProfileIdentity,
+    displayTruthRevisionMatch: user.displayTruthRevision === admin.displayTruthRevision,
+    finalizedDailyRowsHashMatch: user.finalizedDailyRowsHash === admin.finalizedDailyRowsHash,
+    dailyWeatherHashMatch: user.dailyWeatherHash === admin.dailyWeatherHash,
+    validationKeysMatch: JSON.stringify(user.validationKeys) === JSON.stringify(admin.validationKeys),
+    travelVacantFingerprintMatch: user.travelVacantFingerprint === admin.travelVacantFingerprint,
+    scorerVersionMatch: user.scorerVersion === admin.scorerVersion,
+    calculationVersionMatch: user.calculationVersion === admin.calculationVersion,
+    userVisibleEqualsUserBundleC: bundleCValuesEqual(userVisible, user.bundleC),
+    adminVisibleEqualsAdminBundleC: bundleCValuesEqual(adminVisible, admin.bundleC),
+    userBundleCEqualsAdminBundleC: bundleCValuesEqual(user.bundleC, admin.bundleC),
+  };
+  const violations = [...args.inputParity.violations];
+  if (!proof.userVisibleEqualsUserBundleC) {
+    violations.push("user visible weather != user meta.pastDisplayWeatherSensitivityScore");
+  }
+  if (!proof.adminVisibleEqualsAdminBundleC) {
+    violations.push("admin visible weather != admin meta.pastDisplayWeatherSensitivityScore");
+  }
+  const ok =
+    proof.profileFingerprintsMatch &&
+    proof.usageShapeProfileIdentityMatch &&
+    proof.displayTruthRevisionMatch &&
+    proof.finalizedDailyRowsHashMatch &&
+    proof.dailyWeatherHashMatch &&
+    proof.validationKeysMatch &&
+    proof.travelVacantFingerprintMatch &&
+    proof.scorerVersionMatch &&
+    proof.calculationVersionMatch &&
+    proof.userVisibleEqualsUserBundleC &&
+    proof.adminVisibleEqualsAdminBundleC &&
+    proof.userBundleCEqualsAdminBundleC;
+  return {
+    ok,
+    ...proof,
+    violations: [...new Set(violations)],
+    user,
+    admin,
+    profileFingerprints,
+  };
 }

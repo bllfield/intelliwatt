@@ -204,6 +204,7 @@ export function buildInitialPastSimLockboxInput(args: {
   validationOnlyDateKeysLocal?: Iterable<string>;
   validationSelectionMode?: ValidationDaySelectionMode | "manual" | null;
   testHomeId?: string | null;
+  profileHouseId?: string | null;
   weatherPreference?: WeatherPreference | null;
   weatherLogicMode?: WeatherLogicMode | null;
 }): PastSimLockboxInput {
@@ -214,7 +215,10 @@ export function buildInitialPastSimLockboxInput(args: {
     manualUsagePayload: args.manualUsagePayload,
     adminLabTreatmentMode: args.adminLabTreatmentMode,
   });
-  const profileHouseId = sourceHouseId === testHomeId ? sourceHouseId : testHomeId;
+  const profileHouseIdOverride = String(args.profileHouseId ?? "").trim();
+  const profileHouseId =
+    profileHouseIdOverride ||
+    (sourceHouseId === testHomeId ? sourceHouseId : testHomeId);
 
   void args.weatherPreference;
 

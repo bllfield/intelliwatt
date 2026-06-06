@@ -282,6 +282,7 @@ async function copyPastSimulatorBuildFromSource(args: {
   });
 
   mirrored.onePathUserSiteParity = args.parity;
+  mirrored.profileHouseId = args.sourceHouseId;
 
   if (args.preferredActualSource === "SMT" || args.preferredActualSource === "GREEN_BUTTON") {
     applyAdminPreferredActualSourceToMirroredBuild(

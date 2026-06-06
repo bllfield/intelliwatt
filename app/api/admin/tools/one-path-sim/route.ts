@@ -1614,6 +1614,7 @@ async function ensureOnePathSmtOnLookup(args: {
 async function resolveOnePathTestHomeState(args: {
   ownerUserId: string;
   selectedSourceHouseId: string;
+  selectedSourceUserId?: string | null;
   fallbackSourceHouseId?: string | null;
   preferredTestHomeHouseId?: string | null;
 }) {
@@ -1654,7 +1655,14 @@ async function resolveOnePathTestHomeState(args: {
         }
       : null,
     linkedSourceHouseId,
-    linkedSourceUserId: link?.sourceUserId ? String(link.sourceUserId) : null,
+    linkedSourceUserId:
+      link?.sourceUserId
+        ? String(link.sourceUserId)
+        : linkedSourceHouseId === args.selectedSourceHouseId &&
+            typeof args.selectedSourceUserId === "string" &&
+            args.selectedSourceUserId.trim()
+          ? args.selectedSourceUserId.trim()
+          : null,
     status,
     statusMessage:
       link?.statusMessage ? String(link.statusMessage) : linkedSourceHouseId ? "Using request-scoped One Path test-home binding." : null,
@@ -1745,6 +1753,7 @@ export async function POST(request: NextRequest) {
   const onePathTestHomeState = await resolveOnePathTestHomeState({
     ownerUserId,
     selectedSourceHouseId: resolved.selectedHouse.id,
+    selectedSourceUserId: resolved.userId,
     fallbackSourceHouseId:
       typeof body?.sourceHouseId === "string" && body.sourceHouseId.trim() ? body.sourceHouseId.trim() : null,
     preferredTestHomeHouseId:
@@ -1816,6 +1825,7 @@ export async function POST(request: NextRequest) {
     const replacedState = await resolveOnePathTestHomeState({
       ownerUserId,
       selectedSourceHouseId: resolved.selectedHouse.id,
+      selectedSourceUserId: resolved.userId,
       fallbackSourceHouseId: resolved.selectedHouse.id,
       preferredTestHomeHouseId: replacement.testHomeHouseId ?? null,
     });

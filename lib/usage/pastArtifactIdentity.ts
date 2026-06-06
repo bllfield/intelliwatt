@@ -14,6 +14,7 @@ import { resolveWeatherLogicModeFromBuildInputs } from "@/modules/usageSimulator
 import { getHouseAddressForUserHouse } from "@/modules/usageSimulator/repo";
 import { resolveWindowFromBuildInputsForPastIdentity } from "@/modules/usageSimulator/windowIdentity";
 import { getUsageShapeProfileIdentityForPast } from "@/modules/simulatedUsage/simulatePastUsageDataset";
+import { resolvePastProfileHouseIdFromBuildInputs } from "@/lib/usage/pastVisibleWeatherReadDiagnostics";
 import { computePastWeatherIdentity } from "@/modules/weather/identity";
 
 export type PastArtifactTravelRange = { startDate: string; endDate: string };
@@ -120,9 +121,17 @@ export async function resolvePastArtifactIdentity(args: {
         usageShapeProfileDerivedAt: null,
         usageShapeProfileSimHash: null,
       }
-    : await getUsageShapeProfileIdentityForPast(args.requestHouseId);
+    : await getUsageShapeProfileIdentityForPast(
+        resolvePastProfileHouseIdFromBuildInputs({
+          buildInputs: args.buildInputs,
+          requestHouseId: args.requestHouseId,
+        })
+      );
 
-  const weatherHouseId = String(args.buildInputs.actualContextHouseId ?? args.requestHouseId);
+  const weatherHouseId = resolvePastProfileHouseIdFromBuildInputs({
+    buildInputs: args.buildInputs,
+    requestHouseId: args.requestHouseId,
+  });
   const weatherIdentity = await computePastWeatherIdentity({
     houseId: weatherHouseId,
     startDate: window.startDate,

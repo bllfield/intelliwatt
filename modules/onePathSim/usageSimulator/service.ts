@@ -55,6 +55,7 @@ import {
   preferredActualSourceFromPastBuildInputs,
 } from "@/lib/usage/pastSimValidationReadBackfill";
 import { resolvePastArtifactIdentity } from "@/lib/usage/pastArtifactIdentity";
+import { resolvePastProfileHouseIdFromBuildInputs, resolvePastProfileLoadContext } from "@/lib/usage/pastVisibleWeatherReadDiagnostics";
 import { healPastArtifactIfIdentityMismatch } from "@/lib/usage/pastArtifactHeal";
 import {
   isolateBuildInputsForUserSite,
@@ -1002,8 +1003,16 @@ export async function rebuildGapfillSharedPastArtifact(args: {
     endDate: identityWindowResolved.endDate,
     preferredSource: resolvePreferredActualSourceFromBuildInputs(buildInputs),
   });
-  const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(args.houseId);
-  const sourceHouseIdForWeather = String((buildInputs as any)?.actualContextHouseId ?? args.houseId);
+  const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(
+    resolvePastProfileHouseIdFromBuildInputs({
+      buildInputs: buildInputs as Record<string, unknown>,
+      requestHouseId: args.houseId,
+    })
+  );
+  const sourceHouseIdForWeather = resolvePastProfileHouseIdFromBuildInputs({
+    buildInputs: buildInputs as Record<string, unknown>,
+    requestHouseId: args.houseId,
+  });
   const weatherIdentity = await computePastWeatherIdentity({
     houseId: sourceHouseIdForWeather,
     startDate: identityWindowResolved.startDate,
@@ -2011,8 +2020,16 @@ export async function buildGapfillCompareSimShared(args: {
       endDate: identityWindowResolved.endDate,
       preferredSource: resolvePreferredActualSourceFromBuildInputs(buildInputs),
     });
-    const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(houseId);
-    const sourceHouseIdForWeather = String((buildInputs as any)?.actualContextHouseId ?? houseId);
+    const usageShapeProfileIdentity = await getUsageShapeProfileIdentityForPast(
+      resolvePastProfileHouseIdFromBuildInputs({
+        buildInputs: buildInputs as Record<string, unknown>,
+        requestHouseId: houseId,
+      })
+    );
+    const sourceHouseIdForWeather = resolvePastProfileHouseIdFromBuildInputs({
+      buildInputs: buildInputs as Record<string, unknown>,
+      requestHouseId: houseId,
+    });
     const weatherIdentity = await computePastWeatherIdentity({
       houseId: sourceHouseIdForWeather,
       startDate: identityWindowResolved.startDate,
@@ -4525,9 +4542,37 @@ async function recalcSimulatorBuildImpl(args: {
     preferredActualSource,
     asyncMetadata: args.runContext?.asyncMetadata ?? undefined,
   });
+  let profileHouseIdForLockbox: string | undefined;
+  let persistedParityLock: ReturnType<typeof readOnePathUserSiteParityLock> = null;
+  let persistedBuildInputs: Record<string, unknown> | null = null;
+  if (scenarioId) {
+    const persistedBuild = await (prisma as any).usageSimulatorBuild
+      .findUnique({
+        where: {
+          userId_houseId_scenarioKey: { userId, houseId, scenarioKey: scenarioId },
+        },
+        select: { buildInputs: true },
+      })
+      .catch(() => null);
+    if (persistedBuild?.buildInputs && typeof persistedBuild.buildInputs === "object") {
+      persistedBuildInputs = persistedBuild.buildInputs as Record<string, unknown>;
+      persistedParityLock = readOnePathUserSiteParityLock(persistedBuildInputs);
+      profileHouseIdForLockbox = resolvePastProfileHouseIdFromBuildInputs({
+        buildInputs: persistedBuildInputs,
+        requestHouseId: houseId,
+      });
+    }
+  }
+  const profileLoadContext = resolvePastProfileLoadContext({
+    buildInputs: persistedBuildInputs,
+    requestUserId: userId,
+    requestHouseId: houseId,
+    sourceUserId: persistedParityLock?.sourceUserId,
+  });
   const initialLockboxInput = buildInitialPastSimLockboxInput({
     houseId,
     actualContextHouseId,
+    profileHouseId: profileHouseIdForLockbox,
     sourceEsiid: esiid ?? null,
     simulatorMode: mode,
     travelRanges: [],
@@ -4595,10 +4640,16 @@ async function recalcSimulatorBuildImpl(args: {
       .catch(() => null)
   );
   const homeRec = await traceCoreContextStep("home_profile_load", () =>
-    getHomeProfileSimulatedByUserHouse({ userId, houseId })
+    getHomeProfileSimulatedByUserHouse({
+      userId: profileLoadContext.profileUserId,
+      houseId: profileLoadContext.profileHouseId,
+    })
   );
   const applianceRec = await traceCoreContextStep("appliance_profile_load", () =>
-    getApplianceProfileSimulatedByUserHouse({ userId, houseId })
+    getApplianceProfileSimulatedByUserHouse({
+      userId: profileLoadContext.profileUserId,
+      houseId: profileLoadContext.profileHouseId,
+    })
   );
 
   let manualUsagePayload = args.manualUsagePayload ?? (manualRec?.payload as any) ?? null;
@@ -6341,9 +6392,26 @@ async function recalcSimulatorBuildImpl(args: {
       correlationId: args.correlationId,
     });
   } else {
-    const parityLock = readOnePathUserSiteParityLock(buildInputs as Record<string, unknown>);
+    const parityLock =
+      readOnePathUserSiteParityLock(buildInputs as Record<string, unknown>) ?? persistedParityLock;
     if (parityLock && isParityBuildInputsDirty({ currentBuildInputs: buildInputs as Record<string, unknown>, parity: parityLock })) {
       buildInputs = clearOnePathUserSiteParityFromBuildInputs(buildInputs as Record<string, unknown>) as SimulatorBuildInputsV1;
+    }
+    const profileHouseId =
+      profileHouseIdForLockbox ??
+      persistedParityLock?.sourceHouseId ??
+      resolvePastProfileHouseIdFromBuildInputs({
+        buildInputs: buildInputs as Record<string, unknown>,
+        requestHouseId: houseId,
+      });
+    if (profileHouseId) {
+      (buildInputs as Record<string, unknown>).profileHouseId = profileHouseId;
+    }
+    if (
+      persistedParityLock &&
+      !isParityBuildInputsDirty({ currentBuildInputs: buildInputs as Record<string, unknown>, parity: persistedParityLock })
+    ) {
+      (buildInputs as Record<string, unknown>).onePathUserSiteParity = persistedParityLock;
     }
   }
 
@@ -6627,7 +6695,12 @@ async function recalcSimulatorBuildImpl(args: {
         dataset: dataset as Record<string, unknown>,
         homeProfile: homeProfile as any,
         applianceProfile: applianceProfile as any,
-        weatherHouseId: actualContextHouseId ?? houseId,
+        weatherHouseId:
+          profileHouseIdForLockbox ??
+          resolvePastProfileHouseIdFromBuildInputs({
+            buildInputs: buildInputs as Record<string, unknown>,
+            requestHouseId: houseId,
+          }),
         preferredActualSource: preferredActualSource ?? null,
         forceRecompute: true,
       });
