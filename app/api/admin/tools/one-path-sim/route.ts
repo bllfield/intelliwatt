@@ -108,6 +108,7 @@ import { resolveSmtPersistedCoverageSpan } from "@/lib/usage/smtWindowStatus";
 import { buildRuntimeEnvParityTrace } from "@/modules/onePathSim/runtimeEnvParityTrace";
 import { listScenarios } from "@/modules/usageSimulator/service";
 import { buildPerformanceAuditSnapshot } from "@/lib/usage/usageParityAudit";
+import { isEsiidUniqueConstraintError } from "@/lib/house/syncIdentifiers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -116,6 +117,19 @@ const GREEN_BUTTON_ROUTE_STAGE_TIMEOUT_MS = 120_000;
 /** Same heal profile as POST /api/user/usage/refresh. */
 /** Lookup/load must wait for full canonical SMT coverage (admin waits), not the short user-session tail budget. */
 const ONE_PATH_SMT_HEAL_PROFILE = "admin_sim" as const;
+
+function onePathEsiidSiblingConflictResponse(error: unknown): NextResponse | null {
+  if (!isEsiidUniqueConstraintError(error)) return null;
+  return NextResponse.json(
+    {
+      ok: false,
+      error: "esiid_already_on_sibling_house",
+      message:
+        "This meter ESIID is already linked to the source home. One Path lab test homes stay without their own ESIID; SMT heal runs on the linked source house.",
+    },
+    { status: 409 }
+  );
+}
 
 function withRunPerformanceAudit(args: {
   readModel: Record<string, unknown> | null | undefined;
@@ -2585,10 +2599,13 @@ export async function POST(request: NextRequest) {
           { status: 409 }
         );
       }
+      const esiidConflict = onePathEsiidSiblingConflictResponse(error);
+      if (esiidConflict) return esiidConflict;
       throw error;
     }
   }
 
+  try {
   const previewMode =
     typeof body?.mode === "string" && body.mode.trim()
       ? normalizeMode(body.mode)
@@ -2951,4 +2968,9 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({ ok: false, error: "unsupported_action" }, { status: 400 });
+  } catch (error) {
+    const esiidConflict = onePathEsiidSiblingConflictResponse(error);
+    if (esiidConflict) return esiidConflict;
+    throw error;
+  }
 }

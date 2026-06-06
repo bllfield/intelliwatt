@@ -258,7 +258,8 @@ async function copySourceHouseIdentityToLabHome(args: {
       utilityName: args.sourceHouse.utilityName,
       utilityPhone: args.sourceHouse.utilityPhone,
       label: args.label,
-      esiid: args.sourceHouse.esiid ? String(args.sourceHouse.esiid) : null,
+      // Lab/test homes must not own a globally unique ESIID; SMT heal uses the linked source house.
+      esiid: null,
     },
   });
 }

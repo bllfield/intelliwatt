@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { cleanEsiid } from "@/lib/smt/esiid";
 
-function isEsiidUniqueConstraintError(error: unknown): boolean {
+export function isEsiidUniqueConstraintError(error: unknown): boolean {
   if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
     return true;
   }

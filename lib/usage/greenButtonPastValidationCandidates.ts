@@ -32,6 +32,33 @@ function dateKeyInRange(dateKey: string, startDate: string, endDate: string): bo
   return dateKey >= startDate && dateKey <= endDate;
 }
 
+/** Prefer artifact coverage window; fall back to canonical 365-day lag window. */
+export function resolvePastValidationCoverageWindow(args: {
+  meta?: Record<string, unknown> | null;
+  buildInputs?: Record<string, unknown> | null;
+}): { startDate: string; endDate: string } {
+  const fromMetaStart =
+    asDateKey(args.meta?.coverageStart) ??
+    asDateKey(args.meta?.coverageStartDate) ??
+    asDateKey((args.meta?.summary as { start?: unknown } | undefined)?.start);
+  const fromMetaEnd =
+    asDateKey(args.meta?.coverageEnd) ??
+    asDateKey(args.meta?.coverageEndDate) ??
+    asDateKey((args.meta?.summary as { end?: unknown } | undefined)?.end);
+  const fromBuildStart =
+    asDateKey(args.buildInputs?.validationSelectionPreloadWindowStart) ??
+    asDateKey(args.buildInputs?.coverageStart);
+  const fromBuildEnd =
+    asDateKey(args.buildInputs?.validationSelectionPreloadWindowEnd) ??
+    asDateKey(args.buildInputs?.coverageEnd);
+  const startDate = fromMetaStart ?? fromBuildStart;
+  const endDate = fromMetaEnd ?? fromBuildEnd;
+  if (startDate && endDate && startDate <= endDate) {
+    return { startDate, endDate };
+  }
+  return resolveCanonicalUsage365CoverageWindow();
+}
+
 /**
  * Stratified validation pool for Green Button Past Sim: home-local trusted days in the
  * coverage window (not Chicago 96/96 on raw UTC-grid timestamps).
@@ -203,7 +230,10 @@ export function resolveGreenButtonPastValidationOnlyDateKeysAtRead(args: {
   const trustedHome = trustedHomeDateKeysFromRecords(meta, args.buildInputs ?? null);
   if (trustedHome.length === 0) return [];
 
-  const coverage = resolveCanonicalUsage365CoverageWindow();
+  const coverage = resolvePastValidationCoverageWindow({
+    meta,
+    buildInputs: args.buildInputs ?? null,
+  });
   const timezone =
     String(args.timezone ?? meta?.timezone ?? args.buildInputs?.timezone ?? "America/Chicago").trim() ||
     "America/Chicago";
@@ -287,7 +317,10 @@ export function resolveGreenButtonPastValidationSelectionAfterSim(args: {
   if (meta?.actualSource !== "GREEN_BUTTON") return null;
   if (!args.decodedIntervals15.length) return null;
 
-  const coverage = resolveCanonicalUsage365CoverageWindow();
+  const coverage = resolvePastValidationCoverageWindow({
+    meta,
+    buildInputs: null,
+  });
   const timezone =
     String(args.timezone ?? meta?.timezone ?? "America/Chicago").trim() || "America/Chicago";
   const travelDateKeys = new Set(

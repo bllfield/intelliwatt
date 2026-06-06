@@ -147,6 +147,27 @@ function seasonFromDateKey(dateKey: string): "winter" | "summer" | "shoulder" {
   return "shoulder";
 }
 
+function seasonMonthBucketKey(dateKey: string): string {
+  return `${seasonFromDateKey(dateKey)}:${dateKey.slice(0, 7)}`;
+}
+
+function sortSeasonMonthBucketKeys(keys: string[]): string[] {
+  const seasonOrder: Record<"winter" | "summer" | "shoulder", number> = {
+    winter: 0,
+    summer: 1,
+    shoulder: 2,
+  };
+  return [...keys].sort((a, b) => {
+    const [seasonA = "", monthA = ""] = a.split(":");
+    const [seasonB = "", monthB = ""] = b.split(":");
+    const seasonCmp =
+      (seasonOrder[seasonA as keyof typeof seasonOrder] ?? 9) -
+      (seasonOrder[seasonB as keyof typeof seasonOrder] ?? 9);
+    if (seasonCmp !== 0) return seasonCmp;
+    return monthA.localeCompare(monthB);
+  });
+}
+
 function withBasicSelectionDiagnostics(args: {
   modeUsed: ValidationDaySelectionMode;
   targetCount: number;
@@ -318,17 +339,6 @@ export function selectValidationDayKeys(args: {
     };
   }
 
-  const winter = cleanCandidates.filter((dk) => seasonFromDateKey(dk) === "winter");
-  const summer = cleanCandidates.filter((dk) => seasonFromDateKey(dk) === "summer");
-  const shoulder = cleanCandidates.filter((dk) => seasonFromDateKey(dk) === "shoulder");
-  const weekday = cleanCandidates.filter((dk) => {
-    const dow = getLocalDayOfWeekFromDateKey(dk, args.timezone);
-    return dow !== 0 && dow !== 6;
-  });
-  const weekend = cleanCandidates.filter((dk) => {
-    const dow = getLocalDayOfWeekFromDateKey(dk, args.timezone);
-    return dow === 0 || dow === 6;
-  });
   const shuffle = (arr: string[], seedSuffix: string) =>
     pickRandomDateKeys({
       candidateDateKeys: arr,
@@ -343,17 +353,39 @@ export function selectValidationDayKeys(args: {
       monthKeyFromLocalKey: (dk) => dk.slice(0, 7),
     });
 
+  const seasonMonthGroups = new Map<string, string[]>();
+  for (const dk of cleanCandidates) {
+    const bucketKey = seasonMonthBucketKey(dk);
+    if (!seasonMonthGroups.has(bucketKey)) seasonMonthGroups.set(bucketKey, []);
+    seasonMonthGroups.get(bucketKey)!.push(dk);
+  }
+  const seasonMonthBucketKeys = sortSeasonMonthBucketKeys(Array.from(seasonMonthGroups.keys()));
   const { picked, bucketCounts, fallbackSubstitutions } = roundRobinPickBuckets({
     targetCount,
-    orderedBuckets: [
-      { key: "winter", keys: shuffle(winter, "winter") },
-      { key: "summer", keys: shuffle(summer, "summer") },
-      { key: "shoulder", keys: shuffle(shoulder, "shoulder") },
-      { key: "weekday", keys: shuffle(weekday, "weekday") },
-      { key: "weekend", keys: shuffle(weekend, "weekend") },
-    ],
+    orderedBuckets: seasonMonthBucketKeys.map((bucketKey) => ({
+      key: bucketKey,
+      keys: shuffle(seasonMonthGroups.get(bucketKey) ?? [], bucketKey),
+    })),
   });
-  const deduped = Array.from(new Set(picked)).slice(0, targetCount).sort();
+
+  let deduped = Array.from(new Set(picked)).slice(0, targetCount);
+  if (deduped.length < targetCount) {
+    const remaining = cleanCandidates.filter((dk) => !deduped.includes(dk));
+    const fill = pickRandomDateKeys({
+      candidateDateKeys: remaining,
+      testDays: targetCount - deduped.length,
+      seed: `${args.seed}:stratified_fill`,
+      stratifyByMonth: true,
+      stratifyByWeekend: true,
+      isWeekendLocalKey: (dk) => {
+        const dow = getLocalDayOfWeekFromDateKey(dk, args.timezone);
+        return dow === 0 || dow === 6;
+      },
+      monthKeyFromLocalKey: (dk) => dk.slice(0, 7),
+    }).filter((dk) => !deduped.includes(dk));
+    deduped = [...deduped, ...fill].slice(0, targetCount);
+  }
+  deduped = deduped.sort();
   return {
     selectedDateKeys: deduped,
     diagnostics: withBasicSelectionDiagnostics({

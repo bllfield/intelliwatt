@@ -15,7 +15,7 @@ export const CANONICAL_PAST_VALIDATION_SELECTION_MODE: ValidationDaySelectionMod
 export const CANONICAL_PAST_VALIDATION_DAY_COUNT = 14;
 
 /** Bumped when shared user/One Path validation selection policy changes. */
-export const PAST_VALIDATION_POLICY_REVISION = "unified_past_validation_stratified_14_v3";
+export const PAST_VALIDATION_POLICY_REVISION = "unified_past_validation_stratified_14_v4";
 
 export type ResolvedPastValidationPolicy = {
   owner: ValidationPolicyOwner;
@@ -164,6 +164,44 @@ export function storedValidationKeysLookLikeRecentTailCluster(args: {
 }
 
 /**
+ * True when auto-picked keys cluster at the start of a few season-month buckets
+ * (legacy stratified round-robin across overlapping season/weekday buckets).
+ */
+export function storedValidationKeysLookLikeSeasonMonthEdgeCluster(args: {
+  storedValidationDateKeysLocal: readonly string[];
+}): boolean {
+  const keys = Array.from(
+    new Set(
+      (args.storedValidationDateKeysLocal ?? [])
+        .map((dk) => String(dk ?? "").slice(0, 10))
+        .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
+    )
+  ).sort();
+  if (keys.length < 6) return false;
+
+  const groups = new Map<string, string[]>();
+  for (const dk of keys) {
+    const bucketKey = `${seasonFromDateKey(dk)}:${dk.slice(0, 7)}`;
+    if (!groups.has(bucketKey)) groups.set(bucketKey, []);
+    groups.get(bucketKey)!.push(dk);
+  }
+
+  let clusteredMonthGroups = 0;
+  let keysInClusteredGroups = 0;
+  for (const groupKeys of groups.values()) {
+    if (groupKeys.length < 3) continue;
+    const sorted = [...groupKeys].sort();
+    const spanDays = calendarDaysInclusive(sorted[0]!, sorted[sorted.length - 1]!);
+    if (spanDays <= 12) {
+      clusteredMonthGroups += 1;
+      keysInClusteredGroups += groupKeys.length;
+    }
+  }
+
+  return clusteredMonthGroups >= 2 && keysInClusteredGroups >= Math.ceil(keys.length * 0.5);
+}
+
+/**
  * True when auto-picked validation keys lack minimum weekday/weekend and season spread
  * expected from stratified_weather_balanced selection.
  */
@@ -204,6 +242,7 @@ export function shouldReconcilePastValidationSelection(args: {
   storedSelectionMode?: string | null;
   storedValidationKeyCount: number;
   storedValidationDateKeysLocal?: readonly string[];
+  storedPastValidationPolicyRevision?: string | null;
   timezone?: string | null;
   coverageEndDate?: string | null;
 }): boolean {
@@ -211,8 +250,10 @@ export function shouldReconcilePastValidationSelection(args: {
   const storedMode = normalizeValidationSelectionMode(args.storedSelectionMode);
   const keyCount = Math.max(0, Math.floor(Number(args.storedValidationKeyCount) || 0));
   const storedKeys = args.storedValidationDateKeysLocal ?? [];
+  const storedRevision = String(args.storedPastValidationPolicyRevision ?? "").trim();
 
   if (keyCount === 0) return true;
+  if (storedRevision && storedRevision !== PAST_VALIDATION_POLICY_REVISION) return true;
   if (storedMode === "manual") return keyCount !== canonical.validationDayCount;
   if (storedMode === "random_simple") return true;
   if (storedMode !== canonical.selectionMode) return true;
@@ -232,6 +273,14 @@ export function shouldReconcilePastValidationSelection(args: {
     storedValidationKeysLackCanonicalSpread({
       storedValidationDateKeysLocal: storedKeys,
       timezone: args.timezone,
+    })
+  ) {
+    return true;
+  }
+  if (
+    storedMode === canonical.selectionMode &&
+    storedValidationKeysLookLikeSeasonMonthEdgeCluster({
+      storedValidationDateKeysLocal: storedKeys,
     })
   ) {
     return true;

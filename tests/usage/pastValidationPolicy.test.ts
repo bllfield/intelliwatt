@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   CANONICAL_PAST_VALIDATION_DAY_COUNT,
   CANONICAL_PAST_VALIDATION_SELECTION_MODE,
+  PAST_VALIDATION_POLICY_REVISION,
   resolvePastValidationPolicy,
   resolvePastValidationEngineInput,
   resolveUserValidationPolicy,
   resolveAdminValidationPolicy,
   shouldReconcilePastValidationSelection,
+  storedValidationKeysLookLikeSeasonMonthEdgeCluster,
 } from "@/lib/usage/pastValidationPolicy";
 
 describe("pastValidationPolicy", () => {
@@ -118,6 +120,52 @@ describe("pastValidationPolicy", () => {
       shouldReconcilePastValidationSelection({
         storedSelectionMode: "manual",
         storedValidationKeyCount: CANONICAL_PAST_VALIDATION_DAY_COUNT,
+      })
+    ).toBe(false);
+  });
+
+  it("reconciles legacy season-month edge clusters and stale policy revisions", () => {
+    const legacyEdgeClusterKeys = [
+      "2025-06-05",
+      "2025-06-06",
+      "2025-06-07",
+      "2025-06-08",
+      "2025-06-09",
+      "2025-06-14",
+      "2025-09-01",
+      "2025-09-02",
+      "2025-09-03",
+      "2025-09-04",
+      "2025-12-01",
+      "2025-12-02",
+      "2025-12-03",
+      "2025-12-04",
+    ];
+    expect(
+      storedValidationKeysLookLikeSeasonMonthEdgeCluster({
+        storedValidationDateKeysLocal: legacyEdgeClusterKeys,
+      })
+    ).toBe(true);
+    expect(
+      shouldReconcilePastValidationSelection({
+        storedSelectionMode: "stratified_weather_balanced",
+        storedValidationKeyCount: CANONICAL_PAST_VALIDATION_DAY_COUNT,
+        storedValidationDateKeysLocal: legacyEdgeClusterKeys,
+        timezone: "America/Chicago",
+      })
+    ).toBe(true);
+    expect(
+      shouldReconcilePastValidationSelection({
+        storedSelectionMode: "stratified_weather_balanced",
+        storedValidationKeyCount: CANONICAL_PAST_VALIDATION_DAY_COUNT,
+        storedPastValidationPolicyRevision: "unified_past_validation_stratified_14_v3",
+      })
+    ).toBe(true);
+    expect(
+      shouldReconcilePastValidationSelection({
+        storedSelectionMode: "stratified_weather_balanced",
+        storedValidationKeyCount: CANONICAL_PAST_VALIDATION_DAY_COUNT,
+        storedPastValidationPolicyRevision: PAST_VALIDATION_POLICY_REVISION,
       })
     ).toBe(false);
   });
