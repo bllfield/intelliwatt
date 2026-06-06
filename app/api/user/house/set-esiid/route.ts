@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { cleanEsiid } from "@/lib/smt/esiid";
+import { syncHouseIdentifiersFromAuthorization } from "@/lib/house/syncIdentifiers";
 
 export const dynamic = "force-dynamic";
 
@@ -48,9 +49,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "House not found for user" }, { status: 404 });
     }
 
-    await prisma.houseAddress.update({
-      where: { id: house.id },
-      data: { esiid: cleaned },
+    await syncHouseIdentifiersFromAuthorization({
+      houseAddressId: house.id,
+      esiid: cleaned,
     });
 
     return NextResponse.json({ ok: true, esiid: cleaned });

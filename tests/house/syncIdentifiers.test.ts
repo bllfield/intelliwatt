@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const prisma = {
@@ -43,6 +44,26 @@ describe("syncHouseIdentifiersFromAuthorization", () => {
       where: { id: "house-b" },
       data: { esiid: "10400511114390001" },
     });
+  });
+
+  it("swallows esiid unique constraint races without throwing", async () => {
+    const uniqueError = new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+      code: "P2002",
+      clientVersion: "test",
+      meta: { target: ["esiid"] },
+    });
+    prisma.houseAddress.findFirst
+      .mockResolvedValueOnce({ id: "house-b", userId: "user-1", esiid: null })
+      .mockResolvedValueOnce(null);
+    prisma.houseAddress.update.mockRejectedValueOnce(uniqueError);
+
+    const { syncHouseIdentifiersFromAuthorization } = await import("@/lib/house/syncIdentifiers");
+    await expect(
+      syncHouseIdentifiersFromAuthorization({
+        houseAddressId: "house-b",
+        esiid: "10400511114390001",
+      })
+    ).resolves.toBeUndefined();
   });
 
   it("no-ops when target house already has the esiid", async () => {

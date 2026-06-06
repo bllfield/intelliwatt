@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { cleanEsiid } from "@/lib/smt/esiid";
 import { resolveAddressToEsiid } from "@/lib/resolver/addressToEsiid";
+import { syncHouseIdentifiersFromAuthorization } from "@/lib/house/syncIdentifiers";
 
 export const dynamic = "force-dynamic";
 
@@ -65,7 +66,6 @@ export async function POST(req: NextRequest) {
     const updates: Record<string, unknown> = {
       rawWattbuyJson: lookup.raw ?? undefined,
     };
-    if (nextEsiid) updates.esiid = nextEsiid;
     if (!house.tdspSlug && nextTdspSlug) updates.tdspSlug = nextTdspSlug;
     if (!house.utilityName && nextUtilityName) updates.utilityName = nextUtilityName;
 
@@ -73,6 +73,13 @@ export async function POST(req: NextRequest) {
       await prisma.houseAddress.update({
         where: { id: house.id },
         data: updates,
+      });
+    }
+
+    if (nextEsiid) {
+      await syncHouseIdentifiersFromAuthorization({
+        houseAddressId: house.id,
+        esiid: nextEsiid,
       });
     }
 

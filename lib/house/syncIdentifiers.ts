@@ -4,7 +4,21 @@ import { prisma } from "@/lib/db";
 import { cleanEsiid } from "@/lib/smt/esiid";
 
 function isEsiidUniqueConstraintError(error: unknown): boolean {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+  if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+    return true;
+  }
+  const code =
+    error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code ?? "") : "";
+  return code === "P2002";
+}
+
+function esiidLookupVariants(raw: string): string[] {
+  const cleaned = cleanEsiid(raw);
+  if (!cleaned) return [];
+  const variants = new Set<string>([cleaned, `'${cleaned}'`, `"${cleaned}"`]);
+  const digitsOnly = cleaned.replace(/\D/g, "");
+  if (digitsOnly) variants.add(digitsOnly);
+  return Array.from(variants);
 }
 
 export async function syncHouseIdentifiersFromAuthorization({
@@ -30,10 +44,10 @@ export async function syncHouseIdentifiersFromAuthorization({
 
   const conflicting = await prisma.houseAddress.findFirst({
     where: {
-      esiid: cleanedEsiid,
+      esiid: { in: esiidLookupVariants(cleanedEsiid) },
       id: { not: houseAddressId },
     },
-    select: { id: true, userId: true },
+    select: { id: true, userId: true, esiid: true },
   });
 
   if (conflicting) {

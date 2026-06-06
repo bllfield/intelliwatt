@@ -242,17 +242,22 @@ export async function resolveUserPastApiWeatherResponse(args: {
   };
 }
 
+function readDatasetMeta(dataset: unknown): Record<string, unknown> {
+  if (!dataset || typeof dataset !== "object" || Array.isArray(dataset)) return {};
+  return asRecord((dataset as { meta?: unknown }).meta);
+}
+
 export function resolvePastWeatherScoreFromHouseApiBody(args: {
   weatherSensitivityScore: unknown;
   weatherCardsSourceOwner?: string | null;
-  dataset?: { meta?: Record<string, unknown> } | null;
+  dataset?: unknown;
 }): {
   score: Record<string, unknown> | null;
   sourceField: string;
   sourceOwner: string;
   rejectedPreSimFallback: boolean;
 } {
-  const meta = asRecord(args.dataset?.meta);
+  const meta = readDatasetMeta(args.dataset);
   const pastDisplay = pastDisplayScoreFromMeta(meta);
   const preSim = readPreSimBuildDiagnosticScore(meta);
   const topLevel = asRecord(args.weatherSensitivityScore);
