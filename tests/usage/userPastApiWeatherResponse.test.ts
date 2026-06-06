@@ -98,6 +98,59 @@ describe("userPastApiWeatherResponse", () => {
     expect(resolved.score?.weatherEfficiencyScore0to100).toBe(51);
   });
 
+  it("client guard rejects stale past display that still matches pre-sim diagnostic", () => {
+    const resolved = resolvePastWeatherScoreFromHouseApiBody({
+      weatherSensitivityScore: preSimScore,
+      weatherCardsSourceOwner: "past_artifact_build",
+      dataset: {
+        meta: {
+          datasetKind: "SIMULATED",
+          weatherSensitivityScore: preSimScore,
+          pastDisplayWeatherSensitivityScore: preSimScore,
+        },
+      },
+    });
+
+    expect(resolved.rejectedPreSimFallback).toBe(true);
+    expect(resolved.score).toBeNull();
+    expect(resolved.sourceOwner).toBe("missing_past_display_weather");
+  });
+
+  it("API resolver forces past display attach when persisted bundle C matches pre-sim bundle B", async () => {
+    const dataset = {
+      summary: { source: "SIMULATED" },
+      daily: [{ date: "2025-04-10", kwh: 9, source: "SIMULATED" }],
+      meta: {
+        datasetKind: "SIMULATED",
+        weatherSensitivityScore: preSimScore,
+        pastDisplayWeatherSensitivityScore: {
+          ...preSimScore,
+          sourceOwner: "past_artifact_build",
+          displayOwner: "past_artifact_build",
+          scoringContext: "PAST_DISPLAY",
+        },
+      },
+    };
+
+    const resolved = await resolveUserPastApiWeatherResponse({
+      dataset,
+      scenarioName: "Past (Corrected)",
+      scenarioId: "past-s1",
+      requestedHouseId: "h1",
+      weatherHouseId: "h1",
+    });
+
+    expect(resolved.weatherReadPath).toBe("past_display_forced_attach");
+    expect(resolved.weatherSensitivity.score?.weatherEfficiencyScore0to100).toBe(51);
+    expect(resolved.diagnostics.ownerViolation).toBeNull();
+    expect(
+      (dataset.meta as Record<string, unknown>).pastDisplayWeatherSensitivityScore
+    ).toMatchObject({
+      weatherEfficiencyScore0to100: 51,
+      sourceOwner: "past_artifact_build",
+    });
+  });
+
   it("API resolver forces past display attach when artifact only has pre-sim diagnostic", async () => {
     const dataset = {
       summary: { source: "SIMULATED" },

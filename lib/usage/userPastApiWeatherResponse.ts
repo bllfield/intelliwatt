@@ -14,10 +14,12 @@ import {
 import {
   buildWeatherScoringAudit,
   detectPastVisibleWeatherOwnerViolation,
+  pastDisplayScoreMatchesPreSimDiagnostic,
   PAST_DISPLAY_WEATHER_META_FIELD as PAST_DISPLAY_FIELD,
   readPreSimBuildDiagnosticScore,
   resolveUsageSourceTypeFromDataset,
   scoreCardValues,
+  weatherScoreCardValuesMatch,
   type WeatherScoringAudit,
 } from "@/lib/usage/weatherScoringOwnership";
 
@@ -90,6 +92,10 @@ function shouldForcePastDisplayWeatherRecompute(args: {
     actualBaselineScore: null,
   });
   if (ownerViolation) return ownerViolation;
+
+  if (pastDisplayScoreMatchesPreSimDiagnostic(args.meta)) {
+    return "Persisted past display weather matches pre-sim build diagnostic (stale bundle C)";
+  }
 
   const visible = scoreCardValues(args.visibleScore);
   const preSimValues = scoreCardValues(preSim);
@@ -267,6 +273,10 @@ export function resolvePastWeatherScoreFromHouseApiBody(args: {
     const topValues = scoreCardValues(topLevel);
     const preSimValues = scoreCardValues(preSim);
     const pastDisplayValues = scoreCardValues(pastDisplay);
+    const pastDisplayMatchesPreSim =
+      pastDisplay != null &&
+      preSimValues.weatherEfficiency != null &&
+      weatherScoreCardValuesMatch(pastDisplay, preSim);
     const rejectedPreSimFallback =
       preSimValues.weatherEfficiency != null &&
       topValues.weatherEfficiency === preSimValues.weatherEfficiency &&
@@ -275,10 +285,11 @@ export function resolvePastWeatherScoreFromHouseApiBody(args: {
       topValues.confidence === preSimValues.confidence &&
       (pastDisplay == null ||
         pastDisplayValues.weatherEfficiency == null ||
-        topValues.weatherEfficiency !== pastDisplayValues.weatherEfficiency);
+        topValues.weatherEfficiency !== pastDisplayValues.weatherEfficiency ||
+        pastDisplayMatchesPreSim);
 
     if (rejectedPreSimFallback) {
-      if (pastDisplay) {
+      if (pastDisplay && !pastDisplayMatchesPreSim) {
         return {
           score: pastDisplay,
           sourceField: PAST_DISPLAY_FIELD,

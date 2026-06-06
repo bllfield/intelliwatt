@@ -535,6 +535,33 @@ export function readPreSimBuildDiagnosticScore(
   return Object.keys(preSim).length > 0 ? preSim : null;
 }
 
+export function weatherScoreCardValuesMatch(
+  left: unknown,
+  right: unknown
+): boolean {
+  const a = scoreCardValues(left);
+  const b = scoreCardValues(right);
+  if (a.weatherEfficiency == null || b.weatherEfficiency == null) return false;
+  return (
+    a.weatherEfficiency === b.weatherEfficiency &&
+    a.cooling === b.cooling &&
+    a.heating === b.heating &&
+    a.confidence === b.confidence
+  );
+}
+
+/** Persisted bundle C that still matches pre-sim bundle B was scored before display truth / stitched daily rows. */
+export function pastDisplayScoreMatchesPreSimDiagnostic(
+  meta: Record<string, unknown> | null | undefined
+): boolean {
+  const record = asRecord(meta);
+  const pastDisplay = asRecord(record.pastDisplayWeatherSensitivityScore);
+  if (Object.keys(pastDisplay).length === 0) return false;
+  const preSim = readPreSimBuildDiagnosticScore(record);
+  if (!preSim) return false;
+  return weatherScoreCardValuesMatch(pastDisplay, preSim);
+}
+
 export function scoreCardValues(score: unknown): {
   weatherEfficiency: number | null;
   cooling: number | null;
@@ -583,6 +610,15 @@ export function detectPastVisibleWeatherOwnerViolation(args: {
     visible.heating === pastDisplay.heating &&
     visible.confidence === pastDisplay.confidence
   ) {
+    if (
+      preSim.weatherEfficiency != null &&
+      pastDisplay.weatherEfficiency === preSim.weatherEfficiency &&
+      pastDisplay.cooling === preSim.cooling &&
+      pastDisplay.heating === preSim.heating &&
+      pastDisplay.confidence === preSim.confidence
+    ) {
+      return "Persisted past display weather matches pre-sim build diagnostic (stale bundle C)";
+    }
     return null;
   }
 

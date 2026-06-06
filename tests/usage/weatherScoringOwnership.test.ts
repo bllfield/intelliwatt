@@ -215,6 +215,24 @@ describe("weatherScoringOwnership", () => {
     expect(parity.weatherScoringAudit?.displayOwner).toBe("past_artifact_build");
   });
 
+  it("flags stale persisted past display that still matches pre-sim diagnostic", () => {
+    const meta = pastDisplayDatasetFixture("SMT").meta as Record<string, unknown>;
+    const preSim = meta.weatherSensitivityScore as Record<string, unknown>;
+    meta.pastDisplayWeatherSensitivityScore = {
+      ...preSim,
+      sourceOwner: "past_artifact_build",
+      displayOwner: "past_artifact_build",
+      scoringContext: "PAST_DISPLAY",
+    };
+
+    const violation = detectPastVisibleWeatherOwnerViolation({
+      meta,
+      visibleScore: meta.pastDisplayWeatherSensitivityScore,
+      visibleSourceOwner: "past_artifact_build",
+    });
+    expect(violation).toContain("stale bundle C");
+  });
+
   it("does not expose simulation_build_diagnostic as visible SMT Past weather", () => {
     const meta = pastDisplayDatasetFixture("SMT").meta as Record<string, unknown>;
     const violation = detectPastVisibleWeatherOwnerViolation({

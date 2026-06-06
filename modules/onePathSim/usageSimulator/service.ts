@@ -17,7 +17,10 @@ import {
 } from "@/lib/usage/actualDatasetForHouse";
 import { redistributeGreenButtonGridZeroSamples } from "@/modules/onePathSim/greenButtonIntervalCorrections";
 import { isSimulatedDailySourceForCompare } from "@/lib/usage/dailySourceNotation";
-import { resolveStaleIncompleteMeterSlotCompleteDateKeys } from "@/lib/usage/pastSimStaleIncompleteMeter";
+import {
+  applyPastSimDisplayTruthToDataset,
+  resolveStaleIncompleteMeterSlotCompleteDateKeys,
+} from "@/lib/usage/pastSimStaleIncompleteMeter";
 import { attachPastSimDisplayWeatherToDataset } from "@/lib/usage/pastSimDisplayWeather";
 import {
   buildWeatherWindowCoverageAudit,
@@ -37,6 +40,7 @@ import {
 import { finalizeGreenButtonValidationCompareTruthSync } from "@/lib/usage/greenButtonPastValidationCompareTruth";
 import {
   expandGreenButtonPastTrustedHomeDateKeysWithShiftedTargets,
+  readGreenButtonTrustedHomeDateKeysFromPastMeta,
   resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals,
 } from "@/lib/usage/greenButtonPastTrustedPool";
 import { resolvePastSimTravelRangesForRecalc } from "@/lib/usage/pastSimTravelRanges";
@@ -6613,12 +6617,19 @@ async function recalcSimulatorBuildImpl(args: {
       reconcilePastDatasetDisplayTotals(dataset as Record<string, unknown>);
       syncPastSimDisplayInsightsFromCanonicalIntervals(dataset as Record<string, unknown>);
       reconcilePastDatasetDisplayTotals(dataset as Record<string, unknown>);
+      applyPastSimDisplayTruthToDataset(dataset as Record<string, unknown>, {
+        greenButtonTrustedHomeDateKeys: readGreenButtonTrustedHomeDateKeysFromPastMeta(
+          (dataset as any)?.meta
+        ),
+      });
+      reconcilePastDatasetDisplayTotals(dataset as Record<string, unknown>);
       await attachPastSimDisplayWeatherToDataset({
         dataset: dataset as Record<string, unknown>,
         homeProfile: homeProfile as any,
         applianceProfile: applianceProfile as any,
-        weatherHouseId: houseId,
+        weatherHouseId: actualContextHouseId ?? houseId,
         preferredActualSource: preferredActualSource ?? null,
+        forceRecompute: true,
       });
       const datasetJsonForStorage = buildPastArtifactDatasetJsonForStorage({
         dataset: {

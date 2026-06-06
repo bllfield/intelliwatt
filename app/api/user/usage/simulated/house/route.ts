@@ -22,7 +22,11 @@ import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/vali
 import { getManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
 import type { WeatherSensitivityEnvelope } from "@/modules/weatherSensitivity/shared";
 import { hasPersistedPastDisplayWeatherScore } from "@/lib/usage/pastSimDisplayWeather";
-import { buildWeatherScoringAudit, resolveActualUsageWeatherScore } from "@/lib/usage/weatherScoringOwnership";
+import {
+  buildWeatherScoringAudit,
+  pastDisplayScoreMatchesPreSimDiagnostic,
+  resolveActualUsageWeatherScore,
+} from "@/lib/usage/weatherScoringOwnership";
 import { shouldUsePastDisplayWeatherCards } from "@/lib/usage/userPastVisibleWeather";
 import { resolveUserPastApiWeatherResponse } from "@/lib/usage/userPastApiWeatherResponse";
 
@@ -238,7 +242,23 @@ export async function GET(request: NextRequest) {
         scenarioName: scenarioRow?.name ?? null,
         meta: datasetAny?.meta,
       });
-      const warmPastDisplayWeather = usePastDisplayWeather && hasPersistedPastDisplayWeatherScore(datasetAny);
+      const datasetMeta =
+        datasetAny?.meta && typeof datasetAny.meta === "object"
+          ? (datasetAny.meta as Record<string, unknown>)
+          : ({} as Record<string, unknown>);
+      const lockboxRunContext =
+        datasetMeta.lockboxRunContext && typeof datasetMeta.lockboxRunContext === "object"
+          ? (datasetMeta.lockboxRunContext as Record<string, unknown>)
+          : ({} as Record<string, unknown>);
+      const pastWeatherHouseId =
+        String(datasetMeta.actualContextHouseId ?? lockboxRunContext.actualContextHouseId ?? houseId).trim() ||
+        houseId;
+      const stalePersistedPastDisplayWeather =
+        usePastDisplayWeather && pastDisplayScoreMatchesPreSimDiagnostic(datasetMeta);
+      const warmPastDisplayWeather =
+        usePastDisplayWeather &&
+        hasPersistedPastDisplayWeatherScore(datasetAny) &&
+        !stalePersistedPastDisplayWeather;
       const [homeProfile, applianceProfileRec, manualUsageRec, sageTruth, smtSlotCompleteDateKeys] =
         await Promise.all([
           warmPastDisplayWeather
@@ -273,7 +293,7 @@ export async function GET(request: NextRequest) {
         smtSlotCompleteDateKeys,
         homeProfile,
         applianceProfile,
-        weatherHouseId: houseId,
+        weatherHouseId: pastWeatherHouseId,
         skipWeatherRecompute: warmPastDisplayWeather,
       });
       let weatherSensitivity: WeatherSensitivityEnvelope;
@@ -302,7 +322,7 @@ export async function GET(request: NextRequest) {
           preferredActualSource: preferredActualSource ?? null,
           homeProfile: resolvedHomeProfile,
           applianceProfile: resolvedApplianceProfile,
-          weatherHouseId: houseId,
+          weatherHouseId: pastWeatherHouseId,
         });
         weatherSensitivity = pastWeather.weatherSensitivity;
         weatherScoringAudit = pastWeather.weatherScoringAudit;

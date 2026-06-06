@@ -4,6 +4,7 @@ import {
 } from "@/modules/weatherSensitivity/shared";
 import {
   PAST_DISPLAY_WEATHER_META_FIELD,
+  pastDisplayScoreMatchesPreSimDiagnostic,
   persistPastDisplayWeatherScoringAudit,
   resolvePastDisplayWeatherScore,
 } from "@/lib/usage/weatherScoringOwnership";
@@ -49,7 +50,11 @@ export async function attachPastSimDisplayWeatherToDataset(args: {
   preferredActualSource?: string | null;
   forceRecompute?: boolean;
 }): Promise<WeatherSensitivityEnvelope> {
-  if (!args.forceRecompute && hasPersistedPastDisplayWeatherScore(args.dataset)) {
+  const metaBeforeAttach = asRecord(args.dataset.meta);
+  const stalePersistedPastDisplay =
+    hasPersistedPastDisplayWeatherScore(args.dataset) &&
+    pastDisplayScoreMatchesPreSimDiagnostic(metaBeforeAttach);
+  if (!args.forceRecompute && hasPersistedPastDisplayWeatherScore(args.dataset) && !stalePersistedPastDisplay) {
     const meta = asRecord(args.dataset.meta);
     meta.displayWeatherCardsSourceOwner =
       String(asRecord(meta.pastDisplayWeatherSensitivityScore).sourceOwner ?? "").trim() ||

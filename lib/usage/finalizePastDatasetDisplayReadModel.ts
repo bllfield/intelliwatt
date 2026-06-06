@@ -6,6 +6,7 @@ import {
   attachPastSimDisplayWeatherToDataset,
   hasPersistedPastDisplayWeatherScore,
 } from "@/lib/usage/pastSimDisplayWeather";
+import { pastDisplayScoreMatchesPreSimDiagnostic } from "@/lib/usage/weatherScoringOwnership";
 import { reconcilePastDatasetDisplayTotals } from "@/lib/usage/reconcilePastDatasetDisplayTotals";
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -43,7 +44,9 @@ export async function finalizePastDatasetDisplayReadModel(args: {
   reconcilePastDatasetDisplayTotals(dataset);
 
   const refreshedMeta = asRecord(dataset.meta);
-  if (hasPersistedPastDisplayWeatherScore(dataset)) {
+  const stalePersistedPastDisplay =
+    hasPersistedPastDisplayWeatherScore(dataset) && pastDisplayScoreMatchesPreSimDiagnostic(refreshedMeta);
+  if (hasPersistedPastDisplayWeatherScore(dataset) && !stalePersistedPastDisplay) {
     refreshedMeta.displayWeatherCardsSourceOwner =
       String(asRecord(refreshedMeta.pastDisplayWeatherSensitivityScore).sourceOwner ?? "").trim() ||
       "past_artifact_build";
@@ -53,7 +56,7 @@ export async function finalizePastDatasetDisplayReadModel(args: {
     return;
   }
 
-  if (args.skipWeatherRecompute) return;
+  if (args.skipWeatherRecompute && !stalePersistedPastDisplay) return;
 
   const pastDisplayWeather = asRecord(refreshedMeta.pastDisplayWeatherSensitivityScore);
   if (
