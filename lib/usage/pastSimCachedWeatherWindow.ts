@@ -1,7 +1,7 @@
 import { enumerateDateKeysInclusive } from "@/lib/time/chicago";
 import { getHouseWeatherDays } from "@/modules/weather/repo";
 import { WEATHER_STUB_SOURCE } from "@/modules/weather/types";
-import type { WeatherKind } from "@/modules/weather/types";
+import type { DayWeather, WeatherKind } from "@/modules/weather/types";
 import {
   resolveWeatherKindForLogicMode,
   type WeatherLogicMode,
@@ -93,8 +93,8 @@ export function readDailyWeatherFromDataset(
 export function dailyWeatherRecordToHouseWeatherMap(
   record: Record<string, CanonicalDailyWeatherRow>,
   args: { houseId: string; kind: WeatherKind }
-): Map<string, ReturnType<typeof getHouseWeatherDays> extends Map<string, infer T> ? T : never> {
-  const out = new Map<string, any>();
+): Map<string, DayWeather> {
+  const out = new Map<string, DayWeather>();
   for (const [dateKey, row] of Object.entries(record)) {
     out.set(dateKey, {
       houseId: args.houseId,

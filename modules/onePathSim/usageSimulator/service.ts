@@ -4796,9 +4796,7 @@ async function recalcSimulatorBuildImpl(args: {
         startDateKey: coverageWindow.startDate,
         endDateKey: coverageWindow.endDate,
         timezone: "America/Chicago",
-        weatherLogicMode: resolveWeatherLogicModeFromBuildInputs(
-          (args.buildInputs ?? {}) as Record<string, unknown>
-        ),
+        weatherLogicMode: resolveWeatherLogicModeFromBuildInputs({}),
       });
       recalcWeatherWindowAudit = buildWeatherWindowCoverageAudit(preSimWeatherCoverage);
       if (preSimWeatherCoverage.complete) {
@@ -5878,7 +5876,7 @@ async function recalcSimulatorBuildImpl(args: {
         ...(preloadedActualIntervalsForSim != null ? { actualIntervals: preloadedActualIntervalsForSim } : {}),
         ...(preloadedSelectedDailyWeather ? { preloadedSelectedDailyWeather } : {}),
       });
-      if (result.weatherLoadAudit) {
+      if (result.dataset !== null && "weatherLoadAudit" in result && result.weatherLoadAudit) {
         recalcWeatherWindowAudit = result.weatherLoadAudit.weatherWindowCoverage;
         recalcWeatherActualDatasetLoadSkipped = result.weatherLoadAudit.weatherActualDatasetLoadSkipped;
       }

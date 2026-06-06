@@ -277,7 +277,9 @@ export function buildUsageParityAudit(args: {
           pass: true,
           user: { weatherEfficiency: null, cooling: null, heating: null, confidence: null },
           admin: { weatherEfficiency: null, cooling: null, heating: null, confidence: null },
-          sourceOwner: "meta.pastDisplayWeatherSensitivityScore",
+          sourceOwner: "user_past_visible_api_weather",
+          userVisibleSourceOwner: "not_past_workspace",
+          adminVisibleSourceOwner: "missing_admin_read_model",
         },
       };
 
@@ -330,7 +332,7 @@ export function buildUsageParityAudit(args: {
       tolerance: 0,
       sourceOwner: pastReadModelAudit.weatherCards.sourceOwner,
       userVisibleSourceOwner: userPastVisibleWeather?.sourceOwner ?? null,
-      adminVisibleSourceOwner: pastReadModelAudit.weatherCards.adminSourceOwner ?? null,
+      adminVisibleSourceOwner: pastReadModelAudit.weatherCards.adminVisibleSourceOwner ?? null,
     },
     readModelAudit: {
       pass: pastReadModelAudit.ok,
