@@ -184,9 +184,9 @@ function TruthSummaryPanel(props: {
 }
 
 function resolveLookupDefaultPresetKey(json: LookupResponse): string {
-  const sourceContext = asRecord(json.sourceContext);
+  const sourceContext = asRecord(json.sourceContext) ?? {};
   const committed = String(sourceContext.committedUsageSource ?? "").trim();
-  const manualPayload = asRecord(sourceContext.manualUsagePayload);
+  const manualPayload = asRecord(sourceContext.manualUsagePayload) ?? {};
   const manualMode = String(manualPayload.mode ?? "").trim();
   return resolveDefaultPastPresetKeyForCommittedSource({
     committedUsageSource:

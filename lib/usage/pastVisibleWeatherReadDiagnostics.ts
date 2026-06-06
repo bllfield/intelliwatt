@@ -16,6 +16,11 @@ function asDateKey(value: unknown): string | null {
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
 }
 
+export type PastDisplayWeatherReadPath =
+  | "past_display_artifact_warm"
+  | "past_display_finalize_recompute"
+  | "past_display_missing";
+
 export type PastVisibleWeatherReadDiagnostics = {
   routeOwner: string;
   artifactId: string | null;
@@ -34,7 +39,7 @@ export type PastVisibleWeatherReadDiagnostics = {
   datasetMetaWeatherSensitivityScore: Record<string, unknown> | null;
   weatherScoringAudit: WeatherScoringAudit | null;
   weatherCardsSourceOwner: string | null;
-  weatherReadPath: string;
+  weatherReadPath: PastDisplayWeatherReadPath;
   displayTruthRevision: string | null;
   displayWeatherRecomputeCount: number | null;
   pastDisplayWeatherCachePersisted: boolean;
@@ -86,7 +91,7 @@ export function buildPastVisibleWeatherReadDiagnostics(args: {
   topLevelWeatherSensitivityScore?: unknown;
   weatherCardsSourceOwner?: string | null;
   weatherScoringAudit?: WeatherScoringAudit | null;
-  weatherReadPath: string;
+  weatherReadPath: PastDisplayWeatherReadPath;
 }): PastVisibleWeatherReadDiagnostics {
   const meta = asRecord(args.dataset.meta);
   const identity = readArtifactIdentity(meta);
@@ -189,7 +194,7 @@ export function resolvePreferredActualSourceFromDataset(dataset: Record<string, 
   return preferred || null;
 }
 
-export function pastDisplayWeatherReadPathFromMeta(meta: Record<string, unknown>): string {
+export function pastDisplayWeatherReadPathFromMeta(meta: Record<string, unknown>): PastDisplayWeatherReadPath {
   const recomputeCount = Number(meta.displayWeatherRecomputeCount);
   if (Number.isFinite(recomputeCount) && recomputeCount > 0) {
     return "past_display_finalize_recompute";

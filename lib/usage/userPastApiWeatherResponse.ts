@@ -7,6 +7,7 @@ import {
   buildPastVisibleWeatherReadDiagnostics,
   pastDisplayWeatherReadPathFromMeta,
   resolvePastVisibleWeatherEnvelopeFromDataset,
+  type PastDisplayWeatherReadPath,
   type PastVisibleWeatherReadDiagnostics,
 } from "@/lib/usage/pastVisibleWeatherReadDiagnostics";
 import {
@@ -45,7 +46,7 @@ export async function resolveUserPastApiWeatherResponse(args: {
   weatherSensitivity: WeatherSensitivityEnvelope;
   weatherCardsSourceOwner: string;
   weatherScoringAudit: WeatherScoringAudit;
-  weatherReadPath: string;
+  weatherReadPath: PastDisplayWeatherReadPath;
   diagnostics: PastVisibleWeatherReadDiagnostics;
 }> {
   const dataset = args.dataset;

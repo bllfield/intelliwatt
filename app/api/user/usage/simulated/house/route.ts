@@ -28,6 +28,7 @@ import {
 import { readGreenButtonTrustedHomeDateKeysFromPastMeta } from "@/lib/usage/greenButtonPastTrustedPool";
 import {
   resolvePastWeatherHouseIdFromDataset,
+  type PastDisplayWeatherReadPath,
 } from "@/lib/usage/pastVisibleWeatherReadDiagnostics";
 import { shouldUsePastDisplayWeatherCards } from "@/lib/usage/userPastVisibleWeather";
 import { resolveUserPastApiWeatherResponse } from "@/lib/usage/userPastApiWeatherResponse";
@@ -285,7 +286,8 @@ export async function GET(request: NextRequest) {
       let weatherSensitivity: WeatherSensitivityEnvelope;
       let weatherScoringAudit: Awaited<ReturnType<typeof resolveUserPastApiWeatherResponse>>["weatherScoringAudit"];
       let weatherCardsSourceOwner = "actual_usage_weather_score";
-      let weatherReadPath = finalizeOutcome?.weatherReadPath ?? "past_display_finalize_recompute";
+      let weatherReadPath: PastDisplayWeatherReadPath =
+        finalizeOutcome?.weatherReadPath ?? "past_display_finalize_recompute";
       let pastWeatherDiagnostics: Awaited<
         ReturnType<typeof resolveUserPastApiWeatherResponse>
       >["diagnostics"] | null = null;
