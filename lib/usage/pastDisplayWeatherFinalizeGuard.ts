@@ -16,7 +16,7 @@ import {
   PAST_DISPLAY_WEATHER_META_FIELD,
 } from "@/lib/usage/weatherScoringOwnership";
 
-export const PAST_DISPLAY_WEATHER_FINALIZE_VERSION = "past_display_weather_finalize_v1";
+export const PAST_DISPLAY_WEATHER_FINALIZE_VERSION = "past_display_weather_finalize_v2";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};

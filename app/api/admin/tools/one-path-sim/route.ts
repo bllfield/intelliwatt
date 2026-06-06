@@ -719,9 +719,11 @@ async function preparePastArtifactDatasetForDisplay(args: {
   const lockbox = asRecord(meta.lockboxRunContext) ?? {};
   const weatherHouseId =
     String(meta.actualContextHouseId ?? lockbox.actualContextHouseId ?? args.houseId).trim() || args.houseId;
+  // Score Past display weather with source-house profiles (same as user Past route), not the pinned test home.
+  const profileHouseId = weatherHouseId;
   const [homeProfile, applianceProfileRec] = await Promise.all([
-    getHomeProfileSimulatedByUserHouse({ userId: args.userId, houseId: args.houseId }),
-    getApplianceProfileSimulatedByUserHouse({ userId: args.userId, houseId: args.houseId }),
+    getHomeProfileSimulatedByUserHouse({ userId: args.userId, houseId: profileHouseId }),
+    getApplianceProfileSimulatedByUserHouse({ userId: args.userId, houseId: profileHouseId }),
   ]);
   const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRec?.appliancesJson as any) ?? null);
   const greenButtonTrustedHomeDateKeys = readGreenButtonTrustedHomeDateKeysFromPastMeta(meta);

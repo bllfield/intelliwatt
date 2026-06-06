@@ -249,10 +249,11 @@ export async function GET(request: NextRequest) {
         dataset: datasetAny,
         fallbackHouseId: houseId,
       });
+      const profileHouseId = pastWeatherHouseId;
       const [homeProfile, applianceProfileRec, manualUsageRec, sageTruth, smtSlotCompleteDateKeys] =
         await Promise.all([
-          getHomeProfileSimulatedByUserHouse({ userId: u.user.id, houseId }),
-          getApplianceProfileSimulatedByUserHouse({ userId: u.user.id, houseId }),
+          getHomeProfileSimulatedByUserHouse({ userId: u.user.id, houseId: profileHouseId }),
+          getApplianceProfileSimulatedByUserHouse({ userId: u.user.id, houseId: profileHouseId }),
           getManualUsageInputForUserHouse({ userId: u.user.id, houseId }).catch(() => ({ payload: null })),
           resolveOnePathUpstreamUsageTruthForSimulation({
             userId: u.user.id,

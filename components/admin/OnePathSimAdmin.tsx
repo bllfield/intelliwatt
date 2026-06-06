@@ -14,6 +14,7 @@ import {
 import { buildOnePathSandboxHarnessSummary } from "@/modules/onePathSim/adminHarnessSummary";
 import { formatAdminToolErrorMessage } from "@/lib/admin/formatAdminToolError";
 import { buildOnePathTuningCycleSummary } from "@/modules/onePathSim/tuningCycleSummary";
+import type { WeatherSensitivityScore } from "@/modules/weatherSensitivity/shared";
 import {
   buildKnownScenarioHarnessRunControls,
   readTravelRangesFromLookupSourceContext,
@@ -2011,6 +2012,7 @@ export function OnePathSimAdmin() {
               readModel={asRecord(runResult?.readModel)}
               runType={displayRunType}
               pastWeatherDiagnostics={asRecord(runResult?.pastWeatherDiagnostics)}
+              topLevelWeatherScore={(runResult?.weatherSensitivityScore as WeatherSensitivityScore | null) ?? null}
             />
           </div>
         ) : shouldRenderLookupBaselineView ? (

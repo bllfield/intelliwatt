@@ -60,6 +60,7 @@ export function OnePathRunReadOnlyView(props: {
   readModel?: Record<string, unknown> | null;
   runType?: string | null;
   pastWeatherDiagnostics?: Record<string, unknown> | null;
+  topLevelWeatherScore?: WeatherSensitivityScore | null;
 }) {
   const [monthlyView, setMonthlyView] = useState<"chart" | "table">("chart");
   const [dailyView, setDailyView] = useState<"chart" | "table">("chart");
@@ -86,9 +87,8 @@ export function OnePathRunReadOnlyView(props: {
   const datasetMeta = asRecord(props.dataset?.meta);
   const isPastSimulatedDisplay =
     datasetMeta?.datasetKind === "SIMULATED" && datasetMeta?.baselinePassthrough !== true;
-  // Past cards must come from finalized dataset meta (bundle C), not a stale runDisplayView snapshot.
-  const view =
-    isPastSimulatedDisplay && derivedView ? derivedView : suppliedView ?? derivedView;
+  // Past charts may rebuild client-side, but visible weather must follow the server-finalized bundle C.
+  const view = suppliedView ?? derivedView;
 
   const visibleWeatherScore = useMemo(() => {
     if (!view) return null;
@@ -98,17 +98,30 @@ export function OnePathRunReadOnlyView(props: {
       return diagnosticsVisible as WeatherSensitivityScore;
     }
     const guarded = resolvePastWeatherScoreFromHouseApiBody({
-      weatherSensitivityScore: view.weatherScore,
+      weatherSensitivityScore:
+        props.topLevelWeatherScore ?? suppliedView?.weatherScore ?? view.weatherScore,
       weatherCardsSourceOwner:
-        String(datasetMeta?.displayWeatherCardsSourceOwner ?? props.pastWeatherDiagnostics?.weatherCardsSourceOwner ?? ""),
+        String(
+          props.pastWeatherDiagnostics?.weatherCardsSourceOwner ??
+            datasetMeta?.displayWeatherCardsSourceOwner ??
+            ""
+        ),
       dataset: props.dataset,
     });
-    return (guarded.score as WeatherSensitivityScore | null) ?? view.weatherScore ?? null;
+    return (
+      (guarded.score as WeatherSensitivityScore | null) ??
+      props.topLevelWeatherScore ??
+      suppliedView?.weatherScore ??
+      view.weatherScore ??
+      null
+    );
   }, [
     datasetMeta?.displayWeatherCardsSourceOwner,
     isPastSimulatedDisplay,
     props.dataset,
     props.pastWeatherDiagnostics,
+    props.topLevelWeatherScore,
+    suppliedView?.weatherScore,
     view,
   ]);
 
