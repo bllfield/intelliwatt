@@ -8,7 +8,10 @@ import {
   buildAdminPastWeatherApiFields,
   resolvePastVisibleWeatherScore,
 } from "@/lib/usage/resolvePastVisibleWeatherScore";
-import { resolvePastWeatherHouseIdFromDataset } from "@/lib/usage/pastVisibleWeatherReadDiagnostics";
+import {
+  resolvePastProfileLoadContext,
+  resolvePastWeatherHouseIdFromDataset,
+} from "@/lib/usage/pastVisibleWeatherReadDiagnostics";
 import { resolveStaleIncompleteMeterSlotCompleteDateKeys } from "@/lib/usage/pastSimStaleIncompleteMeter";
 import { sageActualDailyRowsFromDataset } from "@/lib/usage/sageActualDailyTruth";
 import { buildUserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
@@ -714,16 +717,27 @@ async function preparePastArtifactDatasetForDisplay(args: {
   dataset: Record<string, unknown> | null | undefined;
   sageActualDataset?: Record<string, unknown> | null;
   smtSlotCompleteDateKeys?: ReadonlySet<string>;
+  linkedSourceUserId?: string | null;
+  persistDisplayWeatherToCache?: boolean;
 }): Promise<PastDisplayWeatherFinalizeOutcome | null> {
   if (!args.dataset) return null;
   const meta = asRecord(args.dataset.meta) ?? {};
-  const weatherHouseId = resolvePastWeatherHouseIdFromDataset({
+  const profileLoad = resolvePastProfileLoadContext({
     dataset: args.dataset,
-    fallbackHouseId: args.houseId,
+    requestUserId: args.userId,
+    requestHouseId: args.houseId,
+    sourceUserId: args.linkedSourceUserId,
   });
+  const weatherHouseId = profileLoad.profileHouseId;
   const [homeProfile, applianceProfileRec] = await Promise.all([
-    getHomeProfileSimulatedByUserHouse({ userId: args.userId, houseId: weatherHouseId }),
-    getApplianceProfileSimulatedByUserHouse({ userId: args.userId, houseId: weatherHouseId }),
+    getHomeProfileSimulatedByUserHouse({
+      userId: profileLoad.profileUserId,
+      houseId: profileLoad.profileHouseId,
+    }),
+    getApplianceProfileSimulatedByUserHouse({
+      userId: profileLoad.profileUserId,
+      houseId: profileLoad.profileHouseId,
+    }),
   ]);
   const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRec?.appliancesJson as any) ?? null);
   const greenButtonTrustedHomeDateKeys = readGreenButtonTrustedHomeDateKeysFromPastMeta(meta);
@@ -738,7 +752,7 @@ async function preparePastArtifactDatasetForDisplay(args: {
     weatherHouseId,
     fallbackHouseId: args.houseId,
     scenarioId: String(args.scenarioId ?? meta.scenarioId ?? meta.artifactScenarioId ?? "").trim() || undefined,
-    persistDisplayWeatherToCache: true,
+    persistDisplayWeatherToCache: args.persistDisplayWeatherToCache === true,
   });
 }
 
@@ -939,6 +953,8 @@ async function buildPastSimRunReadbackResponse(args: {
     dataset: asRecord(readback.dataset),
     sageActualDataset: asRecord(sageTruth?.dataset),
     smtSlotCompleteDateKeys: sageDisplayArgs.smtSlotCompleteDateKeys,
+    linkedSourceUserId: args.linkedSourceUserId,
+    persistDisplayWeatherToCache: false,
   });
   const artifactDataset = asRecord(readback.dataset) ?? {};
   const pastWeather = resolveAdminPastWeatherResponse({
@@ -2488,6 +2504,8 @@ export async function POST(request: NextRequest) {
           dataset: artifactDataset,
           sageActualDataset: asRecord(sageTruthForPastDisplay?.dataset),
           smtSlotCompleteDateKeys: sageDisplayArgsForPast.smtSlotCompleteDateKeys,
+          linkedSourceUserId: onePathTestHomeState.linkedSourceUserId,
+          persistDisplayWeatherToCache: effectiveRawInputBase.persistRequested !== false,
         });
         const compactPastWeather =
           effectiveRawInputBase.scenarioId != null && artifactDataset
@@ -2585,6 +2603,8 @@ export async function POST(request: NextRequest) {
           dataset: asRecord(manualPastReadResult.displayDataset),
           sageActualDataset: asRecord(actualDatasetForManualRun),
           smtSlotCompleteDateKeys: manualSageDisplayArgs.smtSlotCompleteDateKeys,
+          linkedSourceUserId: onePathTestHomeState.linkedSourceUserId,
+          persistDisplayWeatherToCache: effectiveRawInputBase.persistRequested !== false,
         });
       } else if (effectiveRawInputBase.scenarioId) {
         runFinalizeOutcome = await preparePastArtifactDatasetForDisplay({
@@ -2594,6 +2614,8 @@ export async function POST(request: NextRequest) {
           dataset: asRecord(readModel.dataset),
           sageActualDataset: asRecord(sageTruthForPastDisplay?.dataset),
           smtSlotCompleteDateKeys: sageDisplayArgsForPast.smtSlotCompleteDateKeys,
+          linkedSourceUserId: onePathTestHomeState.linkedSourceUserId,
+          persistDisplayWeatherToCache: effectiveRawInputBase.persistRequested !== false,
         });
       }
       const manualRunDisplayView =

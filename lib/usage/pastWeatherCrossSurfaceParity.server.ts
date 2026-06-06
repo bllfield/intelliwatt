@@ -3,6 +3,7 @@ import "server-only";
 import {
   auditPastWeatherInputParity,
   buildPastWeatherCrossSurfaceAcceptanceProof,
+  buildPastWeatherInputFingerprint,
   computeSimulatedProfileFingerprint,
 } from "@/lib/usage/pastWeatherInputParity";
 import { auditUserAdminPastReadModelParity } from "@/lib/usage/intervalReadModelInvariants";
@@ -28,9 +29,10 @@ async function finalizeSourceDatasetForCrossSurfaceParity(args: {
   sourceScenarioId: string;
   dataset: Record<string, unknown>;
 }): Promise<Record<string, unknown>> {
-  const meta = asRecord(args.dataset.meta);
+  const dataset = structuredClone(args.dataset);
+  const meta = asRecord(dataset.meta);
   const profileLoad = resolvePastProfileLoadContext({
-    dataset: args.dataset,
+    dataset,
     requestUserId: args.sourceUserId,
     requestHouseId: args.sourceHouseId,
     sourceUserId: args.sourceUserId,
@@ -47,8 +49,8 @@ async function finalizeSourceDatasetForCrossSurfaceParity(args: {
   ]);
   const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRec?.appliancesJson as any) ?? null);
   const greenButtonTrustedHomeDateKeys = readGreenButtonTrustedHomeDateKeysFromPastMeta(meta);
-  const finalized = await finalizePastDatasetDisplayReadModel({
-    dataset: structuredClone(args.dataset),
+  await finalizePastDatasetDisplayReadModel({
+    dataset,
     weatherHouseId: profileLoad.profileHouseId,
     fallbackHouseId: args.sourceHouseId,
     scenarioId: args.sourceScenarioId,
@@ -58,7 +60,7 @@ async function finalizeSourceDatasetForCrossSurfaceParity(args: {
       greenButtonTrustedHomeDateKeys.size > 0 ? greenButtonTrustedHomeDateKeys : undefined,
     persistDisplayWeatherToCache: false,
   });
-  return asRecord(finalized?.dataset ?? args.dataset);
+  return dataset;
 }
 
 async function finalizeAdminDatasetForCrossSurfaceParity(args: {
@@ -69,9 +71,10 @@ async function finalizeAdminDatasetForCrossSurfaceParity(args: {
   adminScenarioId: string;
   dataset: Record<string, unknown>;
 }): Promise<Record<string, unknown>> {
-  const meta = asRecord(args.dataset.meta);
+  const dataset = structuredClone(args.dataset);
+  const meta = asRecord(dataset.meta);
   const profileLoad = resolvePastProfileLoadContext({
-    dataset: args.dataset,
+    dataset,
     requestUserId: args.adminUserId,
     requestHouseId: args.adminHouseId,
     sourceUserId: args.sourceUserId,
@@ -92,8 +95,8 @@ async function finalizeAdminDatasetForCrossSurfaceParity(args: {
   ]);
   const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRec?.appliancesJson as any) ?? null);
   const greenButtonTrustedHomeDateKeys = readGreenButtonTrustedHomeDateKeysFromPastMeta(meta);
-  const finalized = await finalizePastDatasetDisplayReadModel({
-    dataset: structuredClone(args.dataset),
+  await finalizePastDatasetDisplayReadModel({
+    dataset,
     weatherHouseId: effectiveProfileLoad.profileHouseId,
     fallbackHouseId: args.adminHouseId,
     scenarioId: args.adminScenarioId,
@@ -103,7 +106,7 @@ async function finalizeAdminDatasetForCrossSurfaceParity(args: {
       greenButtonTrustedHomeDateKeys.size > 0 ? greenButtonTrustedHomeDateKeys : undefined,
     persistDisplayWeatherToCache: false,
   });
-  return asRecord(finalized?.dataset ?? args.dataset);
+  return dataset;
 }
 
 export async function auditPastWeatherCrossSurfaceParity(args: {
@@ -196,20 +199,25 @@ export async function auditPastWeatherCrossSurfaceParity(args: {
     };
   }
 
-  const userDataset = await finalizeSourceDatasetForCrossSurfaceParity({
-    sourceUserId: args.sourceUserId,
-    sourceHouseId: args.sourceHouseId,
-    sourceScenarioId: args.sourceScenarioId,
-    dataset: sourceCached.datasetJson as Record<string, unknown>,
-  });
-  const profileHouseId = resolvePastWeatherHouseIdFromDataset({
-    dataset: userDataset,
-    fallbackHouseId: args.sourceHouseId,
+  const userRawDataset = sourceCached.datasetJson as Record<string, unknown>;
+  const userInputDataset = userRawDataset;
+  const userDailyFingerprint = buildPastWeatherInputFingerprint({
+    dataset: userInputDataset,
+    weatherHouseId: args.sourceHouseId,
+    forceComputedDisplayTruthRevision: true,
   });
   let adminRawDataset: Record<string, unknown> | null = null;
   let adminDatasetForParity = args.adminDataset;
   if (args.adminScenarioId) {
     const adminCandidates: Array<Awaited<ReturnType<typeof getLatestCachedPastDatasetByScenario>>> = [];
+    const seenHashes = new Set<string>();
+    const pushCandidate = (row: Awaited<ReturnType<typeof getLatestCachedPastDatasetByScenario>>) => {
+      if (!row?.datasetJson) return;
+      const hash = String(row.inputHash ?? "").trim();
+      if (hash && seenHashes.has(hash)) return;
+      if (hash) seenHashes.add(hash);
+      adminCandidates.push(row);
+    };
     const { loadPastSimBuildInputsForRead } = await import("@/lib/usage/loadPastSimBuildInputsForRead");
     const { resolvePastArtifactIdentity } = await import("@/lib/usage/pastArtifactIdentity");
     const { getHouseAddressForUserHouse } = await import("@/modules/onePathSim/usageSimulator/repo");
@@ -235,24 +243,49 @@ export async function auditPastWeatherCrossSurfaceParity(args: {
           scenarioId: args.adminScenarioId,
           inputHash: adminIdentity.inputHash,
         });
-        if (byIdentity) adminCandidates.push(byIdentity);
+        if (byIdentity) pushCandidate(byIdentity);
       }
     }
     const latest = await getLatestCachedPastDatasetByScenario({
       houseId: args.adminHouseId,
       scenarioId: args.adminScenarioId,
     });
-    if (latest) adminCandidates.push(latest);
+    if (latest) pushCandidate(latest);
+
+    const scoreAdminCandidate = (
+      row: Awaited<ReturnType<typeof getLatestCachedPastDatasetByScenario>> | null | undefined
+    ) => {
+      if (!row?.datasetJson) return -1;
+      const dataset = row.datasetJson as Record<string, unknown>;
+      const lockboxProfileHouseId = resolvePastWeatherHouseIdFromDataset({
+        dataset,
+        fallbackHouseId: args.adminHouseId,
+      });
+      const adminDailyFingerprint = buildPastWeatherInputFingerprint({
+        dataset,
+        weatherHouseId: args.sourceHouseId,
+        forceComputedDisplayTruthRevision: true,
+      });
+      let score = 0;
+      if (lockboxProfileHouseId === args.sourceHouseId) score += 4;
+      if (adminDailyFingerprint.finalizedDailyRowsHash === userDailyFingerprint.finalizedDailyRowsHash) score += 2;
+      if (
+        adminDailyFingerprint.usageShapeProfileIdentity === userDailyFingerprint.usageShapeProfileIdentity
+      ) {
+        score += 1;
+      }
+      return score;
+    };
 
     const adminCached =
-      adminCandidates.find((row) => {
-        if (!row?.datasetJson) return false;
-        const lockboxProfileHouseId = resolvePastWeatherHouseIdFromDataset({
-          dataset: row.datasetJson as Record<string, unknown>,
-          fallbackHouseId: args.adminHouseId,
-        });
-        return lockboxProfileHouseId === args.sourceHouseId;
-      }) ??
+      adminCandidates
+        .slice()
+        .sort((left, right) => scoreAdminCandidate(right) - scoreAdminCandidate(left))
+        .find((row) => scoreAdminCandidate(row) >= 6) ??
+      adminCandidates
+        .slice()
+        .sort((left, right) => scoreAdminCandidate(right) - scoreAdminCandidate(left))
+        .find((row) => scoreAdminCandidate(row) >= 2) ??
       adminCandidates.find((row) => Boolean(row?.datasetJson)) ??
       null;
 
@@ -268,9 +301,17 @@ export async function auditPastWeatherCrossSurfaceParity(args: {
       });
     }
   }
-  const userRawDataset = sourceCached.datasetJson as Record<string, unknown>;
-  const userInputDataset = userRawDataset;
   const adminInputDataset = adminRawDataset ?? adminDatasetForParity;
+  const userDataset = await finalizeSourceDatasetForCrossSurfaceParity({
+    sourceUserId: args.sourceUserId,
+    sourceHouseId: args.sourceHouseId,
+    sourceScenarioId: args.sourceScenarioId,
+    dataset: userRawDataset,
+  });
+  const profileHouseId = resolvePastWeatherHouseIdFromDataset({
+    dataset: userRawDataset,
+    fallbackHouseId: args.sourceHouseId,
+  });
   const profileLoad = resolvePastProfileLoadContext({
     dataset: userDataset,
     requestUserId: args.sourceUserId,

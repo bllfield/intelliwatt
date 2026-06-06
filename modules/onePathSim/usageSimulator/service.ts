@@ -5738,6 +5738,11 @@ async function recalcSimulatorBuildImpl(args: {
   const fingerprintContext = createFingerprintRecalcContext({
     houseId,
     actualContextHouseId,
+    wholeHomeHouseId:
+      profileHouseIdForLockbox && profileHouseIdForLockbox !== houseId ? profileHouseIdForLockbox : houseId,
+    skipFingerprintPersist:
+      isCrossHouseAdminLab ||
+      Boolean(profileHouseIdForLockbox && profileHouseIdForLockbox !== houseId),
     esiid: esiid ?? null,
     homeProfile: homeProfile as any,
     applianceProfile: applianceProfile as any,

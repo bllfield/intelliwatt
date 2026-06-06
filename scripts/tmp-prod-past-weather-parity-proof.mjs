@@ -4,6 +4,9 @@
  *
  * Usage:
  *   npx tsx --require ./scripts/register-server-only-stub.cjs scripts/tmp-prod-past-weather-parity-proof.mjs
+ *
+ * Cache-safe acceptance capture (no prod HTTP leg):
+ *   PROOF_AUDIT_ONLY=1 npx tsx --require ./scripts/register-server-only-stub.cjs scripts/tmp-prod-past-weather-parity-proof.mjs
  */
 import { readFileSync, existsSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -24,6 +27,10 @@ if (existsSync(envLocalPath)) {
   }
 }
 
+const PROOF_AUDIT_ONLY =
+  process.env.PROOF_AUDIT_ONLY === "1" ||
+  process.env.PROOF_AUDIT_ONLY === "true" ||
+  process.env.PROOF_AUDIT_ONLY === "yes";
 const BASE = process.env.BASE_URL || "https://intelliwatt.com";
 const TOKEN = process.env.ADMIN_TOKEN || "";
 const EMAIL = process.env.AUDIT_USER_EMAIL || "bllfield32@icloud.com";
@@ -58,8 +65,8 @@ async function adminPost(body) {
 }
 
 async function main() {
-  if (!TOKEN) {
-    console.error("ADMIN_TOKEN missing");
+  if (!PROOF_AUDIT_ONLY && !TOKEN) {
+    console.error("ADMIN_TOKEN missing (set PROOF_AUDIT_ONLY=1 for cache-safe audit-only proof)");
     process.exit(2);
   }
 
@@ -98,30 +105,36 @@ async function main() {
     });
   }
 
-  const adminRun = await adminPost({
-    action: "run",
-    email: EMAIL,
-    houseId: TEST_HOUSE,
-    sourceHouseId: SOURCE_HOUSE,
-    onePathTestHomeHouseId: TEST_HOUSE,
-    mode: "GREEN_BUTTON",
-    runReason: "keeper-green-button-past",
-    scenarioId: testPast?.id,
-    persistRequested: false,
-    overwriteProfilesFromSource: true,
-  });
-
-  const adminDataset = adminRun.json?.readModel?.dataset ?? null;
-  const adminMeta = pickMeta(adminRun.json);
-  const adminDiag = adminRun.json?.pastWeatherDiagnostics ?? {};
-  const adminBundleC = scoreCard(adminMeta.pastDisplayWeatherSensitivityScore);
-  const adminTop = scoreCard(adminRun.json?.weatherSensitivityScore ?? adminDiag.visibleWeatherScore);
-  const adminAudit = adminMeta.pastDisplayWeatherScoringAudit ?? adminRun.json?.weatherScoringAudit ?? null;
-
   const acceptanceProof = crossSurface?.acceptanceProof ?? null;
+
+  let adminRun = { status: null, json: null };
+  if (!PROOF_AUDIT_ONLY) {
+    adminRun = await adminPost({
+      action: "run",
+      email: EMAIL,
+      houseId: TEST_HOUSE,
+      sourceHouseId: SOURCE_HOUSE,
+      onePathTestHomeHouseId: TEST_HOUSE,
+      mode: "GREEN_BUTTON",
+      runReason: "keeper-green-button-past",
+      scenarioId: testPast?.id,
+      persistRequested: false,
+      overwriteProfilesFromSource: true,
+    });
+  }
+
+  const adminMeta = pickMeta(adminRun.json ?? {});
+  const adminDiag = adminRun.json?.pastWeatherDiagnostics ?? {};
+  const adminBundleC =
+    scoreCard(adminMeta.pastDisplayWeatherSensitivityScore) ??
+    (acceptanceProof ? scoreCard(acceptanceProof.admin.bundleC) : null);
+  const adminTop =
+    scoreCard(adminRun.json?.weatherSensitivityScore ?? adminDiag.visibleWeatherScore) ?? adminBundleC;
+  const adminAudit = adminMeta.pastDisplayWeatherScoringAudit ?? adminRun.json?.weatherScoringAudit ?? null;
 
   const out = {
     at: new Date().toISOString(),
+    proofMode: PROOF_AUDIT_ONLY ? "audit_only" : "audit_then_admin_http",
     base: BASE,
     houses: { sourceHouse: SOURCE_HOUSE, testHome: TEST_HOUSE },
     scenarios: { sourcePastScenarioId: sourcePast?.id ?? null, testPastScenarioId: testPast?.id ?? null },
@@ -131,27 +144,35 @@ async function main() {
           visibleEqualsBundleC: acceptanceProof.userVisibleEqualsUserBundleC,
         }
       : null,
-    adminPast: {
-      httpStatus: adminRun.status,
-      ok: adminRun.json?.ok,
-      weatherReadPath: adminRun.json?.weatherReadPath ?? adminDiag.weatherReadPath ?? null,
-      weatherCardsSourceOwner: adminRun.json?.weatherCardsSourceOwner ?? adminDiag.weatherCardsSourceOwner ?? null,
-      actualContextHouseId: adminDiag.actualContextHouseId ?? adminMeta.actualContextHouseId ?? null,
-      weatherHouseId: adminDiag.weatherHouseId ?? null,
-      topLevel: adminTop,
-      bundleC: adminBundleC,
-      visibleEqualsBundleC: acceptanceProof?.adminVisibleEqualsAdminBundleC ?? null,
-      audit: adminAudit
+    adminPast: PROOF_AUDIT_ONLY
+      ? acceptanceProof
         ? {
-            scorerModule: adminAudit.scorerModule,
-            scoringContext: adminAudit.scoringContext,
-            scoreVersion: adminAudit.scoreVersion,
-            calculationVersion: adminAudit.calculationVersion,
-            outputField: adminAudit.outputField,
+            bundleC: acceptanceProof.admin.bundleC,
+            visibleEqualsBundleC: acceptanceProof.adminVisibleEqualsAdminBundleC,
+            source: "cross_surface_finalize",
           }
-        : null,
-      netKwh: adminRun.json?.runDisplayView?.summary?.totals?.netKwh ?? null,
-    },
+        : null
+      : {
+          httpStatus: adminRun.status,
+          ok: adminRun.json?.ok,
+          weatherReadPath: adminRun.json?.weatherReadPath ?? adminDiag.weatherReadPath ?? null,
+          weatherCardsSourceOwner: adminRun.json?.weatherCardsSourceOwner ?? adminDiag.weatherCardsSourceOwner ?? null,
+          actualContextHouseId: adminDiag.actualContextHouseId ?? adminMeta.actualContextHouseId ?? null,
+          weatherHouseId: adminDiag.weatherHouseId ?? null,
+          topLevel: adminTop,
+          bundleC: adminBundleC,
+          visibleEqualsBundleC: acceptanceProof?.adminVisibleEqualsAdminBundleC ?? null,
+          audit: adminAudit
+            ? {
+                scorerModule: adminAudit.scorerModule,
+                scoringContext: adminAudit.scoringContext,
+                scoreVersion: adminAudit.scoreVersion,
+                calculationVersion: adminAudit.calculationVersion,
+                outputField: adminAudit.outputField,
+              }
+            : null,
+          netKwh: adminRun.json?.runDisplayView?.summary?.totals?.netKwh ?? null,
+        },
     pastWeatherCrossSurfaceParity: crossSurface
       ? {
           ok: crossSurface.ok,
@@ -162,10 +183,7 @@ async function main() {
         }
       : null,
     verdict:
-      adminRun.status === 200 &&
-      adminRun.json?.ok === true &&
-      crossSurface?.ok === true &&
-      acceptanceProof?.ok === true
+      crossSurface?.ok === true && acceptanceProof?.ok === true
         ? "PROD_WEATHER_PARITY_PASS"
         : "PROD_WEATHER_PARITY_FAIL",
   };

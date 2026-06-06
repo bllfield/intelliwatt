@@ -11,6 +11,10 @@ import { getMemoryRssMb, logSimPipelineEvent } from "@/modules/onePathSim/usageS
 export type FingerprintRecalcContextArgs = {
   houseId: string;
   actualContextHouseId: string;
+  /** WholeHome artifact house; defaults to `houseId`. One Path parity may point at source profile house. */
+  wholeHomeHouseId?: string;
+  /** Cross-house admin recalc must not persist fingerprint rebuilds onto source/context houses. */
+  skipFingerprintPersist?: boolean;
   esiid: string | null;
   homeProfile: Record<string, unknown> | null | undefined;
   applianceProfile: Record<string, unknown> | null | undefined;
@@ -56,6 +60,7 @@ function logPolicyDecision(args: {
 export function createFingerprintRecalcContext(
   args: FingerprintRecalcContextArgs
 ): FingerprintRecalcContext {
+  const wholeHomeHouseId = String(args.wholeHomeHouseId ?? args.houseId).trim() || args.houseId;
   let wholeHomePolicyPromise:
     | Promise<Awaited<ReturnType<typeof evaluateWholeHomeFingerprintPolicy>>>
     | null = null;
@@ -68,14 +73,14 @@ export function createFingerprintRecalcContext(
     if (!wholeHomePolicyPromise) {
       const startedAt = Date.now();
       wholeHomePolicyPromise = evaluateWholeHomeFingerprintPolicy({
-        houseId: args.houseId,
+        houseId: wholeHomeHouseId,
         homeProfile: args.homeProfile,
         applianceProfile: args.applianceProfile,
       }).then((policy) => {
         logPolicyDecision({
           eventName: "whole_home_fingerprint_policy_decision",
           correlationId: args.correlationId,
-          houseId: args.houseId,
+          houseId: wholeHomeHouseId,
           decision: policy.decision,
           startedAt,
         });
@@ -123,7 +128,7 @@ export function createFingerprintRecalcContext(
     const existing = resolvedByManualKey.get(cacheKey);
     if (existing) return existing;
     const p = resolveSimFingerprint({
-      houseId: args.houseId,
+      houseId: wholeHomeHouseId,
       actualContextHouseId: args.actualContextHouseId,
       mode: args.mode,
       correlationId: args.correlationId,

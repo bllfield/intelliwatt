@@ -39,10 +39,11 @@ export async function ensureSimulatorFingerprintsForRecalc(args: EnsureSimulator
 export async function ensureSimulatorFingerprintsWithContext(
   context: FingerprintRecalcContext
 ): Promise<void> {
+  const wholeHomeHouseId = String(context.wholeHomeHouseId ?? context.houseId).trim() || context.houseId;
   const wholeHomePolicy = await context.getWholeHomePolicy();
-  if (wholeHomePolicy.decision.action === "rebuild") {
+  if (wholeHomePolicy.decision.action === "rebuild" && context.skipFingerprintPersist !== true) {
     await buildAndPersistWholeHomeFingerprint({
-      houseId: context.houseId,
+      houseId: wholeHomeHouseId,
       homeProfile: context.homeProfile,
       applianceProfile: context.applianceProfile,
       correlationId: context.correlationId,
@@ -52,7 +53,7 @@ export async function ensureSimulatorFingerprintsWithContext(
   }
 
   const usagePolicy = await context.getUsagePolicy();
-  if (usagePolicy && usagePolicy.decision.action === "rebuild") {
+  if (usagePolicy && usagePolicy.decision.action === "rebuild" && context.skipFingerprintPersist !== true) {
     const usageBuildStartedAt = Date.now();
     logSimPipelineEvent("usage_fingerprint_build_from_prepared_start", {
       correlationId: context.correlationId,
