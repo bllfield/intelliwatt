@@ -3,6 +3,8 @@ import {
   DEFAULT_ONE_PATH_SCENARIO_PRESET_KEY,
   ONE_PATH_SCENARIO_PRESETS,
   getKnownHouseScenarioByKey,
+  isOnePathPastSimPreset,
+  resolveDefaultPastPresetKeyForCommittedSource,
   resolveKnownHouseScenarioSelection,
 } from "@/modules/onePathSim/knownHouseScenarios";
 
@@ -35,6 +37,24 @@ describe("one path scenario presets", () => {
     expect(getKnownHouseScenarioByKey("keeper-fort-worth-green-button-past-primary")?.scenarioKey).toBe(
       "green-button-past-primary"
     );
+  });
+
+  it("maps committed usage source to the matching Past preset key", () => {
+    expect(resolveDefaultPastPresetKeyForCommittedSource({ committedUsageSource: "SMT" })).toBe(
+      "interval-past-primary"
+    );
+    expect(resolveDefaultPastPresetKeyForCommittedSource({ committedUsageSource: "GREEN_BUTTON" })).toBe(
+      "green-button-past-primary"
+    );
+    expect(
+      resolveDefaultPastPresetKeyForCommittedSource({ committedUsageSource: null, manualUsageMode: "MONTHLY" })
+    ).toBe("manual-monthly-past-primary");
+  });
+
+  it("detects Past sim presets for sim-run audit defaults", () => {
+    expect(isOnePathPastSimPreset(getKnownHouseScenarioByKey("interval-past-primary")!)).toBe(true);
+    expect(isOnePathPastSimPreset(getKnownHouseScenarioByKey("interval-baseline-primary")!)).toBe(false);
+    expect(isOnePathPastSimPreset(getKnownHouseScenarioByKey("interval-future-primary")!)).toBe(false);
   });
 
   it("resolves house and scenario from the active lookup selection", () => {

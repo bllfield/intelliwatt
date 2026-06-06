@@ -13,6 +13,7 @@ import {
   ensureSmtCoverageForHouse,
   type EnsureSmtCoverageResult,
 } from "@/lib/usage/ensureSmtCoverage";
+import { resolveHouseCommittedUsageSource } from "@/lib/usage/houseCommittedUsageSource";
 import type { UsageRefreshResult } from "@/lib/usage/userUsageRefresh";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { getHomeProfileReadOnlyByUserHouse, getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
@@ -1713,6 +1714,15 @@ export async function POST(request: NextRequest) {
           : null,
   });
   const smtSourceEsiid = resolved.selectedHouse.esiid ? String(resolved.selectedHouse.esiid) : null;
+  const sourceCommittedUsageSource = await resolveHouseCommittedUsageSource({
+    houseId: resolved.selectedHouse.id,
+    userId: resolved.userId,
+    esiid: smtSourceEsiid,
+  });
+  const sourceManualUsageForPreset = await getOnePathManualUsageInput({
+    userId: resolved.userId,
+    houseId: resolved.selectedHouse.id,
+  }).catch(() => ({ payload: null, updatedAt: null }));
   const effectiveUserId = onePathTestHomeState.isPinned ? ownerUserId : resolved.userId;
   const effectiveHouseId = onePathTestHomeState.isPinned ? onePathTestHomeState.testHomeHouseId : resolved.selectedHouse.id;
   /** User-site actual truth always comes from the email-selected source house, not the pinned test home. */
@@ -2760,6 +2770,9 @@ export async function POST(request: NextRequest) {
       scenarios: effectiveScenarios,
       sourceContext: {
         debugDiagnosticsIncluded: false,
+        committedUsageSource: sourceCommittedUsageSource,
+        manualUsagePayload: sourceManualUsageForPreset.payload ?? null,
+        manualUsageUpdatedAt: sourceManualUsageForPreset.updatedAt ?? null,
         onePathTestHome: onePathTestHomeSummary,
         smtRefreshCheck,
         pastBuildInputsSync: pastBuildInputsSync
@@ -2885,6 +2898,7 @@ export async function POST(request: NextRequest) {
     simulationVariablePolicy: previewSimulationVariablePolicy,
   }).catch(() => ({ score: null, derivedInput: null }));
   const previewLookupSourceContext = {
+    committedUsageSource: sourceCommittedUsageSource,
     actualDatasetSummary: usageTruth?.dataset?.summary ?? null,
     actualDatasetMeta: (usageTruth?.dataset as any)?.meta ?? null,
     usageTruthSource: usageTruth?.usageTruthSource ?? "missing_usage_truth",

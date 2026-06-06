@@ -401,6 +401,26 @@ export const ONE_PATH_SCENARIO_PRESETS: OnePathKnownScenario[] = [
 /** @deprecated Use ONE_PATH_SCENARIO_PRESETS */
 export const KNOWN_HOUSE_SCENARIOS = ONE_PATH_SCENARIO_PRESETS;
 
+export function isOnePathPastSimPreset(
+  scenario: Pick<OnePathKnownScenario, "scenarioSelectionStrategy" | "scenarioNameHint">
+): boolean {
+  if (scenario.scenarioSelectionStrategy !== "scenario_name") return false;
+  const hint = normalizeLabel(scenario.scenarioNameHint);
+  return hint.includes("past");
+}
+
+/** Default Past preset for lookup based on the source house committed usage type. */
+export function resolveDefaultPastPresetKeyForCommittedSource(args: {
+  committedUsageSource?: "SMT" | "GREEN_BUTTON" | null;
+  manualUsageMode?: string | null;
+}): string {
+  if (args.committedUsageSource === "GREEN_BUTTON") return "green-button-past-primary";
+  const manualMode = String(args.manualUsageMode ?? "").trim().toUpperCase();
+  if (manualMode === "MONTHLY") return "manual-monthly-past-primary";
+  if (manualMode === "ANNUAL") return "manual-annual-past-primary";
+  return DEFAULT_ONE_PATH_SCENARIO_PRESET_KEY;
+}
+
 export function getKnownHouseScenarioByKey(scenarioKey: string | null | undefined): OnePathKnownScenario | null {
   if (!scenarioKey) return null;
   const legacyKey =

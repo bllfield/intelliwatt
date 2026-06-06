@@ -102,6 +102,10 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("getKnownHouseScenarioByKey");
     expect(source).toContain("ONE_PATH_SCENARIO_PRESETS");
     expect(source).toContain("resolveKnownHouseScenarioSelection");
+    expect(source).toContain("resolveLookupDefaultPresetKey");
+    expect(source).toContain("resolveDefaultPastPresetKeyForCommittedSource");
+    expect(source).toContain("isOnePathPastSimPreset");
+    expect(source).toContain("setIncludeSimRunAuditEnabled(isOnePathPastSimPreset");
     expect(source).toContain("sandboxHarnessSummary");
     expect(source).toContain("openVariableFamily");
     expect(source).toContain("Copy all variables for AI");

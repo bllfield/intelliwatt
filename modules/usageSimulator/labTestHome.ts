@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
+import { resolveHouseCommittedUsageSource } from "@/lib/usage/houseCommittedUsageSource";
 import { homeDetailsPrisma } from "@/lib/db/homeDetailsClient";
 import { appliancesPrisma } from "@/lib/db/appliancesClient";
 import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
@@ -1122,24 +1123,35 @@ export async function replaceGlobalOnePathLabTestHomeFromSource(args: {
       testHomeHouseId: testHome.id,
     });
 
-    const cloneResult = await cloneOnePathGreenButtonUsageFromSource({
-      sourceHouseId: args.sourceHouseId,
-      targetHouseId: testHome.id,
-      targetUserId: args.ownerUserId,
-      targetEsiid: sourceHouse.esiid ? String(sourceHouse.esiid) : null,
+    const committedUsageSource = await resolveHouseCommittedUsageSource({
+      houseId: args.sourceHouseId,
+      userId: args.sourceUserId,
+      esiid: sourceHouse.esiid ? String(sourceHouse.esiid) : null,
     });
-    if (!cloneResult.copied || !cloneResult.rawId) {
-      throw new Error(
-        "green_button_clone_failed: source Green Button intervals were not copied to the One Path test home"
-      );
-    }
-    const clonedIntervalCount = await (usagePrisma as any).greenButtonInterval
-      ?.count?.({ where: { homeId: testHome.id, rawId: cloneResult.rawId } })
-      .catch(() => 0);
-    if (!Number(clonedIntervalCount) || clonedIntervalCount < 1) {
-      throw new Error(
-        `green_button_clone_failed: expected persisted intervals on test home but found ${clonedIntervalCount ?? 0}`
-      );
+    let usageCloneKind: "green_button" | "source_linked" = "source_linked";
+    if (committedUsageSource === "GREEN_BUTTON") {
+      const cloneResult = await cloneOnePathGreenButtonUsageFromSource({
+        sourceHouseId: args.sourceHouseId,
+        targetHouseId: testHome.id,
+        targetUserId: args.ownerUserId,
+        targetEsiid: sourceHouse.esiid ? String(sourceHouse.esiid) : null,
+      });
+      if (!cloneResult.copied || !cloneResult.rawId) {
+        throw new Error(
+          "green_button_clone_failed: source Green Button intervals were not copied to the One Path test home"
+        );
+      }
+      const clonedIntervalCount = await (usagePrisma as any).greenButtonInterval
+        ?.count?.({ where: { homeId: testHome.id, rawId: cloneResult.rawId } })
+        .catch(() => 0);
+      if (!Number(clonedIntervalCount) || clonedIntervalCount < 1) {
+        throw new Error(
+          `green_button_clone_failed: expected persisted intervals on test home but found ${clonedIntervalCount ?? 0}`
+        );
+      }
+      usageCloneKind = "green_button";
+    } else {
+      await clearOnePathActualUsageState({ houseId: testHome.id });
     }
 
     const { mirrorOnePathPastBuildInputsFromSource } = await import(
@@ -1157,9 +1169,13 @@ export async function replaceGlobalOnePathLabTestHomeFromSource(args: {
       })
       .catch(() => null);
 
+    const usageCloneNote =
+      usageCloneKind === "green_button"
+        ? "Green Button intervals cloned to the test home."
+        : "Actual usage stays on the linked source house (no Green Button clone).";
     const statusMessage = paritySync.ok
-      ? "One Path test home replaced; Past build inputs mirrored from user site. Run Past Sim on One Path to build the test-home artifact."
-      : `Test home replaced; Past build mirror pending (${paritySync.code}: ${paritySync.message}). Recalc Past on the user site, then re-link.`;
+      ? `One Path test home replaced; ${usageCloneNote} Past build inputs mirrored from user site. Run Past Sim on One Path to build the test-home artifact.`
+      : `Test home replaced; ${usageCloneNote} Past build mirror pending (${paritySync.code}: ${paritySync.message}). Recalc Past on the user site, then re-link.`;
 
     await upsertOnePathLabTestHomeLink({
       ownerUserId: args.ownerUserId,

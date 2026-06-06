@@ -102,6 +102,9 @@ describe("one path green button preset wiring", () => {
     expect(onePathReplacement).not.toContain("await Promise.all([\n      (usagePrisma as any).pastSimulatedDatasetCache");
     expect(onePathReplacement).toContain("(usagePrisma as any).pastSimulatedDatasetCache");
     expect(onePathReplacement).toContain("(usagePrisma as any).gapfillCompareRunSnapshot");
+    expect(onePathReplacement).toContain("resolveHouseCommittedUsageSource");
+    expect(onePathReplacement).toContain('committedUsageSource === "GREEN_BUTTON"');
+    expect(onePathReplacement).toContain("clearOnePathActualUsageState");
   });
 
   it("does not wipe shared SMT intervals when Green Button upload completes", () => {

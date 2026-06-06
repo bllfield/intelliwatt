@@ -23,6 +23,8 @@ import {
   DEFAULT_ONE_PATH_SCENARIO_PRESET_KEY,
   ONE_PATH_SCENARIO_PRESETS,
   getKnownHouseScenarioByKey,
+  isOnePathPastSimPreset,
+  resolveDefaultPastPresetKeyForCommittedSource,
   resolveKnownHouseScenarioSelection,
   type OnePathKnownScenario,
 } from "@/modules/onePathSim/knownHouseScenarios";
@@ -179,6 +181,18 @@ function TruthSummaryPanel(props: {
       </div>
     </div>
   );
+}
+
+function resolveLookupDefaultPresetKey(json: LookupResponse): string {
+  const sourceContext = asRecord(json.sourceContext);
+  const committed = String(sourceContext.committedUsageSource ?? "").trim();
+  const manualPayload = asRecord(sourceContext.manualUsagePayload);
+  const manualMode = String(manualPayload.mode ?? "").trim();
+  return resolveDefaultPastPresetKeyForCommittedSource({
+    committedUsageSource:
+      committed === "GREEN_BUTTON" ? "GREEN_BUTTON" : committed === "SMT" ? "SMT" : null,
+    manualUsageMode: manualMode || null,
+  });
 }
 
 function modeToOverrideBucketKey(mode: string): "intervalOverrides" | "manualMonthlyOverrides" | "manualAnnualOverrides" | "newBuildOverrides" {
@@ -779,6 +793,7 @@ export function OnePathSimAdmin() {
           lookupJson.selectedHouse?.id ||
           controls.selectedHouseId,
       });
+      setIncludeSimRunAuditEnabled(isOnePathPastSimPreset(scenario));
       if (options?.statusMessage) {
         setStatus(options.statusMessage);
       }
@@ -1027,7 +1042,9 @@ export function OnePathSimAdmin() {
                   : json.selectedHouse?.id ?? "",
             }
       );
-      const scenarioAfterLookup = getKnownHouseScenarioByKey(selectedKnownScenarioKey);
+      const defaultPresetKey = resolveLookupDefaultPresetKey(json);
+      setSelectedKnownScenarioKey(defaultPresetKey);
+      const scenarioAfterLookup = getKnownHouseScenarioByKey(defaultPresetKey);
       if (scenarioAfterLookup) {
         applyKnownScenarioPresetLocally(scenarioAfterLookup, json, {
           clearRunResult: freshSelection,
@@ -1044,7 +1061,6 @@ export function OnePathSimAdmin() {
       email,
       ensureOnePathTestHomeReady,
       requestLookup,
-      selectedKnownScenarioKey,
     ]
   );
 
@@ -1602,6 +1618,7 @@ export function OnePathSimAdmin() {
                     applyKnownScenarioPresetLocally(nextScenario, lookup, {
                       statusMessage: `Preset applied: ${nextScenario.label}. Run without reloading the house.`,
                     });
+                    setIncludeSimRunAuditEnabled(isOnePathPastSimPreset(nextScenario));
                   }
                 }}
               >
