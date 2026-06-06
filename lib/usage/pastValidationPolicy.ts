@@ -188,7 +188,7 @@ export function storedValidationKeysLookLikeSeasonMonthEdgeCluster(args: {
 
   let clusteredMonthGroups = 0;
   let keysInClusteredGroups = 0;
-  for (const groupKeys of groups.values()) {
+  for (const groupKeys of Array.from(groups.values())) {
     if (groupKeys.length < 3) continue;
     const sorted = [...groupKeys].sort();
     const spanDays = calendarDaysInclusive(sorted[0]!, sorted[sorted.length - 1]!);
