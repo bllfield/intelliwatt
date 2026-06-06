@@ -1,6 +1,8 @@
 import { buildDisplayedMonthlyRows } from "@/modules/usageSimulator/monthlyCompareRows";
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
 import { readPastSimDisplayWeatherSensitivityScore } from "@/lib/usage/pastSimDisplayWeather";
+import { resolveUserPastVisibleWeatherSensitivityScore } from "@/lib/usage/userPastVisibleWeather";
+import { WORKSPACE_PAST_SCENARIO_NAME } from "@/lib/usage/onePathPastUserSiteParityTypes";
 import { buildOnePathRunReadOnlyView } from "@/modules/onePathSim/runReadOnlyView";
 import type { UserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
 
@@ -203,7 +205,10 @@ function weatherCardValuesFromScore(score: unknown): {
   };
 }
 
-export function auditUserAdminPastReadModelParity(args: { dataset: unknown }): {
+export function auditUserAdminPastReadModelParity(args: {
+  dataset: unknown;
+  scenarioName?: string | null;
+}): {
   ok: boolean;
   violations: string[];
   weatherCards: {
@@ -211,13 +216,18 @@ export function auditUserAdminPastReadModelParity(args: { dataset: unknown }): {
     user: ReturnType<typeof weatherCardValuesFromScore>;
     admin: ReturnType<typeof weatherCardValuesFromScore>;
     sourceOwner: string;
+    userVisibleSourceOwner: string;
+    adminVisibleSourceOwner: string;
   };
 } {
   const datasetRecord = asRecord(args.dataset);
-  const pastDisplayWeather = readPastSimDisplayWeatherSensitivityScore(datasetRecord);
+  const userPastVisibleWeather = resolveUserPastVisibleWeatherSensitivityScore({
+    dataset: datasetRecord,
+    scenarioName: args.scenarioName ?? WORKSPACE_PAST_SCENARIO_NAME,
+  });
   const viewModel = buildUserUsageDashboardViewModel({
     dataset: args.dataset,
-    weatherSensitivityScore: pastDisplayWeather as never,
+    weatherSensitivityScore: userPastVisibleWeather.score as never,
   });
   const adminView = buildOnePathRunReadOnlyView({
     dataset: Object.keys(datasetRecord).length > 0 ? datasetRecord : null,
@@ -231,7 +241,9 @@ export function auditUserAdminPastReadModelParity(args: { dataset: unknown }): {
         pass: false,
         user: weatherCardValuesFromScore(null),
         admin: weatherCardValuesFromScore(null),
-        sourceOwner: "meta.pastDisplayWeatherSensitivityScore",
+        sourceOwner: "user_past_visible_api_weather",
+        userVisibleSourceOwner: userPastVisibleWeather.sourceOwner,
+        adminVisibleSourceOwner: "missing_admin_read_model",
       },
     };
   }
@@ -270,15 +282,23 @@ export function auditUserAdminPastReadModelParity(args: { dataset: unknown }): {
     violations.push("fifteenMinuteAverages mismatch");
   }
 
-  const userWeather = weatherCardValuesFromScore(pastDisplayWeather);
+  const userWeather = weatherCardValuesFromScore(userPastVisibleWeather.score);
   const adminWeather = weatherCardValuesFromScore(adminView.weatherScore);
   const weatherPass =
     userWeather.weatherEfficiency === adminWeather.weatherEfficiency &&
     userWeather.cooling === adminWeather.cooling &&
     userWeather.heating === adminWeather.heating &&
-    userWeather.confidence === adminWeather.confidence;
+    userWeather.confidence === adminWeather.confidence &&
+    userPastVisibleWeather.sourceOwner !== "missing_past_display_weather" &&
+    userPastVisibleWeather.sourceOwner !== "not_past_workspace";
   if (!weatherPass) {
     violations.push("weather cards mismatch");
+  }
+  if (
+    userPastVisibleWeather.sourceOwner === "missing_past_display_weather" ||
+    userPastVisibleWeather.sourceOwner === "not_past_workspace"
+  ) {
+    violations.push(`user past weather sourceOwner=${userPastVisibleWeather.sourceOwner}`);
   }
 
   return {
@@ -288,7 +308,9 @@ export function auditUserAdminPastReadModelParity(args: { dataset: unknown }): {
       pass: weatherPass,
       user: userWeather,
       admin: adminWeather,
-      sourceOwner: "meta.pastDisplayWeatherSensitivityScore",
+      sourceOwner: "user_past_visible_api_weather",
+      userVisibleSourceOwner: userPastVisibleWeather.sourceOwner,
+      adminVisibleSourceOwner: "buildOnePathRunReadOnlyView.weatherScore",
     },
   };
 }

@@ -16,6 +16,7 @@ import {
   buildValidationTargetsSnapshot,
 } from "@/lib/usage/usageParityAudit";
 import type { UserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
+import { WORKSPACE_PAST_SCENARIO_NAME } from "@/lib/usage/onePathPastUserSiteParityTypes";
 import type { WeatherSensitivityScore } from "@/modules/weatherSensitivity/shared";
 
 export type SimulationVariablePolicyResponseShape = {
@@ -680,6 +681,7 @@ export function buildSimulationVariableCopyPayload(args: {
     pastRunDisplayView: pastSim ? effectiveRunDisplayView : null,
     displayTotalsDataset: displayTotalsDataset,
     engineInput: asRecord(args.engineInput),
+    userPastScenarioName: pastSim ? WORKSPACE_PAST_SCENARIO_NAME : null,
   });
   const performanceAudit =
     args.performanceAudit ??

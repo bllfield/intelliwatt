@@ -5,6 +5,8 @@ import {
   INTERVAL_READ_MODEL_TOLERANCE_KWH,
 } from "@/lib/usage/intervalReadModelInvariants";
 import { readPastSimDisplayWeatherSensitivityScore } from "@/lib/usage/pastSimDisplayWeather";
+import { resolveUserPastVisibleWeatherSensitivityScore } from "@/lib/usage/userPastVisibleWeather";
+import { WORKSPACE_PAST_SCENARIO_NAME } from "@/lib/usage/onePathPastUserSiteParityTypes";
 import { computePastSimCanonicalOwnershipAudit } from "@/lib/usage/pastSimValidationBaselineProjection";
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
 import { buildUsageDisplayTotalsAudit } from "@/modules/onePathSim/usageDisplayTotalsAudit";
@@ -221,6 +223,7 @@ export function buildUsageParityAudit(args: {
   displayTotalsDataset?: unknown;
   engineInput?: Record<string, unknown> | null;
   compareMetrics?: Record<string, unknown> | null;
+  userPastScenarioName?: string | null;
 }) {
   const actualSnapshot = buildUsageParitySnapshotFromHouseContract(args.userUsagePageBaselineContract);
   const simulatorUsageSnapshot = actualSnapshot;
@@ -242,12 +245,18 @@ export function buildUsageParityAudit(args: {
   });
 
   const pastDatasetRecord = asRecord(args.pastDataset);
+  const userPastScenarioName = args.userPastScenarioName ?? WORKSPACE_PAST_SCENARIO_NAME;
+  const userPastVisibleWeather = Object.keys(pastDatasetRecord).length
+    ? resolveUserPastVisibleWeatherSensitivityScore({
+        dataset: pastDatasetRecord,
+        scenarioName: userPastScenarioName,
+      })
+    : null;
   const pastUserSnapshot = Object.keys(pastDatasetRecord).length
     ? buildUsageParitySnapshotFromHouseContract({
         dataset: args.pastDataset as UserUsageHouseContract["dataset"],
-        weatherSensitivityScore: readPastSimDisplayWeatherSensitivityScore(
-          pastDatasetRecord
-        ) as UserUsageHouseContract["weatherSensitivityScore"],
+        weatherSensitivityScore: (userPastVisibleWeather?.score ??
+          null) as UserUsageHouseContract["weatherSensitivityScore"],
       })
     : null;
   const pastAdminSnapshot = args.pastRunDisplayView
@@ -257,7 +266,10 @@ export function buildUsageParityAudit(args: {
       : null;
 
   const pastReadModelAudit = Object.keys(pastDatasetRecord).length
-    ? auditUserAdminPastReadModelParity({ dataset: args.pastDataset })
+    ? auditUserAdminPastReadModelParity({
+        dataset: args.pastDataset,
+        scenarioName: userPastScenarioName,
+      })
     : {
         ok: true,
         violations: [] as string[],
@@ -317,6 +329,8 @@ export function buildUsageParityAudit(args: {
       },
       tolerance: 0,
       sourceOwner: pastReadModelAudit.weatherCards.sourceOwner,
+      userVisibleSourceOwner: userPastVisibleWeather?.sourceOwner ?? null,
+      adminVisibleSourceOwner: pastReadModelAudit.weatherCards.adminSourceOwner ?? null,
     },
     readModelAudit: {
       pass: pastReadModelAudit.ok,
@@ -498,7 +512,11 @@ export function buildPerformanceAuditSnapshot(args: {
     pickNumber(stageDurationsMs.sourceWeatherLoad) ??
     null;
 
+  const instrumentedDuration = totalDurationMs != null && totalDurationMs > 0;
+  const instrumentedStages = stageValues.some((value) => value > 0);
+
   return {
+    auditMode: instrumentedDuration || instrumentedStages ? "instrumented" : "snapshot_read_only",
     totalDurationMs,
     selectedMode,
     simulatorMode: selectedMode,

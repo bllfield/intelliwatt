@@ -24,6 +24,10 @@ import {
   buildWeatherEfficiencyDerivedInput,
   resolveSharedWeatherSensitivityEnvelope,
 } from "@/modules/weatherSensitivity/shared";
+import {
+  resolveUserPastVisibleWeatherSensitivityScore,
+  shouldUsePastDisplayWeatherCards,
+} from "@/lib/usage/userPastVisibleWeather";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -252,7 +256,6 @@ export async function GET(request: NextRequest) {
         }),
       ]);
       const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRec?.appliancesJson as any) ?? null);
-      const isPastSimulatedDataset = (datasetAny?.meta as any)?.datasetKind === "SIMULATED";
       await finalizePastDatasetDisplayReadModel({
         dataset: datasetAny,
         sageActualDataset: sageTruth?.dataset ?? null,
@@ -261,15 +264,24 @@ export async function GET(request: NextRequest) {
         applianceProfile,
         weatherHouseId: houseId,
       });
-      const pastDisplayScore = (datasetAny?.meta as any)?.pastDisplayWeatherSensitivityScore ?? null;
+      const usePastDisplayWeather = shouldUsePastDisplayWeatherCards({
+        scenarioName: scenarioRow?.name ?? null,
+        meta: datasetAny?.meta,
+      });
+      const pastVisibleWeather = resolveUserPastVisibleWeatherSensitivityScore({
+        dataset: datasetAny,
+        scenarioName: scenarioRow?.name ?? null,
+      });
       const pastDisplayDerivedInput =
         (datasetAny?.meta as any)?.pastDisplayWeatherEfficiencyDerivedInput ?? null;
-      const weatherSensitivity = isPastSimulatedDataset
+      const weatherSensitivity = usePastDisplayWeather
         ? {
-            score: pastDisplayScore,
+            score: pastVisibleWeather.score,
             derivedInput:
               pastDisplayDerivedInput ??
-              (pastDisplayScore ? buildWeatherEfficiencyDerivedInput(pastDisplayScore) : null),
+              (pastVisibleWeather.score
+                ? buildWeatherEfficiencyDerivedInput(pastVisibleWeather.score as never)
+                : null),
           }
         : await (async () => {
             const actualDatasetForSharedScore =
@@ -301,6 +313,9 @@ export async function GET(request: NextRequest) {
         sharedDiagnostics,
         weatherSensitivityScore: weatherSensitivity.score,
         weatherEfficiencyDerivedInput: weatherSensitivity.derivedInput,
+        weatherCardsSourceOwner: usePastDisplayWeather
+          ? pastVisibleWeather.sourceOwner
+          : "shared_weather_sensitivity_envelope",
         correlationId,
         simulationProducer: "one_path",
         readModeUsed,

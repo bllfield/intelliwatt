@@ -194,8 +194,54 @@ describe("usage parity regression", () => {
     expect(adminView?.weatherScore?.coolingSensitivityScore0to100).toBe(92);
     expect(adminView?.weatherScore?.heatingSensitivityScore0to100).toBe(82);
 
-    const parity = auditUserAdminPastReadModelParity({ dataset });
+    const parity = auditUserAdminPastReadModelParity({
+      dataset,
+      scenarioName: "Past (Corrected)",
+    });
     expect(parity.ok, parity.violations.join("; ")).toBe(true);
+  });
+
+  it("fails parity when user-visible weather would use pre-sim scores instead of past display", () => {
+    const dataset = {
+      summary: { source: "GREEN_BUTTON", intervalsCount: 1, totalKwh: 1, start: "2026-06-01", end: "2026-06-01" },
+      totals: { importKwh: 1, exportKwh: 0, netKwh: 1 },
+      daily: [{ date: "2026-06-01", kwh: 1, source: "ACTUAL" }],
+      monthly: [{ month: "2026-06", kwh: 1 }],
+      series: { intervals15: [{ timestamp: "2026-06-01T17:00:00.000Z", kwh: 1 }] },
+      insights: {
+        timeOfDayBuckets: [
+          { key: "overnight", label: "Overnight", kwh: 0.25 },
+          { key: "morning", label: "Morning", kwh: 0.25 },
+          { key: "afternoon", label: "Afternoon", kwh: 0.25 },
+          { key: "evening", label: "Evening", kwh: 0.25 },
+        ],
+      },
+      meta: {
+        datasetKind: "SIMULATED",
+        weatherSensitivityScore: {
+          weatherEfficiencyScore0to100: 50,
+          coolingSensitivityScore0to100: 96,
+          heatingSensitivityScore0to100: 73,
+          confidenceScore0to100: 100,
+        },
+        pastDisplayWeatherSensitivityScore: {
+          weatherEfficiencyScore0to100: 51,
+          coolingSensitivityScore0to100: 92,
+          heatingSensitivityScore0to100: 76,
+          confidenceScore0to100: 100,
+          sourceOwner: "past_artifact_build",
+        },
+      },
+    };
+    const adminView = buildOnePathRunReadOnlyView({ dataset, readModel: { compareProjection: { metrics: {} } } });
+    const parity = auditUserAdminPastReadModelParity({
+      dataset,
+      scenarioName: "Past (Corrected)",
+    });
+    expect(adminView?.weatherScore?.weatherEfficiencyScore0to100).toBe(51);
+    expect(parity.weatherCards.user.weatherEfficiency).toBe(51);
+    expect(parity.weatherCards.admin.weatherEfficiency).toBe(51);
+    expect(parity.weatherCards.pass).toBe(true);
   });
 
   it("rejects zero time-of-day buckets for interval-backed past usage", () => {
