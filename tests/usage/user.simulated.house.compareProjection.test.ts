@@ -251,10 +251,6 @@ describe("user simulated house compare projection", () => {
       heatingSensitivityScore0to100: 73,
       confidenceScore0to100: 100,
     };
-    resolveSharedWeatherSensitivityEnvelope.mockResolvedValueOnce({
-      score: pastDisplayScore,
-      derivedInput: null,
-    });
     readOnePathSimulatedUsageScenario.mockResolvedValueOnce({
       ok: true,
       houseId: "h1",
@@ -266,6 +262,15 @@ describe("user simulated house compare projection", () => {
         meta: {
           datasetKind: "SIMULATED",
           weatherSensitivityScore: preSimScore,
+          pastDisplayWeatherSensitivityScore: pastDisplayScore,
+          pastDisplayWeatherScoringAudit: {
+            scorerModule: "resolveSharedWeatherSensitivityEnvelope",
+            scoringContext: "PAST_DISPLAY",
+            displayOwner: "past_artifact_build",
+            outputField: "meta.pastDisplayWeatherSensitivityScore",
+          },
+          displayWeatherCardsSourceOwner: "past_artifact_build",
+          displayWeatherRecomputeCount: 1,
           validationCompareRows: [],
           validationCompareMetrics: {},
         },

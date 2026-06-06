@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { finalizePastDatasetDisplayReadModel } from "@/lib/usage/finalizePastDatasetDisplayReadModel";
+import { readGreenButtonTrustedHomeDateKeysFromPastMeta } from "@/lib/usage/greenButtonPastTrustedPool";
+import {
+  buildPastVisibleWeatherReadDiagnostics,
+  pastDisplayWeatherReadPathFromMeta,
+} from "@/lib/usage/pastVisibleWeatherReadDiagnostics";
 import { resolveStaleIncompleteMeterSlotCompleteDateKeys } from "@/lib/usage/pastSimStaleIncompleteMeter";
 import { sageActualDailyRowsFromDataset } from "@/lib/usage/sageActualDailyTruth";
 import { buildUserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
@@ -699,23 +704,34 @@ function sageRunDisplayViewArgsFromTruth(
 async function preparePastArtifactDatasetForDisplay(args: {
   userId: string;
   houseId: string;
+  scenarioId?: string | null;
   dataset: Record<string, unknown> | null | undefined;
   sageActualDataset?: Record<string, unknown> | null;
   smtSlotCompleteDateKeys?: ReadonlySet<string>;
 }) {
   if (!args.dataset) return;
+  const meta = asRecord(args.dataset.meta);
+  const lockbox = asRecord(meta.lockboxRunContext);
+  const weatherHouseId =
+    String(meta.actualContextHouseId ?? lockbox.actualContextHouseId ?? args.houseId).trim() || args.houseId;
   const [homeProfile, applianceProfileRec] = await Promise.all([
     getHomeProfileSimulatedByUserHouse({ userId: args.userId, houseId: args.houseId }),
     getApplianceProfileSimulatedByUserHouse({ userId: args.userId, houseId: args.houseId }),
   ]);
   const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRec?.appliancesJson as any) ?? null);
+  const greenButtonTrustedHomeDateKeys = readGreenButtonTrustedHomeDateKeysFromPastMeta(meta);
   await finalizePastDatasetDisplayReadModel({
     dataset: args.dataset,
     sageActualDataset: args.sageActualDataset ?? null,
     smtSlotCompleteDateKeys: args.smtSlotCompleteDateKeys,
+    greenButtonTrustedHomeDateKeys:
+      greenButtonTrustedHomeDateKeys.size > 0 ? greenButtonTrustedHomeDateKeys : undefined,
     homeProfile,
     applianceProfile,
-    weatherHouseId: args.houseId,
+    weatherHouseId,
+    fallbackHouseId: args.houseId,
+    scenarioId: String(args.scenarioId ?? meta.scenarioId ?? meta.artifactScenarioId ?? "").trim() || undefined,
+    persistDisplayWeatherToCache: true,
   });
 }
 
@@ -885,6 +901,7 @@ async function buildPastSimRunReadbackResponse(args: {
   await preparePastArtifactDatasetForDisplay({
     userId: args.userId,
     houseId: args.houseId,
+    scenarioId: args.scenarioId,
     dataset: asRecord(readback.dataset),
     sageActualDataset: asRecord(sageTruth?.dataset),
     smtSlotCompleteDateKeys: sageDisplayArgs.smtSlotCompleteDateKeys,
@@ -927,6 +944,23 @@ async function buildPastSimRunReadbackResponse(args: {
           pastVariables,
         }
       : null;
+  const artifactDataset = asRecord(readback.dataset);
+  const artifactMeta = asRecord(artifactDataset.meta);
+  const adminWeatherHouseId =
+    String(artifactMeta.actualContextHouseId ?? asRecord(artifactMeta.lockboxRunContext).actualContextHouseId ?? args.houseId).trim() ||
+    args.houseId;
+  const pastWeatherDiagnostics = buildPastVisibleWeatherReadDiagnostics({
+    routeOwner: "app/api/admin/tools/one-path-sim/route.ts",
+    dataset: artifactDataset,
+    scenarioName: "Past (Corrected)",
+    scenarioId: args.scenarioId,
+    requestedHouseId: args.houseId,
+    weatherHouseId: adminWeatherHouseId,
+    topLevelWeatherSensitivityScore: compactRunDisplayView?.weatherScore ?? null,
+    weatherCardsSourceOwner: "past_artifact_build",
+    weatherScoringAudit: (artifactMeta.pastDisplayWeatherScoringAudit as never) ?? null,
+    weatherReadPath: pastDisplayWeatherReadPathFromMeta(artifactMeta),
+  });
   return {
     ok: true as const,
     debugDiagnosticsIncluded: false,
@@ -936,6 +970,7 @@ async function buildPastSimRunReadbackResponse(args: {
     correlationId: args.correlationId ?? null,
     manualStageOneView: null,
     runDisplayView: compactRunDisplayView,
+    pastWeatherDiagnostics,
     artifact: null,
     readModel: {
       ...buildCompactSimulationReadModel({
@@ -2374,6 +2409,7 @@ export async function POST(request: NextRequest) {
         await preparePastArtifactDatasetForDisplay({
           userId: effectiveUserId,
           houseId: effectiveHouseId,
+          scenarioId: effectiveRawInputBase.scenarioId ?? null,
           dataset: artifactDataset,
           sageActualDataset: asRecord(sageTruthForPastDisplay?.dataset),
           smtSlotCompleteDateKeys: sageDisplayArgsForPast.smtSlotCompleteDateKeys,
@@ -2453,6 +2489,7 @@ export async function POST(request: NextRequest) {
         await preparePastArtifactDatasetForDisplay({
           userId: effectiveUserId,
           houseId: effectiveHouseId,
+          scenarioId: effectiveRawInputBase.scenarioId ?? null,
           dataset: asRecord(manualPastReadResult.displayDataset),
           sageActualDataset: asRecord(actualDatasetForManualRun),
           smtSlotCompleteDateKeys: manualSageDisplayArgs.smtSlotCompleteDateKeys,
@@ -2461,6 +2498,7 @@ export async function POST(request: NextRequest) {
         await preparePastArtifactDatasetForDisplay({
           userId: effectiveUserId,
           houseId: effectiveHouseId,
+          scenarioId: effectiveRawInputBase.scenarioId,
           dataset: asRecord(readModel.dataset),
           sageActualDataset: asRecord(sageTruthForPastDisplay?.dataset),
           smtSlotCompleteDateKeys: sageDisplayArgsForPast.smtSlotCompleteDateKeys,

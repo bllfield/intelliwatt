@@ -21,6 +21,7 @@ import {
   validationActualDailyKwhMapFromMeta,
 } from "@/lib/usage/pastSimValidationCompareRead";
 import { resolvePastSimFifteenMinuteCurveFromDataset } from "@/lib/usage/pastSimDisplayFromDataset";
+import { readPastSimDisplayWeatherSensitivityScore } from "@/lib/usage/pastSimDisplayWeather";
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
 import { dailyRowFieldsFromSourceRow } from "@/modules/usageSimulator/dailyRowFieldsFromDisplay";
 import type { ValidationCompareProjectionSidecar } from "@/lib/usage/validationCompareProjection";
@@ -367,7 +368,7 @@ export function buildOnePathRunReadOnlyView(args: {
   const isBaselinePassthrough = meta?.baselinePassthrough === true;
   const isPastSimulatedDisplay = meta?.datasetKind === "SIMULATED" && !isBaselinePassthrough;
   const weatherScore = isPastSimulatedDisplay
-    ? ((meta?.pastDisplayWeatherSensitivityScore as WeatherSensitivityScore | null | undefined) ?? null)
+    ? ((readPastSimDisplayWeatherSensitivityScore(dataset) as WeatherSensitivityScore | null | undefined) ?? null)
     : (args.weatherSensitivityScore ??
       (meta?.weatherSensitivityScore as WeatherSensitivityScore | null | undefined) ??
       null);

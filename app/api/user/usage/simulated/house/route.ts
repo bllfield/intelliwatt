@@ -21,12 +21,14 @@ import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProf
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import { getManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
 import type { WeatherSensitivityEnvelope } from "@/modules/weatherSensitivity/shared";
-import { hasPersistedPastDisplayWeatherScore } from "@/lib/usage/pastSimDisplayWeather";
 import {
   buildWeatherScoringAudit,
-  pastDisplayScoreMatchesPreSimDiagnostic,
   resolveActualUsageWeatherScore,
 } from "@/lib/usage/weatherScoringOwnership";
+import { readGreenButtonTrustedHomeDateKeysFromPastMeta } from "@/lib/usage/greenButtonPastTrustedPool";
+import {
+  resolvePastWeatherHouseIdFromDataset,
+} from "@/lib/usage/pastVisibleWeatherReadDiagnostics";
 import { shouldUsePastDisplayWeatherCards } from "@/lib/usage/userPastVisibleWeather";
 import { resolveUserPastApiWeatherResponse } from "@/lib/usage/userPastApiWeatherResponse";
 
@@ -242,38 +244,19 @@ export async function GET(request: NextRequest) {
         scenarioName: scenarioRow?.name ?? null,
         meta: datasetAny?.meta,
       });
-      const datasetMeta =
-        datasetAny?.meta && typeof datasetAny.meta === "object"
-          ? (datasetAny.meta as Record<string, unknown>)
-          : ({} as Record<string, unknown>);
-      const lockboxRunContext =
-        datasetMeta.lockboxRunContext && typeof datasetMeta.lockboxRunContext === "object"
-          ? (datasetMeta.lockboxRunContext as Record<string, unknown>)
-          : ({} as Record<string, unknown>);
-      const pastWeatherHouseId =
-        String(datasetMeta.actualContextHouseId ?? lockboxRunContext.actualContextHouseId ?? houseId).trim() ||
-        houseId;
-      const stalePersistedPastDisplayWeather =
-        usePastDisplayWeather && pastDisplayScoreMatchesPreSimDiagnostic(datasetMeta);
-      const warmPastDisplayWeather =
-        usePastDisplayWeather &&
-        hasPersistedPastDisplayWeatherScore(datasetAny) &&
-        !stalePersistedPastDisplayWeather;
+      const pastWeatherHouseId = resolvePastWeatherHouseIdFromDataset({
+        dataset: datasetAny,
+        fallbackHouseId: houseId,
+      });
       const [homeProfile, applianceProfileRec, manualUsageRec, sageTruth, smtSlotCompleteDateKeys] =
         await Promise.all([
-          warmPastDisplayWeather
-            ? Promise.resolve(null)
-            : getHomeProfileSimulatedByUserHouse({ userId: u.user.id, houseId }),
-          warmPastDisplayWeather
-            ? Promise.resolve(null)
-            : getApplianceProfileSimulatedByUserHouse({ userId: u.user.id, houseId }),
-          warmPastDisplayWeather
-            ? Promise.resolve({ payload: null })
-            : getManualUsageInputForUserHouse({ userId: u.user.id, houseId }).catch(() => ({ payload: null })),
+          getHomeProfileSimulatedByUserHouse({ userId: u.user.id, houseId }),
+          getApplianceProfileSimulatedByUserHouse({ userId: u.user.id, houseId }),
+          getManualUsageInputForUserHouse({ userId: u.user.id, houseId }).catch(() => ({ payload: null })),
           resolveOnePathUpstreamUsageTruthForSimulation({
             userId: u.user.id,
             houseId,
-            actualContextHouseId: houseId,
+            actualContextHouseId: pastWeatherHouseId,
             smtSourceEsiid: house?.esiid ?? null,
             seedIfMissing: false,
             preferredActualSource: preferredActualSource ?? null,
@@ -284,44 +267,37 @@ export async function GET(request: NextRequest) {
             meta: datasetAny?.meta,
           }),
         ]);
-      const applianceProfile = warmPastDisplayWeather
-        ? null
-        : normalizeStoredApplianceProfile((applianceProfileRec?.appliancesJson as any) ?? null);
-      await finalizePastDatasetDisplayReadModel({
+      const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRec?.appliancesJson as any) ?? null);
+      const greenButtonTrustedHomeDateKeys = readGreenButtonTrustedHomeDateKeysFromPastMeta(datasetAny?.meta);
+      const finalizeOutcome = await finalizePastDatasetDisplayReadModel({
         dataset: datasetAny,
         sageActualDataset: sageTruth?.dataset ?? null,
         smtSlotCompleteDateKeys,
+        greenButtonTrustedHomeDateKeys:
+          greenButtonTrustedHomeDateKeys.size > 0 ? greenButtonTrustedHomeDateKeys : undefined,
         homeProfile,
         applianceProfile,
         weatherHouseId: pastWeatherHouseId,
-        skipWeatherRecompute: warmPastDisplayWeather,
+        fallbackHouseId: houseId,
+        scenarioId,
+        persistDisplayWeatherToCache: true,
       });
       let weatherSensitivity: WeatherSensitivityEnvelope;
       let weatherScoringAudit: Awaited<ReturnType<typeof resolveUserPastApiWeatherResponse>>["weatherScoringAudit"];
       let weatherCardsSourceOwner = "actual_usage_weather_score";
-      let weatherReadPath = warmPastDisplayWeather ? "past_display_artifact_warm" : "past_display_finalize";
+      let weatherReadPath = finalizeOutcome?.weatherReadPath ?? "past_display_finalize_recompute";
       let pastWeatherDiagnostics: Awaited<
         ReturnType<typeof resolveUserPastApiWeatherResponse>
       >["diagnostics"] | null = null;
       if (usePastDisplayWeather) {
-        const [resolvedHomeProfile, resolvedApplianceProfile] = await Promise.all([
-          homeProfile != null
-            ? Promise.resolve(homeProfile)
-            : getHomeProfileSimulatedByUserHouse({ userId: u.user.id, houseId }).catch(() => null),
-          applianceProfile != null
-            ? Promise.resolve(applianceProfile)
-            : getApplianceProfileSimulatedByUserHouse({ userId: u.user.id, houseId })
-                .then((rec) => normalizeStoredApplianceProfile((rec?.appliancesJson as any) ?? null))
-                .catch(() => null),
-        ]);
         const pastWeather = await resolveUserPastApiWeatherResponse({
           dataset: datasetAny,
           scenarioName: scenarioRow?.name ?? null,
           scenarioId,
           requestedHouseId: houseId,
           preferredActualSource: preferredActualSource ?? null,
-          homeProfile: resolvedHomeProfile,
-          applianceProfile: resolvedApplianceProfile,
+          homeProfile,
+          applianceProfile,
           weatherHouseId: pastWeatherHouseId,
         });
         weatherSensitivity = pastWeather.weatherSensitivity;
