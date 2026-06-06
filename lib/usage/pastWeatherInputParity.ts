@@ -1,11 +1,7 @@
 import { createHash } from "crypto";
 
-import {
-  computePastDisplayTruthRevision,
-  PAST_DISPLAY_WEATHER_FINALIZE_VERSION,
-} from "@/lib/usage/pastDisplayWeatherFinalizeGuard";
+import { readPastValidationPolicyRevisionFromMeta } from "@/lib/usage/pastSimulationCoreLabel";
 import { readGreenButtonTrustedHomeDateKeysFromPastMeta } from "@/lib/usage/greenButtonPastTrustedPool";
-import { auditUserAdminPastReadModelParity } from "@/lib/usage/intervalReadModelInvariants";
 import {
   PAST_DISPLAY_WEATHER_META_FIELD,
   scoreCardValues,
@@ -15,6 +11,8 @@ import {
   WEATHER_CALCULATION_VERSION,
   WEATHER_SCORE_VERSION,
 } from "@/modules/weatherSensitivity/shared";
+
+const PAST_DISPLAY_WEATHER_FINALIZE_VERSION = "past_display_weather_finalize_v2";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -31,6 +29,47 @@ function round2(value: number): number {
 
 function stableHash(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value), "utf8").digest("base64url").slice(0, 22);
+}
+
+function computePastDisplayTruthRevision(args: {
+  dataset: Record<string, unknown>;
+  weatherHouseId?: string | null;
+}): string {
+  const meta = asRecord(args.dataset.meta);
+  const daily = Array.isArray(args.dataset.daily)
+    ? (args.dataset.daily as Array<{ date?: unknown; kwh?: unknown; source?: unknown }>)
+    : [];
+  const dailyFingerprint = daily
+    .map((row) => {
+      const date = String(row.date ?? "").slice(0, 10);
+      const kwh = round2(Number(row.kwh) || 0);
+      const source = String(row.source ?? "").trim().toUpperCase();
+      return `${date}|${kwh}|${source}`;
+    })
+    .sort()
+    .join(";");
+
+  const trustedKeys = Array.from(readGreenButtonTrustedHomeDateKeysFromPastMeta(meta)).sort().join(",");
+  const coverageStart = String(meta.coverageStart ?? asRecord(args.dataset.summary).start ?? "").slice(0, 10);
+  const coverageEnd = String(meta.coverageEnd ?? asRecord(args.dataset.summary).end ?? "").slice(0, 10);
+  const weatherHouseId = String(args.weatherHouseId ?? meta.actualContextHouseId ?? "").trim();
+  const validationRevision = readPastValidationPolicyRevisionFromMeta(meta) ?? "";
+  const dailyWeatherKeys = Object.keys(asRecord(args.dataset.dailyWeather ?? meta.dailyWeatherByDateKey))
+    .sort()
+    .join(",");
+
+  const canonical = [
+    PAST_DISPLAY_WEATHER_FINALIZE_VERSION,
+    dailyFingerprint,
+    trustedKeys,
+    coverageStart,
+    coverageEnd,
+    weatherHouseId,
+    validationRevision,
+    dailyWeatherKeys,
+  ].join("\n");
+
+  return createHash("sha256").update(canonical, "utf8").digest("base64url").slice(0, 22);
 }
 
 function readArtifactInputHash(meta: Record<string, unknown>): string | null {
@@ -83,8 +122,9 @@ function readValidationKeys(meta: Record<string, unknown>): string[] {
 
 function readTravelVacantFingerprint(meta: Record<string, unknown>): string {
   const lockbox = asRecord(meta.lockboxInput);
-  const travelRanges = Array.isArray(lockbox.travelRanges?.ranges)
-    ? (lockbox.travelRanges.ranges as Array<{ startDate?: unknown; endDate?: unknown }>)
+  const travelRangesContainer = asRecord(lockbox.travelRanges);
+  const travelRanges = Array.isArray(travelRangesContainer.ranges)
+    ? (travelRangesContainer.ranges as Array<{ startDate?: unknown; endDate?: unknown }>)
     : Array.isArray(lockbox.travelRanges)
       ? (lockbox.travelRanges as Array<{ startDate?: unknown; endDate?: unknown }>)
       : [];
@@ -318,153 +358,4 @@ export function computeSimulatedProfileFingerprint(args: {
     appliancesJson: args.applianceProfileJson ?? null,
   });
   return createHash("sha256").update(canonical, "utf8").digest("base64url").slice(0, 16);
-}
-
-export async function auditPastWeatherCrossSurfaceParity(args: {
-  sourceUserId: string;
-  sourceHouseId: string;
-  sourceScenarioId: string;
-  adminDataset: Record<string, unknown>;
-  adminUserId: string;
-  adminHouseId: string;
-  sourceArtifactInputHash?: string | null;
-}): Promise<{
-  ok: boolean;
-  violations: string[];
-  sourceArtifactLoaded: boolean;
-  sourceArtifactInputHash: string | null;
-  inputParity: PastWeatherInputParityResult | null;
-  readModelParity: ReturnType<typeof auditUserAdminPastReadModelParity> | null;
-}> {
-  const { getCachedPastDataset } = await import("@/modules/onePathSim/usageSimulator/pastCache");
-  const { getHomeProfileSimulatedByUserHouse } = await import("@/modules/homeProfile/repo");
-  const { getApplianceProfileSimulatedByUserHouse } = await import("@/modules/applianceProfile/repo");
-
-  const adminMeta = asRecord(args.adminDataset.meta);
-  const requestedSourceHash =
-    String(args.sourceArtifactInputHash ?? "").trim() ||
-    String(asRecord(adminMeta.lockboxInput).sourceContext?.intervalFingerprint ?? "").trim() ||
-    null;
-
-  let sourceHash = requestedSourceHash;
-  let sourceCached = sourceHash
-    ? await getCachedPastDataset({
-        houseId: args.sourceHouseId,
-        scenarioId: args.sourceScenarioId,
-        inputHash: sourceHash,
-      })
-    : null;
-
-  if (!sourceCached) {
-    const { resolvePastArtifactIdentity } = await import("@/lib/usage/pastArtifactIdentity");
-    const { loadPastSimBuildInputsForRead } = await import("@/lib/usage/loadPastSimBuildInputsForRead");
-    const { getHouseAddressForUserHouse } = await import("@/modules/onePathSim/usageSimulator/repo");
-    const buildInputs = await loadPastSimBuildInputsForRead({
-      userId: args.sourceUserId,
-      houseId: args.sourceHouseId,
-      scenarioId: args.sourceScenarioId,
-    });
-    const house = await getHouseAddressForUserHouse({
-      userId: args.sourceUserId,
-      houseId: args.sourceHouseId,
-    });
-    if (buildInputs && house) {
-      const identity = await resolvePastArtifactIdentity({
-        userId: args.sourceUserId,
-        requestHouseId: args.sourceHouseId,
-        requestHouseEsiid: house.esiid ?? null,
-        buildInputs,
-      });
-      if (identity?.inputHash) {
-        sourceHash = identity.inputHash;
-        sourceCached = await getCachedPastDataset({
-          houseId: args.sourceHouseId,
-          scenarioId: args.sourceScenarioId,
-          inputHash: sourceHash,
-        });
-      }
-    }
-  }
-
-  if (!sourceCached?.datasetJson) {
-    return {
-      ok: false,
-      violations: [
-        `source Past artifact missing for cross-surface weather parity (house=${args.sourceHouseId} hash=${sourceHash ?? "unknown"})`,
-      ],
-      sourceArtifactLoaded: false,
-      sourceArtifactInputHash: sourceHash,
-      inputParity: null,
-      readModelParity: null,
-    };
-  }
-
-  const userDataset = sourceCached.datasetJson as Record<string, unknown>;
-  const [userHome, userApp, adminHome, adminApp] = await Promise.all([
-    getHomeProfileSimulatedByUserHouse({ userId: args.sourceUserId, houseId: args.sourceHouseId }),
-    getApplianceProfileSimulatedByUserHouse({ userId: args.sourceUserId, houseId: args.sourceHouseId }),
-    getHomeProfileSimulatedByUserHouse({ userId: args.adminUserId, houseId: args.adminHouseId }),
-    getApplianceProfileSimulatedByUserHouse({ userId: args.adminUserId, houseId: args.adminHouseId }),
-  ]);
-  const userProfiles = {
-    homeProfile: computeSimulatedProfileFingerprint({ homeProfile: userHome, applianceProfileJson: null }),
-    applianceProfile: computeSimulatedProfileFingerprint({
-      homeProfile: null,
-      applianceProfileJson: userApp?.appliancesJson ?? null,
-    }),
-  };
-  const adminProfiles = {
-    homeProfile: computeSimulatedProfileFingerprint({ homeProfile: adminHome, applianceProfileJson: null }),
-    applianceProfile: computeSimulatedProfileFingerprint({
-      homeProfile: null,
-      applianceProfileJson: adminApp?.appliancesJson ?? null,
-    }),
-  };
-  const userCombined = computeSimulatedProfileFingerprint({
-    homeProfile: userHome,
-    applianceProfileJson: userApp?.appliancesJson ?? null,
-  });
-  const adminCombined = computeSimulatedProfileFingerprint({
-    homeProfile: adminHome,
-    applianceProfileJson: adminApp?.appliancesJson ?? null,
-  });
-
-  const inputParity = auditPastWeatherInputParity({
-    userDataset,
-    adminDataset: args.adminDataset,
-    userProfileFingerprints: {
-      homeProfile: userCombined,
-      applianceProfile: userProfiles.applianceProfile,
-    },
-    adminProfileFingerprints: {
-      homeProfile: adminCombined,
-      applianceProfile: adminProfiles.applianceProfile,
-    },
-  });
-  const readModelParity = auditUserAdminPastReadModelParity({
-    userDataset,
-    adminDataset: args.adminDataset,
-    userProfileFingerprints: {
-      homeProfile: userCombined,
-      applianceProfile: userProfiles.applianceProfile,
-    },
-    adminProfileFingerprints: {
-      homeProfile: adminCombined,
-      applianceProfile: adminProfiles.applianceProfile,
-    },
-  });
-
-  const violations = [...inputParity.violations];
-  if (!readModelParity.ok) {
-    violations.push(...readModelParity.violations);
-  }
-
-  return {
-    ok: inputParity.ok && readModelParity.ok,
-    violations: [...new Set(violations)],
-    sourceArtifactLoaded: true,
-    sourceArtifactInputHash: sourceHash,
-    inputParity,
-    readModelParity,
-  };
 }

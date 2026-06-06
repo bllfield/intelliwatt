@@ -722,8 +722,8 @@ async function preparePastArtifactDatasetForDisplay(args: {
     fallbackHouseId: args.houseId,
   });
   const [homeProfile, applianceProfileRec] = await Promise.all([
-    getHomeProfileSimulatedByUserHouse({ userId: args.userId, houseId: profileHouseId }),
-    getApplianceProfileSimulatedByUserHouse({ userId: args.userId, houseId: profileHouseId }),
+    getHomeProfileSimulatedByUserHouse({ userId: args.userId, houseId: weatherHouseId }),
+    getApplianceProfileSimulatedByUserHouse({ userId: args.userId, houseId: weatherHouseId }),
   ]);
   const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRec?.appliancesJson as any) ?? null);
   const greenButtonTrustedHomeDateKeys = readGreenButtonTrustedHomeDateKeysFromPastMeta(meta);
@@ -995,7 +995,7 @@ async function buildPastSimRunReadbackResponse(args: {
     args.linkedSourceScenarioId &&
     artifactDataset
       ? await (
-          await import("@/lib/usage/pastWeatherInputParity")
+          await import("@/lib/usage/pastWeatherCrossSurfaceParity.server")
         ).auditPastWeatherCrossSurfaceParity({
           sourceUserId: args.linkedSourceUserId,
           sourceHouseId: args.linkedSourceHouseId,

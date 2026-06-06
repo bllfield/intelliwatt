@@ -238,7 +238,9 @@ async function main() {
   const crossSurfaceParity =
     userBody.ok && adminRes.json?.ok
       ? await (async () => {
-          const { auditPastWeatherCrossSurfaceParity } = await import("../lib/usage/pastWeatherInputParity.ts");
+          const { auditPastWeatherCrossSurfaceParity } = await import(
+            "../lib/usage/pastWeatherCrossSurfaceParity.server.ts"
+          );
           return auditPastWeatherCrossSurfaceParity({
             sourceUserId: user.id,
             sourceHouseId: SOURCE_HOUSE,

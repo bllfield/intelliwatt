@@ -127,7 +127,7 @@ async function main() {
     user && sourcePast?.id
       ? await loadSourceArtifactReadOnly(user.id, SOURCE_HOUSE, sourcePast.id)
       : null;
-  const sourceMeta = (sourceCached?.datasetJson as { meta?: Record<string, unknown> } | undefined)?.meta ?? {};
+  const sourceMeta = sourceCached?.datasetJson?.meta ?? {};
   const sourceBundleC = scoreCard(sourceMeta.pastDisplayWeatherSensitivityScore);
 
   const { buildPastWeatherInputFingerprint, computeSimulatedProfileFingerprint } = await import(
