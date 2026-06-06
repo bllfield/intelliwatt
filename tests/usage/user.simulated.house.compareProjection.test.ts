@@ -235,6 +235,69 @@ describe("user simulated house compare projection", () => {
     });
   });
 
+  it("returns past display weather bundle C for Past (Corrected), not pre-sim diagnostic B", async () => {
+    const pastDisplayScore = {
+      weatherEfficiencyScore0to100: 51,
+      coolingSensitivityScore0to100: 92,
+      heatingSensitivityScore0to100: 76,
+      confidenceScore0to100: 100,
+      sourceOwner: "past_artifact_build",
+      displayOwner: "past_artifact_build",
+      scoringContext: "PAST_DISPLAY",
+    };
+    const preSimScore = {
+      weatherEfficiencyScore0to100: 50,
+      coolingSensitivityScore0to100: 96,
+      heatingSensitivityScore0to100: 73,
+      confidenceScore0to100: 100,
+    };
+    resolveSharedWeatherSensitivityEnvelope.mockResolvedValueOnce({
+      score: pastDisplayScore,
+      derivedInput: null,
+    });
+    readOnePathSimulatedUsageScenario.mockResolvedValueOnce({
+      ok: true,
+      houseId: "h1",
+      scenarioKey: "past-s1",
+      scenarioId: "past-s1",
+      dataset: {
+        summary: { source: "SIMULATED" },
+        daily: [{ date: "2025-04-10", kwh: 9, source: "SIMULATED" }],
+        meta: {
+          datasetKind: "SIMULATED",
+          weatherSensitivityScore: preSimScore,
+          validationCompareRows: [],
+          validationCompareMetrics: {},
+        },
+      },
+    });
+
+    const { GET } = await import("@/app/api/user/usage/simulated/house/route");
+    const req = new NextRequest(
+      "http://localhost/api/user/usage/simulated/house?houseId=h1&scenarioId=past-s1"
+    );
+    const res = await GET(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.weatherCardsSourceOwner).toBe("past_artifact_build");
+    expect(body.weatherScoringAudit?.scoringContext).toBe("PAST_DISPLAY");
+    expect(body.weatherScoringAudit?.displayOwner).toBe("past_artifact_build");
+    expect(body.weatherSensitivityScore).toMatchObject({
+      weatherEfficiencyScore0to100: 51,
+      coolingSensitivityScore0to100: 92,
+      heatingSensitivityScore0to100: 76,
+      confidenceScore0to100: 100,
+    });
+    expect(body.dataset?.meta?.pastDisplayWeatherSensitivityScore).toMatchObject({
+      weatherEfficiencyScore0to100: 51,
+      sourceOwner: "past_artifact_build",
+    });
+    expect(body.pastWeatherDiagnostics?.visibleWeatherScoreSourceOwner).toBe("past_artifact_build");
+    expect(body.routeOwner).toBe("app/api/user/usage/simulated/house/route.ts");
+    expect(body.scenarioName).toBe("Past (Corrected)");
+  });
+
   it("returns compareProjection sidecar from canonical dataset family", async () => {
     const { GET } = await import("@/app/api/user/usage/simulated/house/route");
     const req = new NextRequest(

@@ -23,6 +23,7 @@ import type {
   WeatherEfficiencyDerivedInput,
   WeatherSensitivityScore,
 } from "@/modules/weatherSensitivity/shared";
+import { resolvePastWeatherScoreFromHouseApiBody } from "@/lib/usage/userPastApiWeatherResponse";
 
 type UsageSeriesPoint = {
   timestamp: string;
@@ -154,6 +155,7 @@ export type HouseUsage = {
   usageIngestion?: UserUsageIngestionStatus | null;
   weatherSensitivityScore?: WeatherSensitivityScore | null;
   weatherEfficiencyDerivedInput?: WeatherEfficiencyDerivedInput | null;
+  weatherCardsSourceOwner?: string | null;
 };
 
 function houseNeedsSmtIngestionPoll(house: HouseUsage | null | undefined): boolean {
@@ -712,8 +714,24 @@ export const UsageDashboard: React.FC<Props> = ({
     };
   }, [activeHouse?.houseId, manualUsageHouseId, manualUsagePayload, presentationSurface]);
 
-  const resolvedWeatherSensitivityScore =
-    activeHouse?.weatherSensitivityScore ?? fetchedManualWeatherSensitivityScore ?? null;
+  const resolvedWeatherSensitivityScore = useMemo(() => {
+    if (dashboardVariant === "PAST_SIMULATED_USAGE" && activeHouse) {
+      const pastWeather = resolvePastWeatherScoreFromHouseApiBody({
+        weatherSensitivityScore: activeHouse.weatherSensitivityScore,
+        weatherCardsSourceOwner: activeHouse.weatherCardsSourceOwner,
+        dataset: activeHouse.dataset,
+      });
+      return (pastWeather.score as WeatherSensitivityScore | null) ?? null;
+    }
+    return activeHouse?.weatherSensitivityScore ?? fetchedManualWeatherSensitivityScore ?? null;
+  }, [
+    activeHouse,
+    activeHouse?.weatherCardsSourceOwner,
+    activeHouse?.weatherSensitivityScore,
+    activeHouse?.dataset,
+    dashboardVariant,
+    fetchedManualWeatherSensitivityScore,
+  ]);
 
   const manualMonthlyStageOne = useMemo(() => {
     const allowManualStageOnePresentation = shouldAllowManualStageOnePresentation({

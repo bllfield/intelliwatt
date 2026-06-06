@@ -20,21 +20,11 @@ import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import { getManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
-import {
-  buildWeatherEfficiencyDerivedInput,
-  type WeatherSensitivityEnvelope,
-} from "@/modules/weatherSensitivity/shared";
+import type { WeatherSensitivityEnvelope } from "@/modules/weatherSensitivity/shared";
 import { hasPersistedPastDisplayWeatherScore } from "@/lib/usage/pastSimDisplayWeather";
-import {
-  buildWeatherScoringAudit,
-  PAST_DISPLAY_WEATHER_META_FIELD,
-  resolveActualUsageWeatherScore,
-  resolveUsageSourceTypeFromDataset,
-} from "@/lib/usage/weatherScoringOwnership";
-import {
-  resolveUserPastVisibleWeatherSensitivityScore,
-  shouldUsePastDisplayWeatherCards,
-} from "@/lib/usage/userPastVisibleWeather";
+import { buildWeatherScoringAudit, resolveActualUsageWeatherScore } from "@/lib/usage/weatherScoringOwnership";
+import { shouldUsePastDisplayWeatherCards } from "@/lib/usage/userPastVisibleWeather";
+import { resolveUserPastApiWeatherResponse } from "@/lib/usage/userPastApiWeatherResponse";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -286,37 +276,39 @@ export async function GET(request: NextRequest) {
         weatherHouseId: houseId,
         skipWeatherRecompute: warmPastDisplayWeather,
       });
-      const pastVisibleWeather = resolveUserPastVisibleWeatherSensitivityScore({
-        dataset: datasetAny,
-        scenarioName: scenarioRow?.name ?? null,
-      });
-      const pastDisplayDerivedInput =
-        (datasetAny?.meta as any)?.pastDisplayWeatherEfficiencyDerivedInput ?? null;
-      const pastSourceType = resolveUsageSourceTypeFromDataset(datasetAny, {
-        preferredActualSource: preferredActualSource ?? null,
-      });
       let weatherSensitivity: WeatherSensitivityEnvelope;
-      let weatherScoringAudit: ReturnType<typeof buildWeatherScoringAudit>;
+      let weatherScoringAudit: Awaited<ReturnType<typeof resolveUserPastApiWeatherResponse>>["weatherScoringAudit"];
+      let weatherCardsSourceOwner = "actual_usage_weather_score";
+      let weatherReadPath = warmPastDisplayWeather ? "past_display_artifact_warm" : "past_display_finalize";
+      let pastWeatherDiagnostics: Awaited<
+        ReturnType<typeof resolveUserPastApiWeatherResponse>
+      >["diagnostics"] | null = null;
       if (usePastDisplayWeather) {
-        weatherSensitivity = {
-          score: pastVisibleWeather.score as WeatherSensitivityEnvelope["score"],
-          derivedInput:
-            pastDisplayDerivedInput ??
-            (pastVisibleWeather.score
-              ? buildWeatherEfficiencyDerivedInput(pastVisibleWeather.score as never)
-              : null),
-        };
-        weatherScoringAudit =
-          (datasetAny?.meta as any)?.pastDisplayWeatherScoringAudit ??
-          buildWeatherScoringAudit({
-            scoringContext: "PAST_DISPLAY",
-            scoringDataset: datasetAny,
-            datasetKind: "SIMULATED",
-            sourceType: pastSourceType,
-            preferredActualSource: preferredActualSource ?? null,
-            outputField: PAST_DISPLAY_WEATHER_META_FIELD,
-            envelope: weatherSensitivity,
-          });
+        const [resolvedHomeProfile, resolvedApplianceProfile] = await Promise.all([
+          homeProfile != null
+            ? Promise.resolve(homeProfile)
+            : getHomeProfileSimulatedByUserHouse({ userId: u.user.id, houseId }).catch(() => null),
+          applianceProfile != null
+            ? Promise.resolve(applianceProfile)
+            : getApplianceProfileSimulatedByUserHouse({ userId: u.user.id, houseId })
+                .then((rec) => normalizeStoredApplianceProfile((rec?.appliancesJson as any) ?? null))
+                .catch(() => null),
+        ]);
+        const pastWeather = await resolveUserPastApiWeatherResponse({
+          dataset: datasetAny,
+          scenarioName: scenarioRow?.name ?? null,
+          scenarioId,
+          requestedHouseId: houseId,
+          preferredActualSource: preferredActualSource ?? null,
+          homeProfile: resolvedHomeProfile,
+          applianceProfile: resolvedApplianceProfile,
+          weatherHouseId: houseId,
+        });
+        weatherSensitivity = pastWeather.weatherSensitivity;
+        weatherScoringAudit = pastWeather.weatherScoringAudit;
+        weatherCardsSourceOwner = pastWeather.weatherCardsSourceOwner;
+        weatherReadPath = pastWeather.weatherReadPath;
+        pastWeatherDiagnostics = pastWeather.diagnostics;
       } else {
         const actualDatasetForSharedScore =
           actualDatasetForCompare ??
@@ -362,11 +354,12 @@ export async function GET(request: NextRequest) {
         sharedDiagnostics,
         weatherSensitivityScore: weatherSensitivity.score,
         weatherEfficiencyDerivedInput: weatherSensitivity.derivedInput,
-        weatherCardsSourceOwner: usePastDisplayWeather
-          ? pastVisibleWeather.sourceOwner
-          : "actual_usage_weather_score",
+        weatherCardsSourceOwner,
         weatherScoringAudit,
-        weatherReadPath: warmPastDisplayWeather ? "past_display_artifact_warm" : "past_display_finalize",
+        weatherReadPath,
+        pastWeatherDiagnostics,
+        scenarioName: scenarioRow?.name ?? null,
+        routeOwner: "app/api/user/usage/simulated/house/route.ts",
         correlationId,
         simulationProducer: "one_path",
         readModeUsed,

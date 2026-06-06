@@ -1492,12 +1492,14 @@ export function OnePathSimAdmin() {
         <div className="rounded-2xl bg-brand-white p-6 shadow-lg">
           <div className="text-2xl font-semibold text-brand-navy">One Path Sim Admin</div>
           <p className="mt-2 max-w-4xl text-sm text-slate-600">
-            Thin admin harness for the pre-cutover canonical simulation truth console. All four modes adapt into
+            Thin admin harness for the canonical One Path simulation truth console. All four modes adapt into
             One Path-owned simulation paths, persist one artifact family, and render from the One Path read model only.
-            Shared/live inputs stay read-only, and shared display reuse stays presentation-only. Older surfaces are not
-            rerouted to this harness yet.
+            User Past simulated usage reads the same artifact family via the user simulated-house route. Baseline Actual
+            usage and other non-Past surfaces remain on their existing paths. Shared/live inputs stay read-only.
           </p>
-          <div className="mt-2 text-xs text-slate-500">Older surfaces are not rerouted to this harness yet.</div>
+          <div className="mt-2 text-xs text-slate-500">
+            User Past is One Path-backed; this page is the admin truth console for the same artifact family.
+          </div>
         </div>
 
         <div className="rounded-2xl bg-white p-6 shadow-lg">

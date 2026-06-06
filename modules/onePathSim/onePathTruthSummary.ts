@@ -266,10 +266,11 @@ export function buildOnePathTruthSummary(args: {
     preCutoverHarness: {
       title: "Pre-Cutover Harness Status",
       summary:
-        "This page is the pre-cutover canonical simulation truth console only. It proves One Path-owned interval calculations live inside modules/onePathSim/** while shared/live inputs stay read-only and shared display reuse stays presentation-only. Older admin and user surfaces are not rerouted here yet.",
+        "This page is the canonical One Path simulation truth console. It proves One Path-owned interval calculations live inside modules/onePathSim/** while shared/live inputs stay read-only and shared display reuse stays presentation-only. User Past reads the same artifact family via the user simulated-house route.",
       currentRun: {
         status: "pre-cutover canonical harness",
-        rerouteStatus: "Older surfaces are not rerouted to this harness yet.",
+        rerouteStatus:
+          "User Past reads the One Path artifact via the user simulated-house route; baseline Actual and other non-Past surfaces remain on existing paths.",
         sharedProducerPathUsed: args.engineInput.sharedProducerPathUsed ?? null,
         readModelOnly: true,
         selectedMode: args.inputType ?? null,

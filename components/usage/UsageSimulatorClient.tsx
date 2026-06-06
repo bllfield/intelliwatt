@@ -12,6 +12,7 @@ import { buildValidationCompareDisplay } from "@/components/usage/validationComp
 import type { ManualMonthlyReconciliation } from "@/modules/manualUsage/reconciliation";
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
 import type { WeatherSensitivityScore } from "@/modules/weatherSensitivity/shared";
+import { resolvePastWeatherScoreFromHouseApiBody } from "@/lib/usage/userPastApiWeatherResponse";
 import {
   PAST_VALIDATION_COMPARE_DEFAULT_EXPANDED,
   shouldResetPastValidationCompareExpanded,
@@ -116,6 +117,9 @@ type ScenarioHouseResp =
       };
       manualMonthlyReconciliation?: ManualMonthlyReconciliation | null;
       weatherSensitivityScore?: WeatherSensitivityScore | null;
+      weatherCardsSourceOwner?: string | null;
+      weatherReadPath?: string | null;
+      pastWeatherDiagnostics?: Record<string, unknown> | null;
     }
   | { ok: false; code: string; message: string; failureCode?: string; failureMessage?: string };
 
@@ -609,6 +613,11 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
           return;
         }
         const okBody = j;
+        const pastWeather = resolvePastWeatherScoreFromHouseApiBody({
+          weatherSensitivityScore: okBody.weatherSensitivityScore,
+          weatherCardsSourceOwner: okBody.weatherCardsSourceOwner,
+          dataset: okBody.dataset,
+        });
         setScenarioSimHouseOverride([
           {
             houseId,
@@ -617,7 +626,10 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
             esiid: null,
             dataset: okBody.dataset,
             alternatives: { smt: null, greenButton: null },
-            weatherSensitivityScore: okBody.weatherSensitivityScore ?? null,
+            weatherSensitivityScore: (pastWeather.score as WeatherSensitivityScore | null) ?? null,
+            weatherCardsSourceOwner: pastWeather.sourceOwner,
+            weatherReadPath: okBody.weatherReadPath ?? null,
+            pastWeatherDiagnostics: okBody.pastWeatherDiagnostics ?? null,
           },
         ]);
         setScenarioCompareProjection(

@@ -31,8 +31,8 @@ describe("one path ownership audit source", () => {
     expect(pageSource).toContain("One Path wiring flow");
     expect(pageSource).toContain("External surface classification");
     expect(pageSource).toContain("Drift-risk watchlist");
-    expect(pageSource).toContain("pre-cutover canonical simulation truth console");
-    expect(pageSource).toContain("Older surfaces are not rerouted to this harness yet.");
+    expect(pageSource).toContain("canonical One Path simulation truth console");
+    expect(pageSource).toContain("User Past is One Path-backed");
     expect(auditSource).toContain("Pre-cutover harness status");
     expect(auditSource).toContain("Stage Boundary Map");
     expect(auditSource).toContain("Upstream Usage Truth");

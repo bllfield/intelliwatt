@@ -34,8 +34,8 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(source).toContain("ManualUsageEntry");
     expect(source).toContain('fetch("/api/admin/tools/one-path-sim"');
     expect(source).toContain("render from the One Path read model");
-    expect(source).toContain("pre-cutover canonical simulation truth console");
-    expect(source).toContain("Older surfaces are not rerouted to this harness yet.");
+    expect(source).toContain("canonical One Path simulation truth console");
+    expect(source).toContain("User Past is One Path-backed");
     expect(source).toContain("VALIDATION_SELECTION_OPTIONS");
     expect(source).toContain("Actual context house");
     expect(source).toContain("Manual validation date keys");
