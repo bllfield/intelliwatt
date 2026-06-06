@@ -31,7 +31,9 @@ export async function finalizePastDatasetDisplayReadModel(args: {
   /** @deprecated Weather is always synced from finalized display daily rows for Past parity. */
   skipWeatherRecompute?: boolean;
   fallbackHouseId?: string | null;
-}): Promise<void> {
+  scenarioId?: string | null;
+  persistDisplayWeatherToCache?: boolean;
+}): Promise<PastDisplayWeatherFinalizeOutcome | null> {
   const dataset = args.dataset;
   if (!dataset || typeof dataset !== "object") return null;
 

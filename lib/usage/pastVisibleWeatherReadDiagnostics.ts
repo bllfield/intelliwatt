@@ -82,6 +82,7 @@ export function buildPastVisibleWeatherReadDiagnostics(args: {
   scenarioName?: string | null;
   scenarioId?: string | null;
   requestedHouseId: string;
+  weatherHouseId?: string | null;
   topLevelWeatherSensitivityScore?: unknown;
   weatherCardsSourceOwner?: string | null;
   weatherScoringAudit?: WeatherScoringAudit | null;

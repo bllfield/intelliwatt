@@ -711,8 +711,8 @@ async function preparePastArtifactDatasetForDisplay(args: {
   smtSlotCompleteDateKeys?: ReadonlySet<string>;
 }) {
   if (!args.dataset) return;
-  const meta = asRecord(args.dataset.meta);
-  const lockbox = asRecord(meta.lockboxRunContext);
+  const meta = asRecord(args.dataset.meta) ?? {};
+  const lockbox = asRecord(meta.lockboxRunContext) ?? {};
   const weatherHouseId =
     String(meta.actualContextHouseId ?? lockbox.actualContextHouseId ?? args.houseId).trim() || args.houseId;
   const [homeProfile, applianceProfileRec] = await Promise.all([
@@ -945,10 +945,11 @@ async function buildPastSimRunReadbackResponse(args: {
           pastVariables,
         }
       : null;
-  const artifactDataset = asRecord(readback.dataset);
-  const artifactMeta = asRecord(artifactDataset.meta);
+  const artifactDataset = asRecord(readback.dataset) ?? {};
+  const artifactMeta = asRecord(artifactDataset.meta) ?? {};
+  const artifactLockbox = asRecord(artifactMeta.lockboxRunContext) ?? {};
   const adminWeatherHouseId =
-    String(artifactMeta.actualContextHouseId ?? asRecord(artifactMeta.lockboxRunContext).actualContextHouseId ?? args.houseId).trim() ||
+    String(artifactMeta.actualContextHouseId ?? artifactLockbox.actualContextHouseId ?? args.houseId).trim() ||
     args.houseId;
   const pastWeatherDiagnostics = buildPastVisibleWeatherReadDiagnostics({
     routeOwner: "app/api/admin/tools/one-path-sim/route.ts",
