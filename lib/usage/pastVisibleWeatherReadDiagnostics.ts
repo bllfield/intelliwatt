@@ -195,11 +195,12 @@ export function resolvePreferredActualSourceFromDataset(dataset: Record<string, 
 }
 
 export function pastDisplayWeatherReadPathFromMeta(meta: Record<string, unknown>): PastDisplayWeatherReadPath {
+  if (readPastSimDisplayWeatherSensitivityScore({ meta }) == null) {
+    return "past_display_missing";
+  }
   const recomputeCount = Number(meta.displayWeatherRecomputeCount);
   if (Number.isFinite(recomputeCount) && recomputeCount > 0) {
     return "past_display_finalize_recompute";
   }
-  return readPastSimDisplayWeatherSensitivityScore({ meta }) != null
-    ? "past_display_artifact_warm"
-    : "past_display_missing";
+  return "past_display_artifact_warm";
 }

@@ -1,21 +1,13 @@
+import type { WeatherSensitivityEnvelope } from "@/modules/weatherSensitivity/shared";
+import type { PastDisplayWeatherFinalizeOutcome } from "@/lib/usage/pastDisplayWeatherFinalizeGuard";
 import {
-  buildWeatherEfficiencyDerivedInput,
-  type WeatherSensitivityEnvelope,
-} from "@/modules/weatherSensitivity/shared";
-import { PAST_DISPLAY_WEATHER_META_FIELD } from "@/lib/usage/pastSimDisplayWeather";
+  resolvePastVisibleWeatherScore,
+  type PastParityAuditDiagnostics,
+} from "@/lib/usage/resolvePastVisibleWeatherScore";
+import type { PastDisplayWeatherReadPath } from "@/lib/usage/pastVisibleWeatherReadDiagnostics";
 import {
-  buildPastVisibleWeatherReadDiagnostics,
-  pastDisplayWeatherReadPathFromMeta,
-  resolvePastVisibleWeatherEnvelopeFromDataset,
-  type PastDisplayWeatherReadPath,
-  type PastVisibleWeatherReadDiagnostics,
-} from "@/lib/usage/pastVisibleWeatherReadDiagnostics";
-import {
-  buildWeatherScoringAudit,
-  pastDisplayScoreMatchesPreSimDiagnostic,
   PAST_DISPLAY_WEATHER_META_FIELD as PAST_DISPLAY_FIELD,
   readPreSimBuildDiagnosticScore,
-  resolveUsageSourceTypeFromDataset,
   scoreCardValues,
   weatherScoreCardValuesMatch,
   type WeatherScoringAudit,
@@ -25,8 +17,8 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
-/** @deprecated Use PastVisibleWeatherReadDiagnostics from pastVisibleWeatherReadDiagnostics.ts */
-export type UserPastApiWeatherDiagnostics = PastVisibleWeatherReadDiagnostics;
+/** @deprecated Use PastParityAuditDiagnostics from resolvePastVisibleWeatherScore.ts */
+export type UserPastApiWeatherDiagnostics = PastParityAuditDiagnostics;
 
 function pastDisplayScoreFromMeta(meta: Record<string, unknown>): Record<string, unknown> | null {
   const pastDisplay = asRecord(meta.pastDisplayWeatherSensitivityScore);
@@ -42,67 +34,26 @@ export async function resolveUserPastApiWeatherResponse(args: {
   homeProfile?: unknown;
   applianceProfile?: unknown;
   weatherHouseId: string;
+  compareProjection?: Record<string, unknown> | null;
+  finalizeOutcome?: PastDisplayWeatherFinalizeOutcome | null;
 }): Promise<{
   weatherSensitivity: WeatherSensitivityEnvelope;
   weatherCardsSourceOwner: string;
   weatherScoringAudit: WeatherScoringAudit;
   weatherReadPath: PastDisplayWeatherReadPath;
-  diagnostics: PastVisibleWeatherReadDiagnostics;
+  diagnostics: PastParityAuditDiagnostics;
 }> {
-  const dataset = args.dataset;
-  const meta = asRecord(dataset.meta);
-  const visible = resolvePastVisibleWeatherEnvelopeFromDataset({
-    dataset,
-    scenarioName: args.scenarioName,
-  });
-  const weatherReadPath = pastDisplayWeatherReadPathFromMeta(meta);
-  const pastSourceType = resolveUsageSourceTypeFromDataset(dataset, {
-    preferredActualSource: args.preferredActualSource ?? null,
-  });
-
-  const storedDerivedInput =
-    meta.pastDisplayWeatherEfficiencyDerivedInput as WeatherSensitivityEnvelope["derivedInput"] | undefined;
-  const weatherSensitivity: WeatherSensitivityEnvelope = {
-    score: visible.score as WeatherSensitivityEnvelope["score"],
-    derivedInput:
-      storedDerivedInput ??
-      (visible.score && Array.isArray((visible.score as { requiredInputAdjustmentsApplied?: unknown }).requiredInputAdjustmentsApplied)
-        ? buildWeatherEfficiencyDerivedInput(visible.score as never)
-        : null),
-  };
-
-  const weatherScoringAudit =
-    visible.scoringAudit ??
-    buildWeatherScoringAudit({
-      scoringContext: "PAST_DISPLAY",
-      scoringDataset: dataset,
-      datasetKind: "SIMULATED",
-      sourceType: pastSourceType,
-      preferredActualSource: args.preferredActualSource ?? null,
-      outputField: PAST_DISPLAY_WEATHER_META_FIELD,
-      envelope: weatherSensitivity,
-    });
-
-  const diagnostics = buildPastVisibleWeatherReadDiagnostics({
+  return resolvePastVisibleWeatherScore({
+    finalizedDataset: args.dataset,
     routeOwner: "app/api/user/usage/simulated/house/route.ts",
-    dataset,
     scenarioName: args.scenarioName,
     scenarioId: args.scenarioId,
     requestedHouseId: args.requestedHouseId,
     weatherHouseId: args.weatherHouseId,
-    topLevelWeatherSensitivityScore: weatherSensitivity.score,
-    weatherCardsSourceOwner: visible.sourceOwner,
-    weatherScoringAudit,
-    weatherReadPath,
+    preferredActualSource: args.preferredActualSource ?? null,
+    compareProjection: args.compareProjection ?? null,
+    finalizeOutcome: args.finalizeOutcome ?? null,
   });
-
-  return {
-    weatherSensitivity,
-    weatherCardsSourceOwner: visible.sourceOwner,
-    weatherScoringAudit,
-    weatherReadPath,
-    diagnostics,
-  };
 }
 
 function readDatasetMeta(dataset: unknown): Record<string, unknown> {
@@ -125,6 +76,32 @@ export function resolvePastWeatherScoreFromHouseApiBody(args: {
   const preSim = readPreSimBuildDiagnosticScore(meta);
   const topLevel = asRecord(args.weatherSensitivityScore);
   const owner = String(args.weatherCardsSourceOwner ?? "").trim() || "unknown";
+  const isPastSimulatedDisplay = meta.datasetKind === "SIMULATED" && meta.baselinePassthrough !== true;
+
+  if (isPastSimulatedDisplay && pastDisplay) {
+    const pastDisplayValues = scoreCardValues(pastDisplay);
+    const topValues = scoreCardValues(topLevel);
+    const preSimValues = scoreCardValues(preSim);
+    const topMatchesPreSim =
+      preSimValues.weatherEfficiency != null &&
+      topValues.weatherEfficiency === preSimValues.weatherEfficiency &&
+      topValues.cooling === preSimValues.cooling &&
+      topValues.heating === preSimValues.heating &&
+      topValues.confidence === preSimValues.confidence;
+    const topDiffersFromC =
+      pastDisplayValues.weatherEfficiency != null &&
+      (topValues.weatherEfficiency !== pastDisplayValues.weatherEfficiency ||
+        topValues.cooling !== pastDisplayValues.cooling ||
+        topValues.heating !== pastDisplayValues.heating ||
+        topValues.confidence !== pastDisplayValues.confidence);
+
+    return {
+      score: pastDisplay,
+      sourceField: PAST_DISPLAY_FIELD,
+      sourceOwner: "past_artifact_build",
+      rejectedPreSimFallback: topMatchesPreSim || topDiffersFromC,
+    };
+  }
 
   if (Object.keys(topLevel).length > 0 && typeof topLevel.weatherEfficiencyScore0to100 === "number") {
     const topValues = scoreCardValues(topLevel);

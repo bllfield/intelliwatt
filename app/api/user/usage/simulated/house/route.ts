@@ -301,6 +301,8 @@ export async function GET(request: NextRequest) {
           homeProfile,
           applianceProfile,
           weatherHouseId: pastWeatherHouseId,
+          compareProjection: compareProjection ?? null,
+          finalizeOutcome,
         });
         weatherSensitivity = pastWeather.weatherSensitivity;
         weatherScoringAudit = pastWeather.weatherScoringAudit;

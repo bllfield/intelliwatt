@@ -5,7 +5,9 @@ import { ValidationComparePanel } from "@/components/usage/ValidationComparePane
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 import { WeatherSensitivityCard } from "@/components/usage/WeatherSensitivityCard";
 import { formatDateLong, formatDateShort } from "@/components/usage/usageFormatting";
+import { resolvePastWeatherScoreFromHouseApiBody } from "@/lib/usage/userPastApiWeatherResponse";
 import { buildOnePathRunReadOnlyView, type OnePathRunReadOnlyView as OnePathRunReadOnlyModel } from "@/modules/onePathSim/runReadOnlyView";
+import type { WeatherSensitivityScore } from "@/modules/weatherSensitivity/shared";
 import { PAST_VALIDATION_COMPARE_DEFAULT_EXPANDED } from "@/modules/onePathSim/usageSimulator/pastCompareUiDefaults";
 
 function formatScenarioVariable(value: {
@@ -57,6 +59,7 @@ export function OnePathRunReadOnlyView(props: {
   engineInput?: Record<string, unknown> | null;
   readModel?: Record<string, unknown> | null;
   runType?: string | null;
+  pastWeatherDiagnostics?: Record<string, unknown> | null;
 }) {
   const [monthlyView, setMonthlyView] = useState<"chart" | "table">("chart");
   const [dailyView, setDailyView] = useState<"chart" | "table">("chart");
@@ -80,7 +83,34 @@ export function OnePathRunReadOnlyView(props: {
     [props.dataset, props.engineInput, props.readModel, readModel.sageActualDataset, readModel.sageActualDaily]
   );
   const suppliedView = isRenderableRunReadOnlyView(props.view) ? props.view : null;
-  const view = suppliedView ?? derivedView;
+  const datasetMeta = asRecord(props.dataset?.meta);
+  const isPastSimulatedDisplay =
+    datasetMeta?.datasetKind === "SIMULATED" && datasetMeta?.baselinePassthrough !== true;
+  // Past cards must come from finalized dataset meta (bundle C), not a stale runDisplayView snapshot.
+  const view =
+    isPastSimulatedDisplay && derivedView ? derivedView : suppliedView ?? derivedView;
+
+  const visibleWeatherScore = useMemo(() => {
+    if (!view) return null;
+    if (!isPastSimulatedDisplay) return view.weatherScore ?? null;
+    const diagnosticsVisible = asRecord(props.pastWeatherDiagnostics?.visibleWeatherScore);
+    if (diagnosticsVisible && typeof diagnosticsVisible.weatherEfficiencyScore0to100 === "number") {
+      return diagnosticsVisible as WeatherSensitivityScore;
+    }
+    const guarded = resolvePastWeatherScoreFromHouseApiBody({
+      weatherSensitivityScore: view.weatherScore,
+      weatherCardsSourceOwner:
+        String(datasetMeta?.displayWeatherCardsSourceOwner ?? props.pastWeatherDiagnostics?.weatherCardsSourceOwner ?? ""),
+      dataset: props.dataset,
+    });
+    return (guarded.score as WeatherSensitivityScore | null) ?? view.weatherScore ?? null;
+  }, [
+    datasetMeta?.displayWeatherCardsSourceOwner,
+    isPastSimulatedDisplay,
+    props.dataset,
+    props.pastWeatherDiagnostics,
+    view,
+  ]);
 
   if (!view) return null;
 
@@ -139,8 +169,12 @@ export function OnePathRunReadOnlyView(props: {
         </div>
       </div>
 
-      {view.weatherScore ? (
-        <WeatherSensitivityCard score={view.weatherScore} presentation="customer" title="Weather Efficiency Score" />
+      {visibleWeatherScore ? (
+        <WeatherSensitivityCard
+          score={visibleWeatherScore}
+          presentation="customer"
+          title="Weather Efficiency Score"
+        />
       ) : null}
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">

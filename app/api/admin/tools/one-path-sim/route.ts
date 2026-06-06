@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { finalizePastDatasetDisplayReadModel } from "@/lib/usage/finalizePastDatasetDisplayReadModel";
+import type { PastDisplayWeatherFinalizeOutcome } from "@/lib/usage/pastDisplayWeatherFinalizeGuard";
 import { readGreenButtonTrustedHomeDateKeysFromPastMeta } from "@/lib/usage/greenButtonPastTrustedPool";
 import {
-  buildPastVisibleWeatherReadDiagnostics,
-  pastDisplayWeatherReadPathFromMeta,
-} from "@/lib/usage/pastVisibleWeatherReadDiagnostics";
+  applyFinalizedPastVisibleWeatherToRunDisplayView,
+  buildAdminPastWeatherApiFields,
+  resolvePastVisibleWeatherScore,
+} from "@/lib/usage/resolvePastVisibleWeatherScore";
+import { resolvePastWeatherHouseIdFromDataset } from "@/lib/usage/pastVisibleWeatherReadDiagnostics";
 import { resolveStaleIncompleteMeterSlotCompleteDateKeys } from "@/lib/usage/pastSimStaleIncompleteMeter";
 import { sageActualDailyRowsFromDataset } from "@/lib/usage/sageActualDailyTruth";
 import { buildUserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
@@ -379,7 +382,8 @@ function buildCompactRunReadModelDataset(args: {
       intervals15: [],
     },
     meta: {
-      ...(args.artifactDatasetMeta ?? {}),
+      // Always prefer live artifact meta after display-truth finalize; artifactDatasetMeta can be a stale snapshot.
+      ...(asRecord(args.artifactDataset?.meta) ?? args.artifactDatasetMeta ?? {}),
       ...(args.forceBaselinePassthrough ? { baselinePassthrough: true } : {}),
     },
   };
@@ -709,8 +713,8 @@ async function preparePastArtifactDatasetForDisplay(args: {
   dataset: Record<string, unknown> | null | undefined;
   sageActualDataset?: Record<string, unknown> | null;
   smtSlotCompleteDateKeys?: ReadonlySet<string>;
-}) {
-  if (!args.dataset) return;
+}): Promise<PastDisplayWeatherFinalizeOutcome | null> {
+  if (!args.dataset) return null;
   const meta = asRecord(args.dataset.meta) ?? {};
   const lockbox = asRecord(meta.lockboxRunContext) ?? {};
   const weatherHouseId =
@@ -721,7 +725,7 @@ async function preparePastArtifactDatasetForDisplay(args: {
   ]);
   const applianceProfile = normalizeStoredApplianceProfile((applianceProfileRec?.appliancesJson as any) ?? null);
   const greenButtonTrustedHomeDateKeys = readGreenButtonTrustedHomeDateKeysFromPastMeta(meta);
-  await finalizePastDatasetDisplayReadModel({
+  return finalizePastDatasetDisplayReadModel({
     dataset: args.dataset,
     sageActualDataset: args.sageActualDataset ?? null,
     smtSlotCompleteDateKeys: args.smtSlotCompleteDateKeys,
@@ -733,6 +737,30 @@ async function preparePastArtifactDatasetForDisplay(args: {
     fallbackHouseId: args.houseId,
     scenarioId: String(args.scenarioId ?? meta.scenarioId ?? meta.artifactScenarioId ?? "").trim() || undefined,
     persistDisplayWeatherToCache: true,
+  });
+}
+
+function resolveAdminPastWeatherResponse(args: {
+  dataset: Record<string, unknown>;
+  houseId: string;
+  scenarioId: string;
+  scenarioName?: string | null;
+  compareProjection?: Record<string, unknown> | null;
+  finalizeOutcome?: PastDisplayWeatherFinalizeOutcome | null;
+}) {
+  const weatherHouseId = resolvePastWeatherHouseIdFromDataset({
+    dataset: args.dataset,
+    fallbackHouseId: args.houseId,
+  });
+  return resolvePastVisibleWeatherScore({
+    finalizedDataset: args.dataset,
+    routeOwner: "app/api/admin/tools/one-path-sim/route.ts",
+    scenarioName: args.scenarioName ?? "Past (Corrected)",
+    scenarioId: args.scenarioId,
+    requestedHouseId: args.houseId,
+    weatherHouseId,
+    compareProjection: args.compareProjection ?? null,
+    finalizeOutcome: args.finalizeOutcome ?? null,
   });
 }
 
@@ -899,7 +927,7 @@ async function buildPastSimRunReadbackResponse(args: {
     smtSourceEsiid: args.smtSourceEsiid ?? args.smtPostSimHealing?.sourceEsiid ?? null,
     preferredActualSource: preferredActualSourceForCompare,
   });
-  await preparePastArtifactDatasetForDisplay({
+  const finalizeOutcome = await preparePastArtifactDatasetForDisplay({
     userId: args.userId,
     houseId: args.houseId,
     scenarioId: args.scenarioId,
@@ -907,12 +935,22 @@ async function buildPastSimRunReadbackResponse(args: {
     sageActualDataset: asRecord(sageTruth?.dataset),
     smtSlotCompleteDateKeys: sageDisplayArgs.smtSlotCompleteDateKeys,
   });
-  const runDisplayViewBase =
+  const artifactDataset = asRecord(readback.dataset) ?? {};
+  const pastWeather = resolveAdminPastWeatherResponse({
+    dataset: artifactDataset,
+    houseId: args.houseId,
+    scenarioId: args.scenarioId,
+    compareProjection,
+    finalizeOutcome,
+  });
+  const runDisplayViewBase = applyFinalizedPastVisibleWeatherToRunDisplayView(
     buildOnePathRunReadOnlyView({
-      dataset: asRecord(readback.dataset),
+      dataset: artifactDataset,
       readModel: { compareProjection },
       ...sageDisplayArgs,
-    }) ?? null;
+    }) ?? null,
+    pastWeather
+  );
   logSimPipelineEvent("one_path_admin_past_display_view_success", {
     correlationId: args.correlationId ?? null,
     houseId: args.houseId,
@@ -945,24 +983,7 @@ async function buildPastSimRunReadbackResponse(args: {
           pastVariables,
         }
       : null;
-  const artifactDataset = asRecord(readback.dataset) ?? {};
-  const artifactMeta = asRecord(artifactDataset.meta) ?? {};
-  const artifactLockbox = asRecord(artifactMeta.lockboxRunContext) ?? {};
-  const adminWeatherHouseId =
-    String(artifactMeta.actualContextHouseId ?? artifactLockbox.actualContextHouseId ?? args.houseId).trim() ||
-    args.houseId;
-  const pastWeatherDiagnostics = buildPastVisibleWeatherReadDiagnostics({
-    routeOwner: "app/api/admin/tools/one-path-sim/route.ts",
-    dataset: artifactDataset,
-    scenarioName: "Past (Corrected)",
-    scenarioId: args.scenarioId,
-    requestedHouseId: args.houseId,
-    weatherHouseId: adminWeatherHouseId,
-    topLevelWeatherSensitivityScore: compactRunDisplayView?.weatherScore ?? null,
-    weatherCardsSourceOwner: "past_artifact_build",
-    weatherScoringAudit: (artifactMeta.pastDisplayWeatherScoringAudit as never) ?? null,
-    weatherReadPath: pastDisplayWeatherReadPathFromMeta(artifactMeta),
-  });
+  const pastWeatherApiFields = buildAdminPastWeatherApiFields(pastWeather);
   return {
     ok: true as const,
     debugDiagnosticsIncluded: false,
@@ -972,13 +993,13 @@ async function buildPastSimRunReadbackResponse(args: {
     correlationId: args.correlationId ?? null,
     manualStageOneView: null,
     runDisplayView: compactRunDisplayView,
-    pastWeatherDiagnostics,
+    ...pastWeatherApiFields,
     artifact: null,
     readModel: {
       ...buildCompactSimulationReadModel({
         artifact: null,
-        artifactDataset: asRecord(readback.dataset),
-        artifactDatasetMeta: asRecord(asRecord(readback.dataset)?.meta),
+        artifactDataset,
+        artifactDatasetMeta: asRecord(artifactDataset.meta),
         runDisplayView: compactRunDisplayView,
         compareProjection,
       }),
@@ -2417,7 +2438,7 @@ export async function POST(request: NextRequest) {
           buildInputs: buildInputsForCompare,
           engineInput: asRecord(engineInput),
         });
-        await preparePastArtifactDatasetForDisplay({
+        const compactFinalizeOutcome = await preparePastArtifactDatasetForDisplay({
           userId: effectiveUserId,
           houseId: effectiveHouseId,
           scenarioId: effectiveRawInputBase.scenarioId ?? null,
@@ -2425,24 +2446,39 @@ export async function POST(request: NextRequest) {
           sageActualDataset: asRecord(sageTruthForPastDisplay?.dataset),
           smtSlotCompleteDateKeys: sageDisplayArgsForPast.smtSlotCompleteDateKeys,
         });
-        const compactRunDisplayView =
+        const compactPastWeather =
+          effectiveRawInputBase.scenarioId != null && artifactDataset
+            ? resolveAdminPastWeatherResponse({
+                dataset: artifactDataset,
+                houseId: effectiveHouseId,
+                scenarioId: String(effectiveRawInputBase.scenarioId),
+                compareProjection: compareProjectionForPast,
+                finalizeOutcome: compactFinalizeOutcome,
+              })
+            : null;
+        const compactRunDisplayView = applyFinalizedPastVisibleWeatherToRunDisplayView(
           buildOnePathRunReadOnlyView({
-            dataset: artifactDataset,
+            dataset: artifactDataset ?? {},
             engineInput: asRecord(engineInput),
             readModel: { compareProjection: compareProjectionForPast },
             ...sageDisplayArgsForPast,
-          }) ?? null;
+          }) ?? null,
+          compactPastWeather ?? { weatherSensitivity: { score: null, derivedInput: null } }
+        );
         const compactReadModel = {
           ...buildCompactSimulationReadModel({
             artifact: asRecord(artifact),
             artifactDataset,
-            artifactDatasetMeta,
+            artifactDatasetMeta: asRecord(artifactDataset?.meta),
             runDisplayView: compactRunDisplayView,
             compareProjection: compareProjectionForPast,
           }),
           sageActualDataset: sageTruthForPastDisplay?.dataset ?? null,
           sageActualDaily: sageDisplayArgsForPast.sageActualDaily ?? null,
         };
+        const compactPastWeatherApiFields = compactPastWeather
+          ? buildAdminPastWeatherApiFields(compactPastWeather)
+          : null;
         return NextResponse.json({
           ok: true,
           debugDiagnosticsIncluded: false,
@@ -2451,6 +2487,7 @@ export async function POST(request: NextRequest) {
           engineInput: slimEngineInput,
           manualStageOneView: artifact.manualStageOneView ?? null,
           runDisplayView: compactRunDisplayView,
+          ...(compactPastWeatherApiFields ?? {}),
           artifact: null,
           readModel: compactReadModel,
         });
@@ -2496,8 +2533,9 @@ export async function POST(request: NextRequest) {
             smtSourceEsiid,
           })
         : sageDisplayArgsForPast;
+      let runFinalizeOutcome: PastDisplayWeatherFinalizeOutcome | null = null;
       if (manualPastReadResult?.ok) {
-        await preparePastArtifactDatasetForDisplay({
+        runFinalizeOutcome = await preparePastArtifactDatasetForDisplay({
           userId: effectiveUserId,
           houseId: effectiveHouseId,
           scenarioId: effectiveRawInputBase.scenarioId ?? null,
@@ -2506,7 +2544,7 @@ export async function POST(request: NextRequest) {
           smtSlotCompleteDateKeys: manualSageDisplayArgs.smtSlotCompleteDateKeys,
         });
       } else if (effectiveRawInputBase.scenarioId) {
-        await preparePastArtifactDatasetForDisplay({
+        runFinalizeOutcome = await preparePastArtifactDatasetForDisplay({
           userId: effectiveUserId,
           houseId: effectiveHouseId,
           scenarioId: effectiveRawInputBase.scenarioId,
@@ -2524,15 +2562,35 @@ export async function POST(request: NextRequest) {
               ...manualSageDisplayArgs,
             })
           : null;
-      const runDisplayView =
+      const runDisplayDataset = asRecord(
+        manualPastReadResult?.ok ? manualPastReadResult.displayDataset : readModel.dataset
+      );
+      const runPastWeather =
+        effectiveRawInputBase.scenarioId != null && runDisplayDataset
+          ? resolveAdminPastWeatherResponse({
+              dataset: runDisplayDataset,
+              houseId: effectiveHouseId,
+              scenarioId: String(effectiveRawInputBase.scenarioId),
+              compareProjection: asRecord(
+                manualPastReadResult?.ok
+                  ? manualPastReadResult.compareProjection
+                  : readModel.compareProjection
+              ),
+              finalizeOutcome: runFinalizeOutcome,
+            })
+          : null;
+      const runDisplayView = applyFinalizedPastVisibleWeatherToRunDisplayView(
         manualRunDisplayView ??
-        buildOnePathRunReadOnlyView({
-          dataset: asRecord(readModel.dataset),
-          engineInput: asRecord(engineInput),
-          readModel: asRecord(readModel),
-          ...sageDisplayArgsForPast,
-        }) ??
-        null;
+          buildOnePathRunReadOnlyView({
+            dataset: runDisplayDataset,
+            engineInput: asRecord(engineInput),
+            readModel: asRecord(readModel),
+            ...sageDisplayArgsForPast,
+          }) ??
+          null,
+        runPastWeather ?? { weatherSensitivity: { score: null, derivedInput: null } }
+      );
+      const runPastWeatherApiFields = runPastWeather ? buildAdminPastWeatherApiFields(runPastWeather) : null;
       if (!includeDebugDiagnostics) {
         const compactReadModel = buildCompactSimulationReadModel({
           artifact: asRecord(artifact),
@@ -2559,6 +2617,7 @@ export async function POST(request: NextRequest) {
           engineInput: slimEngineInput,
           manualStageOneView: readModel.manualStageOneView ?? null,
           runDisplayView,
+          ...(runPastWeatherApiFields ?? {}),
           artifact: null,
           readModel: compactReadModelWithPerf,
           performanceAudit: compactReadModelWithPerf?.performanceAudit ?? null,
@@ -2584,6 +2643,7 @@ export async function POST(request: NextRequest) {
         readModel: readModelWithPerf,
         manualStageOneView: readModel.manualStageOneView ?? null,
         runDisplayView,
+        ...(runPastWeatherApiFields ?? {}),
         performanceAudit: readModelWithPerf?.performanceAudit ?? null,
         greenButtonRehydrateFromRaw,
       });

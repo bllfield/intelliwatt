@@ -2010,6 +2010,7 @@ export function OnePathSimAdmin() {
               engineInput={asRecord(runResult?.engineInput)}
               readModel={asRecord(runResult?.readModel)}
               runType={displayRunType}
+              pastWeatherDiagnostics={asRecord(runResult?.pastWeatherDiagnostics)}
             />
           </div>
         ) : shouldRenderLookupBaselineView ? (

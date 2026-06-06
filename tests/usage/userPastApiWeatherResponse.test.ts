@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { applyFinalizedPastVisibleWeatherToRunDisplayView } from "@/lib/usage/resolvePastVisibleWeatherScore";
 import {
   resolvePastWeatherScoreFromHouseApiBody,
   resolveUserPastApiWeatherResponse,
@@ -38,7 +39,7 @@ describe("userPastApiWeatherResponse", () => {
       },
     });
 
-    expect(resolved.rejectedPreSimFallback).toBe(false);
+    expect(resolved.rejectedPreSimFallback).toBe(true);
     expect(resolved.sourceOwner).toBe("past_artifact_build");
     expect(resolved.score?.coolingSensitivityScore0to100).toBe(93);
     expect(resolved.score?.heatingSensitivityScore0to100).toBe(76);
@@ -50,13 +51,14 @@ describe("userPastApiWeatherResponse", () => {
       weatherCardsSourceOwner: "past_artifact_build",
       dataset: {
         meta: {
+          datasetKind: "SIMULATED",
           weatherSensitivityScore: preSimScore,
           pastDisplayWeatherSensitivityScore: pastDisplayScore,
         },
       },
     });
 
-    expect(resolved.rejectedPreSimFallback).toBe(false);
+    expect(resolved.rejectedPreSimFallback).toBe(true);
     expect(resolved.sourceOwner).toBe("past_artifact_build");
     expect(resolved.score?.weatherEfficiencyScore0to100).toBe(50);
     expect(resolved.score?.coolingSensitivityScore0to100).toBe(93);
@@ -120,5 +122,22 @@ describe("userPastApiWeatherResponse", () => {
     expect(resolved.diagnostics.datasetMetaPastDisplayWeatherSensitivityScore).toEqual(
       pastDisplayScore
     );
+  });
+
+  it("patches admin runDisplayView weatherScore from finalized bundle C", () => {
+    const patched = applyFinalizedPastVisibleWeatherToRunDisplayView(
+      {
+        summary: { totals: { netKwh: 100 } },
+        weatherScore: preSimScore,
+      },
+      {
+        weatherSensitivity: {
+          score: pastDisplayScore as never,
+          derivedInput: null,
+        },
+      }
+    );
+
+    expect(patched?.weatherScore).toEqual(pastDisplayScore);
   });
 });
