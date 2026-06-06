@@ -2167,7 +2167,9 @@ export async function POST(request: NextRequest) {
       );
     }
     try {
-      if (!includeDebugDiagnostics && effectiveRawInputBase.scenarioId && !isManualMode) {
+      // Past Sim (scenario selected): always dispatch canonical recalc + readback — not the
+      // adaptIntervalRawInput / runSharedSimulation baseline diagnostic path.
+      if (effectiveRawInputBase.scenarioId && !isManualMode) {
         let exactArtifactInputHash: string | null = null;
         if (mode === "INTERVAL" || mode === "GREEN_BUTTON") {
           if (

@@ -1519,8 +1519,19 @@ describe("admin one path sim route", () => {
     expect(res.status).toBe(200);
     expect(json.smtIncompleteMeterRetry).toBeUndefined();
     expect(ensureSmtCoverageForHouse).not.toHaveBeenCalled();
-    expect(adaptIntervalRawInput).toHaveBeenCalledTimes(1);
-    expect(runSharedSimulation).toHaveBeenCalledTimes(1);
+    expect(json.runType).toBe("PAST_SIM");
+    expect(dispatchPastSimRecalc).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scenarioId: "scenario-1",
+        runContext: expect.objectContaining({
+          callerLabel: "one_path_admin_past_run",
+          preferredActualSource: "SMT",
+        }),
+      })
+    );
+    expect(adaptIntervalRawInput).not.toHaveBeenCalled();
+    expect(runSharedSimulation).not.toHaveBeenCalled();
+    expect(readOnePathSimulatedUsageScenario).toHaveBeenCalled();
   });
 
   it("defaults lookup requests to lean debug-off source context when debug is not requested", async () => {
