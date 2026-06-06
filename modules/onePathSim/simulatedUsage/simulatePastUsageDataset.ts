@@ -49,6 +49,13 @@ import {
   type WeatherLogicMode,
 } from "@/modules/onePathSim/usageSimulator/pastSimWeatherPolicy";
 import {
+  assessCachedWeatherWindowCoverage,
+  buildWeatherWindowCoverageAudit,
+  mapSelectedWeatherToDailyWeatherRecord,
+  persistPastSimArtifactWeatherFields,
+  type CanonicalDailyWeatherRow,
+} from "@/lib/usage/pastSimCachedWeatherWindow";
+import {
   createSimCorrelationId,
   getMemoryRssMb,
   logSimPipelineEvent,
@@ -800,13 +807,13 @@ export function collectSimulatedDayLocalDateIntervalConflicts(
   return out;
 }
 
-type HouseWeatherDayMap = Awaited<ReturnType<typeof getHouseWeatherDays>>;
+type PastWindowWeatherDayMap = Awaited<ReturnType<typeof getHouseWeatherDays>>;
 
 function mergeActualWxWithNormalForLowDataModes(args: {
-  actualWxByDateKey: HouseWeatherDayMap;
-  normalWxByDateKey: HouseWeatherDayMap;
+  actualWxByDateKey: PastWindowWeatherDayMap;
+  normalWxByDateKey: PastWindowWeatherDayMap;
   canonicalDateKeys: string[];
-}): { mergedActualWxByDateKey: HouseWeatherDayMap; normalFilledDateKeyCount: number } {
+}): { mergedActualWxByDateKey: PastWindowWeatherDayMap; normalFilledDateKeyCount: number } {
   const merged = new Map(args.actualWxByDateKey);
   let normalFilledDateKeyCount = 0;
   for (const dk of args.canonicalDateKeys) {
@@ -823,7 +830,7 @@ function mergeActualWxWithNormalForLowDataModes(args: {
 }
 
 function collectMissingOrStubWeatherDateKeys(args: {
-  weatherByDateKey: HouseWeatherDayMap;
+  weatherByDateKey: PastWindowWeatherDayMap;
   canonicalDateKeys: string[];
 }): string[] {
   return args.canonicalDateKeys.filter((dk) => {
@@ -921,7 +928,7 @@ function buildPastWindowWeatherGapDetails(args: {
   requestedStartDate: string;
   requestedEndDate: string;
   canonicalDateKeys: string[];
-  selectedWeatherByDateKey: HouseWeatherDayMap;
+  selectedWeatherByDateKey: PastWindowWeatherDayMap;
   missingDateKeys: string[];
   weatherLogicMode: WeatherLogicMode;
   backfillAttempted: boolean;
@@ -1140,6 +1147,37 @@ function summarizePastWindowWeatherProvenance(args: {
   };
 }
 
+function mergeHouseWeatherDayMaps(
+  base: PastWindowWeatherDayMap | undefined,
+  overlay: PastWindowWeatherDayMap
+): PastWindowWeatherDayMap {
+  const merged = new Map(base ?? []);
+  for (const [dateKey, row] of Array.from(overlay.entries())) merged.set(dateKey, row);
+  return merged;
+}
+
+async function loadHouseWeatherDaysPartial(args: {
+  houseId: string;
+  canonicalDateKeys: string[];
+  kind: "ACTUAL_LAST_YEAR" | "NORMAL_AVG";
+  preloaded?: PastWindowWeatherDayMap;
+}): Promise<{ map: PastWindowWeatherDayMap; getHouseWeatherDaysCallCount: number }> {
+  const keysToFetch = args.canonicalDateKeys.filter((dateKey) => {
+    const row = args.preloaded?.get(dateKey);
+    if (!row) return true;
+    return String(row?.source ?? "").trim() === WEATHER_STUB_SOURCE;
+  });
+  let map = mergeHouseWeatherDayMaps(args.preloaded, new Map());
+  if (keysToFetch.length === 0) return { map, getHouseWeatherDaysCallCount: 0 };
+  const fetched = await getHouseWeatherDays({
+    houseId: args.houseId,
+    dateKeys: keysToFetch,
+    kind: args.kind,
+  });
+  map = mergeHouseWeatherDayMaps(map, fetched);
+  return { map, getHouseWeatherDaysCallCount: 1 };
+}
+
 /**
  * Single shared weather loader for Past window.
  * Produces actualWxByDateKey, normalWxByDateKey, and truthful provenance.
@@ -1150,17 +1188,91 @@ export async function loadWeatherForPastWindow(args: {
   endDate: string;
   canonicalDateKeys: string[];
   weatherLogicMode: WeatherLogicMode;
+  preloadedActualWxByDateKey?: PastWindowWeatherDayMap;
+  preloadedNormalWxByDateKey?: PastWindowWeatherDayMap;
+  preloadedSelectedDailyWeather?: Record<string, CanonicalDailyWeatherRow>;
 }): Promise<{
-  actualWxByDateKey: Awaited<ReturnType<typeof getHouseWeatherDays>>;
-  normalWxByDateKey: Awaited<ReturnType<typeof getHouseWeatherDays>>;
-  selectedWeatherByDateKey: Awaited<ReturnType<typeof getHouseWeatherDays>>;
+  actualWxByDateKey: PastWindowWeatherDayMap;
+  normalWxByDateKey: PastWindowWeatherDayMap;
+  selectedWeatherByDateKey: PastWindowWeatherDayMap;
   provenance: WeatherProvenance;
+  weatherLoadAudit: {
+    weatherWindowCoverage: ReturnType<typeof buildWeatherWindowCoverageAudit>;
+    weatherActualDatasetLoadSkipped: boolean;
+    getHouseWeatherDaysCallCount: number;
+    sourceOwner: "cached_weather" | "artifact_daily_weather" | "fresh_fetch";
+  };
 }> {
   const { houseId, startDate, endDate, canonicalDateKeys, weatherLogicMode } = args;
-  const [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
-    getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
-    getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
+  let getHouseWeatherDaysCallCount = 0;
+  let sourceOwner: "cached_weather" | "artifact_daily_weather" | "fresh_fetch" = "fresh_fetch";
+
+  const preloadedSelected =
+    args.preloadedSelectedDailyWeather && Object.keys(args.preloadedSelectedDailyWeather).length > 0
+      ? mapSelectedWeatherToDailyWeatherRecord(
+          new Map(
+            Object.entries(args.preloadedSelectedDailyWeather).map(([dateKey, row]) => [
+              dateKey,
+              {
+                tAvgF: row.tAvgF,
+                tMinF: row.tMinF,
+                tMaxF: row.tMaxF,
+                hdd65: row.hdd65,
+                cdd65: row.cdd65,
+                source: row.source ?? undefined,
+              },
+            ])
+          )
+        )
+      : null;
+  const preloadedSelectedCoverage =
+    preloadedSelected && Object.keys(preloadedSelected).length > 0
+      ? assessCachedWeatherWindowCoverage({
+          requiredDateKeys: canonicalDateKeys,
+          dailyWeatherByDateKey: preloadedSelected,
+          sourceOwner: "artifact_daily_weather",
+          startDateKey: startDate,
+          endDateKey: endDate,
+        })
+      : null;
+
+  const preloadedActual =
+    args.preloadedActualWxByDateKey ??
+    (preloadedSelectedCoverage?.complete && weatherLogicMode === "LAST_YEAR_ACTUAL_WEATHER"
+      ? mergeHouseWeatherDayMaps(
+          undefined,
+          dailyWeatherRecordToSelectedMap(preloadedSelected!, houseId, "ACTUAL_LAST_YEAR")
+        )
+      : undefined);
+  const preloadedNormal =
+    args.preloadedNormalWxByDateKey ??
+    (preloadedSelectedCoverage?.complete && weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER"
+      ? mergeHouseWeatherDayMaps(
+          undefined,
+          dailyWeatherRecordToSelectedMap(preloadedSelected!, houseId, "NORMAL_AVG")
+        )
+      : undefined);
+
+  if (preloadedSelectedCoverage?.complete) sourceOwner = "artifact_daily_weather";
+
+  const [actualLoad, normalLoad] = await Promise.all([
+    loadHouseWeatherDaysPartial({
+      houseId,
+      canonicalDateKeys,
+      kind: "ACTUAL_LAST_YEAR",
+      preloaded: preloadedActual,
+    }),
+    loadHouseWeatherDaysPartial({
+      houseId,
+      canonicalDateKeys,
+      kind: "NORMAL_AVG",
+      preloaded: preloadedNormal,
+    }),
   ]);
+  getHouseWeatherDaysCallCount += actualLoad.getHouseWeatherDaysCallCount + normalLoad.getHouseWeatherDaysCallCount;
+  const actualWxByDateKey = actualLoad.map;
+  const normalWxByDateKey = normalLoad.map;
+
   const missingOrStubActualWxKeys = collectMissingOrStubWeatherDateKeys({
     weatherByDateKey: actualWxByDateKey,
     canonicalDateKeys,
@@ -1173,23 +1285,53 @@ export async function loadWeatherForPastWindow(args: {
     weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER" ? normalWxByDateKey : actualWxByDateKey;
   const missingSelectedWxKeys =
     weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER" ? missingOrStubNormalWxKeys : missingOrStubActualWxKeys;
-  if (missingSelectedWxKeys.length === 0) {
+
+  const buildSuccessResult = (args2: {
+    actualWx: PastWindowWeatherDayMap;
+    normalWx: PastWindowWeatherDayMap;
+    selectedWx: PastWindowWeatherDayMap;
+    skipped: boolean;
+    owner: typeof sourceOwner;
+  }) => {
+    const selectedDaily = mapSelectedWeatherToDailyWeatherRecord(args2.selectedWx);
+    const coverage = assessCachedWeatherWindowCoverage({
+      requiredDateKeys: canonicalDateKeys,
+      dailyWeatherByDateKey: selectedDaily,
+      sourceOwner: args2.owner,
+      startDateKey: startDate,
+      endDateKey: endDate,
+    });
     return {
-      actualWxByDateKey,
-      normalWxByDateKey,
-      selectedWeatherByDateKey:
-        weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER"
-          ? normalWxByDateKey
-          : actualWxByDateKey,
+      actualWxByDateKey: args2.actualWx,
+      normalWxByDateKey: args2.normalWx,
+      selectedWeatherByDateKey: args2.selectedWx,
       provenance: summarizePastWindowWeatherProvenance({
-        selectedWxByDateKey:
-          weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER"
-            ? normalWxByDateKey
-            : actualWxByDateKey,
+        selectedWxByDateKey: args2.selectedWx,
         weatherLogicMode,
         weatherFallbackReason: null,
       }),
+      weatherLoadAudit: {
+        weatherWindowCoverage: buildWeatherWindowCoverageAudit(coverage),
+        weatherActualDatasetLoadSkipped: args2.skipped,
+        getHouseWeatherDaysCallCount,
+        sourceOwner: args2.owner,
+      },
     };
+  };
+
+  if (missingSelectedWxKeys.length === 0) {
+    if (sourceOwner === "fresh_fetch" && getHouseWeatherDaysCallCount === 0) {
+      sourceOwner = "cached_weather";
+    } else if (sourceOwner === "fresh_fetch" && getHouseWeatherDaysCallCount > 0) {
+      sourceOwner = "cached_weather";
+    }
+    return buildSuccessResult({
+      actualWx: actualWxByDateKey,
+      normalWx: normalWxByDateKey,
+      selectedWx: selectedWeatherBeforeBackfill,
+      skipped: getHouseWeatherDaysCallCount === 0,
+      owner: sourceOwner,
+    });
   }
 
   const house = await (prisma as any).houseAddress
@@ -1212,20 +1354,37 @@ export async function loadWeatherForPastWindow(args: {
       `Shared weather load failed: house lat/lng is missing, so real weather backfill cannot run. ${formatPastWindowWeatherGapDetails(details)}`
     );
   }
+
+  const backfillStartDate = missingSelectedWxKeys[0]!;
+  const backfillEndDate = missingSelectedWxKeys[missingSelectedWxKeys.length - 1]!;
   if (weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER") {
-    await ensureHouseWeatherNormalAvgBackfill({ houseId, dateKeys: canonicalDateKeys });
+    await ensureHouseWeatherNormalAvgBackfill({ houseId, dateKeys: missingSelectedWxKeys });
   } else {
     await ensureHouseWeatherBackfill({
       houseId,
-      startDate,
-      endDate,
+      startDate: backfillStartDate,
+      endDate: backfillEndDate,
       allowOutsideCanonicalCoverage: true,
     });
   }
-  const [actualWx2, normalWx2] = await Promise.all([
-    getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
-    getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
+  const [actualReload, normalReload] = await Promise.all([
+    loadHouseWeatherDaysPartial({
+      houseId,
+      canonicalDateKeys: missingSelectedWxKeys,
+      kind: "ACTUAL_LAST_YEAR",
+      preloaded: actualWxByDateKey,
+    }),
+    loadHouseWeatherDaysPartial({
+      houseId,
+      canonicalDateKeys: missingSelectedWxKeys,
+      kind: "NORMAL_AVG",
+      preloaded: normalWxByDateKey,
+    }),
   ]);
+  getHouseWeatherDaysCallCount +=
+    actualReload.getHouseWeatherDaysCallCount + normalReload.getHouseWeatherDaysCallCount;
+  const actualWx2 = actualReload.map;
+  const normalWx2 = normalReload.map;
   const selectedWeatherAfterBackfill =
     weatherLogicMode === "LONG_TERM_AVERAGE_WEATHER" ? normalWx2 : actualWx2;
   const missingSelectedAfterBackfill = collectMissingOrStubWeatherDateKeys({
@@ -1248,16 +1407,37 @@ export async function loadWeatherForPastWindow(args: {
         : `Shared weather load failed: ACTUAL_LAST_YEAR coverage is still missing after real API backfill. ${formatPastWindowWeatherGapDetails(details)}`
     );
   }
-  return {
-    actualWxByDateKey: actualWx2,
-    normalWxByDateKey: normalWx2,
-    selectedWeatherByDateKey: selectedWeatherAfterBackfill,
-    provenance: summarizePastWindowWeatherProvenance({
-      selectedWxByDateKey: selectedWeatherAfterBackfill,
-      weatherLogicMode,
-      weatherFallbackReason: null,
-    }),
-  };
+  return buildSuccessResult({
+    actualWx: actualWx2,
+    normalWx: normalWx2,
+    selectedWx: selectedWeatherAfterBackfill,
+    skipped: false,
+    owner: "fresh_fetch",
+  });
+}
+
+function dailyWeatherRecordToSelectedMap(
+  record: Record<string, CanonicalDailyWeatherRow>,
+  houseId: string,
+  kind: "ACTUAL_LAST_YEAR" | "NORMAL_AVG"
+): PastWindowWeatherDayMap {
+  return new Map(
+    Object.entries(record).map(([dateKey, row]) => [
+      dateKey,
+      {
+        houseId,
+        dateKey,
+        kind,
+        version: 1,
+        tAvgF: row.tAvgF,
+        tMinF: row.tMinF,
+        tMaxF: row.tMaxF,
+        hdd65: row.hdd65,
+        cdd65: row.cdd65,
+        source: String(row.source ?? "").trim() || "ARTIFACT_CACHE",
+      },
+    ])
+  );
 }
 
 export type SimulatePastUsageDatasetArgs = {
@@ -1290,6 +1470,8 @@ export type SimulatePastUsageDatasetArgs = {
   retainSimulatedDayResultDateKeysLocal?: Set<string>;
   /** Observability: plan §6 (Slice 2); threaded from recalc. */
   correlationId?: string;
+  /** Artifact or DB-backed weather rows for the Past window; only missing dates are fetched. */
+  preloadedSelectedDailyWeather?: Record<string, CanonicalDailyWeatherRow>;
 };
 
 export type SimulatePastUsageDatasetResult = {
@@ -1304,6 +1486,12 @@ export type SimulatePastUsageDatasetResult = {
   stitchedCurve?: SimulatedCurve;
   /** Supplemental metadata for simulated dates only. */
   simulatedDayResults?: SimulatedDayResult[];
+  weatherLoadAudit?: {
+    weatherWindowCoverage: ReturnType<typeof buildWeatherWindowCoverageAudit>;
+    weatherActualDatasetLoadSkipped: boolean;
+    getHouseWeatherDaysCallCount: number;
+    sourceOwner: "cached_weather" | "artifact_daily_weather" | "fresh_fetch";
+  };
 };
 
 export type SimulatePastSelectedDaysArgs = Omit<SimulatePastUsageDatasetArgs, "includeSimulatedDayResults"> & {
@@ -1923,6 +2111,7 @@ export async function simulatePastUsageDataset(
         endDate,
         canonicalDateKeys,
         weatherLogicMode,
+        preloadedSelectedDailyWeather: args.preloadedSelectedDailyWeather,
       });
       const { provenance } = weatherLoaded;
       logSimPipelineEvent("day_simulation_weather_load_success", {
@@ -2816,6 +3005,10 @@ export async function simulatePastUsageDataset(
           weatherCoverageEnd: provenance.weatherCoverageEnd,
           weatherStubRowCount: provenance.weatherStubRowCount,
           weatherActualRowCount: provenance.weatherActualRowCount,
+          weatherWindowCoverage: weatherLoaded.weatherLoadAudit.weatherWindowCoverage,
+          weatherActualDatasetLoadSkipped: weatherLoaded.weatherLoadAudit.weatherActualDatasetLoadSkipped,
+          getHouseWeatherDaysReadPathCount: weatherLoaded.weatherLoadAudit.getHouseWeatherDaysCallCount,
+          weatherLoadSourceOwner: weatherLoaded.weatherLoadAudit.sourceOwner,
           weatherUsed,
           weatherNote: weatherUsed
             ? smtBaselineStrictWeather
@@ -2905,6 +3098,13 @@ export async function simulatePastUsageDataset(
       memoryRssMb: getMemoryRssMb(),
       source: "simulatePastUsageDataset",
     });
+    if (dataset && weatherByDateKeyForSimulation.size > 0) {
+      persistPastSimArtifactWeatherFields({
+        dataset: dataset as Record<string, unknown>,
+        dailyWeatherByDateKey: mapSelectedWeatherToDailyWeatherRecord(weatherByDateKeyForSimulation),
+        sourceOwner: weatherLoaded.weatherLoadAudit.sourceOwner,
+      });
+    }
     return {
       dataset,
       meta: (dataset?.meta as Record<string, unknown>) ?? {},
@@ -2912,6 +3112,7 @@ export async function simulatePastUsageDataset(
       shapeMonthsPresent,
       actualWxByDateKey: weatherByDateKeyForSimulation,
       selectedWeatherByDateKey: weatherByDateKeyForSimulation,
+      weatherLoadAudit: weatherLoaded.weatherLoadAudit,
       // lab_validation (Gap-Fill / shared compare): dataset already carries `series.intervals15`;
       // omitting duplicate `SimulatedCurve` cuts peak heap. cold_build/recalc still return it.
       stitchedCurve: buildPathKind === "lab_validation" ? undefined : stitchedCurve,

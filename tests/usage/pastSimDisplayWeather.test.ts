@@ -36,5 +36,6 @@ describe("pastSimDisplayWeather", () => {
     const pastDisplay = meta.pastDisplayWeatherSensitivityScore as Record<string, number>;
     expect(pastDisplay.coolingSensitivityScore0to100).toBe(92);
     expect(pastDisplay.heatingSensitivityScore0to100).toBe(82);
+    expect(pastDisplay.sourceOwner).toBe("past_artifact_build");
   });
 });

@@ -19,6 +19,13 @@ import { redistributeGreenButtonGridZeroSamples } from "@/modules/onePathSim/gre
 import { isSimulatedDailySourceForCompare } from "@/lib/usage/dailySourceNotation";
 import { resolveStaleIncompleteMeterSlotCompleteDateKeys } from "@/lib/usage/pastSimStaleIncompleteMeter";
 import { attachPastSimDisplayWeatherToDataset } from "@/lib/usage/pastSimDisplayWeather";
+import {
+  buildWeatherWindowCoverageAudit,
+  getCachedWeatherWindowCoverage,
+  persistPastSimArtifactWeatherFields,
+  readDailyWeatherFromDataset,
+  mapSelectedWeatherToDailyWeatherRecord,
+} from "@/lib/usage/pastSimCachedWeatherWindow";
 import { reconcilePastDatasetDisplayTotals } from "@/lib/usage/reconcilePastDatasetDisplayTotals";
 import { syncPastSimDisplayInsightsFromCanonicalIntervals } from "@/lib/usage/pastSimCanonicalDisplayInsights";
 import { applyPastSimValidationBaselineProjectionToDataset } from "@/lib/usage/pastSimValidationBaselineProjection";
@@ -198,22 +205,82 @@ async function attachSelectedDailyWeatherForDataset(args: {
     .filter((value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value));
   if (dateKeys.length === 0) return;
   const weatherLogicMode = resolveWeatherLogicModeFromBuildInputs(args.buildInputs);
-  if ((dataset as any).dailyWeather) {
+  const weatherHouseId = String(args.buildInputs.actualContextHouseId ?? args.fallbackHouseId);
+  const timezone =
+    String(args.buildInputs.timezone ?? args.fallbackTimezone ?? "America/Chicago").trim() ||
+    "America/Chicago";
+  if (!(dataset as any).meta || typeof (dataset as any).meta !== "object") (dataset as any).meta = {};
+
+  const artifactDailyWeather = readDailyWeatherFromDataset(dataset as Record<string, unknown>);
+  const artifactCoverage =
+    artifactDailyWeather && Object.keys(artifactDailyWeather).length > 0
+      ? await getCachedWeatherWindowCoverage({
+          houseId: weatherHouseId,
+          startDateKey: dateKeys[0]!,
+          endDateKey: dateKeys[dateKeys.length - 1]!,
+          timezone,
+          requiredDateKeys: dateKeys,
+          artifactDailyWeather,
+          weatherLogicMode,
+          skipDbLookup: true,
+        })
+      : null;
+
+  if (artifactCoverage?.complete) {
+    persistPastSimArtifactWeatherFields({
+      dataset: dataset as Record<string, unknown>,
+      dailyWeatherByDateKey: artifactCoverage.dailyWeatherByDateKey,
+      sourceOwner: "artifact_daily_weather",
+    });
+    (dataset as any).meta.weatherWindowCoverage = buildWeatherWindowCoverageAudit(artifactCoverage);
+    (dataset as any).meta.weatherWindowComplete = true;
+    (dataset as any).meta.getHouseWeatherDaysReadPathCount = 0;
     const { remapGreenButtonShiftedDailyWeatherOnDataset } = await import(
       "@/lib/usage/greenButtonShiftedDisplay"
     );
     await remapGreenButtonShiftedDailyWeatherOnDataset({
       dataset: dataset as Record<string, unknown>,
-      weatherHouseId: String(args.buildInputs.actualContextHouseId ?? args.fallbackHouseId),
+      weatherHouseId,
       weatherKind: resolveWeatherKindForLogicMode(weatherLogicMode),
       displayDateKeys: dateKeys,
     });
     return;
   }
-  const weatherHouseId = String(args.buildInputs.actualContextHouseId ?? args.fallbackHouseId);
-  const timezone =
-    String(args.buildInputs.timezone ?? args.fallbackTimezone ?? "America/Chicago").trim() ||
-    "America/Chicago";
+
+  const cachedCoverage = await getCachedWeatherWindowCoverage({
+    houseId: weatherHouseId,
+    startDateKey: dateKeys[0]!,
+    endDateKey: dateKeys[dateKeys.length - 1]!,
+    timezone,
+    requiredDateKeys: dateKeys,
+    weatherLogicMode,
+  });
+  if (cachedCoverage.complete) {
+    persistPastSimArtifactWeatherFields({
+      dataset: dataset as Record<string, unknown>,
+      dailyWeatherByDateKey: cachedCoverage.dailyWeatherByDateKey,
+      sourceOwner: "cached_weather",
+    });
+    (dataset as any).meta.weatherWindowCoverage = buildWeatherWindowCoverageAudit(cachedCoverage);
+    (dataset as any).meta.weatherWindowComplete = true;
+    (dataset as any).meta.getHouseWeatherDaysReadPathCount = 0;
+    const { remapGreenButtonShiftedDailyWeatherOnDataset } = await import(
+      "@/lib/usage/greenButtonShiftedDisplay"
+    );
+    await remapGreenButtonShiftedDailyWeatherOnDataset({
+      dataset: dataset as Record<string, unknown>,
+      weatherHouseId,
+      weatherKind: resolveWeatherKindForLogicMode(weatherLogicMode),
+      displayDateKeys: dateKeys,
+    });
+    return;
+  }
+
+  (dataset as any).meta.displayWeatherCardsSourceOwner = "fallback_recompute";
+  (dataset as any).meta.weatherWindowComplete = false;
+  (dataset as any).meta.weatherWindowCoverage = buildWeatherWindowCoverageAudit(cachedCoverage);
+  (dataset as any).meta.missingDateKeysCount = cachedCoverage.missingDateKeys.length;
+  let getHouseWeatherDaysReadPathCount = 0;
   const sourceDateByTargetDate =
     dataset?.meta?.greenButtonSourceDateByTargetDate &&
     typeof dataset.meta.greenButtonSourceDateByTargetDate === "object" &&
@@ -252,6 +319,7 @@ async function attachSelectedDailyWeatherForDataset(args: {
     dateKeys: weatherLookupDateKeys,
     kind: weatherKind,
   });
+  getHouseWeatherDaysReadPathCount += 1;
   const wxEntries: Array<readonly [string, NonNullable<ReturnType<typeof lookupWxMap.get>>]> = [];
   for (const dateKey of dateKeys) {
     const lookupDateKey = weatherLookupDateByDisplayDate.get(dateKey) ?? dateKey;
@@ -303,7 +371,7 @@ async function attachSelectedDailyWeatherForDataset(args: {
     );
   }
   if (!weatherAvailability.available) return;
-  (dataset as any).dailyWeather = Object.fromEntries(
+  const dailyWeatherByDateKey = Object.fromEntries(
     dateKeys.map((dateKey: string) => {
       const w = wxMap.get(dateKey)!;
       return [
@@ -319,6 +387,12 @@ async function attachSelectedDailyWeatherForDataset(args: {
       ];
     })
   );
+  persistPastSimArtifactWeatherFields({
+    dataset: dataset as Record<string, unknown>,
+    dailyWeatherByDateKey,
+    sourceOwner: "fresh_fetch",
+  });
+  (dataset as any).meta.getHouseWeatherDaysReadPathCount = getHouseWeatherDaysReadPathCount;
 }
 import {
   buildSourceDerivedMonthlyTargetResolutionFromPayload,
@@ -4706,11 +4780,31 @@ async function recalcSimulatorBuildImpl(args: {
   );
   const simulationVariablePolicy = simulationVariableResolution.effective;
   let weatherSensitivityActualDataset: Record<string, unknown> | null = null;
+  let recalcWeatherWindowAudit: ReturnType<typeof buildWeatherWindowCoverageAudit> | null = null;
+  let recalcWeatherActualDatasetLoadSkipped = false;
   try {
     const shouldLoadWeatherSensitivityActualDataset =
       mode !== "MANUAL_TOTALS" &&
       typeof actualContextHouseId === "string" &&
       actualContextHouseId.trim().length > 0;
+    let preSimCachedDailyWeather: Record<string, import("@/lib/usage/pastSimCachedWeatherWindow").CanonicalDailyWeatherRow> | null =
+      null;
+    if (shouldLoadWeatherSensitivityActualDataset && isGreenButtonPastSharedProducer) {
+      const coverageWindow = resolveCanonicalUsage365CoverageWindow();
+      const preSimWeatherCoverage = await getCachedWeatherWindowCoverage({
+        houseId: actualContextHouseId,
+        startDateKey: coverageWindow.startDate,
+        endDateKey: coverageWindow.endDate,
+        timezone: "America/Chicago",
+        weatherLogicMode: resolveWeatherLogicModeFromBuildInputs(
+          (args.buildInputs ?? {}) as Record<string, unknown>
+        ),
+      });
+      recalcWeatherWindowAudit = buildWeatherWindowCoverageAudit(preSimWeatherCoverage);
+      if (preSimWeatherCoverage.complete) {
+        preSimCachedDailyWeather = preSimWeatherCoverage.dailyWeatherByDateKey;
+      }
+    }
     weatherSensitivityActualDataset = shouldLoadWeatherSensitivityActualDataset
       ? (
           await traceCoreContextStep("weather_actual_dataset_load", () =>
@@ -4730,6 +4824,7 @@ async function recalcSimulatorBuildImpl(args: {
         applianceProfile,
         weatherHouseId: actualContextHouseId,
         simulationVariablePolicy,
+        dailyWeather: preSimCachedDailyWeather,
       })
     );
     weatherSensitivityScore = weatherSensitivityEnvelope.score;
@@ -5757,6 +5852,15 @@ async function recalcSimulatorBuildImpl(args: {
           memoryRssMb: getMemoryRssMb(),
         });
       }
+      const pastWeatherPreload = await getCachedWeatherWindowCoverage({
+        houseId: actualContextHouseId,
+        startDateKey: startDate,
+        endDateKey: endDate,
+        timezone: timezoneForStoredBuild,
+        weatherLogicMode: resolveWeatherLogicModeFromBuildInputs(recalcBuildInputs),
+      });
+      const preloadedSelectedDailyWeather =
+        pastWeatherPreload.foundDateCount > 0 ? pastWeatherPreload.dailyWeatherByDateKey : undefined;
       const result = await simulatePastUsageDataset({
         houseId,
         actualContextHouseId,
@@ -5772,7 +5876,12 @@ async function recalcSimulatorBuildImpl(args: {
           boundedValidationOnlyDateKeysLocal.size > 0 ? boundedValidationOnlyDateKeysLocal : undefined,
         correlationId: args.correlationId,
         ...(preloadedActualIntervalsForSim != null ? { actualIntervals: preloadedActualIntervalsForSim } : {}),
+        ...(preloadedSelectedDailyWeather ? { preloadedSelectedDailyWeather } : {}),
       });
+      if (result.weatherLoadAudit) {
+        recalcWeatherWindowAudit = result.weatherLoadAudit.weatherWindowCoverage;
+        recalcWeatherActualDatasetLoadSkipped = result.weatherLoadAudit.weatherActualDatasetLoadSkipped;
+      }
       if (simulationPreloadCacheHit != null) {
         const preloadStats = recalcIntervalPreload?.getStats();
         logSimPipelineEvent("recalc_simulation_shared_interval_preload_summary", {
@@ -6434,7 +6543,9 @@ async function recalcSimulatorBuildImpl(args: {
         encodedIntervalsDigest: digestEncodedIntervalsBuffer(bytes),
         engineVersion: PAST_ENGINE_VERSION,
       });
-      const perRunTrace: PastSimPerRunTrace = {
+      const datasetWeatherMeta =
+        (dataset as any)?.meta && typeof (dataset as any).meta === "object" ? ((dataset as any).meta as Record<string, unknown>) : {};
+      const perRunTrace: PastSimPerRunTrace & Record<string, unknown> = {
         lockboxInput: finalizedLockboxInput,
         runContext,
         stageTimingsMs: {
@@ -6454,6 +6565,24 @@ async function recalcSimulatorBuildImpl(args: {
         sourceHouseId: finalizedLockboxInput.sourceContext.sourceHouseId,
         profileHouseId: finalizedLockboxInput.profileContext.profileHouseId,
         testHomeId: finalizedLockboxInput.profileContext.testHomeId,
+        weatherWindowCoverage:
+          recalcWeatherWindowAudit ??
+          (datasetWeatherMeta.weatherWindowCoverage as ReturnType<typeof buildWeatherWindowCoverageAudit> | null) ??
+          null,
+        weatherActualDatasetLoadSkipped:
+          recalcWeatherActualDatasetLoadSkipped ||
+          datasetWeatherMeta.weatherActualDatasetLoadSkipped === true,
+        weatherActualDatasetLoadMs:
+          typeof datasetWeatherMeta.weatherActualDatasetLoadMs === "number"
+            ? datasetWeatherMeta.weatherActualDatasetLoadMs
+            : null,
+        getHouseWeatherDaysReadPathCount:
+          typeof datasetWeatherMeta.getHouseWeatherDaysReadPathCount === "number"
+            ? datasetWeatherMeta.getHouseWeatherDaysReadPathCount
+            : 0,
+        displayWeatherRecomputeCount: 0,
+        displayWeatherCardsSourceOwner:
+          String(datasetWeatherMeta.displayWeatherCardsSourceOwner ?? "").trim() || "past_artifact_build",
       };
       if (!dataset.meta || typeof dataset.meta !== "object") (dataset as any).meta = {};
       (dataset.meta as any).effectiveSimulationVariablesUsed = attachRunIdentityToEffectiveSimulationVariablesUsed(

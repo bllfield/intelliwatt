@@ -97,7 +97,7 @@ describe("one path lockbox loadWeatherForPastWindow", () => {
 
     expect(ensureHouseWeatherBackfill).toHaveBeenCalledWith({
       houseId: "h1",
-      startDate: "2026-04-14",
+      startDate: "2026-04-15",
       endDate: "2026-04-15",
       allowOutsideCanonicalCoverage: true,
     });
@@ -105,5 +105,35 @@ describe("one path lockbox loadWeatherForPastWindow", () => {
     expect(thrown?.message ?? "").toContain("requestedWeatherWindow=2026-04-14..2026-04-15");
     expect(thrown?.message ?? "").toContain("missingDateKeys=2026-04-15");
     expect(thrown?.message ?? "").toContain("missingLatestWeatherDay=true");
+  });
+
+  it("reuses complete cached weather without backfill", async () => {
+    const canonicalDateKeys = ["2026-04-14", "2026-04-15"];
+    getHouseWeatherDays
+      .mockResolvedValueOnce(
+        buildWeatherMap(
+          "ACTUAL_LAST_YEAR",
+          canonicalDateKeys.map((dateKey) => ({ dateKey, source: "OPEN_METEO_CACHE" }))
+        )
+      )
+      .mockResolvedValueOnce(
+        buildWeatherMap(
+          "NORMAL_AVG",
+          canonicalDateKeys.map((dateKey) => ({ dateKey, source: "NORMAL_CLIMO" }))
+        )
+      );
+
+    const loaded = await loadWeatherForPastWindow({
+      houseId: "h1",
+      startDate: "2026-04-14",
+      endDate: "2026-04-15",
+      canonicalDateKeys,
+      weatherLogicMode: "LAST_YEAR_ACTUAL_WEATHER",
+    });
+
+    expect(ensureHouseWeatherBackfill).not.toHaveBeenCalled();
+    expect(loaded.weatherLoadAudit.weatherWindowCoverage.complete).toBe(true);
+    expect(loaded.weatherLoadAudit.weatherActualDatasetLoadSkipped).toBe(false);
+    expect(loaded.weatherLoadAudit.getHouseWeatherDaysCallCount).toBe(2);
   });
 });

@@ -488,6 +488,16 @@ export function buildPerformanceAuditSnapshot(args: {
   const gbProducerFetch = pickNumber(lockboxTrace.greenButtonProducerFetchCount);
   const gbProducerReuse = pickNumber(lockboxTrace.greenButtonProducerReuseCount);
 
+  const weatherWindowCoverage =
+    asRecord(lockboxTrace.weatherWindowCoverage).requiredDateCount != null
+      ? asRecord(lockboxTrace.weatherWindowCoverage)
+      : asRecord(datasetMeta.weatherWindowCoverage);
+  const weatherActualDatasetLoadMs =
+    pickNumber(lockboxTrace.weatherActualDatasetLoadMs) ??
+    pickNumber(stageDurationsMs.weather_actual_dataset_load) ??
+    pickNumber(stageDurationsMs.sourceWeatherLoad) ??
+    null;
+
   return {
     totalDurationMs,
     selectedMode,
@@ -513,5 +523,32 @@ export function buildPerformanceAuditSnapshot(args: {
     reusedForValidation: (preloadReuse ?? 0) > 0,
     reusedForSimulation: (gbProducerReuse ?? 0) > 0,
     stageDurationsMs,
+    weatherWindowCoverage:
+      Object.keys(weatherWindowCoverage).length > 0
+        ? {
+            requiredStartDate: weatherWindowCoverage.requiredStartDate ?? null,
+            requiredEndDate: weatherWindowCoverage.requiredEndDate ?? null,
+            requiredDateCount: pickNumber(weatherWindowCoverage.requiredDateCount),
+            foundDateCount: pickNumber(weatherWindowCoverage.foundDateCount),
+            complete: weatherWindowCoverage.complete === true,
+            missingDateKeysCount: pickNumber(weatherWindowCoverage.missingDateKeysCount),
+            sourceOwner: weatherWindowCoverage.sourceOwner ?? null,
+          }
+        : null,
+    weatherActualDatasetLoadSkipped:
+      lockboxTrace.weatherActualDatasetLoadSkipped === true ||
+      datasetMeta.weatherActualDatasetLoadSkipped === true,
+    weatherActualDatasetLoadMs,
+    getHouseWeatherDaysReadPathCount:
+      pickNumber(lockboxTrace.getHouseWeatherDaysReadPathCount) ??
+      pickNumber(datasetMeta.getHouseWeatherDaysReadPathCount) ??
+      0,
+    displayWeatherRecomputeCount:
+      pickNumber(lockboxTrace.displayWeatherRecomputeCount) ??
+      pickNumber(datasetMeta.displayWeatherRecomputeCount) ??
+      0,
+    displayWeatherCardsSourceOwner:
+      String(lockboxTrace.displayWeatherCardsSourceOwner ?? datasetMeta.displayWeatherCardsSourceOwner ?? "").trim() ||
+      null,
   };
 }

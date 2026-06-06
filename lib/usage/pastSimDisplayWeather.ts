@@ -43,20 +43,54 @@ export async function resolvePastSimDisplayWeatherSensitivityEnvelope(args: {
   });
 }
 
+export function hasPersistedPastDisplayWeatherScore(dataset: Record<string, unknown> | null | undefined): boolean {
+  const score = readPastSimDisplayWeatherSensitivityScore(dataset);
+  return (
+    score != null &&
+    Object.keys(score).length > 0 &&
+    typeof score.weatherEfficiencyScore0to100 === "number"
+  );
+}
+
 export async function attachPastSimDisplayWeatherToDataset(args: {
   dataset: Record<string, unknown>;
   homeProfile?: unknown;
   applianceProfile?: unknown;
   weatherHouseId?: string | null;
+  forceRecompute?: boolean;
 }): Promise<WeatherSensitivityEnvelope> {
+  if (!args.forceRecompute && hasPersistedPastDisplayWeatherScore(args.dataset)) {
+    const meta = asRecord(args.dataset.meta);
+    meta.displayWeatherCardsSourceOwner =
+      String(asRecord(meta.pastDisplayWeatherSensitivityScore).sourceOwner ?? "").trim() ||
+      "past_artifact_build";
+    meta.displayWeatherRecomputeCount = 0;
+    args.dataset.meta = meta;
+    const score = readPastSimDisplayWeatherSensitivityScore(args.dataset);
+    const derivedInput =
+      (meta.pastDisplayWeatherEfficiencyDerivedInput as WeatherSensitivityEnvelope["derivedInput"] | undefined) ??
+      (score
+        ? buildWeatherEfficiencyDerivedInput(score as NonNullable<WeatherSensitivityEnvelope["score"]>)
+        : null);
+    return {
+      score: score as WeatherSensitivityEnvelope["score"],
+      derivedInput,
+    };
+  }
+
   const envelope = await resolvePastSimDisplayWeatherSensitivityEnvelope(args);
   if (!isPastSimulatedDisplayDataset(args.dataset)) return envelope;
 
   const meta = asRecord(args.dataset.meta);
   if (envelope.score) {
-    meta.pastDisplayWeatherSensitivityScore = envelope.score;
+    meta.pastDisplayWeatherSensitivityScore = {
+      ...envelope.score,
+      sourceOwner: "past_artifact_build",
+    };
     meta.pastDisplayWeatherEfficiencyDerivedInput =
       envelope.derivedInput ?? buildWeatherEfficiencyDerivedInput(envelope.score);
+    meta.displayWeatherCardsSourceOwner = "past_artifact_build";
+    meta.displayWeatherRecomputeCount = 1;
     args.dataset.meta = meta;
   }
   return envelope;

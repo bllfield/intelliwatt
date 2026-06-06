@@ -2,7 +2,10 @@ import { sageActualDailyKwhByDate } from "@/lib/usage/sageActualDailyTruth";
 import { applyPastSimValidationBaselineProjectionToDataset } from "@/lib/usage/pastSimValidationBaselineProjection";
 import { applyPastSimDisplayTruthToDataset } from "@/lib/usage/pastSimStaleIncompleteMeter";
 import { syncPastSimDisplayInsightsFromCanonicalIntervals } from "@/lib/usage/pastSimCanonicalDisplayInsights";
-import { attachPastSimDisplayWeatherToDataset } from "@/lib/usage/pastSimDisplayWeather";
+import {
+  attachPastSimDisplayWeatherToDataset,
+  hasPersistedPastDisplayWeatherScore,
+} from "@/lib/usage/pastSimDisplayWeather";
 import { reconcilePastDatasetDisplayTotals } from "@/lib/usage/reconcilePastDatasetDisplayTotals";
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -38,16 +41,30 @@ export async function finalizePastDatasetDisplayReadModel(args: {
   reconcilePastDatasetDisplayTotals(dataset);
 
   const refreshedMeta = asRecord(dataset.meta);
+  if (hasPersistedPastDisplayWeatherScore(dataset)) {
+    refreshedMeta.displayWeatherCardsSourceOwner =
+      String(asRecord(refreshedMeta.pastDisplayWeatherSensitivityScore).sourceOwner ?? "").trim() ||
+      "past_artifact_build";
+    refreshedMeta.displayWeatherRecomputeCount = 0;
+    refreshedMeta.weatherWindowComplete = refreshedMeta.weatherWindowComplete ?? true;
+    dataset.meta = refreshedMeta;
+    return;
+  }
+
   const pastDisplayWeather = asRecord(refreshedMeta.pastDisplayWeatherSensitivityScore);
   if (
     Object.keys(pastDisplayWeather).length === 0 &&
     (args.homeProfile != null || args.weatherHouseId != null)
   ) {
+    refreshedMeta.displayWeatherCardsSourceOwner = "fallback_recompute";
+    refreshedMeta.displayWeatherRecomputeCount = 1;
+    dataset.meta = refreshedMeta;
     await attachPastSimDisplayWeatherToDataset({
       dataset,
       homeProfile: args.homeProfile,
       applianceProfile: args.applianceProfile,
       weatherHouseId: args.weatherHouseId,
+      forceRecompute: true,
     });
   }
 }
