@@ -243,7 +243,7 @@ async function probeArtifactLeg(args) {
   });
   const fingerprints = buildManualReadModelFingerprints({
     dataset: display.displayDataset ?? dataset,
-    weatherHouseId: args.houseId,
+    fallbackHouseId: args.houseId,
   });
 
   return {
@@ -265,9 +265,12 @@ async function probeArtifactLeg(args) {
 async function buildGapfillActualComparison(args) {
   const { buildManualUsageReadModel } = await import("../../modules/manualUsage/readModel.ts");
   const { resolveManualCompareActualDataset } = await import("../../lib/usage/manualCompareActualDataset.ts");
+  const { evaluateGapfillBillPeriodActualComparison } = await import(
+    "../../lib/usage/manualCrossSurfaceParityProof.ts"
+  );
   const { readOnePathSimulatedUsageScenario } = await import("../../modules/onePathSim/serviceBridge.ts");
   if (!args.scenarioId || !args.payload) return null;
-  const [simRead, actual] = await Promise.all([
+  const [simRead, actualDataset] = await Promise.all([
     readOnePathSimulatedUsageScenario({
       userId: args.labOwnerUserId,
       houseId: args.labHouseId,
@@ -284,27 +287,23 @@ async function buildGapfillActualComparison(args) {
       },
     }),
     resolveManualCompareActualDataset({
-      userId: args.sourceUserId,
-      houseId: args.sourceHouseId,
-      scenarioId: null,
-      preferredActualSource: "SMT",
+      actualReference: {
+        userId: args.sourceUserId,
+        houseId: args.sourceHouseId,
+        scenarioId: null,
+        esiid: args.sourceEsiid ?? null,
+      },
     }).catch(() => null),
   ]);
-  if (!simRead.ok || !simRead.dataset) return { ok: false, reason: "artifact_missing" };
+  if (!simRead.ok || !simRead.dataset) {
+    return evaluateGapfillBillPeriodActualComparison({ readModel: null, reason: "artifact_missing" });
+  }
   const readModel = buildManualUsageReadModel({
     payload: args.payload,
     dataset: simRead.dataset,
-    actualDataset: actual?.dataset ?? null,
+    actualDataset,
   });
-  const rows = readModel.billPeriodCompare?.rows ?? [];
-  const compared = rows.filter((row) => row.actualKwh != null);
-  return {
-    ok: compared.length > 0,
-    billPeriodCount: rows.length,
-    comparedBillPeriodCount: compared.length,
-    reconciledCount: rows.filter((row) => row.status === "reconciled").length,
-    deltaPresentCount: rows.filter((row) => row.status === "delta_present").length,
-  };
+  return evaluateGapfillBillPeriodActualComparison({ readModel });
 }
 
 async function main() {
@@ -348,7 +347,7 @@ async function main() {
     process.exit(2);
   }
 
-  const [sourcePast, labPast] = await Promise.all([
+  const [sourcePast, labPast, sourceHouseRow] = await Promise.all([
     prisma.usageSimulatorScenario.findFirst({
       where: { userId: user.id, houseId: SOURCE_HOUSE, name: "Past (Corrected)", archivedAt: null },
       select: { id: true },
@@ -359,7 +358,12 @@ async function main() {
       select: { id: true },
       orderBy: { updatedAt: "desc" },
     }),
+    prisma.houseAddress.findFirst({
+      where: { id: SOURCE_HOUSE },
+      select: { esiid: true },
+    }),
   ]);
+  const sourceEsiid = sourceHouseRow?.esiid ? String(sourceHouseRow.esiid) : null;
 
   const canonicalCoverage = resolveCanonicalCoverageForProof();
   const [sourceManual, labManual] = await Promise.all([
@@ -558,6 +562,7 @@ async function main() {
         ? await buildGapfillActualComparison({
             sourceUserId: user.id,
             sourceHouseId: SOURCE_HOUSE,
+            sourceEsiid,
             labOwnerUserId: owner.id,
             labHouseId: LAB_HOUSE,
             scenarioId: labPast?.id ?? null,

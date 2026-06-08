@@ -1,6 +1,6 @@
 {
   "proofVersion": "manual_cross_surface_parity_v2",
-  "generatedAt": "2026-06-08T18:23:01.871Z",
+  "generatedAt": "2026-06-08T19:33:37.918Z",
   "proofMode": "audit_only",
   "sourceHouseId": "8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8",
   "labHouseId": "29a3d820-2593-4673-9dd6-cd161bbd7f6f",
@@ -95,28 +95,29 @@
       "runDispatchPath": "dispatchPastSimRecalc(MANUAL_TOTALS)->usageSimulator wrapper->onePath recalcSimulatorBuild",
       "readModelPath": "buildOnePathManualUsagePastSimReadResult->readOnePathSimulatedUsageScenario",
       "producerVersion": "production_past_stitched_v16",
-      "gapfillDerivedPayloadHash": "AHGIrBOAoFkku0CgCvWmas",
+      "gapfillDerivedPayloadHash": "WCyFvR-DFoni53YRHv_jeG",
       "gapfillActualComparison": {
-        "ok": false,
+        "ok": true,
         "billPeriodCount": 1,
-        "comparedBillPeriodCount": 0,
+        "comparedBillPeriodCount": 1,
         "reconciledCount": 0,
-        "deltaPresentCount": 1
+        "deltaPresentCount": 1,
+        "reason": null
       },
       "comparisonFamily": "gapfill_derived_payload_parity",
       "payloadProvenance": "gapfill_derived",
-      "fixtureArtifactInputHash": "yKzKtXxP0A1De-tDENhy_pnsKn1KfIacezEvwARychs",
+      "fixtureArtifactInputHash": "BaWYTbCnFMuU_cjKv_pEYKYwSJgxQkGdIyL4IOG8zwA",
       "fixtureFamily": "GAPFILL_DERIVED",
       "applyAdminRemap": false,
-      "sourcePayloadHash": "KKB7EY244paFVWOtz-1BQk",
-      "normalizedPayloadHash": "AHGIrBOAoFkku0CgCvWmas",
-      "billPeriodHash": "X12wnS93pJX7fvI5z45Ns5",
+      "sourcePayloadHash": "yyWHVQCbrN58pxq0q56Llv",
+      "normalizedPayloadHash": "WCyFvR-DFoni53YRHv_jeG",
+      "billPeriodHash": "f5RUYT3REe-xh1v1yAZq-u",
       "statementRangesHash": "T1PNoYwrqgwDVLtfmj7L5e",
       "travelRangesHash": "nMsHDM8gT4XvreU9n6zxu_",
       "validationResultHash": "DncEoP0Qpt1sZOCeVTFGxs",
       "anchorDate": "2026-06-04",
       "payloadMode": "ANNUAL",
-      "annualKwh": 14502.74,
+      "annualKwh": 12868.42,
       "monthlyTotals": null,
       "status": "ok",
       "unavailableReason": null,
@@ -126,15 +127,15 @@
       "displayCoverageEnd": "2026-06-04",
       "coverageWindowMatch": true,
       "artifactInputHash": null,
-      "finalizedDailyRowsHash": "g8Xh8tvo1gnbrKQs9pCBmR",
-      "displayTruthRevision": "co4Zgqq-kqST3DhkeKQwXq",
-      "monthlyRowsHash": "skaJ2a5OOA6kDPn82rxRZZ",
-      "timeOfDayBucketsHash": "xnXVzfMIrSSC_i0OM_Ze8S"
+      "finalizedDailyRowsHash": "XlmmRUQtf94GlKm2S0EhuD",
+      "displayTruthRevision": "cAvl0dxSBuXO-4JmzQ_R7S",
+      "monthlyRowsHash": "WhvhCj-rmz2PXWZr4rihr5",
+      "timeOfDayBucketsHash": "zKdoQA631WNY9P4QESztEQ",
+      "weatherHouseId": "8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8"
     }
   ],
   "violations": [
-    "gapfill_annual_from_source_intervals: artifact coverage 2025-06-05→2026-06-04 != canonical 2025-06-07→2026-06-06",
-    "gapfill_annual_from_source_intervals: gapfill actual comparison failed for derived payload"
+    "gapfill_annual_from_source_intervals: artifact coverage 2025-06-05→2026-06-04 != canonical 2025-06-07→2026-06-06"
   ],
   "warnings": [],
   "verdict": "MANUAL_CROSS_SURFACE_PARITY_FAIL"

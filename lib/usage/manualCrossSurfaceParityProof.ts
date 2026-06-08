@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 
 import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
 import { buildPastMonthlyRowsParityDebug } from "@/lib/usage/intervalReadModelInvariants";
+import { resolvePastWeatherHouseIdFromDataset } from "@/lib/usage/pastVisibleWeatherReadDiagnostics";
 import { buildPastWeatherInputFingerprint } from "@/lib/usage/pastWeatherInputParity";
 import { buildManualBillPeriodTargets, normalizeStatementRanges, normalizeTravelRanges } from "@/modules/manualUsage/statementRanges";
 import { validateManualUsagePayload } from "@/modules/manualUsage/validation";
@@ -359,18 +360,60 @@ export function readDisplayCoverageFromDataset(args: {
   };
 }
 
+/** Shared weather-house identity for manual display-truth fingerprinting across proof legs. */
+export function resolveManualDisplayTruthWeatherHouseId(args: {
+  dataset: Record<string, unknown>;
+  fallbackHouseId: string;
+}): string {
+  return resolvePastWeatherHouseIdFromDataset({
+    dataset: args.dataset,
+    fallbackHouseId: args.fallbackHouseId,
+  });
+}
+
+export type GapfillBillPeriodActualComparisonSummary = {
+  ok: boolean;
+  billPeriodCount: number;
+  comparedBillPeriodCount: number;
+  reconciledCount: number;
+  deltaPresentCount: number;
+  reason?: string | null;
+};
+
+/** Mirrors production GapFill compare: bill-period rows with actualIntervalTotalKwh present. */
+export function evaluateGapfillBillPeriodActualComparison(args: {
+  readModel: { billPeriodCompare?: { rows?: Array<{ actualIntervalTotalKwh?: number | null; status?: string | null }> } } | null;
+  reason?: string | null;
+}): GapfillBillPeriodActualComparisonSummary {
+  const rows = args.readModel?.billPeriodCompare?.rows ?? [];
+  const compared = rows.filter((row) => row.actualIntervalTotalKwh != null);
+  return {
+    ok: compared.length > 0,
+    billPeriodCount: rows.length,
+    comparedBillPeriodCount: compared.length,
+    reconciledCount: rows.filter((row) => row.status === "reconciled").length,
+    deltaPresentCount: rows.filter((row) => row.status === "delta_present").length,
+    reason: args.reason ?? null,
+  };
+}
+
 export function buildManualReadModelFingerprints(args: {
   dataset: Record<string, unknown>;
-  weatherHouseId: string;
+  fallbackHouseId: string;
 }): {
   finalizedDailyRowsHash: string | null;
   displayTruthRevision: string | null;
   monthlyRowsHash: string | null;
   timeOfDayBucketsHash: string | null;
+  weatherHouseId: string;
 } {
+  const weatherHouseId = resolveManualDisplayTruthWeatherHouseId({
+    dataset: args.dataset,
+    fallbackHouseId: args.fallbackHouseId,
+  });
   const fingerprint = buildPastWeatherInputFingerprint({
     dataset: args.dataset,
-    weatherHouseId: args.weatherHouseId,
+    weatherHouseId,
     forceComputedDisplayTruthRevision: true,
   });
   const userView = buildUserUsageDashboardViewModel({ dataset: args.dataset as never });
@@ -389,6 +432,7 @@ export function buildManualReadModelFingerprints(args: {
     displayTruthRevision: fingerprint.displayTruthRevision,
     monthlyRowsHash: monthlyRowsParity?.userMonthlyRowsHash ?? null,
     timeOfDayBucketsHash: stableManualProofHash(userView?.derived.timeOfDayBuckets ?? adminView?.summary.timeOfDayBuckets ?? []),
+    weatherHouseId,
   };
 }
 
@@ -552,6 +596,17 @@ export function aggregateManualCrossSurfaceProofViolations(args: {
         leg.validationResultHash !== anchorReference.validationResultHash
       ) {
         violations.push(`same_payload_parity: ${leg.legId}: validationResultHash != ${anchorReference.legId}`);
+      }
+    }
+  }
+
+  if (auditProofFamily === "SAME_PAYLOAD" && anchorReference?.normalizedPayloadHash) {
+    for (const leg of samePayloadAnchors) {
+      if (
+        leg.gapfillDerivedPayloadHash &&
+        leg.gapfillDerivedPayloadHash !== anchorReference.normalizedPayloadHash
+      ) {
+        violations.push(`same_payload_parity: ${leg.legId}: gapfillDerivedPayloadHash != anchor`);
       }
     }
   }

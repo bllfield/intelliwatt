@@ -1,6 +1,6 @@
 {
   "proofVersion": "manual_cross_surface_parity_v2",
-  "generatedAt": "2026-06-08T18:10:38.606Z",
+  "generatedAt": "2026-06-08T19:22:21.689Z",
   "proofMode": "audit_only",
   "sourceHouseId": "8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8",
   "labHouseId": "29a3d820-2593-4673-9dd6-cd161bbd7f6f",
@@ -46,12 +46,12 @@
       "gapfillActualComparison": null,
       "comparisonFamily": "same_payload_parity",
       "payloadProvenance": "user_entered",
-      "fixtureArtifactInputHash": "SwMpFTmvItmMQOn5_9gAOO1Xq9A0_adoZQyp9vYHQcQ",
+      "fixtureArtifactInputHash": "egpXh-zgJ-zeBTLV0AX7a2DPdM7CaUqFlXjtsL5lLzc",
       "fixtureFamily": "SAME_PAYLOAD",
       "applyAdminRemap": false,
-      "sourcePayloadHash": "Ms0wDferZWmZgTgRrji49k",
-      "normalizedPayloadHash": "_zfR_qerMs5TFYYPYhiYg9",
-      "billPeriodHash": "T-qmMMn--0Zg_dnyRnojEk",
+      "sourcePayloadHash": "2bOlGsc6LJIP7ItoX9a_Tr",
+      "normalizedPayloadHash": "J0fiBGXRYyocaZLM9kQOEL",
+      "billPeriodHash": "XPIDDqLuiZiso6_9XLmq_O",
       "statementRangesHash": "CxByDgmxMNCQrEWLTL3pdw",
       "travelRangesHash": "nMsHDM8gT4XvreU9n6zxu_",
       "validationResultHash": "DncEoP0Qpt1sZOCeVTFGxs",
@@ -61,51 +61,51 @@
       "monthlyTotals": [
         {
           "month": "2025-07",
-          "kwh": 1658.49
+          "kwh": 0
         },
         {
           "month": "2025-08",
-          "kwh": 1815.96
+          "kwh": 1808.61
         },
         {
           "month": "2025-09",
-          "kwh": 1585.62
+          "kwh": 1586.28
         },
         {
           "month": "2025-10",
-          "kwh": 1524.16
+          "kwh": 1526.22
         },
         {
           "month": "2025-11",
-          "kwh": 1167.56
+          "kwh": 1208.12
         },
         {
           "month": "2025-12",
-          "kwh": 1030.53
+          "kwh": 1018.16
         },
         {
           "month": "2026-01",
-          "kwh": 974.94
+          "kwh": 1009.51
         },
         {
           "month": "2026-02",
-          "kwh": 1223.95
+          "kwh": 1216.64
         },
         {
           "month": "2026-03",
-          "kwh": 665.31
+          "kwh": 659.25
         },
         {
           "month": "2026-04",
-          "kwh": 817.66
+          "kwh": 848.51
         },
         {
           "month": "2026-05",
-          "kwh": 860.8
+          "kwh": 810.28
         },
         {
           "month": "2026-06",
-          "kwh": 1177.76
+          "kwh": 1176.84
         }
       ],
       "status": "ok",
@@ -116,10 +116,11 @@
       "displayCoverageEnd": "2026-06-06",
       "coverageWindowMatch": true,
       "artifactInputHash": null,
-      "finalizedDailyRowsHash": "Q8rawlLrNE7IVy1utJdvs6",
-      "displayTruthRevision": "DdXPa5PVjLuuw2E-bdoE9J",
-      "monthlyRowsHash": "tcWCiL8QtW_LhKKKeuhQ3Y",
-      "timeOfDayBucketsHash": "InQZspZUvFpDF4LgQNkeDe"
+      "finalizedDailyRowsHash": "wQSrtcORs1ZieYdu0HMHts",
+      "displayTruthRevision": "KcS4m1FNL3b9dyMDN-Ce_V",
+      "monthlyRowsHash": "bxdTvrjO2X5m4kgkvd4z3p",
+      "timeOfDayBucketsHash": "vBPmAJQ0zQfsPyd01OhMkE",
+      "weatherHouseId": "8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8"
     },
     {
       "legId": "user_manual_annual",
@@ -144,12 +145,12 @@
       "gapfillActualComparison": null,
       "comparisonFamily": "same_payload_parity",
       "payloadProvenance": "lab_saved",
-      "fixtureArtifactInputHash": "Hs2hwwOMOCLzG1ytI11orXUUhYf3aSolHycBuhNjxj0",
+      "fixtureArtifactInputHash": "Cd8PidREXoppTcroPD98JoWbRUNJ7Eaq0pYARWwcgh8",
       "fixtureFamily": "SAME_PAYLOAD",
       "applyAdminRemap": true,
-      "sourcePayloadHash": "Ms0wDferZWmZgTgRrji49k",
-      "normalizedPayloadHash": "_zfR_qerMs5TFYYPYhiYg9",
-      "billPeriodHash": "T-qmMMn--0Zg_dnyRnojEk",
+      "sourcePayloadHash": "2bOlGsc6LJIP7ItoX9a_Tr",
+      "normalizedPayloadHash": "J0fiBGXRYyocaZLM9kQOEL",
+      "billPeriodHash": "XPIDDqLuiZiso6_9XLmq_O",
       "statementRangesHash": "CxByDgmxMNCQrEWLTL3pdw",
       "travelRangesHash": "nMsHDM8gT4XvreU9n6zxu_",
       "validationResultHash": "DncEoP0Qpt1sZOCeVTFGxs",
@@ -159,51 +160,51 @@
       "monthlyTotals": [
         {
           "month": "2025-07",
-          "kwh": 1658.49
+          "kwh": 0
         },
         {
           "month": "2025-08",
-          "kwh": 1815.96
+          "kwh": 1808.61
         },
         {
           "month": "2025-09",
-          "kwh": 1585.62
+          "kwh": 1586.28
         },
         {
           "month": "2025-10",
-          "kwh": 1524.16
+          "kwh": 1526.22
         },
         {
           "month": "2025-11",
-          "kwh": 1167.56
+          "kwh": 1208.12
         },
         {
           "month": "2025-12",
-          "kwh": 1030.53
+          "kwh": 1018.16
         },
         {
           "month": "2026-01",
-          "kwh": 974.94
+          "kwh": 1009.51
         },
         {
           "month": "2026-02",
-          "kwh": 1223.95
+          "kwh": 1216.64
         },
         {
           "month": "2026-03",
-          "kwh": 665.31
+          "kwh": 659.25
         },
         {
           "month": "2026-04",
-          "kwh": 817.66
+          "kwh": 848.51
         },
         {
           "month": "2026-05",
-          "kwh": 860.8
+          "kwh": 810.28
         },
         {
           "month": "2026-06",
-          "kwh": 1177.76
+          "kwh": 1176.84
         }
       ],
       "status": "ok",
@@ -214,10 +215,11 @@
       "displayCoverageEnd": "2026-06-06",
       "coverageWindowMatch": true,
       "artifactInputHash": null,
-      "finalizedDailyRowsHash": "Q8rawlLrNE7IVy1utJdvs6",
-      "displayTruthRevision": "_43oeGRMHHk9V_7jyLzYXP",
-      "monthlyRowsHash": "5vmtyeBw8erVhmfsd6FB0E",
-      "timeOfDayBucketsHash": "InQZspZUvFpDF4LgQNkeDe"
+      "finalizedDailyRowsHash": "wQSrtcORs1ZieYdu0HMHts",
+      "displayTruthRevision": "KcS4m1FNL3b9dyMDN-Ce_V",
+      "monthlyRowsHash": "xpGYyqCAWHurPp7yPxzXLq",
+      "timeOfDayBucketsHash": "vBPmAJQ0zQfsPyd01OhMkE",
+      "weatherHouseId": "8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8"
     },
     {
       "legId": "one_path_admin_manual_monthly",
@@ -234,12 +236,12 @@
       "gapfillActualComparison": null,
       "comparisonFamily": "same_payload_parity",
       "payloadProvenance": "lab_saved",
-      "fixtureArtifactInputHash": "Hs2hwwOMOCLzG1ytI11orXUUhYf3aSolHycBuhNjxj0",
+      "fixtureArtifactInputHash": "Cd8PidREXoppTcroPD98JoWbRUNJ7Eaq0pYARWwcgh8",
       "fixtureFamily": "SAME_PAYLOAD",
       "applyAdminRemap": true,
-      "sourcePayloadHash": "Ms0wDferZWmZgTgRrji49k",
-      "normalizedPayloadHash": "_zfR_qerMs5TFYYPYhiYg9",
-      "billPeriodHash": "T-qmMMn--0Zg_dnyRnojEk",
+      "sourcePayloadHash": "2bOlGsc6LJIP7ItoX9a_Tr",
+      "normalizedPayloadHash": "J0fiBGXRYyocaZLM9kQOEL",
+      "billPeriodHash": "XPIDDqLuiZiso6_9XLmq_O",
       "statementRangesHash": "CxByDgmxMNCQrEWLTL3pdw",
       "travelRangesHash": "nMsHDM8gT4XvreU9n6zxu_",
       "validationResultHash": "DncEoP0Qpt1sZOCeVTFGxs",
@@ -249,51 +251,51 @@
       "monthlyTotals": [
         {
           "month": "2025-07",
-          "kwh": 1658.49
+          "kwh": 0
         },
         {
           "month": "2025-08",
-          "kwh": 1815.96
+          "kwh": 1808.61
         },
         {
           "month": "2025-09",
-          "kwh": 1585.62
+          "kwh": 1586.28
         },
         {
           "month": "2025-10",
-          "kwh": 1524.16
+          "kwh": 1526.22
         },
         {
           "month": "2025-11",
-          "kwh": 1167.56
+          "kwh": 1208.12
         },
         {
           "month": "2025-12",
-          "kwh": 1030.53
+          "kwh": 1018.16
         },
         {
           "month": "2026-01",
-          "kwh": 974.94
+          "kwh": 1009.51
         },
         {
           "month": "2026-02",
-          "kwh": 1223.95
+          "kwh": 1216.64
         },
         {
           "month": "2026-03",
-          "kwh": 665.31
+          "kwh": 659.25
         },
         {
           "month": "2026-04",
-          "kwh": 817.66
+          "kwh": 848.51
         },
         {
           "month": "2026-05",
-          "kwh": 860.8
+          "kwh": 810.28
         },
         {
           "month": "2026-06",
-          "kwh": 1177.76
+          "kwh": 1176.84
         }
       ],
       "status": "ok",
@@ -304,10 +306,11 @@
       "displayCoverageEnd": "2026-06-06",
       "coverageWindowMatch": true,
       "artifactInputHash": null,
-      "finalizedDailyRowsHash": "Q8rawlLrNE7IVy1utJdvs6",
-      "displayTruthRevision": "_43oeGRMHHk9V_7jyLzYXP",
-      "monthlyRowsHash": "5vmtyeBw8erVhmfsd6FB0E",
-      "timeOfDayBucketsHash": "InQZspZUvFpDF4LgQNkeDe"
+      "finalizedDailyRowsHash": "wQSrtcORs1ZieYdu0HMHts",
+      "displayTruthRevision": "KcS4m1FNL3b9dyMDN-Ce_V",
+      "monthlyRowsHash": "xpGYyqCAWHurPp7yPxzXLq",
+      "timeOfDayBucketsHash": "vBPmAJQ0zQfsPyd01OhMkE",
+      "weatherHouseId": "8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8"
     },
     {
       "legId": "one_path_admin_manual_annual",
@@ -328,16 +331,16 @@
       "runDispatchPath": "dispatchPastSimRecalc(MANUAL_TOTALS)->usageSimulator wrapper->onePath recalcSimulatorBuild",
       "readModelPath": "buildOnePathManualUsagePastSimReadResult->readOnePathSimulatedUsageScenario",
       "producerVersion": "production_past_stitched_v16",
-      "gapfillDerivedPayloadHash": "_zfR_qerMs5TFYYPYhiYg9",
+      "gapfillDerivedPayloadHash": "J0fiBGXRYyocaZLM9kQOEL",
       "gapfillActualComparison": null,
       "comparisonFamily": "same_payload_parity",
       "payloadProvenance": "gapfill_derived",
-      "fixtureArtifactInputHash": "Hs2hwwOMOCLzG1ytI11orXUUhYf3aSolHycBuhNjxj0",
+      "fixtureArtifactInputHash": "Cd8PidREXoppTcroPD98JoWbRUNJ7Eaq0pYARWwcgh8",
       "fixtureFamily": "SAME_PAYLOAD",
       "applyAdminRemap": false,
-      "sourcePayloadHash": "Ms0wDferZWmZgTgRrji49k",
-      "normalizedPayloadHash": "_zfR_qerMs5TFYYPYhiYg9",
-      "billPeriodHash": "T-qmMMn--0Zg_dnyRnojEk",
+      "sourcePayloadHash": "2bOlGsc6LJIP7ItoX9a_Tr",
+      "normalizedPayloadHash": "J0fiBGXRYyocaZLM9kQOEL",
+      "billPeriodHash": "XPIDDqLuiZiso6_9XLmq_O",
       "statementRangesHash": "CxByDgmxMNCQrEWLTL3pdw",
       "travelRangesHash": "nMsHDM8gT4XvreU9n6zxu_",
       "validationResultHash": "DncEoP0Qpt1sZOCeVTFGxs",
@@ -347,51 +350,51 @@
       "monthlyTotals": [
         {
           "month": "2025-07",
-          "kwh": 1658.49
+          "kwh": 0
         },
         {
           "month": "2025-08",
-          "kwh": 1815.96
+          "kwh": 1808.61
         },
         {
           "month": "2025-09",
-          "kwh": 1585.62
+          "kwh": 1586.28
         },
         {
           "month": "2025-10",
-          "kwh": 1524.16
+          "kwh": 1526.22
         },
         {
           "month": "2025-11",
-          "kwh": 1167.56
+          "kwh": 1208.12
         },
         {
           "month": "2025-12",
-          "kwh": 1030.53
+          "kwh": 1018.16
         },
         {
           "month": "2026-01",
-          "kwh": 974.94
+          "kwh": 1009.51
         },
         {
           "month": "2026-02",
-          "kwh": 1223.95
+          "kwh": 1216.64
         },
         {
           "month": "2026-03",
-          "kwh": 665.31
+          "kwh": 659.25
         },
         {
           "month": "2026-04",
-          "kwh": 817.66
+          "kwh": 848.51
         },
         {
           "month": "2026-05",
-          "kwh": 860.8
+          "kwh": 810.28
         },
         {
           "month": "2026-06",
-          "kwh": 1177.76
+          "kwh": 1176.84
         }
       ],
       "status": "ok",
@@ -402,10 +405,11 @@
       "displayCoverageEnd": "2026-06-06",
       "coverageWindowMatch": true,
       "artifactInputHash": null,
-      "finalizedDailyRowsHash": "Q8rawlLrNE7IVy1utJdvs6",
-      "displayTruthRevision": "_43oeGRMHHk9V_7jyLzYXP",
-      "monthlyRowsHash": "tcWCiL8QtW_LhKKKeuhQ3Y",
-      "timeOfDayBucketsHash": "InQZspZUvFpDF4LgQNkeDe"
+      "finalizedDailyRowsHash": "wQSrtcORs1ZieYdu0HMHts",
+      "displayTruthRevision": "KcS4m1FNL3b9dyMDN-Ce_V",
+      "monthlyRowsHash": "bxdTvrjO2X5m4kgkvd4z3p",
+      "timeOfDayBucketsHash": "vBPmAJQ0zQfsPyd01OhMkE",
+      "weatherHouseId": "8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8"
     },
     {
       "legId": "gapfill_monthly_from_source_intervals",
@@ -424,9 +428,7 @@
       "coverageWindowMatch": null
     }
   ],
-  "violations": [
-    "same_payload_parity: displayTruthRevision differs for _zfR_qerMs5TFYYPYhiYg9:user_read"
-  ],
+  "violations": [],
   "warnings": [],
-  "verdict": "MANUAL_CROSS_SURFACE_PARITY_FAIL"
+  "verdict": "MANUAL_CROSS_SURFACE_PARITY_PASS"
 }

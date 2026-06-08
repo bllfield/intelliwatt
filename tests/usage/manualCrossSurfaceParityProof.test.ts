@@ -3,12 +3,15 @@ import { describe, expect, it } from "vitest";
 import {
   aggregateManualCrossSurfaceProofViolations,
   assertManifestLegMatchesProofFamily,
+  buildManualReadModelFingerprints,
+  evaluateGapfillBillPeriodActualComparison,
   hashManualPayloadFields,
   isZeroAnnualManualPayload,
   isZeroMonthlyManualPayload,
   normalizeManualPayloadForProof,
   resolveAuditProofFamilyFromGapfillMode,
   resolveManifestFixtureFamily,
+  resolveManualDisplayTruthWeatherHouseId,
   resolveManualProofComparisonFamily,
   stableManualProofHash,
   validateManifestFixtureIsolation,
@@ -243,5 +246,114 @@ describe("manualCrossSurfaceParityProof helpers", () => {
     expect(hashed.payloadMode).toBe("ANNUAL");
     expect(hashed.annualKwh).toBe(5000);
     expect(hashed.monthlyTotals).toBeNull();
+  });
+
+  it("same-payload user/gapfill monthly displayTruthRevision matches when weather-house identity is aligned", () => {
+    const sourceHouseId = "source-house-weather";
+    const labHouseId = "lab-house-request";
+    const dataset = {
+      meta: {
+        coverageStart: "2025-06-07",
+        coverageEnd: "2026-06-06",
+        actualContextHouseId: sourceHouseId,
+      },
+      summary: { start: "2025-06-07", end: "2026-06-06" },
+      daily: [{ date: "2025-06-07", kwh: 12.5, source: "MANUAL" }],
+      dailyWeather: { "2025-06-07": { meanTempF: 70, hdd: 0, cdd: 5 } },
+    };
+    const userFingerprints = buildManualReadModelFingerprints({
+      dataset,
+      fallbackHouseId: sourceHouseId,
+    });
+    const gapfillFingerprints = buildManualReadModelFingerprints({
+      dataset,
+      fallbackHouseId: labHouseId,
+    });
+    expect(resolveManualDisplayTruthWeatherHouseId({ dataset, fallbackHouseId: labHouseId })).toBe(sourceHouseId);
+    expect(userFingerprints.weatherHouseId).toBe(gapfillFingerprints.weatherHouseId);
+    expect(userFingerprints.displayTruthRevision).toBe(gapfillFingerprints.displayTruthRevision);
+    expect(userFingerprints.finalizedDailyRowsHash).toBe(gapfillFingerprints.finalizedDailyRowsHash);
+  });
+
+  it("displayTruthRevision mismatch remains a hard violation when display/weather truth truly differs", () => {
+    const base = {
+      status: "ok" as const,
+      comparisonFamily: "same_payload_parity" as const,
+      fixtureFamily: "SAME_PAYLOAD" as const,
+      canonicalCoverageStart: "2025-06-07",
+      canonicalCoverageEnd: "2026-06-06",
+      coverageWindowMatch: true,
+      normalizedPayloadHash: "same-hash",
+      validationResultHash: stableManualProofHash({ ok: true, error: null }),
+      finalizedDailyRowsHash: "daily-shared",
+      monthlyRowsHash: "monthly-shared",
+    };
+    const { violations } = aggregateManualCrossSurfaceProofViolations({
+      auditManualMode: "MONTHLY",
+      auditGapfillMode: "MANUAL_MONTHLY",
+      legs: [
+        { legId: "user_manual_monthly", ...base, displayTruthRevision: "truth-user" },
+        { legId: "gapfill_manual_monthly", ...base, displayTruthRevision: "truth-gapfill" },
+      ],
+      onePathFacadeParity: { ok: true, checked: [], mismatches: [] },
+    });
+    expect(violations).toContain("same_payload_parity: displayTruthRevision differs for same-hash:user_read");
+  });
+
+  it("evaluateGapfillBillPeriodActualComparison uses actualIntervalTotalKwh", () => {
+    const withActual = evaluateGapfillBillPeriodActualComparison({
+      readModel: {
+        billPeriodCompare: {
+          rows: [
+            { actualIntervalTotalKwh: 420, status: "reconciled" },
+            { actualIntervalTotalKwh: null, status: "delta_present" },
+          ],
+        },
+      },
+    });
+    expect(withActual.comparedBillPeriodCount).toBe(1);
+    expect(withActual.ok).toBe(true);
+    expect(withActual.reconciledCount).toBe(1);
+
+    const withoutActual = evaluateGapfillBillPeriodActualComparison({
+      readModel: {
+        billPeriodCompare: {
+          rows: [{ actualIntervalTotalKwh: null, status: "delta_present" }],
+        },
+      },
+    });
+    expect(withoutActual.comparedBillPeriodCount).toBe(0);
+    expect(withoutActual.ok).toBe(false);
+  });
+
+  it("derived payload hash mismatch is a hard violation in SAME_PAYLOAD family", () => {
+    const { violations, warnings } = aggregateManualCrossSurfaceProofViolations({
+      auditManualMode: "MONTHLY",
+      auditGapfillMode: "MANUAL_MONTHLY",
+      legs: [
+        {
+          legId: "user_manual_monthly",
+          status: "ok",
+          comparisonFamily: "same_payload_parity",
+          fixtureFamily: "SAME_PAYLOAD",
+          normalizedPayloadHash: "anchor-hash",
+          validationResultHash: stableManualProofHash({ ok: true, error: null }),
+        },
+        {
+          legId: "gapfill_manual_monthly",
+          status: "ok",
+          comparisonFamily: "same_payload_parity",
+          fixtureFamily: "SAME_PAYLOAD",
+          normalizedPayloadHash: "anchor-hash",
+          gapfillDerivedPayloadHash: "derived-hash",
+          validationResultHash: stableManualProofHash({ ok: true, error: null }),
+        },
+      ],
+      onePathFacadeParity: { ok: true, checked: [], mismatches: [] },
+    });
+    expect(violations).toContain("same_payload_parity: gapfill_manual_monthly: gapfillDerivedPayloadHash != anchor");
+    expect(warnings.some((w) => w.includes("gapfillDerivedPayloadHash differs from user-entered payload"))).toBe(
+      false
+    );
   });
 });
