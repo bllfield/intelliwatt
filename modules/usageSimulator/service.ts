@@ -116,6 +116,10 @@ import {
 } from "@/modules/usageSimulator/compareProjection";
 import { mergeValidationCanonicalSimulatedTotalsIntoCompareSource } from "@/lib/usage/validationCompareCanonical";
 import {
+  extractPersistIntervals15,
+  prepareManualPastDatasetForArtifactPersist,
+} from "@/lib/usage/manualPastArtifactCanonicalWindowPersist";
+import {
   buildInitialPastSimLockboxInput,
   buildPastSimPerDayTrace,
   buildPastSimReadContext,
@@ -1033,25 +1037,35 @@ export async function rebuildGapfillSharedPastArtifact(args: {
       // Must match shared Past simulator + compare_core stale guard (`needsRebuildForOldCurveVersion`).
       curveShapingVersion: "shared_curve_v2",
     };
-    applyCanonicalCoverageMetadataForNonBaseline(rebuiltDataset, "gapfill_lab", { buildInputs });
-    const canonicalArtifactSimulatedDayTotalsByDate = readCanonicalArtifactSimulatedDayTotalsByDate(rebuiltDataset);
-    const { bytes } = encodeIntervalsV1(intervals15);
+    const persistPrep = prepareManualPastDatasetForArtifactPersist({
+      dataset: rebuiltDataset,
+      simMode: String((buildInputs as any)?.mode ?? ""),
+      scenarioKey: "gapfill_lab",
+      buildInputs,
+      applyLegacyCanonicalCoverageMetadata: () => {
+        applyCanonicalCoverageMetadataForNonBaseline(rebuiltDataset, "gapfill_lab", { buildInputs });
+      },
+    });
+    const datasetForPersist = persistPrep.dataset;
+    const intervals15ForPersist = persistPrep.projected ? extractPersistIntervals15(datasetForPersist) : intervals15;
+    const canonicalArtifactSimulatedDayTotalsByDate = readCanonicalArtifactSimulatedDayTotalsByDate(datasetForPersist);
+    const { bytes } = encodeIntervalsV1(intervals15ForPersist);
     const datasetJsonForStorage = {
-      ...rebuiltDataset,
+      ...datasetForPersist,
       canonicalArtifactSimulatedDayTotalsByDate,
       meta: {
-        ...((rebuiltDataset as any)?.meta ?? {}),
+        ...((datasetForPersist as any)?.meta ?? {}),
         canonicalArtifactSimulatedDayTotalsByDate,
       },
-      series: { ...(rebuiltDataset.series ?? {}), intervals15: [] },
+      series: { ...(datasetForPersist.series ?? {}), intervals15: [] },
     };
     await saveCachedPastDataset({
       houseId: args.houseId,
       scenarioId: resolvedScenarioId,
       inputHash: exactInputHash,
       engineVersion: PAST_ENGINE_VERSION,
-      windowStartUtc: identityWindowResolved.startDate,
-      windowEndUtc: identityWindowResolved.endDate,
+      windowStartUtc: persistPrep.persistWindowStartDate ?? identityWindowResolved.startDate,
+      windowEndUtc: persistPrep.persistWindowEndDate ?? identityWindowResolved.endDate,
       datasetJson: datasetJsonForStorage as Record<string, unknown>,
       intervalsCodec: INTERVAL_CODEC_V1,
       intervalsCompressed: bytes,
@@ -2053,14 +2067,24 @@ export async function buildGapfillCompareSimShared(args: {
     const intervals15 = rebuiltDataset.series.intervals15 as Array<{ timestamp: string; kwh: number }>;
     // Persist canonical shared-window ownership metadata with rebuilt artifacts so compare
     // fallback compatibility checks and scope diagnostics use the same bounded fingerprint.
-    applyCanonicalCoverageMetadataForNonBaseline(rebuiltDataset, "gapfill_lab", { buildInputs });
-    const canonicalArtifactSimulatedDayTotalsByDate = readCanonicalArtifactSimulatedDayTotalsByDate(rebuiltDataset);
-    const { bytes } = encodeIntervalsV1(intervals15);
+    const persistPrep = prepareManualPastDatasetForArtifactPersist({
+      dataset: rebuiltDataset,
+      simMode: String((buildInputs as any)?.mode ?? ""),
+      scenarioKey: "gapfill_lab",
+      buildInputs,
+      applyLegacyCanonicalCoverageMetadata: () => {
+        applyCanonicalCoverageMetadataForNonBaseline(rebuiltDataset, "gapfill_lab", { buildInputs });
+      },
+    });
+    const datasetForPersist = persistPrep.dataset;
+    const intervals15ForPersist = persistPrep.projected ? extractPersistIntervals15(datasetForPersist) : intervals15;
+    const canonicalArtifactSimulatedDayTotalsByDate = readCanonicalArtifactSimulatedDayTotalsByDate(datasetForPersist);
+    const { bytes } = encodeIntervalsV1(intervals15ForPersist);
     const datasetJsonForStorage = {
-      ...rebuiltDataset,
+      ...datasetForPersist,
       canonicalArtifactSimulatedDayTotalsByDate,
       meta: {
-        ...((rebuiltDataset as any)?.meta ?? {}),
+        ...((datasetForPersist as any)?.meta ?? {}),
         canonicalArtifactSimulatedDayTotalsByDate,
       },
       series: { ...(rebuiltDataset.series ?? {}), intervals15: [] },
@@ -2070,8 +2094,8 @@ export async function buildGapfillCompareSimShared(args: {
       scenarioId: sharedScenarioCacheId,
       inputHash: sharedInputHash,
       engineVersion: PAST_ENGINE_VERSION,
-      windowStartUtc: identityWindowResolved.startDate,
-      windowEndUtc: identityWindowResolved.endDate,
+      windowStartUtc: persistPrep.persistWindowStartDate ?? identityWindowResolved.startDate,
+      windowEndUtc: persistPrep.persistWindowEndDate ?? identityWindowResolved.endDate,
       datasetJson: datasetJsonForStorage as Record<string, unknown>,
       intervalsCodec: INTERVAL_CODEC_V1,
       intervalsCompressed: bytes,
@@ -6204,9 +6228,21 @@ async function recalcSimulatorBuildImpl(args: {
         usageShapeProfileSimHash: pastArtifactIdentity.usageShapeProfileSimHash,
       };
       const weatherIdentity = pastArtifactIdentity.weatherIdentity;
-      applyCanonicalCoverageMetadataForNonBaseline(dataset, scenarioKey, { buildInputs });
+      const persistPrep = prepareManualPastDatasetForArtifactPersist({
+        dataset,
+        simMode,
+        scenarioKey,
+        manualUsagePayload,
+        buildInputs,
+        now: args.now,
+        applyLegacyCanonicalCoverageMetadata: () => {
+          applyCanonicalCoverageMetadataForNonBaseline(dataset, scenarioKey, { buildInputs });
+        },
+      });
+      dataset = persistPrep.dataset;
+      const intervals15ForPersist = persistPrep.projected ? extractPersistIntervals15(dataset) : intervals15;
       const canonicalArtifactSimulatedDayTotalsByDate = readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
-      const { bytes } = encodeIntervalsV1(intervals15);
+      const { bytes } = encodeIntervalsV1(intervals15ForPersist);
       const finalizedLockboxInput = finalizePastSimLockboxInput({
         base: normalizedLockboxInput,
         window: identityWindow,
@@ -6299,7 +6335,7 @@ async function recalcSimulatorBuildImpl(args: {
         scenarioId,
         mode: simMode,
         artifactInputHash,
-        intervalCount: intervals15.length,
+        intervalCount: intervals15ForPersist.length,
         source: "recalcSimulatorBuildImpl",
         memoryRssMb: getMemoryRssMb(),
       });
@@ -6308,8 +6344,8 @@ async function recalcSimulatorBuildImpl(args: {
         scenarioId: scenarioIdForCache,
         inputHash: artifactInputHash,
         engineVersion: PAST_ENGINE_VERSION,
-        windowStartUtc: identityWindow.startDate,
-        windowEndUtc: identityWindow.endDate,
+        windowStartUtc: persistPrep.persistWindowStartDate ?? identityWindow.startDate,
+        windowEndUtc: persistPrep.persistWindowEndDate ?? identityWindow.endDate,
         datasetJson: datasetJsonForStorage as Record<string, unknown>,
         intervalsCodec: INTERVAL_CODEC_V1,
         intervalsCompressed: bytes,
@@ -6322,7 +6358,7 @@ async function recalcSimulatorBuildImpl(args: {
         mode: simMode,
         artifactInputHash,
         durationMs: Date.now() - artifactPersistStartedAt,
-        intervalCount: intervals15.length,
+        intervalCount: intervals15ForPersist.length,
         source: "recalcSimulatorBuildImpl",
         memoryRssMb: getMemoryRssMb(),
       });
@@ -6373,7 +6409,7 @@ async function recalcSimulatorBuildImpl(args: {
         mode: simMode,
         artifactInputHash,
         durationMs: Date.now() - artifactPersistStartedAt,
-        intervalCount: intervals15.length,
+        intervalCount: intervals15ForPersist.length,
         source: "recalcSimulatorBuildImpl",
         memoryRssMb: getMemoryRssMb(),
       });
@@ -6384,7 +6420,7 @@ async function recalcSimulatorBuildImpl(args: {
         scenarioId,
         mode: simMode,
         artifactInputHash,
-        intervalCount: intervals15.length,
+        intervalCount: intervals15ForPersist.length,
         dayCount: Array.isArray((dataset as any)?.daily) ? (dataset as any).daily.length : 0,
         monthCount: Array.isArray((dataset as any)?.monthly) ? (dataset as any).monthly.length : 0,
         source: "recalcSimulatorBuildImpl",
@@ -7942,23 +7978,38 @@ export async function getSimulatedUsageForHouseScenario(args: {
               };
             }
             dataset = pastResult.dataset;
+            let persistPrep = {
+              dataset,
+              projected: false,
+              persistWindowStartDate: null as string | null,
+              persistWindowEndDate: null as string | null,
+            };
             if (dataset) {
               if (!dataset.meta || typeof dataset.meta !== "object") (dataset as any).meta = {};
-              // Persist canonical shared-window ownership metadata with the rebuilt artifact so
-              // later scenario-level fallback compatibility checks can trust the saved fingerprint.
-              if (scenarioKey !== "BASELINE") {
-                applyCanonicalCoverageMetadataForNonBaseline(dataset, scenarioKey, { buildInputs });
-              }
+              persistPrep = prepareManualPastDatasetForArtifactPersist({
+                dataset,
+                simMode: mode,
+                scenarioKey,
+                buildInputs,
+                applyLegacyCanonicalCoverageMetadata: () => {
+                  if (scenarioKey !== "BASELINE") {
+                    applyCanonicalCoverageMetadataForNonBaseline(dataset, scenarioKey, { buildInputs });
+                  }
+                },
+              });
+              dataset = persistPrep.dataset;
               (dataset.meta as any).pastWindowDiag = pastWindowDiag;
               (dataset.meta as any).pastBuildIntervalsFetchCount = 1;
               (dataset.meta as any).cacheKeyDiag = cacheKeyDiag;
               (dataset.meta as any).sourceOfDaySimulationCore = SOURCE_OF_DAY_SIMULATION_CORE;
               (dataset.meta as any).dailyRowCount = Array.isArray(dataset.daily) ? dataset.daily.length : 0;
               (dataset.meta as any).intervalCount = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15.length : 0;
-              (dataset.meta as any).coverageStart = dataset?.summary?.start ?? startDate;
-              (dataset.meta as any).coverageEnd = dataset?.summary?.end ?? endDate;
+              (dataset.meta as any).coverageStart =
+                persistPrep.persistWindowStartDate ?? dataset?.summary?.start ?? startDate;
+              (dataset.meta as any).coverageEnd =
+                persistPrep.persistWindowEndDate ?? dataset?.summary?.end ?? endDate;
             }
-            const intervals15 = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15 : [];
+            const intervals15 = extractPersistIntervals15(dataset);
             const { bytes } = encodeIntervalsV1(intervals15);
             const canonicalArtifactSimulatedDayTotalsByDate = readCanonicalArtifactSimulatedDayTotalsByDate(dataset);
             const datasetJsonForStorage = {
@@ -7984,8 +8035,8 @@ export async function getSimulatedUsageForHouseScenario(args: {
               scenarioId: scenarioIdForCache,
               inputHash,
               engineVersion: PAST_ENGINE_VERSION,
-              windowStartUtc: startDate,
-              windowEndUtc: endDate,
+              windowStartUtc: persistPrep.persistWindowStartDate ?? startDate,
+              windowEndUtc: persistPrep.persistWindowEndDate ?? endDate,
               datasetJson: datasetJsonForStorage as Record<string, unknown>,
               intervalsCodec: INTERVAL_CODEC_V1,
               intervalsCompressed: bytes,

@@ -133,19 +133,19 @@
 - `EXACT_INTERVALS` and non-manual GapFill modes unchanged
 - Legacy `buildManualUsagePastSimReadResult` → `usageSimulator/service.getSimulatedUsageForHouseScenario` eliminated for manual GapFill readback only
 
-**Phase 4B (approved — helper only, no wiring):**
+**Phase 4C (approved — guarded persist wiring):**
 
-- Pure persist helper: `lib/usage/persistManualPastArtifactCanonicalWindow.ts`
-- Exports: `projectManualPastDatasetToCanonicalWindow`, `isCanonicalManualPastArtifact`, `MANUAL_CANONICAL_ARTIFACT_WINDOW_VERSION`
-- Shared read-time remap core extracted into helper; `modules/onePathSim/manualDisplayDataset.ts` delegates without behavior change
-- Tests: `tests/usage/persistManualPastArtifactCanonicalWindow.test.ts`
-- **Not wired:** sim services, read-time remap removal, fixture bootstrap, proof reruns
+- Env guard: `MANUAL_CANONICAL_ARTIFACT_WINDOW_PERSIST=1`
+- Shared persist hook: `lib/usage/manualPastArtifactCanonicalWindowPersist.ts`
+- Wired into user + One Path sim services at artifact persist only (`recalcSimulatorBuildImpl`, allow_rebuild, GapFill shared rebuild)
+- When flag on, `MANUAL_TOTALS` monthly/annual artifacts call `projectManualPastDatasetToCanonicalWindow()` before cache write
+- Read-time remap unchanged (Phase 4D)
+- Tests: `tests/usage/manualPastArtifactCanonicalWindowPersist.test.ts`
 
 **Later phases (require separate approval — not started):**
 
-- Phase 2: unify manual readback (GapFill → One Path read model)
-- Phase 3: collapse `onePathSim/manual*` facades onto `manualUsage/*`
-- Phase 4C–4E: wire helper at persist, read-time remap no-op when canonical version stamped, bootstrap + proof reruns
+- Phase 4D: read-time remap no-op when canonical version stamped
+- Phase 4E: bootstrap + proof reruns / final docs
 - Phase 5: GapFill regression protection
 
 **Protected (all phases):**
