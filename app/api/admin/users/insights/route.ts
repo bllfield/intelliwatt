@@ -166,6 +166,7 @@ export async function GET(request: NextRequest) {
             esiid: true,
             tdspSlug: true,
             utilityName: true,
+            committedUsageSource: true,
           },
           orderBy: { createdAt: "desc" },
         })
@@ -419,6 +420,24 @@ export async function GET(request: NextRequest) {
       const hasUsageNow = Boolean(
         (houseEsiid && esiidsWithUsage.has(houseEsiid)) || (hid && housesWithGb.has(hid)),
       );
+      const userHouseKey = hid ? `${u.id}:${hid}` : null;
+      const inferredCommittedUsageSource =
+        h?.committedUsageSource === "SMT" || h?.committedUsageSource === "GREEN_BUTTON"
+          ? h.committedUsageSource
+          : hid && housesWithGb.has(hid)
+            ? ("GREEN_BUTTON" as const)
+            : hasSmtNow
+              ? ("SMT" as const)
+              : null;
+      const usageSource = resolveAdminUserUsageSource({
+        simulatorMode: userHouseKey ? baselineBuildByUserHouse.get(userHouseKey) ?? null : null,
+        manualUsageMode: userHouseKey ? manualUsageByUserHouse.get(userHouseKey) ?? null : null,
+        committedUsageSource:
+          h?.committedUsageSource === "SMT" || h?.committedUsageSource === "GREEN_BUTTON"
+            ? h.committedUsageSource
+            : null,
+        inferredCommittedUsageSource,
+      });
       const switchedWithUs = switchedUserIds.has(u.id);
 
       const contractEndDateIso = snap?.contractEndDate
