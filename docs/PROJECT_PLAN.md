@@ -107,6 +107,50 @@
 
 ---
 
+## PC-2026-11 — Manual Past Sim unification (IN PROGRESS — Phase 1 proof only)
+
+**Status:** **Phase 1 approved and in progress.** GB and SMT Past proof close gates are accepted (`PROD_WEATHER_PARITY_PASS` evidence on `main`). **No runtime manual behavior changes in Phase 1.**
+
+**Goal:** Manual monthly and manual annual converge on one canonical `modules/manualUsage/*` stack shared by User, Admin, Manual Monthly Lab, One Path admin, and GapFill — without forking sim, display, weather scoring, or variable stores.
+
+**Phase 1 (complete — proof only):**
+
+- Read-only cross-surface proof: `scripts/audit/manual-cross-surface-parity-proof.mjs`
+- Pure helpers: `lib/usage/manualCrossSurfaceParityProof.ts`
+- Requires `PROOF_AUDIT_ONLY=1`; fails closed on missing env; **no production writes** unless future phases explicitly set `ALLOW_PROD_MANUAL_RECALC=1`
+- Exposes manual parity gaps (coverage window, payload normalization, read-model hashes, legacy GapFill read path, `onePathSim/manual*` facade drift) **without fixing them**
+
+**Phase 1B (approved — baseline fixtures):**
+
+- Fixture bootstrap: `scripts/audit/bootstrap-manual-cross-surface-fixtures.mjs` (requires `ALLOW_PROD_MANUAL_RECALC=1`)
+- Writes `scripts/audit/manual-cross-surface-fixture-manifest.json` with per-leg artifact hashes
+- Source-house manual payloads are never overwritten; lab/test-home writes isolated to `AUDIT_LAB_HOUSE_ID`
+- Proof separates **same_payload_parity** vs **gapfill_derived_payload_parity** comparison families
+
+**Phase 2A (approved — GapFill manual readback only):**
+
+- GapFill `MANUAL_MONTHLY`, `MONTHLY_FROM_SOURCE_INTERVALS`, `ANNUAL_FROM_SOURCE_INTERVALS` read through `buildOnePathManualUsagePastSimReadResult` → `readOnePathSimulatedUsageScenario`
+- `EXACT_INTERVALS` and non-manual GapFill modes unchanged
+- Legacy `buildManualUsagePastSimReadResult` → `usageSimulator/service.getSimulatedUsageForHouseScenario` eliminated for manual GapFill readback only
+
+**Later phases (require separate approval — not started):**
+
+- Phase 2: unify manual readback (GapFill → One Path read model)
+- Phase 3: collapse `onePathSim/manual*` facades onto `manualUsage/*`
+- Phase 4: converge manual dispatch + persist canonical Past coverage window on artifact write
+- Phase 5: GapFill regression protection
+
+**Protected (all phases):**
+
+- GapFill `EXACT_INTERVALS` and constrained manual modes (`MANUAL_MONTHLY`, `MONTHLY_FROM_SOURCE_INTERVALS`, `ANNUAL_FROM_SOURCE_INTERVALS`)
+- GapFill anchor/date controls, auto statement ranges, interval-to-manual derivation, actual-interval compare
+- Input-side anchor/bill-period logic stays in `manualUsage/*`; eventual artifact window must match SMT/GB canonical Past contract (Phase 4+ only)
+- GB/SMT interval sim math and weather proof gates unchanged
+
+**Evidence (Phase 1):** `scripts/audit/manual-cross-surface-parity-proof-output.json` after guarded runs.
+
+---
+
 ## PC-2026-09 — Past visible weather parity (COMPLETE — 2026-06-06)
 
 **Status:** **Complete.** GB Past keeper cross-surface weather **input parity** and visible cards aligned. Score match alone is **not** sufficient — acceptance requires `pastWeatherCrossSurfaceParity.ok` and `acceptanceProof.ok`.
@@ -2875,6 +2919,31 @@ Add a short "Plan Change" section here with:
 Then perform the change.
 
 ## Plan Changes
+
+### PC-2026-11: Manual Past Sim unification — Phase 1 proof only (June 2026)
+
+**Rationale:** GB and SMT Past weather/cross-surface proof gates are green. Manual monthly/annual paths are mostly unified at the producer but diverge on readback, dispatch orchestration, display-window remap, and duplicated `onePathSim/manual*` forks. Phase 1 captures exact parity gaps before any behavior change.
+
+**Scope (Phase 1 only):**
+
+- `scripts/audit/manual-cross-surface-parity-proof.mjs` — read-only cross-surface manual parity proof
+- `lib/usage/manualCrossSurfaceParityProof.ts` — pure hashing/diagnostics helpers
+- `tests/usage/manualCrossSurfaceParityProof.test.ts` — helper unit tests
+- This plan section (`PC-2026-11`)
+
+**Phase 1B + 2A (approved June 2026):**
+
+- `scripts/audit/bootstrap-manual-cross-surface-fixtures.mjs` — fixture bootstrap with manifest
+- GapFill manual readback unified to One Path read model in `gapfill-lab/route.ts`
+- `tests/usage/gapfillManualReadback.test.ts` — read-path regression tests
+
+**Out of scope (later phases — not approved yet):**
+
+- Manual readback unification, facade collapse, dispatch convergence, canonical artifact window persistence, GapFill behavior changes
+
+**Rollback plan:** Delete proof script/helpers/tests and revert this plan entry; zero runtime impact because Phase 1 makes no product-path edits.
+
+**Guardrails preserved:** No sim fork, no scoring/validation holdout changes, no GB/SMT interval math changes, GapFill constrained modes and anchor logic untouched.
 
 ### PC-2025-01: Raw SMT Files Upload Endpoint (January 2025)
 

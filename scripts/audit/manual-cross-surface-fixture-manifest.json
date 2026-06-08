@@ -1,0 +1,75 @@
+{
+  "bootstrapVersion": "manual_cross_surface_fixture_v1",
+  "generatedAt": "2026-06-08T16:51:50.672Z",
+  "sourceHouseId": "8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8",
+  "labHouseId": "29a3d820-2593-4673-9dd6-cd161bbd7f6f",
+  "sourceUserEmail": "brian@intellipath-solutions.com",
+  "ownerEmail": "brian@intellipath-solutions.com",
+  "legs": {
+    "user_manual_monthly": {
+      "status": "recalc_failed",
+      "scenarioId": "7968944f-7a08-425c-8008-6dc49eaccc34",
+      "artifactInputHash": "-uewIpf0FjU_rksPZ941jFu3s6iF0a8NaIx3gan1XW4",
+      "normalizedPayloadHash": "u_dkyBaQiJjrM0LGoTDQXt",
+      "error": "droplet_async"
+    },
+    "user_manual_annual": {
+      "status": "skipped",
+      "reason": "source_manual_annual_missing"
+    },
+    "manual_monthly_lab": {
+      "status": "recalc_failed",
+      "scenarioId": "3d42aecf-7517-4c86-808e-88a861aeafc6",
+      "artifactInputHash": "rzWOZe5KMDDG6wined5A6Id7cnj5HD-XytDGHpdxL2c",
+      "normalizedPayloadHash": "u_dkyBaQiJjrM0LGoTDQXt",
+      "error": "droplet_async"
+    },
+    "one_path_admin_manual_monthly": {
+      "status": "recalc_failed",
+      "scenarioId": "3d42aecf-7517-4c86-808e-88a861aeafc6",
+      "artifactInputHash": "rzWOZe5KMDDG6wined5A6Id7cnj5HD-XytDGHpdxL2c",
+      "normalizedPayloadHash": "u_dkyBaQiJjrM0LGoTDQXt",
+      "error": "droplet_async",
+      "note": "shares lab Past artifact with manual_monthly_lab"
+    },
+    "one_path_admin_manual_annual": {
+      "status": "recalc_failed",
+      "scenarioId": "3d42aecf-7517-4c86-808e-88a861aeafc6",
+      "artifactInputHash": "rzWOZe5KMDDG6wined5A6Id7cnj5HD-XytDGHpdxL2c",
+      "gapfillDerivedPayloadHash": "WCyFvR-DFoni53YRHv_jeG",
+      "normalizedPayloadHash": "WCyFvR-DFoni53YRHv_jeG",
+      "error": "droplet_async",
+      "note": "lab-only annual payload derived from source intervals"
+    },
+    "gapfill_manual_monthly": {
+      "status": "recalc_failed",
+      "scenarioId": "3d42aecf-7517-4c86-808e-88a861aeafc6",
+      "usageInputMode": "MANUAL_MONTHLY",
+      "artifactInputHash": "rzWOZe5KMDDG6wined5A6Id7cnj5HD-XytDGHpdxL2c",
+      "gapfillDerivedPayloadHash": "_zfR_qerMs5TFYYPYhiYg9",
+      "normalizedPayloadHash": "_zfR_qerMs5TFYYPYhiYg9",
+      "payloadSource": "actual_derived_seed",
+      "error": "droplet_async"
+    },
+    "gapfill_monthly_from_source_intervals": {
+      "status": "recalc_failed",
+      "scenarioId": "3d42aecf-7517-4c86-808e-88a861aeafc6",
+      "usageInputMode": "MONTHLY_FROM_SOURCE_INTERVALS",
+      "artifactInputHash": "rzWOZe5KMDDG6wined5A6Id7cnj5HD-XytDGHpdxL2c",
+      "gapfillDerivedPayloadHash": "_zfR_qerMs5TFYYPYhiYg9",
+      "normalizedPayloadHash": "_zfR_qerMs5TFYYPYhiYg9",
+      "payloadSource": "test_home_saved_payload",
+      "error": "droplet_async"
+    },
+    "gapfill_annual_from_source_intervals": {
+      "status": "recalc_failed",
+      "scenarioId": "3d42aecf-7517-4c86-808e-88a861aeafc6",
+      "usageInputMode": "ANNUAL_FROM_SOURCE_INTERVALS",
+      "artifactInputHash": "rzWOZe5KMDDG6wined5A6Id7cnj5HD-XytDGHpdxL2c",
+      "gapfillDerivedPayloadHash": "WCyFvR-DFoni53YRHv_jeG",
+      "normalizedPayloadHash": "WCyFvR-DFoni53YRHv_jeG",
+      "payloadSource": "actual_derived_seed",
+      "error": "droplet_async"
+    }
+  }
+}

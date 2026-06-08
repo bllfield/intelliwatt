@@ -98,7 +98,7 @@ import {
   resolveActualUsageWeatherScore,
   resolveFingerprintDiagnosticWeatherScore,
 } from "@/lib/usage/weatherScoringOwnership";
-import { buildManualUsagePastSimReadResult } from "@/modules/manualUsage/pastSimReadResult";
+import { buildOnePathManualUsagePastSimReadResult } from "@/modules/onePathSim/manualPastSimReadResult";
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
 import { buildSharedPastSimDiagnostics } from "@/modules/usageSimulator/sharedDiagnostics";
 import { usagePrisma } from "@/lib/db/usageClient";
@@ -623,6 +623,17 @@ async function buildGapfillManualUsageReadbackResponse(args: {
   exactArtifactInputHash?: string | null;
   requireExactArtifactMatch?: boolean;
 }) {
+  if (!isGapfillManualUsageInputMode(args.testUsageInputMode)) {
+    return NextResponse.json(
+      attachFailureContract({
+        ok: false,
+        error: "manual_readback_mode_required",
+        message: "GapFill manual readback applies only to MANUAL_MONTHLY and source-interval-derived manual modes.",
+        usageInputMode: args.testUsageInputMode,
+      }),
+      { status: 400 }
+    );
+  }
   const exactArtifactInputHash =
     typeof args.exactArtifactInputHash === "string" && args.exactArtifactInputHash.trim()
       ? args.exactArtifactInputHash.trim()
@@ -658,7 +669,7 @@ async function buildGapfillManualUsageReadbackResponse(args: {
     { skipFullYearIntervalFetch: true }
   ).catch(() => ({ dataset: null }));
 
-  const readResultWithManualPayload = await buildManualUsagePastSimReadResult({
+  const readResultWithManualPayload = await buildOnePathManualUsagePastSimReadResult({
     userId: args.labOwnerUserId,
     houseId: args.testHomeHouse.id,
     scenarioId: String(args.scenarioId),
@@ -805,8 +816,8 @@ async function buildGapfillManualUsageReadbackResponse(args: {
     ok: true,
     readMode: "artifact_only",
     projectionMode: "baseline",
-    readLayer: "buildManualUsagePastSimReadResult",
-    readFamily: "buildManualUsagePastSimReadResult->getSimulatedUsageForHouseScenario",
+    readLayer: "buildOnePathManualUsagePastSimReadResult",
+    readFamily: "buildOnePathManualUsagePastSimReadResult->readOnePathSimulatedUsageScenario",
     fallbackAllowed: false,
     exactCanonicalReadSucceeded,
     usedFallbackArtifact: false,
