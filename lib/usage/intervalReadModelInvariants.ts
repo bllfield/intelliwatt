@@ -220,6 +220,9 @@ export function auditUserAdminPastReadModelParity(args: {
   actualBaselineWeatherScore?: unknown;
   userProfileFingerprints?: { homeProfile?: string | null; applianceProfile?: string | null };
   adminProfileFingerprints?: { homeProfile?: string | null; applianceProfile?: string | null };
+  /** Cross-surface weather parity: score both legs against the same profile/weather house. */
+  userWeatherHouseId?: string | null;
+  adminWeatherHouseId?: string | null;
   /** When true, same in-memory dataset audit is allowed (read-model structural checks only). */
   allowSameDatasetStructuralAudit?: boolean;
   crossSurfaceWeatherInputsOnly?: boolean;
@@ -273,6 +276,8 @@ export function auditUserAdminPastReadModelParity(args: {
       ? auditPastWeatherInputParity({
           userDataset: userDatasetRecord,
           adminDataset: adminDatasetRecord,
+          userWeatherHouseId: args.userWeatherHouseId,
+          adminWeatherHouseId: args.adminWeatherHouseId,
           userProfileFingerprints: args.userProfileFingerprints,
           adminProfileFingerprints: args.adminProfileFingerprints,
           crossSurfaceWeatherInputsOnly: args.crossSurfaceWeatherInputsOnly,

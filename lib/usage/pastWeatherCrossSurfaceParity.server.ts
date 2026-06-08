@@ -110,6 +110,16 @@ async function finalizeAdminDatasetForCrossSurfaceParity(args: {
   return dataset;
 }
 
+/**
+ * Dual-run cross-surface Past weather acceptance.
+ *
+ * House-local `resolvedSimFingerprint` / `artifactInputHash` may differ because user and
+ * admin artifacts persist under different `houseId`s. Close-gate parity uses canonical
+ * display/weather inputs instead (`crossSurfaceWeatherInputsOnly`): both legs are scored
+ * against the shared profile/weather house id, and acceptance requires matching
+ * `displayTruthRevision`, `finalizedDailyRowsHash`, `dailyWeatherHash`, Bundle C, and
+ * read-model totals/TOD buckets — not byte-identical artifact identity.
+ */
 export async function auditPastWeatherCrossSurfaceParity(args: {
   sourceUserId: string;
   sourceHouseId: string;
@@ -354,6 +364,8 @@ export async function auditPastWeatherCrossSurfaceParity(args: {
   const readModelParity = auditUserAdminPastReadModelParity({
     userDataset: userInputDataset,
     adminDataset: adminInputDataset,
+    userWeatherHouseId: profileHouseId,
+    adminWeatherHouseId: profileHouseId,
     userProfileFingerprints: {
       homeProfile: userCombined,
       applianceProfile: userApplianceFp,

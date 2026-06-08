@@ -360,7 +360,7 @@ async function clearOnePathActualUsageState(args: { houseId: string }) {
   });
 }
 
-async function cloneOnePathGreenButtonUsageFromSource(args: {
+export async function cloneOnePathGreenButtonUsageFromSource(args: {
   sourceHouseId: string;
   targetHouseId: string;
   targetUserId: string;
