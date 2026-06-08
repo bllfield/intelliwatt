@@ -373,7 +373,8 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
     let cancelled = false;
     (async () => {
       try {
-        const requirementsMode = hasActualIntervals && mode === "MANUAL_TOTALS" ? "SMT_BASELINE" : mode;
+        const requirementsMode =
+          hasActualIntervals && mode === "MANUAL_TOTALS" && normalizedIntent !== "MANUAL" ? "SMT_BASELINE" : mode;
         const r = await fetch(
           `/api/user/simulator/requirements?houseId=${encodeURIComponent(houseId)}&mode=${encodeURIComponent(requirementsMode)}`,
           {
@@ -395,7 +396,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         setMissingRequirements(j.canRecalc ? [] : (Array.isArray((j as any).missingItems) ? (j as any).missingItems : []));
         setRequirementsDbStatus((j as any).dbStatus ?? null);
         setCanonicalEndMonth(typeof (j as any).canonicalEndMonth === "string" ? String((j as any).canonicalEndMonth) : "");
-        if ((j as any).hasActualIntervals === true && mode === "MANUAL_TOTALS") {
+        if ((j as any).hasActualIntervals === true && mode === "MANUAL_TOTALS" && normalizedIntent !== "MANUAL") {
           setMode("SMT_BASELINE");
         }
       } catch {

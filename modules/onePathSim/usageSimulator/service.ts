@@ -59,6 +59,7 @@ import { resolvePastProfileHouseIdFromBuildInputs, resolvePastProfileLoadContext
 import { healPastArtifactIfIdentityMismatch } from "@/lib/usage/pastArtifactHeal";
 import {
   isolateBuildInputsForUserSite,
+  isNonIntervalUserSiteSimulatorMode,
   isUserSiteSimulationCaller,
   resolveOnePathPastPreferredActualSource,
   resolvePastRecalcPreferredActualSource,
@@ -7519,6 +7520,9 @@ async function applyUserSiteBuildInputsIsolationIfNeeded(args: {
   correlationId?: string;
 }): Promise<SimulatorBuildInputsV1> {
   if (args.userSiteIsolation !== true) return args.buildInputs;
+  if (isNonIntervalUserSiteSimulatorMode((args.buildInputs as { mode?: unknown }).mode)) {
+    return args.buildInputs;
+  }
   const actualSource = await resolveUserSiteActualSourceForHouse({
     userId: args.userId,
     houseId: args.houseId,

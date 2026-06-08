@@ -40,8 +40,8 @@ export function isPastScenarioValidationBackfillEligible(args: {
   if (!args.scenarioId) return false;
   if (pastScenarioNameFromBuildInputs(args.buildInputs) !== WORKSPACE_PAST_SCENARIO_NAME) return false;
   const buildMode = String(args.buildInputs.mode ?? "");
-  const preferred = preferredActualSourceFromPastBuildInputs(args.buildInputs);
-  if (buildMode !== "SMT_BASELINE" && preferred !== "GREEN_BUTTON") return false;
+  // Interval Past validation backfill applies only to SMT/GB baseline builds — not manual totals.
+  if (buildMode !== "SMT_BASELINE") return false;
   const storedValidationDateKeysLocal = Array.isArray(args.buildInputs.validationOnlyDateKeysLocal)
     ? ((args.buildInputs.validationOnlyDateKeysLocal as unknown[])
         .map((v) => String(v ?? "").slice(0, 10))

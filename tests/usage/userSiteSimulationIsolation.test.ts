@@ -150,4 +150,21 @@ describe("userSiteSimulationIsolation", () => {
     expect((buildInputs.snapshots as { actualSource: string }).actualSource).toBe("SMT");
     expect((buildInputs.lockboxRunContext as { preferredActualSource: string }).preferredActualSource).toBe("SMT");
   });
+
+  it("clears stale interval source stamps when user site has no committed usage", () => {
+    const { buildInputs, changed, reasons } = isolateBuildInputsForUserSite({
+      buildInputs: {
+        mode: "MANUAL_TOTALS",
+        snapshots: { actualSource: "GREEN_BUTTON", scenario: { name: "Past (Corrected)" } },
+        lockboxRunContext: { preferredActualSource: "GREEN_BUTTON" },
+      },
+      requestHouseId: "user-house-1",
+      actualSource: null,
+    });
+    expect(changed).toBe(true);
+    expect(reasons).toContain("snapshots_actualSource_cleared");
+    expect(reasons).toContain("lockbox_preferredActualSource_cleared");
+    expect((buildInputs.snapshots as { actualSource?: string }).actualSource).toBeUndefined();
+    expect((buildInputs.lockboxRunContext as { preferredActualSource?: string }).preferredActualSource).toBeUndefined();
+  });
 });

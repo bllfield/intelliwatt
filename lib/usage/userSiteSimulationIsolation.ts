@@ -222,12 +222,17 @@ export function pickVisibleHouseIdForSmtEntrySync(args: {
   return args.visibleHouses.find((house) => authorized.has(house.id))?.id ?? null;
 }
 
+export function isNonIntervalUserSiteSimulatorMode(mode: unknown): boolean {
+  const normalized = String(mode ?? "").trim();
+  return normalized === "MANUAL_TOTALS" || normalized === "NEW_BUILD_ESTIMATE";
+}
+
 /** User-site truth: request house only; never admin lab cross-house or stale snapshot source. */
 export async function resolveUserSiteActualSourceForHouse(args: {
   userId: string;
   houseId: string;
   esiid: string | null;
-}): Promise<"SMT" | "GREEN_BUTTON"> {
+}): Promise<"SMT" | "GREEN_BUTTON" | null> {
   const { resolveHouseCommittedUsageSource } = await import("@/lib/usage/houseCommittedUsageSource");
   const committed = await resolveHouseCommittedUsageSource({
     userId: args.userId,
@@ -235,13 +240,13 @@ export async function resolveUserSiteActualSourceForHouse(args: {
     esiid: args.esiid,
   });
   if (committed === "SMT" || committed === "GREEN_BUTTON") return committed;
-  return "GREEN_BUTTON";
+  return null;
 }
 
 export function isolateBuildInputsForUserSite(args: {
   buildInputs: Record<string, unknown>;
   requestHouseId: string;
-  actualSource: "SMT" | "GREEN_BUTTON";
+  actualSource: "SMT" | "GREEN_BUTTON" | null;
 }): { buildInputs: Record<string, unknown>; changed: boolean; reasons: string[] } {
   const reasons: string[] = [];
   let changed = false;
@@ -260,23 +265,37 @@ export function isolateBuildInputsForUserSite(args: {
       ? { ...(snapshotsRaw as Record<string, unknown>) }
       : {};
   const prevSource = String(snapshots.actualSource ?? "").trim().toUpperCase();
-  if (prevSource !== args.actualSource) {
-    reasons.push("snapshots_actualSource_reset");
+  const nextSource = args.actualSource ?? "";
+  if (args.actualSource) {
+    if (prevSource !== nextSource) {
+      reasons.push("snapshots_actualSource_reset");
+      changed = true;
+    }
+    snapshots.actualSource = args.actualSource;
+  } else if (prevSource) {
+    delete snapshots.actualSource;
+    reasons.push("snapshots_actualSource_cleared");
     changed = true;
   }
-  snapshots.actualSource = args.actualSource;
   (next as { snapshots: Record<string, unknown> }).snapshots = snapshots;
 
   const lockboxRaw = (next as { lockboxRunContext?: unknown }).lockboxRunContext;
   if (lockboxRaw && typeof lockboxRaw === "object" && !Array.isArray(lockboxRaw)) {
     const lockbox = { ...(lockboxRaw as Record<string, unknown>) };
     const prevPreferred = String(lockbox.preferredActualSource ?? "").trim().toUpperCase();
-    if (prevPreferred !== args.actualSource) {
-      reasons.push("lockbox_preferredActualSource_reset");
+    if (args.actualSource) {
+      if (prevPreferred !== nextSource) {
+        reasons.push("lockbox_preferredActualSource_reset");
+        changed = true;
+      }
+      lockbox.preferredActualSource = args.actualSource;
+      (next as { lockboxRunContext: Record<string, unknown> }).lockboxRunContext = lockbox;
+    } else if (prevPreferred) {
+      delete lockbox.preferredActualSource;
+      reasons.push("lockbox_preferredActualSource_cleared");
       changed = true;
+      (next as { lockboxRunContext: Record<string, unknown> }).lockboxRunContext = lockbox;
     }
-    lockbox.preferredActualSource = args.actualSource;
-    (next as { lockboxRunContext: Record<string, unknown> }).lockboxRunContext = lockbox;
   }
 
   return { buildInputs: next, changed, reasons };

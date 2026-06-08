@@ -166,7 +166,9 @@ export async function POST(request: NextRequest) {
         callerLabel: "user_recalc",
         buildPathKind: "recalc",
         persistRequested: true,
-        ...(committedSource === "SMT" || committedSource === "GREEN_BUTTON"
+        ...(mode !== "MANUAL_TOTALS" &&
+        mode !== "NEW_BUILD_ESTIMATE" &&
+        (committedSource === "SMT" || committedSource === "GREEN_BUTTON")
           ? { preferredActualSource: committedSource }
           : {}),
       },
