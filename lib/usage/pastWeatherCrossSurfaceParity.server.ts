@@ -198,6 +198,12 @@ export async function auditPastWeatherCrossSurfaceParity(args: {
   inputParity: ReturnType<typeof auditPastWeatherInputParity> | null;
   readModelParity: ReturnType<typeof auditUserAdminPastReadModelParity> | null;
   acceptanceProof: ReturnType<typeof buildPastWeatherCrossSurfaceAcceptanceProof> | null;
+  validationHoldoutProof: {
+    ok: boolean;
+    user: Record<string, unknown> | null;
+    admin: Record<string, unknown> | null;
+  } | null;
+  monthlyRowsParity: ReturnType<typeof buildPastMonthlyRowsParityDebug> | null;
 }> {
   const { getCachedPastDataset, getLatestCachedPastDatasetByScenario } = await import(
     "@/modules/onePathSim/usageSimulator/pastCache"
@@ -235,6 +241,8 @@ export async function auditPastWeatherCrossSurfaceParity(args: {
       inputParity: null,
       readModelParity: null,
       acceptanceProof: null,
+      validationHoldoutProof: null,
+      monthlyRowsParity: null,
     };
   }
 
@@ -451,6 +459,21 @@ export async function auditPastWeatherCrossSurfaceParity(args: {
 
   const userFinalizeMeta = asRecord(userDataset.meta);
   const adminFinalizeMeta = asRecord(adminDatasetForParity.meta);
+  const userHoldoutProof = asRecord(userFinalizeMeta.validationHoldoutProof);
+  const adminHoldoutProof = asRecord(adminFinalizeMeta.validationHoldoutProof);
+  const validationHoldoutProof =
+    Object.keys(userHoldoutProof).length > 0 || Object.keys(adminHoldoutProof).length > 0
+      ? {
+          user: Object.keys(userHoldoutProof).length > 0 ? userHoldoutProof : null,
+          admin: Object.keys(adminHoldoutProof).length > 0 ? adminHoldoutProof : null,
+          ok: userHoldoutProof.ok === true && adminHoldoutProof.ok === true,
+        }
+      : null;
+  if (validationHoldoutProof && !validationHoldoutProof.ok) {
+    violations.push("validationHoldoutProof mismatch");
+  }
+
+  const monthlyRowsParity = readModelParity.monthlyRowsParity;
   const userFinalizeFromMeta = readPastDisplayWeatherFinalizeOutcomeFromMeta(userFinalizeMeta);
   const adminFinalizeFromMeta = readPastDisplayWeatherFinalizeOutcomeFromMeta(adminFinalizeMeta);
   const userFingerprint = buildPastWeatherInputFingerprint({
@@ -497,5 +520,7 @@ export async function auditPastWeatherCrossSurfaceParity(args: {
     inputParity,
     readModelParity,
     acceptanceProof,
+    validationHoldoutProof,
+    monthlyRowsParity,
   };
 }

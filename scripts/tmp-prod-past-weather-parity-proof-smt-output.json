@@ -1,5 +1,5 @@
 {
-  "at": "2026-06-08T13:52:33.876Z",
+  "at": "2026-06-08T15:15:40.337Z",
   "proofMode": "audit_only",
   "base": "https://intelliwatt.com",
   "proofSourceType": "SMT",
@@ -13,15 +13,15 @@
   "labHomeOpsNote": "Because GB and SMT currently share the same mutable lab home, the latest dual recalc determines what the admin/test leg contains. The lab home is single-occupancy by source family; GB recalc invalidates SMT lab proof state and SMT recalc invalidates GB lab proof state. Always run the source-specific dual recalc immediately before that source's acceptance proof.",
   "staleLabHomeSourceFamily": null,
   "userPastScenarioId": "7968944f-7a08-425c-8008-6dc49eaccc34",
-  "adminPastScenarioId": "680d63d7-4990-47b3-ad9b-2c9039ed80ac",
+  "adminPastScenarioId": "501836d3-a5c6-41e5-8b8a-8805aff6e8af",
   "scenarios": {
     "sourcePastScenarioId": "7968944f-7a08-425c-8008-6dc49eaccc34",
-    "testPastScenarioId": "680d63d7-4990-47b3-ad9b-2c9039ed80ac"
+    "testPastScenarioId": "501836d3-a5c6-41e5-8b8a-8805aff6e8af"
   },
-  "userArtifactId": "UQm2x31RugIIrNBz0XcGSBw836DQEvL1ovj_M7QAH-E",
-  "adminArtifactId": "EF2gfWVQthv21lXo8S9p7azNi31oYnqW5EFXDtaE2_8",
-  "userArtifactUpdatedAt": "2026-06-08T13:49:53.275Z",
-  "adminArtifactUpdatedAt": "2026-06-08T13:51:16.168Z",
+  "userArtifactId": "z2-trwjk9A93VV_IL0Ok021MaxwklBwKu5iMlTkqkpA",
+  "adminArtifactId": "HeSyW4ybSbsCw0WZuFFCs-QYBGQWtN5bWQOeuQBa5D0",
+  "userArtifactUpdatedAt": "2026-06-08T15:13:17.234Z",
+  "adminArtifactUpdatedAt": "2026-06-08T15:14:30.953Z",
   "userDisplayTruthRevision": "BRB7BfKiSpf1HOCIHzq9SV",
   "adminDisplayTruthRevision": "BRB7BfKiSpf1HOCIHzq9SV",
   "userFinalizedDailyRowsHash": "7uJySapMuMs8RdqKmEC6SY",
@@ -81,18 +81,18 @@
     "ok": true,
     "violations": [],
     "sourceArtifactLoaded": true,
-    "sourceArtifactInputHash": "UQm2x31RugIIrNBz0XcGSBw836DQEvL1ovj_M7QAH-E",
+    "sourceArtifactInputHash": "z2-trwjk9A93VV_IL0Ok021MaxwklBwKu5iMlTkqkpA",
     "sourceReadPath": "past_display_finalize_recompute",
     "adminReadPath": "past_display_finalize_recompute",
     "artifactSelection": {
       "sourceHouseId": "8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8",
       "labHouseId": "29a3d820-2593-4673-9dd6-cd161bbd7f6f",
       "userPastScenarioId": "7968944f-7a08-425c-8008-6dc49eaccc34",
-      "adminPastScenarioId": "680d63d7-4990-47b3-ad9b-2c9039ed80ac",
-      "userArtifactInputHash": "UQm2x31RugIIrNBz0XcGSBw836DQEvL1ovj_M7QAH-E",
-      "adminArtifactInputHash": "EF2gfWVQthv21lXo8S9p7azNi31oYnqW5EFXDtaE2_8",
-      "userArtifactUpdatedAt": "2026-06-08T13:49:53.275Z",
-      "adminArtifactUpdatedAt": "2026-06-08T13:51:16.168Z",
+      "adminPastScenarioId": "501836d3-a5c6-41e5-8b8a-8805aff6e8af",
+      "userArtifactInputHash": "z2-trwjk9A93VV_IL0Ok021MaxwklBwKu5iMlTkqkpA",
+      "adminArtifactInputHash": "HeSyW4ybSbsCw0WZuFFCs-QYBGQWtN5bWQOeuQBa5D0",
+      "userArtifactUpdatedAt": "2026-06-08T15:13:17.234Z",
+      "adminArtifactUpdatedAt": "2026-06-08T15:14:30.953Z",
       "userDisplayTruthRevision": "BRB7BfKiSpf1HOCIHzq9SV",
       "adminDisplayTruthRevision": "BRB7BfKiSpf1HOCIHzq9SV",
       "userFinalizedDailyRowsHash": "7uJySapMuMs8RdqKmEC6SY",
@@ -161,8 +161,8 @@
       },
       "violations": [],
       "user": {
-        "artifactInputHash": "zZ8yx-l9c8P0Behr4WRyeirWJ_NDu-I8atSoVU-i6Ls",
-        "fullChainHash": "zZ8yx-l9c8P0Behr4WRyeirWJ_NDu-I8atSoVU-i6Ls",
+        "artifactInputHash": "cUgbNFA975hUZShzWowwn1g4OtqiJR679eLOzTGK9BI",
+        "fullChainHash": "cUgbNFA975hUZShzWowwn1g4OtqiJR679eLOzTGK9BI",
         "displayTruthRevision": "4qrsj-LgUtmKap252UBj14",
         "finalizedDailyRowsHash": "7uJySapMuMs8RdqKmEC6SY",
         "dailyWeatherHash": "J-quPup011pckz8XP4AouV",
@@ -210,8 +210,8 @@
         "netKwhDailySum": 14693.09
       },
       "admin": {
-        "artifactInputHash": "UJEg_8XGlPE21KYWOAiteHEv_Gek_koqy0LvSMSxK40",
-        "fullChainHash": "UJEg_8XGlPE21KYWOAiteHEv_Gek_koqy0LvSMSxK40",
+        "artifactInputHash": "yqYTECPVmbVxGZ1kF2mYmvjgCTEVU7XdMUPYfczaRaY",
+        "fullChainHash": "yqYTECPVmbVxGZ1kF2mYmvjgCTEVU7XdMUPYfczaRaY",
         "displayTruthRevision": "4qrsj-LgUtmKap252UBj14",
         "finalizedDailyRowsHash": "7uJySapMuMs8RdqKmEC6SY",
         "dailyWeatherHash": "J-quPup011pckz8XP4AouV",
@@ -266,7 +266,313 @@
         "homeProfilesMatch": true,
         "applianceProfilesMatch": true
       }
+    },
+    "validationHoldoutProof": {
+      "user": {
+        "ok": true,
+        "violations": []
+      },
+      "admin": {
+        "ok": true,
+        "violations": []
+      },
+      "ok": true
+    },
+    "monthlyRowsParity": {
+      "userMonthlyRows": [
+        {
+          "month": "2025-07",
+          "kwh": 1784.52
+        },
+        {
+          "month": "2025-08",
+          "kwh": 1774.05
+        },
+        {
+          "month": "2025-09",
+          "kwh": 1589.75
+        },
+        {
+          "month": "2025-10",
+          "kwh": 1240.76
+        },
+        {
+          "month": "2025-11",
+          "kwh": 971.72
+        },
+        {
+          "month": "2025-12",
+          "kwh": 1073.63
+        },
+        {
+          "month": "2026-01",
+          "kwh": 1199.89
+        },
+        {
+          "month": "2026-02",
+          "kwh": 678.98
+        },
+        {
+          "month": "2026-03",
+          "kwh": 826.41
+        },
+        {
+          "month": "2026-04",
+          "kwh": 856.25
+        },
+        {
+          "month": "2026-05",
+          "kwh": 1087.78
+        },
+        {
+          "month": "2026-06",
+          "kwh": 1615.23
+        }
+      ],
+      "adminMonthlyRows": [
+        {
+          "month": "2025-07",
+          "kwh": 1784.52
+        },
+        {
+          "month": "2025-08",
+          "kwh": 1774.05
+        },
+        {
+          "month": "2025-09",
+          "kwh": 1589.75
+        },
+        {
+          "month": "2025-10",
+          "kwh": 1240.76
+        },
+        {
+          "month": "2025-11",
+          "kwh": 971.72
+        },
+        {
+          "month": "2025-12",
+          "kwh": 1073.63
+        },
+        {
+          "month": "2026-01",
+          "kwh": 1199.89
+        },
+        {
+          "month": "2026-02",
+          "kwh": 678.98
+        },
+        {
+          "month": "2026-03",
+          "kwh": 826.41
+        },
+        {
+          "month": "2026-04",
+          "kwh": 856.25
+        },
+        {
+          "month": "2026-05",
+          "kwh": 1087.78
+        },
+        {
+          "month": "2026-06",
+          "kwh": 1615.23
+        }
+      ],
+      "userMonthlyRowsHash": "G4yrDvww8jXJFv6jJ7-MMo",
+      "adminMonthlyRowsHash": "G4yrDvww8jXJFv6jJ7-MMo",
+      "monthlyRowsMatch": true,
+      "monthlyRowsDiffByMonth": [],
+      "totalKwhUser": 14698.97,
+      "totalKwhAdmin": 14698.97,
+      "roundingPolicy": "round2 per row before hash/compare",
+      "comparisonTolerance": 0.1,
+      "userSourceDerivedMonthlyTotalsKwhByMonth": {
+        "2025-07": 1784.51,
+        "2025-08": 1479.56,
+        "2025-09": 1589.74,
+        "2025-10": 1240.73,
+        "2025-11": 971.7,
+        "2025-12": 1073.65,
+        "2026-01": 1199.87,
+        "2026-02": 679,
+        "2026-03": 826.42,
+        "2026-04": 856.24,
+        "2026-05": 1087.79,
+        "2026-06": 250.92
+      },
+      "adminSourceDerivedMonthlyTotalsKwhByMonth": {
+        "2025-07": 1784.51,
+        "2025-08": 1479.56,
+        "2025-09": 1589.74,
+        "2025-10": 1240.73,
+        "2025-11": 971.7,
+        "2025-12": 1073.65,
+        "2026-01": 1199.87,
+        "2026-02": 679,
+        "2026-03": 826.42,
+        "2026-04": 856.24,
+        "2026-05": 1087.79,
+        "2026-06": 250.92
+      },
+      "sourceDerivedMonthlyTotalsKwhByMonthNote": "source-only upstream anchors — not the Past display monthlyRows parity target"
+    },
+    "readModelParity": {
+      "ok": true,
+      "violations": [],
+      "monthlyRowsMatch": true,
+      "timeOfDayBucketsMatch": true
     }
+  },
+  "monthlyRowsParity": {
+    "userMonthlyRows": [
+      {
+        "month": "2025-07",
+        "kwh": 1784.52
+      },
+      {
+        "month": "2025-08",
+        "kwh": 1774.05
+      },
+      {
+        "month": "2025-09",
+        "kwh": 1589.75
+      },
+      {
+        "month": "2025-10",
+        "kwh": 1240.76
+      },
+      {
+        "month": "2025-11",
+        "kwh": 971.72
+      },
+      {
+        "month": "2025-12",
+        "kwh": 1073.63
+      },
+      {
+        "month": "2026-01",
+        "kwh": 1199.89
+      },
+      {
+        "month": "2026-02",
+        "kwh": 678.98
+      },
+      {
+        "month": "2026-03",
+        "kwh": 826.41
+      },
+      {
+        "month": "2026-04",
+        "kwh": 856.25
+      },
+      {
+        "month": "2026-05",
+        "kwh": 1087.78
+      },
+      {
+        "month": "2026-06",
+        "kwh": 1615.23
+      }
+    ],
+    "adminMonthlyRows": [
+      {
+        "month": "2025-07",
+        "kwh": 1784.52
+      },
+      {
+        "month": "2025-08",
+        "kwh": 1774.05
+      },
+      {
+        "month": "2025-09",
+        "kwh": 1589.75
+      },
+      {
+        "month": "2025-10",
+        "kwh": 1240.76
+      },
+      {
+        "month": "2025-11",
+        "kwh": 971.72
+      },
+      {
+        "month": "2025-12",
+        "kwh": 1073.63
+      },
+      {
+        "month": "2026-01",
+        "kwh": 1199.89
+      },
+      {
+        "month": "2026-02",
+        "kwh": 678.98
+      },
+      {
+        "month": "2026-03",
+        "kwh": 826.41
+      },
+      {
+        "month": "2026-04",
+        "kwh": 856.25
+      },
+      {
+        "month": "2026-05",
+        "kwh": 1087.78
+      },
+      {
+        "month": "2026-06",
+        "kwh": 1615.23
+      }
+    ],
+    "userMonthlyRowsHash": "G4yrDvww8jXJFv6jJ7-MMo",
+    "adminMonthlyRowsHash": "G4yrDvww8jXJFv6jJ7-MMo",
+    "monthlyRowsMatch": true,
+    "monthlyRowsDiffByMonth": [],
+    "totalKwhUser": 14698.97,
+    "totalKwhAdmin": 14698.97,
+    "roundingPolicy": "round2 per row before hash/compare",
+    "comparisonTolerance": 0.1,
+    "userSourceDerivedMonthlyTotalsKwhByMonth": {
+      "2025-07": 1784.51,
+      "2025-08": 1479.56,
+      "2025-09": 1589.74,
+      "2025-10": 1240.73,
+      "2025-11": 971.7,
+      "2025-12": 1073.65,
+      "2026-01": 1199.87,
+      "2026-02": 679,
+      "2026-03": 826.42,
+      "2026-04": 856.24,
+      "2026-05": 1087.79,
+      "2026-06": 250.92
+    },
+    "adminSourceDerivedMonthlyTotalsKwhByMonth": {
+      "2025-07": 1784.51,
+      "2025-08": 1479.56,
+      "2025-09": 1589.74,
+      "2025-10": 1240.73,
+      "2025-11": 971.7,
+      "2025-12": 1073.65,
+      "2026-01": 1199.87,
+      "2026-02": 679,
+      "2026-03": 826.42,
+      "2026-04": 856.24,
+      "2026-05": 1087.79,
+      "2026-06": 250.92
+    },
+    "sourceDerivedMonthlyTotalsKwhByMonthNote": "source-only upstream anchors — not the Past display monthlyRows parity target"
+  },
+  "validationHoldoutProof": {
+    "user": {
+      "ok": true,
+      "violations": []
+    },
+    "admin": {
+      "ok": true,
+      "violations": []
+    },
+    "ok": true
   },
   "verdict": "PROD_WEATHER_PARITY_PASS"
 }

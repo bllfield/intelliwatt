@@ -160,6 +160,9 @@ async function main() {
 
   const acceptanceProof = crossSurface?.acceptanceProof ?? null;
   const artifactSelection = crossSurface?.artifactSelection ?? null;
+  const monthlyRowsParity = crossSurface?.monthlyRowsParity ?? null;
+  const validationHoldoutProof = crossSurface?.validationHoldoutProof ?? null;
+  const readModelParity = crossSurface?.readModelParity ?? null;
 
   let adminRun = { status: null, json: null };
   if (!PROOF_AUDIT_ONLY) {
@@ -264,11 +267,26 @@ async function main() {
           adminReadPath: crossSurface.adminReadPath,
           artifactSelection,
           acceptanceProof,
+          validationHoldoutProof,
+          monthlyRowsParity,
+          readModelParity: readModelParity
+            ? {
+                ok: readModelParity.ok,
+                violations: readModelParity.violations,
+                monthlyRowsMatch: monthlyRowsParity?.monthlyRowsMatch ?? null,
+                timeOfDayBucketsMatch: !readModelParity.violations.includes("timeOfDayBuckets mismatch"),
+              }
+            : null,
         }
       : null,
+    monthlyRowsParity,
+    validationHoldoutProof,
     verdict: staleLabHomeMessage
       ? "STALE_LAB_HOME_SOURCE_FAMILY"
-      : crossSurface?.ok === true && acceptanceProof?.ok === true
+      : crossSurface?.ok === true &&
+          acceptanceProof?.ok === true &&
+          validationHoldoutProof?.ok === true &&
+          monthlyRowsParity?.monthlyRowsMatch === true
         ? "PROD_WEATHER_PARITY_PASS"
         : "PROD_WEATHER_PARITY_FAIL",
   };

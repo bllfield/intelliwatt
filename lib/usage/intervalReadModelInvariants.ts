@@ -1,3 +1,5 @@
+import { createHash } from "crypto";
+
 import { buildDisplayedMonthlyRows } from "@/modules/usageSimulator/monthlyCompareRows";
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
 import { auditPastWeatherInputParity } from "@/lib/usage/pastWeatherInputParity";
@@ -36,6 +38,108 @@ function sumDailyKwh(rows: Array<{ kwh?: unknown }>): number {
 
 function sumMonthlyKwh(rows: Array<{ kwh?: unknown }>): number {
   return round2(rows.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0));
+}
+
+function hashMonthlyRows(rows: Array<{ month?: unknown; kwh?: unknown }>): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify(
+        rows.map((row) => ({
+          month: String(row.month ?? "").slice(0, 7),
+          kwh: round2(Number(row.kwh) || 0),
+        }))
+      ),
+      "utf8"
+    )
+    .digest("base64url")
+    .slice(0, 22);
+}
+
+function readSourceDerivedMonthlyTotalsKwhByMonth(
+  dataset: Record<string, unknown>
+): Record<string, number> | null {
+  const meta = asRecord(dataset.meta);
+  const lockboxInput = asRecord(meta.lockboxInput);
+  const sourceContext = asRecord(lockboxInput.sourceContext);
+  const fromSourceContext = asRecord(sourceContext.sourceDerivedMonthlyTotalsKwhByMonth);
+  if (Object.keys(fromSourceContext).length > 0) {
+    return Object.fromEntries(
+      Object.entries(fromSourceContext).map(([month, kwh]) => [month, round2(Number(kwh) || 0)])
+    );
+  }
+  const fromMeta = asRecord(meta.sourceDerivedMonthlyTotalsKwhByMonth);
+  if (Object.keys(fromMeta).length > 0) {
+    return Object.fromEntries(
+      Object.entries(fromMeta).map(([month, kwh]) => [month, round2(Number(kwh) || 0)])
+    );
+  }
+  return null;
+}
+
+export function buildPastMonthlyRowsParityDebug(args: {
+  userDataset?: unknown;
+  adminDataset?: unknown;
+  userMonthlyRows: Array<{ month: string; kwh: number }>;
+  adminMonthlyRows: Array<{ month: string; kwh: number }>;
+}): {
+  userMonthlyRows: Array<{ month: string; kwh: number }>;
+  adminMonthlyRows: Array<{ month: string; kwh: number }>;
+  userMonthlyRowsHash: string;
+  adminMonthlyRowsHash: string;
+  monthlyRowsMatch: boolean;
+  monthlyRowsDiffByMonth: Array<{ month: string; userKwh: number; adminKwh: number; deltaKwh: number }>;
+  totalKwhUser: number;
+  totalKwhAdmin: number;
+  roundingPolicy: string;
+  comparisonTolerance: number;
+  userSourceDerivedMonthlyTotalsKwhByMonth: Record<string, number> | null;
+  adminSourceDerivedMonthlyTotalsKwhByMonth: Record<string, number> | null;
+  sourceDerivedMonthlyTotalsKwhByMonthNote: string;
+} {
+  const userMonthlyRows = args.userMonthlyRows.map((row) => ({
+    month: String(row.month ?? "").slice(0, 7),
+    kwh: round2(Number(row.kwh) || 0),
+  }));
+  const adminMonthlyRows = args.adminMonthlyRows.map((row) => ({
+    month: String(row.month ?? "").slice(0, 7),
+    kwh: round2(Number(row.kwh) || 0),
+  }));
+  const userMonthlyRowsHash = hashMonthlyRows(userMonthlyRows);
+  const adminMonthlyRowsHash = hashMonthlyRows(adminMonthlyRows);
+  const monthlyRowsMatch = userMonthlyRowsHash === adminMonthlyRowsHash;
+  const months = Array.from(
+    new Set([...userMonthlyRows.map((row) => row.month), ...adminMonthlyRows.map((row) => row.month)])
+  ).sort();
+  const userByMonth = new Map(userMonthlyRows.map((row) => [row.month, row.kwh]));
+  const adminByMonth = new Map(adminMonthlyRows.map((row) => [row.month, row.kwh]));
+  const monthlyRowsDiffByMonth = months
+    .map((month) => {
+      const userKwh = userByMonth.get(month) ?? 0;
+      const adminKwh = adminByMonth.get(month) ?? 0;
+      const deltaKwh = round2(userKwh - adminKwh);
+      return { month, userKwh, adminKwh, deltaKwh };
+    })
+    .filter((row) => Math.abs(row.deltaKwh) > INTERVAL_READ_MODEL_TOLERANCE_KWH);
+  return {
+    userMonthlyRows,
+    adminMonthlyRows,
+    userMonthlyRowsHash,
+    adminMonthlyRowsHash,
+    monthlyRowsMatch,
+    monthlyRowsDiffByMonth,
+    totalKwhUser: sumMonthlyKwh(userMonthlyRows),
+    totalKwhAdmin: sumMonthlyKwh(adminMonthlyRows),
+    roundingPolicy: "round2 per row before hash/compare",
+    comparisonTolerance: INTERVAL_READ_MODEL_TOLERANCE_KWH,
+    userSourceDerivedMonthlyTotalsKwhByMonth: args.userDataset
+      ? readSourceDerivedMonthlyTotalsKwhByMonth(asRecord(args.userDataset))
+      : null,
+    adminSourceDerivedMonthlyTotalsKwhByMonth: args.adminDataset
+      ? readSourceDerivedMonthlyTotalsKwhByMonth(asRecord(args.adminDataset))
+      : null,
+    sourceDerivedMonthlyTotalsKwhByMonthNote:
+      "source-only upstream anchors — not the Past display monthlyRows parity target",
+  };
 }
 
 export type IntervalReadModelInvariantResult = {
@@ -241,6 +345,7 @@ export function auditUserAdminPastReadModelParity(args: {
     ownerViolation: string | null;
   };
   weatherScoringAudit: ReturnType<typeof buildWeatherScoringAudit> | null;
+  monthlyRowsParity: ReturnType<typeof buildPastMonthlyRowsParityDebug> | null;
 } {
   const userDatasetRecord = asRecord(args.userDataset ?? args.dataset);
   const adminDatasetRecord = asRecord(args.adminDataset ?? args.dataset);
@@ -302,6 +407,7 @@ export function auditUserAdminPastReadModelParity(args: {
         ownerViolation: "missing user or admin read model",
       },
       weatherScoringAudit: null,
+      monthlyRowsParity: null,
     };
   }
 
@@ -403,6 +509,16 @@ export function auditUserAdminPastReadModelParity(args: {
           },
         });
 
+  const monthlyRowsParity =
+    viewModel && adminView
+      ? buildPastMonthlyRowsParityDebug({
+          userDataset: userDatasetRecord,
+          adminDataset: adminDatasetRecord,
+          userMonthlyRows: viewModel.derived.monthly,
+          adminMonthlyRows: adminView.monthlyRows,
+        })
+      : null;
+
   return {
     ok: violations.length === 0,
     violations,
@@ -418,6 +534,7 @@ export function auditUserAdminPastReadModelParity(args: {
       ownerViolation,
     },
     weatherScoringAudit,
+    monthlyRowsParity,
   };
 }
 
