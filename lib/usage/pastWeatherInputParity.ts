@@ -1,5 +1,9 @@
 import { createHash } from "crypto";
 
+import {
+  buildResolvedSimFingerprintCrossSurfaceAudit,
+  type ResolvedSimFingerprintCrossSurfaceAudit,
+} from "@/lib/usage/pastCrossSurfaceResolvedSimFingerprintPolicy";
 import { readPastValidationPolicyRevisionFromMeta } from "@/lib/usage/pastSimulationCoreLabel";
 import { readGreenButtonTrustedHomeDateKeysFromPastMeta } from "@/lib/usage/greenButtonPastTrustedPool";
 import {
@@ -243,6 +247,8 @@ export type PastWeatherInputParityResult = {
   violations: string[];
   user: PastWeatherInputFingerprint;
   admin: PastWeatherInputFingerprint;
+  /** Present in dual-run cross-surface mode — mismatch is informational, not a waiver. */
+  resolvedSimFingerprint?: ResolvedSimFingerprintCrossSurfaceAudit;
   profileFingerprints: {
     userHomeProfile: string | null;
     userApplianceProfile: string | null;
@@ -276,7 +282,11 @@ export function auditPastWeatherInputParity(args: {
   adminWeatherHouseId?: string | null;
   userProfileFingerprints?: { homeProfile?: string | null; applianceProfile?: string | null };
   adminProfileFingerprints?: { homeProfile?: string | null; applianceProfile?: string | null };
-  /** Dual-run cross-surface: enforce weather-scoring inputs only (not house-local artifact identity). */
+  /**
+   * Dual-run cross-surface: compare canonical display/weather truth (see
+   * `pastCrossSurfaceResolvedSimFingerprintPolicy`). House-local resolvedSimFingerprint
+   * is reported but not required to match; artifactInputHash likewise.
+   */
   crossSurfaceWeatherInputsOnly?: boolean;
 }): PastWeatherInputParityResult {
   const crossSurfaceOnly = args.crossSurfaceWeatherInputsOnly === true;
@@ -303,24 +313,23 @@ export function auditPastWeatherInputParity(args: {
   compareField(violations, "finalizedDailyRowsHash", user.finalizedDailyRowsHash, admin.finalizedDailyRowsHash);
   compareField(violations, "dailyWeatherHash", user.dailyWeatherHash, admin.dailyWeatherHash);
   compareField(violations, "usageShapeProfileIdentity", user.usageShapeProfileIdentity, admin.usageShapeProfileIdentity);
-  if (!crossSurfaceOnly) {
+  compareField(violations, "profileHouseId", user.profileHouseId, admin.profileHouseId);
+  compareField(violations, "intervalDataFingerprint", user.intervalDataFingerprint, admin.intervalDataFingerprint);
+  compareField(violations, "greenButtonTrustedDateKeys", user.greenButtonTrustedDateKeys, admin.greenButtonTrustedDateKeys);
+  if (crossSurfaceOnly) {
+    // Informational only — canonical truth gates above still fail closed on divergence.
+  } else {
     compareField(violations, "resolvedSimFingerprint", user.resolvedSimFingerprint, admin.resolvedSimFingerprint);
-    compareField(violations, "intervalDataFingerprint", user.intervalDataFingerprint, admin.intervalDataFingerprint);
     compareField(violations, "usageFingerprint", user.usageFingerprint, admin.usageFingerprint);
     compareField(violations, "weatherIdentity", user.weatherIdentity, admin.weatherIdentity);
-  }
-  compareField(violations, "validationKeys", user.validationKeys, admin.validationKeys);
-  compareField(violations, "travelVacantFingerprint", user.travelVacantFingerprint, admin.travelVacantFingerprint);
-  if (!crossSurfaceOnly) {
     compareField(violations, "simulationVariableVersion", user.simulationVariableVersion, admin.simulationVariableVersion);
     compareField(violations, "simVersion", user.simVersion, admin.simVersion);
   }
+  compareField(violations, "validationKeys", user.validationKeys, admin.validationKeys);
+  compareField(violations, "travelVacantFingerprint", user.travelVacantFingerprint, admin.travelVacantFingerprint);
   compareField(violations, "scorerVersion", user.scorerVersion, admin.scorerVersion);
   compareField(violations, "calculationVersion", user.calculationVersion, admin.calculationVersion);
   compareField(violations, "finalizeVersion", user.finalizeVersion, admin.finalizeVersion);
-  if (!crossSurfaceOnly) {
-    compareField(violations, "greenButtonTrustedDateKeys", user.greenButtonTrustedDateKeys, admin.greenButtonTrustedDateKeys);
-  }
 
   const homeProfilesMatch =
     args.userProfileFingerprints?.homeProfile != null && args.adminProfileFingerprints?.homeProfile != null
@@ -368,11 +377,19 @@ export function auditPastWeatherInputParity(args: {
     );
   }
 
+  const resolvedSimFingerprint = crossSurfaceOnly
+    ? buildResolvedSimFingerprintCrossSurfaceAudit({
+        user: user.resolvedSimFingerprint,
+        admin: admin.resolvedSimFingerprint,
+      })
+    : undefined;
+
   return {
     ok: violations.length === 0,
     violations,
     user,
     admin,
+    resolvedSimFingerprint,
     profileFingerprints: {
       userHomeProfile: args.userProfileFingerprints?.homeProfile ?? null,
       userApplianceProfile: args.userProfileFingerprints?.applianceProfile ?? null,
@@ -414,10 +431,13 @@ export function buildPastWeatherCrossSurfaceAcceptanceProof(args: {
 }): {
   ok: boolean;
   profileFingerprintsMatch: boolean;
+  profileHouseIdMatch: boolean;
   usageShapeProfileIdentityMatch: boolean;
   displayTruthRevisionMatch: boolean;
   finalizedDailyRowsHashMatch: boolean;
   dailyWeatherHashMatch: boolean;
+  intervalDataFingerprintMatch: boolean;
+  trustedDateKeysMatch: boolean;
   validationKeysMatch: boolean;
   travelVacantFingerprintMatch: boolean;
   scorerVersionMatch: boolean;
@@ -425,6 +445,7 @@ export function buildPastWeatherCrossSurfaceAcceptanceProof(args: {
   userVisibleEqualsUserBundleC: boolean;
   adminVisibleEqualsAdminBundleC: boolean;
   userBundleCEqualsAdminBundleC: boolean;
+  resolvedSimFingerprint: ResolvedSimFingerprintCrossSurfaceAudit | null;
   violations: string[];
   user: PastWeatherInputFingerprint;
   admin: PastWeatherInputFingerprint;
@@ -433,12 +454,24 @@ export function buildPastWeatherCrossSurfaceAcceptanceProof(args: {
   const { user, admin, profileFingerprints } = args.inputParity;
   const userVisible = args.userVisibleBundleC ?? user.bundleC;
   const adminVisible = args.adminVisibleBundleC ?? admin.bundleC;
+  const resolvedSimFingerprint =
+    args.inputParity.resolvedSimFingerprint ??
+    buildResolvedSimFingerprintCrossSurfaceAudit({
+      user: user.resolvedSimFingerprint,
+      admin: admin.resolvedSimFingerprint,
+    });
   const proof = {
     profileFingerprintsMatch: profileFingerprints.homeProfilesMatch === true,
+    profileHouseIdMatch:
+      user.profileHouseId != null &&
+      admin.profileHouseId != null &&
+      user.profileHouseId === admin.profileHouseId,
     usageShapeProfileIdentityMatch: user.usageShapeProfileIdentity === admin.usageShapeProfileIdentity,
     displayTruthRevisionMatch: user.displayTruthRevision === admin.displayTruthRevision,
     finalizedDailyRowsHashMatch: user.finalizedDailyRowsHash === admin.finalizedDailyRowsHash,
     dailyWeatherHashMatch: user.dailyWeatherHash === admin.dailyWeatherHash,
+    intervalDataFingerprintMatch: user.intervalDataFingerprint === admin.intervalDataFingerprint,
+    trustedDateKeysMatch: user.greenButtonTrustedDateKeys === admin.greenButtonTrustedDateKeys,
     validationKeysMatch: JSON.stringify(user.validationKeys) === JSON.stringify(admin.validationKeys),
     travelVacantFingerprintMatch: user.travelVacantFingerprint === admin.travelVacantFingerprint,
     scorerVersionMatch: user.scorerVersion === admin.scorerVersion,
@@ -456,10 +489,13 @@ export function buildPastWeatherCrossSurfaceAcceptanceProof(args: {
   }
   const ok =
     proof.profileFingerprintsMatch &&
+    proof.profileHouseIdMatch &&
     proof.usageShapeProfileIdentityMatch &&
     proof.displayTruthRevisionMatch &&
     proof.finalizedDailyRowsHashMatch &&
     proof.dailyWeatherHashMatch &&
+    proof.intervalDataFingerprintMatch &&
+    proof.trustedDateKeysMatch &&
     proof.validationKeysMatch &&
     proof.travelVacantFingerprintMatch &&
     proof.scorerVersionMatch &&
@@ -470,6 +506,7 @@ export function buildPastWeatherCrossSurfaceAcceptanceProof(args: {
   return {
     ok,
     ...proof,
+    resolvedSimFingerprint,
     violations: Array.from(new Set(violations)),
     user,
     admin,

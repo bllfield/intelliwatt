@@ -22,20 +22,31 @@ Post-deploy visible checks on Fort Worth GB keeper:
 
 **Authoritative pass/fail:** read-only acceptance proof — not visible score match alone.
 
+**`resolvedSimFingerprint` rule (dual-run):** resolvedSimFingerprint may differ between source and lab artifacts because it is house-local. Cross-surface acceptance does not waive parity. It compares canonical display/weather truth instead: finalizedDailyRowsHash, displayTruthRevision, Bundle C, TOD/monthly read-model parity, weather hash, profile identity, usage shape identity, validation/travel-vacant fingerprints, scorer/calculation versions, and source interval/trusted-date fingerprints. Audit output: `acceptanceProof.resolvedSimFingerprint` with `parityRequired: false`, `reason: house_local_artifact_identity`, and `acceptanceComparedInstead`. House-local artifact fingerprint may differ; canonical display/weather truth fingerprints must match. If canonical truth does not match, fail closed.
+
 ```bash
 PROOF_AUDIT_ONLY=1 npx tsx --require ./scripts/register-server-only-stub.cjs scripts/tmp-prod-past-weather-parity-proof.mjs
 ```
 
 Requires `pastWeatherCrossSurfaceParity.ok === true` and `acceptanceProof.ok === true` in `scripts/tmp-prod-past-weather-parity-proof-output.json`.
 
-Shipped: `32cc85d0`, `5abd8197`, `fd1de033`.
+**Lab home single-occupancy:** Because GB and SMT currently share the same mutable lab home, the latest dual recalc determines what the admin/test leg contains. The lab home is single-occupancy by source family; GB recalc invalidates SMT lab proof state and SMT recalc invalidates GB lab proof state. Always run the source-specific dual recalc immediately before that source's acceptance proof.
+
+| Proof | Required pre-step |
+|-------|-------------------|
+| Green Button | `scripts/audit/recalc-gb-dual-past.mjs` |
+| SMT | `scripts/audit/recalc-smt-dual-past.mjs` |
+
+If proof `sourceType` disagrees with the lab artifact family, verdict is `STALE_LAB_HOME_SOURCE_FAMILY` (stale lab state — not a parity-code regression).
+
+Shipped: `32cc85d0`, `5abd8197`, `fd1de033`, `0d765038` (GB close gate).
 
 ---
 
 ## Regression only (do not reopen weather debugging unless proof fails)
 
 1. Run `PROOF_AUDIT_ONLY=1` proof after any change to Past weather finalize, cross-surface audit, One Path profile/fingerprint persist, or admin read-only finalize.
-2. Never accept score-only parity — gates include `finalizedDailyRowsHash`, `displayTruthRevision`, profile/`usageShapeProfileIdentity`, and related input fingerprints.
+2. Never accept score-only parity — gates include `finalizedDailyRowsHash`, `displayTruthRevision`, Bundle C, TOD/monthly read-model parity, profile/`usageShapeProfileIdentity`, interval/trusted-date fingerprints, and `acceptanceProof.resolvedSimFingerprint` (informational when house-local values differ).
 3. Read-only admin/proof runs: `persistDisplayWeatherToCache: false`; no cache `updatedAt` bumps from proof.
 4. Controlled recalc (when needed): `scripts/tmp-local-recalc-one-path-gb-past.mjs` with source `actualContextHouseId`; may also recalc user source if artifacts stale after sim version bump.
 

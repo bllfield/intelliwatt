@@ -7,6 +7,12 @@
  *
  * Cache-safe acceptance capture (no prod HTTP leg):
  *   PROOF_AUDIT_ONLY=1 npx tsx --require ./scripts/register-server-only-stub.cjs scripts/tmp-prod-past-weather-parity-proof.mjs
+ *
+ * Lab home is single-occupancy by source family — run the matching dual recalc first:
+ *   Green Button: scripts/audit/recalc-gb-dual-past.mjs
+ *   SMT:          scripts/audit/recalc-smt-dual-past.mjs
+ *
+ * Set AUDIT_PROOF_SOURCE_TYPE=SMT|GREEN_BUTTON (defaults from source house committed usage).
  */
 import { readFileSync, existsSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -37,6 +43,7 @@ const EMAIL = process.env.AUDIT_USER_EMAIL || "bllfield32@icloud.com";
 const SOURCE_HOUSE = process.env.AUDIT_SOURCE_HOUSE_ID || "0bbd25b6-9b8b-40ba-9382-dd85a1e1eda4";
 const TEST_HOUSE = process.env.AUDIT_LAB_HOUSE_ID || "29a3d820-2593-4673-9dd6-cd161bbd7f6f";
 const OWNER_EMAIL = process.env.AUDIT_OWNER_EMAIL || "brian@intellipath-solutions.com";
+const PROOF_SOURCE_TYPE_RAW = String(process.env.AUDIT_PROOF_SOURCE_TYPE ?? "").trim().toUpperCase();
 
 function scoreCard(score) {
   if (!score || typeof score !== "object") return null;
@@ -87,10 +94,56 @@ async function main() {
         orderBy: { updatedAt: "desc" },
       })
     : null;
+
+  let proofSourceType = null;
+  if (PROOF_SOURCE_TYPE_RAW === "SMT" || PROOF_SOURCE_TYPE_RAW === "GREEN_BUTTON") {
+    proofSourceType = PROOF_SOURCE_TYPE_RAW;
+  } else if (user && SOURCE_HOUSE) {
+    const { getHouseAddressForUserHouse } = await import("../modules/onePathSim/usageSimulator/repo.ts");
+    const { resolveHouseCommittedUsageSource } = await import("../lib/usage/houseCommittedUsageSource.ts");
+    const sourceHouse = await getHouseAddressForUserHouse({ userId: user.id, houseId: SOURCE_HOUSE }).catch(() => null);
+    const committed = await resolveHouseCommittedUsageSource({
+      houseId: SOURCE_HOUSE,
+      userId: user.id,
+      esiid: sourceHouse?.esiid ?? null,
+    });
+    if (committed === "SMT" || committed === "GREEN_BUTTON") proofSourceType = committed;
+  }
+
+  let labArtifactSourceFamily = null;
+  let staleLabHomeMessage = null;
+  if (testPast?.id) {
+    const { getLatestCachedPastDatasetByScenario } = await import(
+      "../modules/onePathSim/usageSimulator/pastCache.ts"
+    );
+    const {
+      detectPastArtifactSourceFamilyFromDataset,
+      buildStaleLabHomeSourceFamilyMessage,
+      LAB_HOME_SINGLE_OCCUPANCY_OPS_NOTE,
+    } = await import("../lib/usage/labHomePastArtifactSourceFamily.ts");
+    const labCached = await getLatestCachedPastDatasetByScenario({
+      houseId: TEST_HOUSE,
+      scenarioId: testPast.id,
+    });
+    labArtifactSourceFamily = detectPastArtifactSourceFamilyFromDataset(
+      labCached?.datasetJson ?? null
+    );
+    if (
+      proofSourceType &&
+      labArtifactSourceFamily &&
+      proofSourceType !== labArtifactSourceFamily
+    ) {
+      staleLabHomeMessage = buildStaleLabHomeSourceFamilyMessage({
+        proofSourceType,
+        labArtifactSourceFamily,
+      });
+    }
+  }
+
   await prisma.$disconnect();
 
   let crossSurface = null;
-  if (user && owner && sourcePast?.id && testPast?.id) {
+  if (!staleLabHomeMessage && user && owner && sourcePast?.id && testPast?.id) {
     const { auditPastWeatherCrossSurfaceParity } = await import(
       "../lib/usage/pastWeatherCrossSurfaceParity.server.ts"
     );
@@ -132,11 +185,17 @@ async function main() {
     scoreCard(adminRun.json?.weatherSensitivityScore ?? adminDiag.visibleWeatherScore) ?? adminBundleC;
   const adminAudit = adminMeta.pastDisplayWeatherScoringAudit ?? adminRun.json?.weatherScoringAudit ?? null;
 
+  const { LAB_HOME_SINGLE_OCCUPANCY_OPS_NOTE } = await import("../lib/usage/labHomePastArtifactSourceFamily.ts");
+
   const out = {
     at: new Date().toISOString(),
     proofMode: PROOF_AUDIT_ONLY ? "audit_only" : "audit_then_admin_http",
     base: BASE,
     houses: { sourceHouse: SOURCE_HOUSE, testHome: TEST_HOUSE },
+    proofSourceType,
+    labArtifactSourceFamily,
+    labHomeOpsNote: LAB_HOME_SINGLE_OCCUPANCY_OPS_NOTE,
+    staleLabHomeSourceFamily: staleLabHomeMessage,
     scenarios: { sourcePastScenarioId: sourcePast?.id ?? null, testPastScenarioId: testPast?.id ?? null },
     userPast: acceptanceProof
       ? {
@@ -182,8 +241,9 @@ async function main() {
           acceptanceProof,
         }
       : null,
-    verdict:
-      crossSurface?.ok === true && acceptanceProof?.ok === true
+    verdict: staleLabHomeMessage
+      ? "STALE_LAB_HOME_SOURCE_FAMILY"
+      : crossSurface?.ok === true && acceptanceProof?.ok === true
         ? "PROD_WEATHER_PARITY_PASS"
         : "PROD_WEATHER_PARITY_FAIL",
   };
@@ -193,6 +253,11 @@ async function main() {
   console.log(JSON.stringify(out, null, 2));
   console.log("Wrote", outPath);
 
+  if (out.verdict === "STALE_LAB_HOME_SOURCE_FAMILY") {
+    console.error(staleLabHomeMessage);
+    console.error(LAB_HOME_SINGLE_OCCUPANCY_OPS_NOTE);
+    process.exit(2);
+  }
   if (out.verdict !== "PROD_WEATHER_PARITY_PASS") process.exit(1);
 }
 

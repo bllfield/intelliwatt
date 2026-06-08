@@ -39,6 +39,7 @@
 | Past engine | `buildPastSimulatedBaselineV1` in **both** `engine.ts` trees | Pending/incomplete/forced simulate | `intervalTrustedSource: GREEN_BUTTON` |
 | Validation compare | `compareProjection.ts` (keep admin + user copies aligned) | `forceSimulateDateKeysLocal` | Same |
 | One Path Past (SMT + GB) ↔ user Past | **Target:** same `recalcSimulatorBuild` / `simulatePastUsageDataset` on test `houseId`. **SMT:** always recalc on admin Past run. **GB:** recalc when cache miss at current GB `inputHash` (`onePathGbPastArtifactRun.ts`). **Support:** `resolvePastSimEsiidForHouse.ts`, `pastArtifactIdentity.ts` | Dual-run; SMT heal on **source**; GB clone on test-home replace | No artifact copy |
+| Past cross-surface weather acceptance | `pastWeatherCrossSurfaceParity.server.ts`, `pastWeatherInputParity.ts`, `pastCrossSurfaceResolvedSimFingerprintPolicy.ts` | `acceptanceProof.ok` + canonical truth hashes; `resolvedSimFingerprint` house-local (informational) | Same rule |
 
 **Do not edit** `modules/realUsageAdapter/greenButton.ts` for SMT-only fixes (workspace lock).
 

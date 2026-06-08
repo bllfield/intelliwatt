@@ -335,6 +335,10 @@ export function auditUserAdminPastReadModelParity(args: {
     violations.push("timeOfDayBuckets mismatch");
   }
 
+  if (JSON.stringify(viewModel.derived.monthly) !== JSON.stringify(adminView.monthlyRows)) {
+    violations.push("monthlyRows mismatch");
+  }
+
   if (JSON.stringify(viewModel.derived.fifteenCurve) !== JSON.stringify(adminView.fifteenMinuteAverages)) {
     violations.push("fifteenMinuteAverages mismatch");
   }

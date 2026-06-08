@@ -139,6 +139,27 @@ Display-only sharing (e.g. `resolvePastSimFifteenMinuteCurveFromDataset`) is fin
 
 ---
 
+## Lab home ops (single-occupancy by source family)
+
+Because GB and SMT currently share the same mutable lab home, the latest dual recalc determines what the admin/test leg contains. The lab home is single-occupancy by source family; GB recalc invalidates SMT lab proof state and SMT recalc invalidates GB lab proof state. Always run the source-specific dual recalc immediately before that source's acceptance proof.
+
+- Green Button proof is valid only after `scripts/audit/recalc-gb-dual-past.mjs`.
+- SMT proof is valid only after `scripts/audit/recalc-smt-dual-past.mjs`.
+- Cross-source stale lab artifacts → `STALE_LAB_HOME_SOURCE_FAMILY` in proof output (not a parity-code regression).
+
+---
+
+## Cross-surface acceptance: `resolvedSimFingerprint` (dual-run)
+
+resolvedSimFingerprint may differ between source and lab artifacts because it is house-local. Cross-surface acceptance does not waive parity. It compares canonical display/weather truth instead: finalizedDailyRowsHash, displayTruthRevision, Bundle C, TOD/monthly read-model parity, weather hash, profile identity, usage shape identity, validation/travel-vacant fingerprints, scorer/calculation versions, and source interval/trusted-date fingerprints.
+
+**Standard:** House-local artifact fingerprint may differ. Canonical display/weather truth fingerprints must match. If canonical truth does not match, fail closed.
+
+- **Not acceptance:** visible score parity alone; `resolvedSimFingerprint` match alone; unexplained `"differs but accepted"`.
+- **Audit owner:** `lib/usage/pastCrossSurfaceResolvedSimFingerprintPolicy.ts`, `lib/usage/pastWeatherInputParity.ts` (`crossSurfaceWeatherInputsOnly`), `acceptanceProof.resolvedSimFingerprint` in proof output.
+
+---
+
 ## Baseline vs Past (do not conflate)
 
 | Run type | Sim? | Dual-run rule |

@@ -104,6 +104,41 @@ Customer Past UI uses plain-English **Simulation Accuracy** (`components/usage/s
 - `tests/usage/pastValidationHoldout.test.ts` — GB + SMT holdout pass; keep-ref leakage fails proof gates
 - `tests/simulatedUsage/buildPastSimulatedBaselineV1.resolvedFingerprint.test.ts` — production holdout vs Gap-Fill keep-ref
 
+## Internal naming (audit readability)
+
+`buildInputs.mode` / `baseKind` may still read `SMT_BASELINE` / `SMT_ACTUAL_BASELINE` — that is the **generic interval-baseline simulator enum**, not the meter vendor. For audits, read:
+
+- `meta.actualSource` → `GREEN_BUTTON` | `SMT`
+- `meta.intervalBaselineAuditLabel` → `GREEN_BUTTON_BASELINE` | `SMT_BASELINE` | `ACTUAL_INTERVAL_BASELINE`
+- `lockboxInput.mode` → `ACTUAL_INTERVAL_BASELINE` when interval-backed Past
+
+## Green Button full close gate (holdout + parity)
+
+Holdout leakage fix alone is **not** sufficient to close GB Past acceptance. All must pass:
+
+- `validationHoldoutProof.ok === true` (holdout behavior)
+- `pastWeatherCrossSurfaceParity.ok === true`
+- `acceptanceProof.ok === true`
+- User Bundle C = Admin Bundle C; visible cards match Bundle C on both surfaces
+- Canonical display/weather truth matches (see `lib/usage/pastCrossSurfaceResolvedSimFingerprintPolicy.ts`): `finalizedDailyRowsHash`, `displayTruthRevision`, Bundle C, TOD/monthly read-model parity, `dailyWeatherHash`, `usageShapeProfileIdentity`, profile fingerprints, validation/travel-vacant fingerprints, scorer/calculation versions, GB/SMT interval fingerprint / trusted-date keys
+- `resolvedSimFingerprint` may differ between source and lab (house-local) — reported in `acceptanceProof.resolvedSimFingerprint` with `parityRequired: false`; mismatch alone is **not** a fail and match alone is **not** acceptance
+
+**Recovery:** guarded dual recalc then read-only proof (lab home is single-occupancy by source family — always run the matching recalc immediately before proof):
+
+```bash
+# Green Button keeper
+ALLOW_PROD_PAST_RECALC=1 AUDIT_USER_EMAIL=... AUDIT_SOURCE_HOUSE_ID=... AUDIT_LAB_HOUSE_ID=... \
+  npx tsx --require ./scripts/register-server-only-stub.cjs scripts/audit/recalc-gb-dual-past.mjs
+AUDIT_PROOF_SOURCE_TYPE=GREEN_BUTTON PROOF_AUDIT_ONLY=1 npx tsx --require ./scripts/register-server-only-stub.cjs scripts/tmp-prod-past-weather-parity-proof.mjs
+
+# SMT keeper (invalidates GB lab artifacts until GB recalc is run again)
+ALLOW_PROD_PAST_RECALC=1 AUDIT_USER_EMAIL=... AUDIT_SOURCE_HOUSE_ID=... AUDIT_LAB_HOUSE_ID=... \
+  npx tsx --require ./scripts/register-server-only-stub.cjs scripts/audit/recalc-smt-dual-past.mjs
+AUDIT_PROOF_SOURCE_TYPE=SMT PROOF_AUDIT_ONLY=1 npx tsx --require ./scripts/register-server-only-stub.cjs scripts/tmp-prod-past-weather-parity-proof.mjs
+```
+
+Do **not** tune holdout WAPE down after removing leakage (e.g. ~29% → ~71% Simulation Accuracy is expected).
+
 ## Acceptance checklist
 
 - [ ] User/Admin Past parity still passes (display + artifact identity)

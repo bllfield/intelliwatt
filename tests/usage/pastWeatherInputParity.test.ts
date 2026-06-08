@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   auditPastWeatherInputParity,
+  buildPastWeatherCrossSurfaceAcceptanceProof,
   buildPastWeatherInputFingerprint,
 } from "@/lib/usage/pastWeatherInputParity";
+import { PAST_CROSS_SURFACE_RESOLVED_SIM_FINGERPRINT_RULE } from "@/lib/usage/pastCrossSurfaceResolvedSimFingerprintPolicy";
 import { auditUserAdminPastReadModelParity } from "@/lib/usage/intervalReadModelInvariants";
 
 function pastDatasetFixture(args: {
@@ -14,6 +16,7 @@ function pastDatasetFixture(args: {
   bundleB: { eff: number; cool: number; heat: number };
   artifactInputHash: string;
   displayTruthRevision: string;
+  resolvedSimFingerprintHash?: string;
 }) {
   const daily = Object.entries(args.dailyKwhByDate).map(([date, kwh]) => ({
     date,
@@ -43,7 +46,13 @@ function pastDatasetFixture(args: {
       artifactInputHash: args.artifactInputHash,
       pastDisplayWeatherDisplayTruthRevision: args.displayTruthRevision,
       pastDisplayWeatherFinalizeVersion: "past_display_weather_finalize_v2",
+      resolvedSimFingerprint: {
+        resolvedHash: args.resolvedSimFingerprintHash ?? `sim-fp-${args.houseLabel}`,
+      },
       lockboxInput: {
+        resolvedSimFingerprint: {
+          resolvedHash: args.resolvedSimFingerprintHash ?? `sim-fp-${args.houseLabel}`,
+        },
         sourceContext: {
           sourceHouseId: "source-house",
           intervalFingerprint: "interval-fp",
@@ -153,6 +162,7 @@ describe("pastWeatherInputParity", () => {
       bundleB: { eff: 55, cool: 81, heat: 79 },
       artifactInputHash: "hash-shared",
       displayTruthRevision: "rev-shared",
+      resolvedSimFingerprintHash: "sim-fp-shared",
     });
     const adminDataset = pastDatasetFixture({
       houseLabel: "admin",
@@ -162,6 +172,7 @@ describe("pastWeatherInputParity", () => {
       bundleB: { eff: 55, cool: 81, heat: 79 },
       artifactInputHash: "hash-shared",
       displayTruthRevision: "rev-shared",
+      resolvedSimFingerprintHash: "sim-fp-shared",
     });
 
     const result = auditPastWeatherInputParity({
@@ -196,6 +207,88 @@ describe("pastWeatherInputParity", () => {
     const withExtra = buildPastWeatherInputFingerprint({ dataset: withBoundaryRows });
     expect(withExtra.finalizedDailyRowsHash).toBe(bounded.finalizedDailyRowsHash);
     expect(withExtra.displayTruthRevision).toBe(bounded.displayTruthRevision);
+  });
+
+  it("cross-surface: reports house-local resolvedSimFingerprint without waiving canonical truth gates", () => {
+    const sharedDaily = { "2025-07-01": 40, "2026-01-01": 30 };
+    const userDataset = pastDatasetFixture({
+      houseLabel: "user",
+      usageShapeProfileIdentity: "shape-shared",
+      dailyKwhByDate: sharedDaily,
+      bundleC: { eff: 50, cool: 93, heat: 76 },
+      bundleB: { eff: 55, cool: 81, heat: 79 },
+      artifactInputHash: "hash-user",
+      displayTruthRevision: "rev-shared",
+    });
+    const adminDataset = pastDatasetFixture({
+      houseLabel: "admin",
+      usageShapeProfileIdentity: "shape-shared",
+      dailyKwhByDate: sharedDaily,
+      bundleC: { eff: 50, cool: 93, heat: 76 },
+      bundleB: { eff: 55, cool: 81, heat: 79 },
+      artifactInputHash: "hash-admin",
+      displayTruthRevision: "rev-shared",
+    });
+
+    const inputParity = auditPastWeatherInputParity({
+      userDataset,
+      adminDataset,
+      userWeatherHouseId: "source-house",
+      adminWeatherHouseId: "source-house",
+      userProfileFingerprints: { homeProfile: "fp-shared", applianceProfile: "fp-shared-app" },
+      adminProfileFingerprints: { homeProfile: "fp-shared", applianceProfile: "fp-shared-app" },
+      crossSurfaceWeatherInputsOnly: true,
+    });
+    const acceptance = buildPastWeatherCrossSurfaceAcceptanceProof({
+      inputParity,
+      userVisibleBundleC: null,
+      adminVisibleBundleC: null,
+    });
+
+    expect(inputParity.ok).toBe(true);
+    expect(acceptance.ok).toBe(true);
+    expect(acceptance.resolvedSimFingerprint).toMatchObject({
+      matches: false,
+      parityRequired: false,
+      reason: "house_local_artifact_identity",
+      rule: PAST_CROSS_SURFACE_RESOLVED_SIM_FINGERPRINT_RULE,
+    });
+    expect(acceptance.resolvedSimFingerprint?.user).not.toBe(acceptance.resolvedSimFingerprint?.admin);
+    expect(inputParity.violations.some((v) => v.startsWith("resolvedSimFingerprint:"))).toBe(false);
+    expect(acceptance.violations.some((v) => v.startsWith("resolvedSimFingerprint:"))).toBe(false);
+  });
+
+  it("cross-surface: still fails when canonical displayTruthRevision diverges despite resolvedSimFingerprint reporting", () => {
+    const userDataset = pastDatasetFixture({
+      houseLabel: "user",
+      usageShapeProfileIdentity: "shape-shared",
+      dailyKwhByDate: { "2025-07-01": 40, "2026-01-01": 30 },
+      bundleC: { eff: 50, cool: 93, heat: 76 },
+      bundleB: { eff: 55, cool: 81, heat: 79 },
+      artifactInputHash: "hash-user",
+      displayTruthRevision: "rev-user",
+    });
+    const adminDataset = pastDatasetFixture({
+      houseLabel: "admin",
+      usageShapeProfileIdentity: "shape-shared",
+      dailyKwhByDate: { "2025-07-01": 41, "2026-01-01": 30 },
+      bundleC: { eff: 50, cool: 93, heat: 76 },
+      bundleB: { eff: 55, cool: 81, heat: 79 },
+      artifactInputHash: "hash-admin",
+      displayTruthRevision: "rev-admin",
+    });
+
+    const inputParity = auditPastWeatherInputParity({
+      userDataset,
+      adminDataset,
+      userProfileFingerprints: { homeProfile: "fp-shared", applianceProfile: "fp-shared-app" },
+      adminProfileFingerprints: { homeProfile: "fp-shared", applianceProfile: "fp-shared-app" },
+      crossSurfaceWeatherInputsOnly: true,
+    });
+
+    expect(inputParity.ok).toBe(false);
+    expect(inputParity.violations.some((v) => v.startsWith("displayTruthRevision:"))).toBe(true);
+    expect(inputParity.resolvedSimFingerprint?.parityRequired).toBe(false);
   });
 
   it("flags same-dataset audit as false green", () => {

@@ -17,6 +17,9 @@
  *   AUDIT_SOURCE_HOUSE_ID=<source-uuid> \
  *   AUDIT_LAB_HOUSE_ID=<lab-uuid> \
  *   npx tsx --require ./scripts/register-server-only-stub.cjs scripts/audit/recalc-smt-dual-past.mjs
+ *
+ * Lab home is single-occupancy: this recalc invalidates Green Button lab proof state.
+ * Run SMT PROOF_AUDIT_ONLY immediately after; do not treat GB proof as valid until recalc-gb-dual-past.mjs runs again.
  */
 import { readFileSync, existsSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
