@@ -2,6 +2,11 @@
 
 import React, { useMemo, useState } from "react";
 import { ValidationComparePanel } from "@/components/usage/ValidationComparePanel";
+import { ValidationCompareDebugMetrics } from "@/components/usage/ValidationCompareDebugMetrics";
+import {
+  readValidationHoldoutProofOk,
+  readValidationHoldoutProofOkFromMetrics,
+} from "@/components/usage/simulationAccuracyDisplay";
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 import { WeatherSensitivityCard } from "@/components/usage/WeatherSensitivityCard";
 import { formatDateLong, formatDateShort } from "@/components/usage/usageFormatting";
@@ -261,16 +266,15 @@ export function OnePathRunReadOnlyView(props: {
                 : "This section compares modeled vs actual on validation days for simulator accuracy transparency."}
             </div>
             {view.compare.rows.length && view.compare.metrics ? (
-              <div className="mt-2 text-xs text-brand-navy/80" aria-live="polite">
-                WAPE {Number(view.compare.metrics?.wape ?? 0).toFixed(2)}% · MAE{" "}
-                {Number(view.compare.metrics?.mae ?? 0).toFixed(2)} · RMSE {Number(view.compare.metrics?.rmse ?? 0).toFixed(2)}
-                {view.summary.pastValidationPolicyRevision ? (
-                  <>
-                    {" "}
-                    · Validation policy {view.summary.pastValidationPolicyRevision}
-                  </>
-                ) : null}
-              </div>
+              <ValidationCompareDebugMetrics
+                className="mt-2"
+                metrics={view.compare.metrics}
+                holdoutProofOk={
+                  readValidationHoldoutProofOk(datasetMeta) ||
+                  readValidationHoldoutProofOkFromMetrics(view.compare.metrics)
+                }
+                pastValidationPolicyRevision={view.summary.pastValidationPolicyRevision ?? null}
+              />
             ) : null}
           </div>
           {view.compare.rows.length ? (

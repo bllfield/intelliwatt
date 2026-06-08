@@ -55,10 +55,11 @@ describe("OnePathRunReadOnlyView source contract", () => {
     expect(source).toContain("ValidationComparePanel");
     expect(source).toContain("Validation / Test Day Compare");
     expect(source).toContain("scored validation day(s). Compare uses the same canonical simulated-day totals as the Past artifact; weather columns mirror the Past daily table when available.");
-    expect(source).toContain("WAPE");
-    expect(source).toContain("MAE");
-    expect(source).toContain("RMSE");
-    expect(source).toContain("Validation policy");
+    expect(source).toContain("ValidationCompareDebugMetrics");
+    const debugMetricsSource = readRepoFile("components/usage/ValidationCompareDebugMetrics.tsx");
+    expect(debugMetricsSource).toContain("Holdout WAPE");
+    expect(debugMetricsSource).toContain("validationHoldoutProof.ok");
+    expect(debugMetricsSource).toContain("Validation policy");
     expect(source).toContain("pastValidationPolicyRevision");
     expect(source).toContain("Show details");
     expect(source).toContain("Hide details");

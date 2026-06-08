@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  readValidationHoldoutProofOk,
+  readValidationHoldoutProofOkFromMetrics,
+} from "@/components/usage/simulationAccuracyDisplay";
 import type { ValidationCompareRowWeather } from "@/modules/usageSimulator/compareProjection";
 
 export type ValidationCompareDisplayRow = {
@@ -15,6 +19,7 @@ export type ValidationCompareDisplayRow = {
 export type ValidationCompareDisplay = {
   rows: ValidationCompareDisplayRow[];
   metrics: Record<string, unknown>;
+  holdoutProofOk: boolean;
 };
 
 function normalizeCompareWeather(value: unknown): ValidationCompareRowWeather | undefined {
@@ -83,11 +88,15 @@ export function buildValidationCompareDisplay(args: {
       : undefined) ??
     args.compareProjection?.metrics ??
     {};
+  const metricsRecord =
+    metrics && typeof metrics === "object" ? (metrics as Record<string, unknown>) : {};
+  const holdoutProofOk =
+    readValidationHoldoutProofOk(datasetMeta) ||
+    readValidationHoldoutProofOkFromMetrics(metricsRecord);
+
   return {
     rows,
-    metrics:
-      metrics && typeof metrics === "object"
-        ? (metrics as Record<string, unknown>)
-        : {},
+    metrics: metricsRecord,
+    holdoutProofOk,
   };
 }

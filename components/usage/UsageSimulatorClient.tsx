@@ -8,6 +8,8 @@ import UsageDashboard, { type ScenarioVariable } from "@/components/usage/UsageD
 import { ValidationComparePanel } from "@/components/usage/ValidationComparePanel";
 import { ManualMonthlyReconciliationPanel } from "@/components/usage/ManualMonthlyReconciliationPanel";
 import { resolvePastCompareSectionMode } from "@/components/usage/pastCompareSectionMode";
+import { SimulationAccuracySummary } from "@/components/usage/SimulationAccuracySummary";
+import { buildSimulationAccuracyUserDisplay } from "@/components/usage/simulationAccuracyDisplay";
 import { buildValidationCompareDisplay } from "@/components/usage/validationCompareDisplay";
 import type { ManualMonthlyReconciliation } from "@/modules/manualUsage/reconciliation";
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
@@ -223,6 +225,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
       weather?: import("@/modules/usageSimulator/compareProjection").ValidationCompareRowWeather;
     }>;
     metrics: Record<string, unknown>;
+    holdoutProofOk: boolean;
   } | null>(null);
   const [scenarioManualMonthlyReconciliation, setScenarioManualMonthlyReconciliation] =
     useState<ManualMonthlyReconciliation | null>(null);
@@ -1532,16 +1535,22 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
               <div className="text-sm font-semibold text-brand-navy">
                 {pastCompareSectionMode === "statement_range_reconciliation"
                   ? "Bill Period Parity Compare"
-                  : "Validation / Test Day Compare"}
+                  : scenarioCurveOutcome?.kind === "success" && scenarioCompareProjection?.rows?.length
+                    ? buildSimulationAccuracyUserDisplay({
+                        wapePercent: Number(scenarioCompareProjection.metrics?.wape ?? 0),
+                        validationDayCount: scenarioCompareProjection.rows.length,
+                        holdoutProofOk: scenarioCompareProjection.holdoutProofOk,
+                      }).title
+                    : "Validation / Test Day Compare"}
               </div>
               <div className="mt-1 text-xs text-brand-navy/70">
                 {scenarioLoading
                   ? ""
                   : activeManualMonthlyReconciliation
                     ? `${activeManualMonthlyReconciliation.eligibleRangeCount} eligible entered bill period(s). Entered manual totals reconcile against the persisted Past Sim totals for matching bill-cycle ranges; later-filled or travel-overlapped ranges are shown as excluded.`
-                  : scenarioCurveOutcome?.kind === "success" && scenarioCompareProjection?.rows?.length
-                    ? `${scenarioCompareProjection.rows.length} scored validation day(s). Compare uses the same canonical simulated-day totals as the Past artifact; weather columns mirror the Past daily table when available.`
-                    : "This section compares modeled vs actual on validation days for simulator accuracy transparency."}
+                    : scenarioCurveOutcome?.kind === "success" && scenarioCompareProjection?.rows?.length
+                      ? "How closely the simulator predicted real usage on days it was not allowed to study in advance."
+                      : "This section summarizes how well the simulator predicts usage on held-out test days."}
               </div>
               {!scenarioLoading && activeManualMonthlyReconciliation ? (
                 <div className="mt-2 text-xs text-brand-navy/80" aria-live="polite">
@@ -1554,18 +1563,13 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
               scenarioCurveOutcome?.kind === "success" &&
               !scenarioManualMonthlyReconciliation?.rows?.length &&
               scenarioCompareProjection?.rows?.length ? (
-                <div className="mt-2 text-xs text-brand-navy/80" aria-live="polite">
-                  WAPE {Number(scenarioCompareProjection.metrics?.wape ?? 0).toFixed(2)}% · MAE{" "}
-                  {Number(scenarioCompareProjection.metrics?.mae ?? 0).toFixed(2)} · RMSE{" "}
-                  {Number(scenarioCompareProjection.metrics?.rmse ?? 0).toFixed(2)}
-                  {typeof scenarioSimHouseOverride?.[0]?.dataset?.meta?.pastValidationPolicyRevision === "string" ? (
-                    <>
-                      {" "}
-                      · Validation policy{" "}
-                      {String(scenarioSimHouseOverride?.[0]?.dataset?.meta?.pastValidationPolicyRevision)}
-                    </>
-                  ) : null}
-                </div>
+                <SimulationAccuracySummary
+                  className="mt-2"
+                  wapePercent={Number(scenarioCompareProjection.metrics?.wape ?? 0)}
+                  validationDayCount={scenarioCompareProjection.rows.length}
+                  holdoutProofOk={scenarioCompareProjection.holdoutProofOk}
+                  showAdvancedDetail={pastCompareExpanded}
+                />
               ) : null}
             </div>
             {!scenarioLoading &&

@@ -1,6 +1,8 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { ValidationCompareDebugMetrics } from "@/components/usage/ValidationCompareDebugMetrics";
+import { readValidationHoldoutProofOkFromMetrics } from "@/components/usage/simulationAccuracyDisplay";
 import type { ValidationCompareRowWeather } from "@/modules/usageSimulator/compareProjection";
 
 type ValidationCompareRow = {
@@ -27,6 +29,8 @@ export function ValidationComparePanel(props: {
   className?: string;
   /** When false, only the table is rendered (e.g. metrics already shown in a collapsed header). */
   showMetricsSummary?: boolean;
+  /** Admin/debug metrics header when showMetricsSummary is true. */
+  holdoutProofOk?: boolean;
 }) {
   const rows = Array.isArray(props.rows) ? props.rows : [];
   const metrics = props.metrics && typeof props.metrics === "object" ? props.metrics : {};
@@ -36,11 +40,13 @@ export function ValidationComparePanel(props: {
   let metricsSummaryEl: ReactNode = null;
   if (showMetrics) {
     metricsSummaryEl = (
-      <div className={["mt-2 text-xs text-brand-navy/80", props.className ?? ""].join(" ").trim()}>
-        {String(metrics?.compareMetricLabel ?? "Reconstruction check")}{" "}
-        {Number(metrics?.wape ?? 0).toFixed(2)}% | MAE {Number(metrics?.mae ?? 0).toFixed(2)} | RMSE{" "}
-        {Number(metrics?.rmse ?? 0).toFixed(2)}
-      </div>
+      <ValidationCompareDebugMetrics
+        className={["mt-2", props.className ?? ""].join(" ").trim()}
+        metrics={metrics}
+        holdoutProofOk={
+          props.holdoutProofOk === true || readValidationHoldoutProofOkFromMetrics(metrics)
+        }
+      />
     );
   }
 

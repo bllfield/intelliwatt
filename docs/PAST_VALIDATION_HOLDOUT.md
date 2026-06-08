@@ -76,6 +76,14 @@ Stamped on dataset meta as `validationHoldoutAuditRows`; proof summary as `valid
 
 Compare UI reads `meta.validationHoldoutProof.ok` via `resolveValidationCompareMetricLabel` in `lib/usage/validationCompareProjection.ts`.
 
+## User-facing compare language (not WAPE)
+
+Customer Past UI uses plain-English **Simulation Accuracy** (`components/usage/simulationAccuracyDisplay.ts`, `SimulationAccuracySummary.tsx`):
+
+- **Pass:** `accuracyPercent = round(100 - wapePercent)` (e.g. WAPE 13.51% → **86%**), subtitle cites hidden-day count, detail shows average miss %
+- **Fail proof:** title **Simulation Check**, main metric **Needs review** — no accuracy percent shown
+- **Admin/debug only:** `ValidationCompareDebugMetrics` shows Holdout WAPE, MAE, RMSE, `validationHoldoutProof.ok`
+
 ## Code owners
 
 | Layer | Owner |
