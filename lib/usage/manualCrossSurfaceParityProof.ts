@@ -8,9 +8,13 @@ import { buildManualBillPeriodTargets, normalizeStatementRanges, normalizeTravel
 import { validateManualUsagePayload } from "@/modules/manualUsage/validation";
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
 import { buildOnePathRunReadOnlyView } from "@/modules/onePathSim/runReadOnlyView";
-import { remapManualDisplayDatasetToCanonicalWindow } from "@/modules/onePathSim/manualDisplayDataset";
+import { resolveManualDisplayDatasetForRead } from "@/modules/onePathSim/manualDisplayDataset";
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
-import { MANUAL_CANONICAL_ARTIFACT_WINDOW_VERSION } from "@/lib/usage/persistManualPastArtifactCanonicalWindow";
+import {
+  MANUAL_CANONICAL_ARTIFACT_WINDOW_VERSION,
+  resolveManualArtifactCoverageClass,
+  type ManualArtifactCoverageClass,
+} from "@/lib/usage/persistManualPastArtifactCanonicalWindow";
 import { isManualCanonicalArtifactWindowPersistEnabled } from "@/lib/usage/manualPastArtifactCanonicalWindowPersist";
 
 export const MANUAL_CROSS_SURFACE_PROOF_VERSION = "manual_cross_surface_parity_v2";
@@ -110,6 +114,8 @@ export type ManualCrossSurfaceProofLeg = {
   manualCanonicalArtifactWindowVersion?: string | null;
   manualCanonicalArtifactWindowPersistAudit?: Record<string, unknown> | null;
   fixtureManualCanonicalArtifactWindowVersion?: string | null;
+  manualArtifactCoverageClass?: ManualArtifactCoverageClass | null;
+  legacyManualDisplayRemapApplied?: boolean | null;
 };
 
 export function resolveManualProofComparisonFamily(
@@ -329,17 +335,20 @@ export function readArtifactCoverageFromDataset(dataset: Record<string, unknown>
   if (!dataset) return { artifactCoverageStart: null, artifactCoverageEnd: null };
   const meta = asRecord(dataset.meta);
   const summary = asRecord(dataset.summary);
-  const audit = asRecord(meta.manualCanonicalArtifactWindowPersistAudit);
-  if (meta.manualCanonicalArtifactWindowVersion === MANUAL_CANONICAL_ARTIFACT_WINDOW_VERSION) {
-    const auditStart = asDateKey(audit.afterCoverageStart);
-    const auditEnd = asDateKey(audit.afterCoverageEnd);
-    if (auditStart && auditEnd) {
-      return { artifactCoverageStart: auditStart, artifactCoverageEnd: auditEnd };
-    }
-  }
   return {
     artifactCoverageStart: asDateKey(meta.coverageStart ?? summary.start),
     artifactCoverageEnd: asDateKey(meta.coverageEnd ?? summary.end),
+  };
+}
+
+export function readManualArtifactProofDiagnostics(dataset: Record<string, unknown> | null | undefined): {
+  manualArtifactCoverageClass: ManualArtifactCoverageClass;
+  legacyManualDisplayRemapApplied: boolean;
+} {
+  const meta = asRecord(dataset?.meta);
+  return {
+    manualArtifactCoverageClass: resolveManualArtifactCoverageClass(dataset, null),
+    legacyManualDisplayRemapApplied: meta.legacyManualDisplayRemapApplied === true,
   };
 }
 
@@ -355,13 +364,10 @@ export function readDisplayCoverageFromDataset(args: {
   if (!args.dataset) {
     return { displayCoverageStart: null, displayCoverageEnd: null, displayDataset: null };
   }
-  const displayDataset =
-    args.applyAdminRemap === true
-      ? (remapManualDisplayDatasetToCanonicalWindow({
-          dataset: args.dataset,
-          usageInputMode: args.usageInputMode ?? null,
-        }) as Record<string, unknown>)
-      : args.dataset;
+  const displayDataset = resolveManualDisplayDatasetForRead({
+    dataset: args.dataset,
+    usageInputMode: args.usageInputMode ?? null,
+  }) as Record<string, unknown>;
   const userView = buildUserUsageDashboardViewModel({ dataset: displayDataset as never });
   const adminView = buildOnePathRunReadOnlyView({ dataset: displayDataset });
   const coverageStart = userView?.coverage.start ?? adminView?.summary.coverageStart ?? null;
@@ -546,7 +552,12 @@ export function aggregateManualCrossSurfaceProofViolations(args: {
         violations.push(
           `${leg.legId}: missing manualCanonicalArtifactWindowVersion stamp (Phase 4C persist hook not applied)`
         );
+      } else if (leg.manualArtifactCoverageClass === "legacy") {
+        violations.push(`${leg.legId}: canonical-stamped artifact read back as legacy manual coverage class`);
       }
+    }
+    if (leg.manualArtifactCoverageClass === "legacy" && leg.legacyManualDisplayRemapApplied !== true) {
+      warnings.push(`${leg.legId}: legacy manual artifact missing legacyManualDisplayRemapApplied diagnostic`);
     }
 
     const legFixtureFamily = leg.fixtureFamily ?? resolveManifestFixtureFamily(leg.legId);

@@ -1,4 +1,7 @@
-import { remapManualPastDatasetForDisplayWindow } from "@/lib/usage/persistManualPastArtifactCanonicalWindow";
+import {
+  remapManualPastDatasetForDisplayWindow,
+  resolveManualDisplayDatasetForRead,
+} from "@/lib/usage/persistManualPastArtifactCanonicalWindow";
 
 export function remapManualDisplayDatasetToCanonicalWindow(args: {
   dataset: any;
@@ -7,3 +10,5 @@ export function remapManualDisplayDatasetToCanonicalWindow(args: {
 }) {
   return remapManualPastDatasetForDisplayWindow(args);
 }
+
+export { resolveManualDisplayDatasetForRead };

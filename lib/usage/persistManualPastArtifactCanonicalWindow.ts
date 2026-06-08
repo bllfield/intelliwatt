@@ -181,6 +181,36 @@ export function isCanonicalManualPastArtifact(dataset: any): boolean {
   );
 }
 
+export type ManualArtifactCoverageClass = "canonical" | "legacy" | "non_manual";
+
+export function resolveManualArtifactCoverageClass(
+  dataset: any,
+  usageInputMode?: string | null
+): ManualArtifactCoverageClass {
+  if (!resolveManualPastUsageInputMode(dataset, usageInputMode ?? null)) {
+    return "non_manual";
+  }
+  return isCanonicalManualPastArtifact(dataset) ? "canonical" : "legacy";
+}
+
+/** Keep persisted canonical manual coverage on artifact read; do not re-derive from lockbox/buildInputs. */
+export function preserveCanonicalManualPastArtifactCoverageForRead(
+  dataset: any
+): { startDate: string; endDate: string } | null {
+  if (!isCanonicalManualPastArtifact(dataset)) return null;
+  const start = asDateKey(dataset?.meta?.coverageStart ?? dataset?.summary?.start);
+  const end = asDateKey(dataset?.meta?.coverageEnd ?? dataset?.summary?.end);
+  if (!start || !end) return null;
+  if (!dataset.summary || typeof dataset.summary !== "object") dataset.summary = {};
+  if (!dataset.meta || typeof dataset.meta !== "object") dataset.meta = {};
+  dataset.summary.start = start;
+  dataset.summary.end = end;
+  dataset.summary.latest = `${end}T23:59:59.999Z`;
+  dataset.meta.coverageStart = start;
+  dataset.meta.coverageEnd = end;
+  return { startDate: start, endDate: end };
+}
+
 export function resolveManualPastDatasetSimulationWindow(dataset: any): {
   startDate: string;
   endDate: string;
@@ -522,6 +552,11 @@ export function remapManualPastDatasetForDisplayWindow(args: {
   usageInputMode?: string | null;
   displayWindowEndDate?: string | null;
 }): any {
+  if (isCanonicalManualPastArtifact(args.dataset)) {
+    preserveCanonicalManualPastArtifactCoverageForRead(args.dataset);
+    return args.dataset;
+  }
+
   const usageInputMode = resolveManualPastUsageInputMode(args.dataset, args.usageInputMode);
   if (!usageInputMode) {
     return args.dataset;
@@ -553,5 +588,16 @@ export function remapManualPastDatasetForDisplayWindow(args: {
     dataset: args.dataset,
     remap,
     includeDisplayNotes: true,
+    metaExtras: {
+      legacyManualDisplayRemapApplied: true,
+    },
   });
+}
+
+export function resolveManualDisplayDatasetForRead(args: {
+  dataset: any;
+  usageInputMode?: string | null;
+  displayWindowEndDate?: string | null;
+}): any {
+  return remapManualPastDatasetForDisplayWindow(args);
 }

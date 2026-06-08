@@ -14,6 +14,8 @@ import {
   resolveManualDisplayTruthWeatherHouseId,
   resolveManualProofComparisonFamily,
   resolveManualProofLegPayload,
+  readArtifactCoverageFromDataset,
+  readManualArtifactProofDiagnostics,
   stableManualProofHash,
   validateManifestFixtureIsolation,
 } from "@/lib/usage/manualCrossSurfaceParityProof";
@@ -442,5 +444,40 @@ describe("manualCrossSurfaceParityProof helpers", () => {
         MANUAL_CROSS_SURFACE_FIXTURE_BOOTSTRAP: "0",
       })
     ).toBe(false);
+  });
+
+  it("readArtifactCoverageFromDataset uses dataset summary/meta only", () => {
+    const coverage = readArtifactCoverageFromDataset({
+      summary: { start: "2025-06-07", end: "2026-06-06" },
+      meta: {
+        manualCanonicalArtifactWindowVersion: MANUAL_CANONICAL_ARTIFACT_WINDOW_VERSION,
+        manualCanonicalArtifactWindowPersistAudit: {
+          afterCoverageStart: "2025-06-05",
+          afterCoverageEnd: "2026-06-04",
+        },
+        coverageStart: "2025-06-07",
+        coverageEnd: "2026-06-06",
+      },
+    });
+    expect(coverage.artifactCoverageStart).toBe("2025-06-07");
+    expect(coverage.artifactCoverageEnd).toBe("2026-06-06");
+  });
+
+  it("readManualArtifactProofDiagnostics distinguishes canonical and legacy artifacts", () => {
+    const legacy = readManualArtifactProofDiagnostics({
+      summary: { start: "2025-06-05", end: "2026-06-04" },
+      meta: { usageInputMode: "MANUAL_ANNUAL" },
+      manualUsageMode: "ANNUAL",
+    });
+    const canonical = readManualArtifactProofDiagnostics({
+      summary: { start: "2025-06-07", end: "2026-06-06" },
+      meta: {
+        manualCanonicalArtifactWindowVersion: MANUAL_CANONICAL_ARTIFACT_WINDOW_VERSION,
+        usageInputMode: "MANUAL_ANNUAL",
+      },
+      manualUsageMode: "ANNUAL",
+    });
+    expect(legacy.manualArtifactCoverageClass).toBe("legacy");
+    expect(canonical.manualArtifactCoverageClass).toBe("canonical");
   });
 });

@@ -1,6 +1,6 @@
 {
   "proofVersion": "manual_cross_surface_parity_v2",
-  "generatedAt": "2026-06-08T21:41:43.619Z",
+  "generatedAt": "2026-06-08T22:26:31.614Z",
   "proofMode": "audit_only",
   "sourceHouseId": "8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8",
   "labHouseId": "29a3d820-2593-4673-9dd6-cd161bbd7f6f",
@@ -135,7 +135,7 @@
         "usageMode": "MANUAL_ANNUAL",
         "callerLabel": "manual_fixture_gapfill_annual_from_source_intervals",
         "hookVersion": "manual_canonical_artifact_v1",
-        "projectedAt": "2026-06-08T21:30:41.188Z",
+        "projectedAt": "2026-06-08T22:15:06.053Z",
         "serviceTree": "onePathSim",
         "afterCoverageEnd": "2026-06-06",
         "beforeCoverageEnd": "2026-06-04",
@@ -143,6 +143,8 @@
         "beforeCoverageStart": "2025-06-05"
       },
       "fixtureManualCanonicalArtifactWindowVersion": "manual_canonical_artifact_v1",
+      "manualArtifactCoverageClass": "canonical",
+      "legacyManualDisplayRemapApplied": false,
       "finalizedDailyRowsHash": "Y4W5W_S1tDs4hJK3X0iC2Q",
       "displayTruthRevision": "74LKYArBbaexFthyhS495m",
       "monthlyRowsHash": "n2iEQNIDLYtfsQj-UlXS74",

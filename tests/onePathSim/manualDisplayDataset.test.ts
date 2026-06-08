@@ -153,4 +153,55 @@ describe("manual display dataset remap", () => {
     expect(out.monthly[out.monthly.length - 1]).toEqual({ month: "2026-04", kwh: 29 });
     expect(out.insights.stitchedMonth).toBeNull();
   });
+
+  it("does not remap canonical-stamped manual artifacts at read time", () => {
+    const dataset = {
+      summary: { start: "2025-06-07", end: "2026-06-06", totalKwh: 365 },
+      meta: {
+        manualCanonicalArtifactWindowVersion: "manual_canonical_artifact_v1",
+        coverageStart: "2025-06-07",
+        coverageEnd: "2026-06-06",
+      },
+      daily: [{ date: "2025-06-07", kwh: 1, source: "SIMULATED" }],
+      series: { intervals15: [{ timestamp: "2025-06-07T00:00:00.000Z", kwh: 1 }] },
+    };
+
+    const out = remapManualDisplayDatasetToCanonicalWindow({
+      dataset,
+      usageInputMode: "MANUAL_ANNUAL",
+    });
+
+    expect(out).toBe(dataset);
+    expect(out.summary.start).toBe("2025-06-07");
+    expect(out.summary.end).toBe("2026-06-06");
+    expect(out.meta.legacyManualDisplayRemapApplied).toBeUndefined();
+  });
+
+  it("stamps legacyManualDisplayRemapApplied for unversioned legacy manual artifacts", () => {
+    const dataset = {
+      summary: { start: "2025-06-05", end: "2026-06-04", totalKwh: 3 },
+      meta: { usageInputMode: "MANUAL_ANNUAL" },
+      daily: [
+        { date: "2025-06-05", kwh: 1, source: "SIMULATED" },
+        { date: "2025-06-06", kwh: 1, source: "SIMULATED" },
+        { date: "2026-06-04", kwh: 1, source: "SIMULATED" },
+      ],
+      series: {
+        intervals15: [
+          { timestamp: "2025-06-05T00:00:00.000Z", kwh: 1 },
+          { timestamp: "2025-06-06T00:00:00.000Z", kwh: 1 },
+          { timestamp: "2026-06-04T00:00:00.000Z", kwh: 1 },
+        ],
+      },
+    };
+
+    const out = remapManualDisplayDatasetToCanonicalWindow({
+      dataset,
+      usageInputMode: "MANUAL_ANNUAL",
+      displayWindowEndDate: "2026-06-06",
+    });
+
+    expect(out.meta.legacyManualDisplayRemapApplied).toBe(true);
+    expect(out.summary.end).toBe("2026-06-06");
+  });
 });

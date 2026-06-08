@@ -119,6 +119,7 @@ import {
   extractPersistIntervals15,
   prepareManualPastDatasetForArtifactPersist,
 } from "@/lib/usage/manualPastArtifactCanonicalWindowPersist";
+import { preserveCanonicalManualPastArtifactCoverageForRead } from "@/lib/usage/persistManualPastArtifactCanonicalWindow";
 import {
   buildInitialPastSimLockboxInput,
   buildPastSimPerDayTrace,
@@ -781,13 +782,19 @@ function applyCanonicalCoverageMetadataForNonBaseline(
   options?: { buildInputs?: unknown; coverageWindow?: CoverageWindow }
 ): { startDate: string; endDate: string } | null {
   if (scenarioKey === "BASELINE" || !dataset?.summary) return null;
-  const canonicalCoverage = options?.coverageWindow ?? resolveCanonicalUsage365CoverageWindow();
-  dataset.summary.start = canonicalCoverage.startDate;
-  dataset.summary.end = canonicalCoverage.endDate;
-  dataset.summary.latest = `${canonicalCoverage.endDate}T23:59:59.999Z`;
-  if (!dataset.meta || typeof dataset.meta !== "object") dataset.meta = {};
-  dataset.meta.coverageStart = canonicalCoverage.startDate;
-  dataset.meta.coverageEnd = canonicalCoverage.endDate;
+  const preservedCoverage = preserveCanonicalManualPastArtifactCoverageForRead(dataset);
+  const canonicalCoverage =
+    preservedCoverage ?? options?.coverageWindow ?? resolveCanonicalUsage365CoverageWindow();
+  if (!preservedCoverage) {
+    dataset.summary.start = canonicalCoverage.startDate;
+    dataset.summary.end = canonicalCoverage.endDate;
+    dataset.summary.latest = `${canonicalCoverage.endDate}T23:59:59.999Z`;
+    if (!dataset.meta || typeof dataset.meta !== "object") dataset.meta = {};
+    dataset.meta.coverageStart = canonicalCoverage.startDate;
+    dataset.meta.coverageEnd = canonicalCoverage.endDate;
+  } else if (!dataset.meta || typeof dataset.meta !== "object") {
+    dataset.meta = {};
+  }
 
   let excludedDateKeys: Set<string>;
   if (options?.buildInputs != null) {

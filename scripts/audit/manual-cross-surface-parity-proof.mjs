@@ -166,6 +166,7 @@ async function probeArtifactLeg(args) {
     hashManualPayloadFields,
     readArtifactCoverageFromDataset,
     readDisplayCoverageFromDataset,
+    readManualArtifactProofDiagnostics,
     resolveCanonicalCoverageForProof,
   } = await import("../../lib/usage/manualCrossSurfaceParityProof.ts");
   const { readOnePathSimulatedUsageScenario } = await import("../../modules/onePathSim/serviceBridge.ts");
@@ -236,6 +237,7 @@ async function probeArtifactLeg(args) {
   const dataset = readback.dataset;
   const meta = dataset.meta ?? {};
   const artifactCoverage = readArtifactCoverageFromDataset(dataset);
+  const proofDiagnostics = readManualArtifactProofDiagnostics(dataset);
   const display = readDisplayCoverageFromDataset({
     dataset,
     usageInputMode: args.surfaceMode ?? null,
@@ -268,6 +270,8 @@ async function probeArtifactLeg(args) {
         ? meta.manualCanonicalArtifactWindowPersistAudit
         : null,
     fixtureManualCanonicalArtifactWindowVersion: args.fixtureManualCanonicalArtifactWindowVersion ?? null,
+    manualArtifactCoverageClass: proofDiagnostics.manualArtifactCoverageClass,
+    legacyManualDisplayRemapApplied: proofDiagnostics.legacyManualDisplayRemapApplied,
     ...fingerprints,
   };
 }

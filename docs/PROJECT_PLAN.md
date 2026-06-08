@@ -107,55 +107,82 @@
 
 ---
 
-## PC-2026-11 — Manual Past Sim unification (IN PROGRESS — Phase 1 proof only)
+## PC-2026-11 — Manual Past Sim unification (Phase 4 complete — 2026-06-08)
 
-**Status:** **Phase 1 approved and in progress.** GB and SMT Past proof close gates are accepted (`PROD_WEATHER_PARITY_PASS` evidence on `main`). **No runtime manual behavior changes in Phase 1.**
+**Status:** **Phases 1–4E complete.** Manual monthly and manual annual persist and read canonical Past display-window artifacts when `MANUAL_CANONICAL_ARTIFACT_WINDOW_PERSIST=1`. All four cross-surface proof modes **PASS** on keeper fixtures. GB/SMT interval logic unchanged. **Phase 5 dispatch convergence not started.**
 
 **Goal:** Manual monthly and manual annual converge on one canonical `modules/manualUsage/*` stack shared by User, Admin, Manual Monthly Lab, One Path admin, and GapFill — without forking sim, display, weather scoring, or variable stores.
+
+**Canonical artifact contract (Phase 4):**
+
+- Product artifact coverage: **2025-06-07 → 2026-06-06** (`meta.manualCanonicalArtifactWindowVersion = manual_canonical_artifact_v1`)
+- Bill/statement-period windows remain **input/constraint truth** and are preserved diagnostically (`manualCanonicalArtifactWindowPersistAudit` on persist)
+- **Persist:** `projectManualPastDatasetToCanonicalWindow()` at artifact write when `MANUAL_CANONICAL_ARTIFACT_WINDOW_PERSIST=1`
+- **Read:** canonical-stamped artifacts are product truth — **no read-time remap**; legacy unversioned artifacts still use explicit legacy display remap (`legacyManualDisplayRemapApplied`)
+- **Product readback coverage** comes from dataset `meta`/`summary`, not persist-audit fallback
+- GapFill actual comparison remains bill/statement-period based and uses actual SMT intervals (`actualIntervalTotalKwh`)
 
 **Phase 1 (complete — proof only):**
 
 - Read-only cross-surface proof: `scripts/audit/manual-cross-surface-parity-proof.mjs`
 - Pure helpers: `lib/usage/manualCrossSurfaceParityProof.ts`
-- Requires `PROOF_AUDIT_ONLY=1`; fails closed on missing env; **no production writes** unless future phases explicitly set `ALLOW_PROD_MANUAL_RECALC=1`
-- Exposes manual parity gaps (coverage window, payload normalization, read-model hashes, legacy GapFill read path, `onePathSim/manual*` facade drift) **without fixing them**
+- Requires `PROOF_AUDIT_ONLY=1`; fails closed on missing env; **no production writes** unless `ALLOW_PROD_MANUAL_RECALC=1`
 
-**Phase 1B (approved — baseline fixtures):**
+**Phase 1B (complete — baseline fixtures):**
 
 - Fixture bootstrap: `scripts/audit/bootstrap-manual-cross-surface-fixtures.mjs` (requires `ALLOW_PROD_MANUAL_RECALC=1`)
 - Writes `scripts/audit/manual-cross-surface-fixture-manifest.json` with per-leg artifact hashes
 - Source-house manual payloads are never overwritten; lab/test-home writes isolated to `AUDIT_LAB_HOUSE_ID`
 - Proof separates **same_payload_parity** vs **gapfill_derived_payload_parity** comparison families
 
-**Phase 2A (approved — GapFill manual readback only):**
+**Phase 2A (complete — GapFill manual readback only):**
 
 - GapFill `MANUAL_MONTHLY`, `MONTHLY_FROM_SOURCE_INTERVALS`, `ANNUAL_FROM_SOURCE_INTERVALS` read through `buildOnePathManualUsagePastSimReadResult` → `readOnePathSimulatedUsageScenario`
 - `EXACT_INTERVALS` and non-manual GapFill modes unchanged
-- Legacy `buildManualUsagePastSimReadResult` → `usageSimulator/service.getSimulatedUsageForHouseScenario` eliminated for manual GapFill readback only
 
-**Phase 4C (approved — guarded persist wiring):**
+**Phase 4B (complete — shared projection helper):**
+
+- `lib/usage/persistManualPastArtifactCanonicalWindow.ts` — `projectManualPastDatasetToCanonicalWindow()`, coverage class helpers
+- Tests: `tests/usage/persistManualPastArtifactCanonicalWindow.test.ts`
+
+**Phase 4C / 4C-2 (complete — guarded persist wiring + fixture/proof hardening):**
 
 - Env guard: `MANUAL_CANONICAL_ARTIFACT_WINDOW_PERSIST=1`
 - Shared persist hook: `lib/usage/manualPastArtifactCanonicalWindowPersist.ts`
-- Wired into user + One Path sim services at artifact persist only (`recalcSimulatorBuildImpl`, allow_rebuild, GapFill shared rebuild)
-- When flag on, `MANUAL_TOTALS` monthly/annual artifacts call `projectManualPastDatasetToCanonicalWindow()` before cache write
-- Read-time remap unchanged (Phase 4D)
+- Wired into user + One Path sim services at artifact persist only
+- Bootstrap sets persist flag + `preservePastCacheVariants` for multi-leg fixture stability
 - Tests: `tests/usage/manualPastArtifactCanonicalWindowPersist.test.ts`
 
-**Later phases (require separate approval — not started):**
+**Phase 4D (complete — read-time canonical / legacy-only remap):**
 
-- Phase 4D: read-time remap no-op when canonical version stamped
-- Phase 4E: bootstrap + proof reruns / final docs
-- Phase 5: GapFill regression protection
+- `resolveManualDisplayDatasetForRead()` — no-op remap for canonical-stamped artifacts
+- `preserveCanonicalManualPastArtifactCoverageForRead()` — canonical coverage wins over non-baseline metadata overwrite
+- Proof: product coverage from dataset meta/summary only (persist audit not used at readback)
+- Tests: `tests/usage/manualPastArtifactReadTimeCanonical.test.ts`, updates to display/read/proof tests
+
+**Phase 4E (complete — closeout, proof refresh, docs):**
+
+- Fixture rebuild: `AUDIT_FIXTURE_PHASE=ALL` with `MANUAL_CANONICAL_ARTIFACT_WINDOW_PERSIST=1`, `PAST_SIM_RECALC_INLINE=true`, `ALLOW_PROD_MANUAL_RECALC=1`
+- Four proof outputs (all `MANUAL_CROSS_SURFACE_PARITY_PASS`):
+  - `scripts/audit/proof-same-payload-monthly.json`
+  - `scripts/audit/proof-same-payload-annual.json`
+  - `scripts/audit/proof-gapfill-derived-monthly.json`
+  - `scripts/audit/proof-gapfill-derived-annual.json`
+
+**Future work (separate approval — not started):**
+
+- Phase 5: dispatch convergence / shared `runSharedSimulation` replacement
+- Manual GapFill redesign
+- Past/future overlay logic
 
 **Protected (all phases):**
 
-- GapFill `EXACT_INTERVALS` and constrained manual modes (`MANUAL_MONTHLY`, `MONTHLY_FROM_SOURCE_INTERVALS`, `ANNUAL_FROM_SOURCE_INTERVALS`)
-- GapFill anchor/date controls, auto statement ranges, interval-to-manual derivation, actual-interval compare
-- Input-side anchor/bill-period logic stays in `manualUsage/*`; eventual artifact window must match SMT/GB canonical Past contract (Phase 4+ only)
+- GapFill `EXACT_INTERVALS` and constrained manual modes unchanged
+- GapFill anchor/date controls, auto statement ranges, interval-to-manual derivation unchanged
 - GB/SMT interval sim math and weather proof gates unchanged
+- Scoring/validation/WAPE/Simulation Accuracy unchanged
 
-**Evidence (Phase 1):** `scripts/audit/manual-cross-surface-parity-proof-output.json` after guarded runs.
+**Evidence (Phase 4E closeout):** regenerated `manual-cross-surface-fixture-manifest.json` + four `proof-*.json` files above; keeper `AUDIT_SOURCE_HOUSE_ID=8a6fe8b9-…`, `AUDIT_LAB_HOUSE_ID=29a3d820-…`.
 
 ---
 

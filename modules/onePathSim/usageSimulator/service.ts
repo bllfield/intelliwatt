@@ -80,6 +80,7 @@ import {
   extractPersistIntervals15,
   prepareManualPastDatasetForArtifactPersist,
 } from "@/lib/usage/manualPastArtifactCanonicalWindowPersist";
+import { preserveCanonicalManualPastArtifactCoverageForRead } from "@/lib/usage/persistManualPastArtifactCanonicalWindow";
 import { resolveWindowFromBuildInputsForPastIdentity } from "@/modules/onePathSim/usageSimulator/windowIdentity";
 import { INTRADAY_TEMPLATE_VERSION } from "@/modules/onePathSim/simulatedUsage/intradayTemplates";
 import { computeMonthlyOverlay, computePastOverlay, computeFutureOverlay } from "@/modules/usageScenario/overlay";
@@ -855,14 +856,20 @@ function applyCanonicalCoverageMetadataForNonBaseline(
   options?: { buildInputs?: unknown; coverageWindow?: CoverageWindow }
 ): { startDate: string; endDate: string } | null {
   if (scenarioKey === "BASELINE" || !dataset?.summary) return null;
-  const manualCoverage = resolveManualCoverageWindowFromBuildInputs(options?.buildInputs);
-  const canonicalCoverage = manualCoverage ?? options?.coverageWindow ?? resolveCanonicalUsage365CoverageWindow();
-  dataset.summary.start = canonicalCoverage.startDate;
-  dataset.summary.end = canonicalCoverage.endDate;
-  dataset.summary.latest = `${canonicalCoverage.endDate}T23:59:59.999Z`;
-  if (!dataset.meta || typeof dataset.meta !== "object") dataset.meta = {};
-  dataset.meta.coverageStart = canonicalCoverage.startDate;
-  dataset.meta.coverageEnd = canonicalCoverage.endDate;
+  const preservedCoverage = preserveCanonicalManualPastArtifactCoverageForRead(dataset);
+  const manualCoverage = preservedCoverage ? null : resolveManualCoverageWindowFromBuildInputs(options?.buildInputs);
+  const canonicalCoverage =
+    preservedCoverage ?? manualCoverage ?? options?.coverageWindow ?? resolveCanonicalUsage365CoverageWindow();
+  if (!preservedCoverage) {
+    dataset.summary.start = canonicalCoverage.startDate;
+    dataset.summary.end = canonicalCoverage.endDate;
+    dataset.summary.latest = `${canonicalCoverage.endDate}T23:59:59.999Z`;
+    if (!dataset.meta || typeof dataset.meta !== "object") dataset.meta = {};
+    dataset.meta.coverageStart = canonicalCoverage.startDate;
+    dataset.meta.coverageEnd = canonicalCoverage.endDate;
+  } else if (!dataset.meta || typeof dataset.meta !== "object") {
+    dataset.meta = {};
+  }
 
   let excludedDateKeys: Set<string>;
   if (options?.buildInputs != null) {

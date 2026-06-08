@@ -9,10 +9,11 @@ function readRepoFile(relativePath: string): string {
 }
 
 describe("one path manual past sim read result source", () => {
-  it("keeps manual display and reconciliation on the same projected dataset owner", () => {
+  it("skips legacy read-time remap for canonical-stamped manual artifacts", () => {
     const source = readRepoFile("modules/onePathSim/manualPastSimReadResult.ts");
 
-    expect(source).toContain("const displayDatasetRaw = out.dataset;");
+    expect(source).toContain("isCanonicalManualPastArtifact(displayDatasetRaw)");
+    expect(source).toContain("resolveManualDisplayDatasetForRead");
     expect(source).not.toContain('projectionMode: "raw"');
     expect(source).not.toContain("loadManualUsageRawDisplayDataset(");
   });
