@@ -102,6 +102,17 @@ export async function requestUsageRefreshForUserHouse(args: {
     return { ok: false, error: "home_not_found" };
   }
 
+  const { isUserFacingSmtBackfillAllowed } = await import("@/lib/usage/smtBackfillEligibility");
+  if (
+    !(await isUserFacingSmtBackfillAllowed({
+      houseId: targetHouse.id,
+      userId: args.userId,
+      esiid: targetHouse.esiid ?? null,
+    }))
+  ) {
+    return { ok: true, homes: [], backfill: [] };
+  }
+
   const adminToken = process.env.ADMIN_TOKEN ?? "";
   if (!adminToken) {
     return {

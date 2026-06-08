@@ -29,6 +29,10 @@ vi.mock("@/lib/usage/ensureSmtCoverage", () => ({
   ensureSmtCoverageForHouse: (...args: any[]) => ensureSmtCoverageForHouse(...args),
 }));
 
+vi.mock("@/lib/usage/smtBackfillEligibility", () => ({
+  isUserFacingSmtBackfillAllowed: vi.fn().mockResolvedValue(true),
+}));
+
 describe("one path upstream usage truth tail refresh", () => {
   beforeEach(() => {
     vi.clearAllMocks();

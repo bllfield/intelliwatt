@@ -40,7 +40,8 @@ export type EnsureSmtCoverageSkippedReason =
   | "session_throttle"
   | "no_esiid"
   | "window_ready"
-  | "green_button_committed";
+  | "green_button_committed"
+  | "not_smt_committed";
 
 export type EnsureSmtCoverageResult = {
   healed: boolean;
@@ -141,9 +142,11 @@ export async function ensureSmtCoverageForHouse(args: {
   skipUsageRefresh?: boolean;
 }): Promise<EnsureSmtCoverageResult> {
   const window = resolveSmtCanonicalWindow();
-  const { isHouseCommittedToGreenButton } = await import("@/lib/usage/houseCommittedUsageSource");
+  const { isSmtBackfillBlockedForGreenButtonHome, isUserFacingSmtBackfillAllowed } = await import(
+    "@/lib/usage/smtBackfillEligibility"
+  );
   if (
-    await isHouseCommittedToGreenButton({
+    await isSmtBackfillBlockedForGreenButtonHome({
       houseId: args.houseId,
       userId: args.userId,
       esiid: args.esiid ?? null,
@@ -152,6 +155,21 @@ export async function ensureSmtCoverageForHouse(args: {
     return {
       healed: false,
       skippedReason: "green_button_committed",
+      dayStatus: emptyWindowStatus(window),
+      window,
+    };
+  }
+  if (
+    args.profile !== "admin_sim" &&
+    !(await isUserFacingSmtBackfillAllowed({
+      houseId: args.houseId,
+      userId: args.userId,
+      esiid: args.esiid ?? null,
+    }))
+  ) {
+    return {
+      healed: false,
+      skippedReason: "not_smt_committed",
       dayStatus: emptyWindowStatus(window),
       window,
     };

@@ -6,6 +6,7 @@ import {
   resolveSimulationHouseForUser,
 } from "@/lib/usage/resolveActualContextHouseForSimulation";
 import { ensureSmtCoverageForHouse } from "@/lib/usage/ensureSmtCoverage";
+import { isUserFacingSmtBackfillAllowed } from "@/lib/usage/smtBackfillEligibility";
 import {
   isGreenButtonPrimaryDataset,
   isResolvedDatasetTailDisplayReady,
@@ -396,10 +397,20 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
     };
   }
   if (resolved?.dataset) {
-    const greenButtonOnlyMode = args.preferredActualSource === "GREEN_BUTTON" || isGreenButtonPrimaryDataset(resolved.dataset);
+    const smtBackfillAllowed = await isUserFacingSmtBackfillAllowed({
+      houseId: actualContextHouse.id,
+      userId: actualContextOwnerUserId,
+      esiid: actualContextHouseWithEffectiveEsiid.esiid,
+    });
+    const greenButtonOnlyMode =
+      !smtBackfillAllowed ||
+      args.preferredActualSource === "GREEN_BUTTON" ||
+      isGreenButtonPrimaryDataset(resolved.dataset);
     const esiidForTail = actualContextHouseWithEffectiveEsiid.esiid;
     const shouldRefreshSmtTail =
       args.seedIfMissing === true &&
+      smtBackfillAllowed &&
+      args.preferredActualSource !== "GREEN_BUTTON" &&
       !greenButtonOnlyMode &&
       Boolean(esiidForTail) &&
       !isGreenButtonPrimaryDataset(resolved.dataset);
@@ -557,6 +568,40 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
     seedingAttempted: true,
     usageTruthSource: "missing_usage_truth",
   });
+
+  if (
+    !(await isUserFacingSmtBackfillAllowed({
+      houseId: actualContextHouse.id,
+      userId: actualContextOwnerUserId,
+      esiid: actualContextHouseWithEffectiveEsiid.esiid,
+    }))
+  ) {
+    logBaselineUsageTruthEvent("baseline_upstream_usage_truth_lookup_failure", {
+      userId: args.userId,
+      selectedHouseId: selectedHouse.id,
+      actualContextHouseId: actualContextHouse.id,
+      usageTruthAlreadyExists: false,
+      seedingAttempted: false,
+      usageTruthSource: "missing_usage_truth",
+    });
+    return {
+      selectedHouse: selectedHouseWithEffectiveEsiid,
+      actualContextHouse: actualContextHouseWithEffectiveEsiid,
+      dataset: null,
+      alternatives: resolved?.alternatives ?? { smt: null, greenButton: null },
+      usageTruthSource: "missing_usage_truth",
+      seedResult: null,
+      summary: buildUpstreamUsageTruthSummary({
+        selectedHouseId: selectedHouse.id,
+        actualContextHouseId: actualContextHouse.id,
+        dataset: null,
+        usageTruthSource: "missing_usage_truth",
+        seedResult: null,
+        preferredActualSource: args.preferredActualSource ?? null,
+        seedIfMissing: args.seedIfMissing,
+      }),
+    };
+  }
 
   const runSessionKey = `sim:${String(args.runId ?? actualContextHouse.id).trim()}`;
   const ensure = await ensureSmtCoverageForHouse({

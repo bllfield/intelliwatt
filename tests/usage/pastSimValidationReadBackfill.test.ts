@@ -20,6 +20,22 @@ describe("pastSimValidationReadBackfill", () => {
     ).toBe(false);
   });
 
+  it("does not backfill when baseKind is MANUAL even if mode is SMT_BASELINE", () => {
+    expect(
+      isPastScenarioValidationBackfillEligible({
+        scenarioId: "past-scenario-1",
+        buildInputs: {
+          mode: "SMT_BASELINE",
+          baseKind: "MANUAL",
+          timezone: "America/Chicago",
+          snapshots: { actualSource: "SMT", scenario: { name: WORKSPACE_PAST_SCENARIO_NAME } },
+        },
+        storedValidationKeyCount: 0,
+        storedSelectionMode: null,
+      }),
+    ).toBe(false);
+  });
+
   it("allows backfill for SMT baseline Past builds", () => {
     expect(
       isPastScenarioValidationBackfillEligible({

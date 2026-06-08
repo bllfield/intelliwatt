@@ -4,6 +4,7 @@ import {
   resolveSimulationHouseForUser,
 } from "@/lib/usage/resolveActualContextHouseForSimulation";
 import { ensureSmtCoverageForHouse } from "@/lib/usage/ensureSmtCoverage";
+import { isUserFacingSmtBackfillAllowed } from "@/lib/usage/smtBackfillEligibility";
 import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 import { resolveReportedCoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 
@@ -270,6 +271,30 @@ export async function resolveUpstreamUsageTruthForSimulation(args: {
   }
 
   const runSessionKey = `sim:${String(args.runId ?? actualContextHouse.id).trim()}`;
+  if (
+    !(await isUserFacingSmtBackfillAllowed({
+      houseId: actualContextHouse.id,
+      userId: actualContextOwnerUserId,
+      esiid: actualContextHouseWithEffectiveEsiid.esiid,
+    }))
+  ) {
+    return {
+      selectedHouse: selectedHouseWithEffectiveEsiid,
+      actualContextHouse: actualContextHouseWithEffectiveEsiid,
+      dataset: null,
+      alternatives: resolved?.alternatives ?? { smt: null, greenButton: null },
+      usageTruthSource: "missing_usage_truth",
+      seedResult: null,
+      summary: buildUpstreamUsageTruthSummary({
+        selectedHouseId: selectedHouse.id,
+        actualContextHouseId: actualContextHouse.id,
+        dataset: null,
+        usageTruthSource: "missing_usage_truth",
+        seedResult: null,
+      }),
+    };
+  }
+
   const ensure = await ensureSmtCoverageForHouse({
     userId: actualContextOwnerUserId,
     houseId: actualContextHouse.id,

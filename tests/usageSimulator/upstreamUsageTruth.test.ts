@@ -20,11 +20,19 @@ vi.mock("@/lib/usage/ensureSmtCoverage", () => ({
   ensureSmtCoverageForHouse: (...args: any[]) => ensureSmtCoverageForHouse(...args),
 }));
 
+const isUserFacingSmtBackfillAllowed = vi.fn();
+
+vi.mock("@/lib/usage/smtBackfillEligibility", () => ({
+  isUserFacingSmtBackfillAllowed: (...args: any[]) => isUserFacingSmtBackfillAllowed(...args),
+}));
+
 describe("live shared upstream usage truth owner", () => {
   beforeEach(() => {
     findFirst.mockReset();
     resolveIntervalsLayer.mockReset();
     ensureSmtCoverageForHouse.mockReset();
+    isUserFacingSmtBackfillAllowed.mockReset();
+    isUserFacingSmtBackfillAllowed.mockResolvedValue(true);
 
     findFirst.mockImplementation(async ({ where }: any) => {
       if (where.id === "house-1") return { id: "house-1", esiid: "esiid-1" };
@@ -112,6 +120,25 @@ describe("live shared upstream usage truth owner", () => {
       seedingAttempted: true,
       seedingResult: "success",
     });
+  });
+
+  it("does not request SMT refresh when user-facing SMT backfill is not allowed", async () => {
+    resolveIntervalsLayer.mockResolvedValueOnce({ dataset: null, alternatives: { smt: null, greenButton: null } });
+    isUserFacingSmtBackfillAllowed.mockResolvedValue(false);
+    const { resolveUpstreamUsageTruthForSimulation } = await import(
+      "@/modules/usageSimulator/upstreamUsageTruth"
+    );
+
+    const out = await resolveUpstreamUsageTruthForSimulation({
+      userId: "user-1",
+      houseId: "house-1",
+      actualContextHouseId: "house-2",
+      seedIfMissing: true,
+    });
+
+    expect(ensureSmtCoverageForHouse).not.toHaveBeenCalled();
+    expect(out.usageTruthSource).toBe("missing_usage_truth");
+    expect(out.dataset).toBeNull();
   });
 
   it("uses the provided SMT source esiid when the actual-context test home has no esiid", async () => {

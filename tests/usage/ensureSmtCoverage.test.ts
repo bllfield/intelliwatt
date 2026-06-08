@@ -59,6 +59,13 @@ vi.mock("@/lib/usage/smtTailCoverage", async (importOriginal) => {
   };
 });
 
+const isUserFacingSmtBackfillAllowed = vi.fn();
+
+vi.mock("@/lib/usage/smtBackfillEligibility", () => ({
+  isSmtBackfillBlockedForGreenButtonHome: vi.fn().mockResolvedValue(false),
+  isUserFacingSmtBackfillAllowed: (...args: unknown[]) => isUserFacingSmtBackfillAllowed(...args),
+}));
+
 import { prisma } from "@/lib/db";
 import {
   clearEnsureSmtCoverageSessionThrottleForTests,
@@ -99,6 +106,8 @@ function windowStatus(overrides?: Partial<ReturnType<typeof loadSmtWindowDayStat
 
 beforeEach(() => {
   clearEnsureSmtCoverageSessionThrottleForTests();
+  isUserFacingSmtBackfillAllowed.mockReset();
+  isUserFacingSmtBackfillAllowed.mockResolvedValue(true);
   findHouseMock.mockResolvedValue({ esiid: "esiid-1" } as never);
   resolveSmtPersistedCoverageSpanMock.mockResolvedValue({
     startDate: "2025-04-16",
@@ -279,5 +288,33 @@ describe("ensureSmtCoverageForHouse", () => {
     expect(waitForSmtDateCoverageMock).toHaveBeenCalledWith(
       expect.objectContaining({ timeoutMs: 8_000 })
     );
+  });
+
+  it("skips user-facing heal when the home is not SMT committed", async () => {
+    isUserFacingSmtBackfillAllowed.mockResolvedValue(false);
+    const result = await ensureSmtCoverageForHouse({
+      userId: "user-1",
+      houseId: "house-1",
+      profile: "user_session",
+      sessionKey: "manual-home",
+    });
+
+    expect(result.healed).toBe(false);
+    expect(result.skippedReason).toBe("not_smt_committed");
+    expect(requestUsageRefreshForUserHouseMock).not.toHaveBeenCalled();
+  });
+
+  it("still allows admin_sim heal when user-facing SMT gate would block", async () => {
+    isUserFacingSmtBackfillAllowed.mockResolvedValue(false);
+    const result = await ensureSmtCoverageForHouse({
+      userId: "user-1",
+      houseId: "house-1",
+      profile: "admin_sim",
+      sessionKey: "one-path",
+      force: true,
+    });
+
+    expect(result.skippedReason).not.toBe("not_smt_committed");
+    expect(result.healed).toBe(true);
   });
 });
