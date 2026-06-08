@@ -70,6 +70,8 @@ Persistence status today:
   `usagePrisma.HomeSimulatedUsageBucket` for non-baseline scenarios.
 - Corrected baseline persistence belongs to this derived layer (`PAST_SIM_BASELINE`) when enabled, not to `BASELINE_INTERVALS`.
 
+**Validation holdout (PC-2026-10):** Production Past recalc wires `validationHoldoutDateKeysLocal` from `buildInputs.validationOnlyDateKeysLocal` into shared `simulatePastUsageDataset` / `buildPastSimulatedBaselineV1`. Display stitch flips validation days to ACTUAL (`projectBaselineFromCanonicalDataset`); compare sidecar uses holdout sim totals (`validationCanonicalSimulatedDayTotalsByDateLocal`, `meta.validationHoldoutProof`). Owners: `lib/usage/pastValidationHoldout.ts`, `modules/usageSimulator/service.ts`. Contract: `docs/PAST_VALIDATION_HOLDOUT.md`.
+
 ### `FUTURE_SIM_BASELINE`
 
 - Concept exists (past overlays applied to future starting curve).

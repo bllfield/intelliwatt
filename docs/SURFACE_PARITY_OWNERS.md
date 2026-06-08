@@ -81,7 +81,8 @@ Two parallel module trees exist for historical reasons. **Any Past Sim parity fi
 
 - **SMT trusted pool / Past Sim:** 96/96 Chicago slots (`smtWindowStatus`). Incomplete-meter ledger days filtered by slot completeness (DST fall-back).
 - **Green Button trusted pool:** `trustedIntervalThresholdForDateKey` (92/96/100). `trustedActualDateKeys` from GB coverage fetch passed into Past engine.
-- **Validation days:** `forceModeledOutputKeepReferencePoolDateKeysLocal` (keep-ref) — scored validation actuals stay in the donor pool; output is still modeled for compare.
+- **Validation days (production Past):** `validationHoldoutDateKeysLocal` + `strict_holdout` in shared Past sim — target validation date excluded from donor/shape pools; compare uses holdout sim (`VALIDATION_HOLDOUT`). Display stays **ACTUAL** via `projectBaselineFromCanonicalDataset`. Metric: **Holdout WAPE** only when `meta.validationHoldoutProof.ok`. **Contract:** `docs/PAST_VALIDATION_HOLDOUT.md` (PC-2026-10).
+- **Gap-Fill lab test days only:** `forceModeledOutputKeepReferencePoolDateKeysLocal` (keep-ref) may remain for bounded lab scoring — not production Past validation.
 - **Past 15-minute load curve (display):** `lib/usage/pastSimDisplayFromDataset.ts` → `resolvePastSimFifteenMinuteCurveFromDataset()` — User Usage and One Path must both call this; no sage upstream or local rebuilds.
 
 ---

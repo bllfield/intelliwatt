@@ -179,6 +179,10 @@ export type PastDaySimulationContext = {
   lowDataWeatherEvidence?: PastLowDataWeatherEvidenceSummary | null;
   weatherEfficiencyDerivedInput?: WeatherEfficiencyDerivedInput | null;
   simulationVariablePolicy?: SimulationVariablePolicy | null;
+  /** Validation/test holdout keys — donor/shape pools exclude per validationHoldoutMode. */
+  validationHoldoutDateKeys?: ReadonlySet<string> | readonly string[] | null;
+  validationHoldoutMode?: import("@/lib/usage/pastValidationHoldout").ValidationHoldoutMode | null;
+  intervalSourceType?: import("@/lib/usage/pastValidationHoldout").PastIntervalSourceType | null;
 };
 
 /** Request to simulate one past day. */
@@ -202,6 +206,7 @@ export type SimulatedDayResult = {
   simulatedReasonCode?:
     | "TRAVEL_VACANT"
     | "TEST_MODELED_KEEP_REF"
+    | "VALIDATION_HOLDOUT"
     | "MANUAL_CONSTRAINED_DAY"
     | "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
     | "FORCED_SELECTED_DAY"
@@ -305,5 +310,5 @@ export type PastDayApplianceProfile = {
 };
 
 /** Lightweight metadata to prove both paths use the same core. */
-export const PAST_DAY_SIMULATOR_VERSION = "1.0.0";
+export const PAST_DAY_SIMULATOR_VERSION = "1.1.0-validation-holdout";
 export const SOURCE_OF_DAY_SIMULATION_CORE = "shared_past_day_simulator";

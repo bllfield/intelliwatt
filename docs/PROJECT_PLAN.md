@@ -86,6 +86,27 @@
 
 ---
 
+## PC-2026-10 — Past validation holdout (COMPLETE — 2026-06-06)
+
+**Status:** **Complete.** **Contract:** `docs/PAST_VALIDATION_HOLDOUT.md`.
+
+**Problem:** Production Past validation scored days used `TEST_MODELED_KEEP_REF`, keeping target-day actual kWh/shape in donor pools — compare “WAPE” was reconstruction, not holdout.
+
+**Policy (locked):**
+
+- **Display:** validation days stay **ACTUAL** (`projectBaselineFromCanonicalDataset`).
+- **Compare:** true holdout sim only (`VALIDATION_HOLDOUT`); metric **Holdout WAPE** only when `meta.validationHoldoutProof.ok`.
+- **Sources:** GREEN_BUTTON, SMT, and future interval-backed sources share `lib/usage/pastValidationHoldout.ts` + `buildPastSimulatedBaselineV1` — not source adapters.
+- **Gap-Fill lab:** bounded test-day keep-ref remains lab-only; production Past uses `validationHoldoutDateKeysLocal`.
+
+**Shipped owners:** `pastValidationHoldout.ts`, `engine.ts`, `pastDaySimulator.ts`, `simulatePastUsageDataset.ts`, `usageSimulator/service.ts` (both trees), `validationCompareProjection.ts`, `ValidationComparePanel.tsx`.
+
+**Tests:** `tests/usage/pastValidationHoldout.test.ts`, holdout case in `buildPastSimulatedBaselineV1.resolvedFingerprint.test.ts`.
+
+**Same-pass doc sync:** `PAST_VALIDATION_HOLDOUT.md`, `SURFACE_PARITY_OWNERS.md`, `USAGE_SIMULATION_PLAN.md`, `PAST_SHARED_CORE_UNIFICATION_PLAN.md`, `PROJECT_CONTEXT.md`, `USAGE_LAYER_MAP.md`, `CHAT_BOOTSTRAP.txt`.
+
+---
+
 ## PC-2026-09 — Past visible weather parity (COMPLETE — 2026-06-06)
 
 **Status:** **Complete.** GB Past keeper cross-surface weather **input parity** and visible cards aligned. Score match alone is **not** sufficient — acceptance requires `pastWeatherCrossSurfaceParity.ok` and `acceptanceProof.ok`.
@@ -364,8 +385,8 @@ LEGACY / NON-AUTHORITATIVE historical drift notes:
 
 - **Target data pool & scoring semantics (authoritative):** `docs/USAGE_SIMULATION_PLAN.md` → *Gap-Fill Lab: Target architecture (data pool, single run, scoring)*. The good-data pool for the shared sim **excludes only** travel/vacant (bad at-home signal); **test compare** days’ actuals **are** in the pool. **Implemented:** Gap-Fill launches shared Past recalc, then grades persisted canonical sim vs actual on test days from the saved artifact family and compare sidecars. Engineering notes: `docs/PAST_SHARED_CORE_UNIFICATION_PLAN.md` → *What changed to match the target*.
 - Past Sim and GapFill compare use the same shared artifact identity/fingerprint and shared simulator logic path.
-- User Past stitch display: `projectBaselineFromCanonicalDataset` + optional `rehydrateValidationCompareMetaFromBuildInputsForRead` ensure validation days show **actual** usage in the main Past table/chart series while **TRAVEL_VACANT** stays simulated in stitch; compare rows come from **`attachValidationCompareProjection`** (artifact-backed canonical simulated-day totals), not a duplicate engine.
-- Green Button Past canonical curve simulates **Travel/Vacant only**; validation/test simulated values are **compare-only**. Artifact save + read finalize persist interval-backed headline totals, weather cards, and TOD/`displayTotalsAudit` owners (`meta.pastDisplayInsightsSyncedAt`, `meta.pastDisplayWeatherSensitivityScore`) shared by user and admin.
+- User Past stitch display: `projectBaselineFromCanonicalDataset` + optional `rehydrateValidationCompareMetaFromBuildInputsForRead` ensure validation days show **actual** usage in the main Past table/chart series while **TRAVEL_VACANT** stays simulated in stitch; compare rows come from **`attachValidationCompareProjection`** (holdout canonical simulated-day totals per PC-2026-10), not a duplicate engine.
+- Green Button / SMT Past: travel/vacant simulated in stitch; validation display **ACTUAL**, compare **holdout sim** (`docs/PAST_VALIDATION_HOLDOUT.md`). Artifact save + read finalize persist interval-backed headline totals, weather cards, and TOD/`displayTotalsAudit` owners (`meta.pastDisplayInsightsSyncedAt`, `meta.pastDisplayWeatherSensitivityScore`) shared by user and admin.
 - Past cached artifact reads: `reconcileRestoredPastDatasetFromDecodedIntervals` rebuilds `daily` / `series.daily` from decoded 15‑minute intervals so table/chart rows cannot carry stale simulated-day labels forward from a prior run when the same scope is re-simulated and persisted; simulated ownership is driven by explicit meta fields when present (`dataset.ts`).
 - Past Sim **Validation / Test Day Compare** (user UI): section loads **collapsed**; expand shows the compare table including **optional** per-row weather from **`dataset.dailyWeather`** (same basis as the Past daily table—display only, not scoring).
 - Past Sim **daily Source** labels and **chart vs table**: validation/test dates in baseline projection show meter-backed **ACTUAL** in **`dataset.daily`** and **`series.daily`**; non-travel simulated rows may show reason subtypes (incomplete meter, leading missing, OTHER) from the shared producer meta—display/projection only, not a new simulator path.

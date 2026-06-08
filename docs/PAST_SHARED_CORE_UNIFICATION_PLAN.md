@@ -129,7 +129,7 @@ Authoritative expanded write-up: `docs/USAGE_SIMULATION_PLAN.md` → **Gap-Fill 
 
 Summary:
 
-- **Reference / good-data pool** for the shared Past sim includes **test compare** days’ **actual** intervals (they are trustworthy at-home usage). **Only** travel/vacant (and similar exclusions) are **withheld** from that pool as bad reference signal.
+- **Reference / good-data pool** for the shared Past sim includes trustworthy at-home actual days. **Withheld from pool:** travel/vacant and **validation holdout targets** when simulating those validation days (`validationHoldoutDateKeysLocal`, PC-2026-10). Validation days may still contribute actual signal to **other** days’ pools; they must not donate to their own holdout sim. **Contract:** `docs/PAST_VALIDATION_HOLDOUT.md`.
 - **Travel/vacant** days are **not** in the pool; they are **filled** by the same shared sim using the **rest** of the good window.
 - **One** shared producer execution writes the canonical Past artifact. Gap-Fill may launch that shared recalc, but compare/parity consume the persisted artifact only.
 - **Target for test rows:** test-day simulated values in Gap-Fill grading come from persisted canonical artifact fields and compare sidecars produced by the shared lockbox run, not from a Gap-Fill-owned fresh compare path.
@@ -137,7 +137,7 @@ Summary:
 ### Stitch UI vs compare UI (contract)
 
 - **Stitched Past chart/table (Usage dashboard):** After `getSimulatedUsageForHouseScenario`, **`projectBaselineFromCanonicalDataset`** replaces **validation-only** dates with **actual meter** daily totals and labels (`ACTUAL_VALIDATION_TEST_DAY`). **TRAVEL_VACANT** modeled days remain **`SIMULATED_TRAVEL_VACANT`** in stitch. If a cached artifact omitted `meta.validationOnlyDateKeysLocal`, **`rehydrateValidationCompareMetaFromBuildInputsForRead`** restores keys from `usageSimulatorBuild.buildInputs` before projection + **`attachValidationCompareProjection`** so compare rows exist and stitch labels are not stuck on `SIMULATED_TEST_DAY`. The daily **Source** column distinguishes incomplete-meter and leading-missing simulated fills (from `simulatedReasonCode` / persisted `simulatedSourceDetailByDate`) from travel, test (pre-projection), and OTHER. Chart and table both consume the same post-projection **`dataset.daily`** / **`series.daily`** (including **`source`/`sourceDetail`** on the series fallback path).
-- **Compare panel:** Still uses **`validationCompareRows`** / **`validationCompareMetrics`** from **`attachValidationCompareProjection`** (canonical simulated-day totals in meta)—not stitched daily labels.
+- **Compare panel:** Uses **`validationCompareRows`** / **`validationCompareMetrics`** from **`attachValidationCompareProjection`** (holdout canonical simulated-day totals in meta)—not stitched daily labels. Metric label **Holdout WAPE** only when `meta.validationHoldoutProof.ok`; otherwise **Reconstruction check**.
 
 ## What changed to match the target (engineering checklist)
 

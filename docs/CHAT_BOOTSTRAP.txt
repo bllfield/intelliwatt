@@ -679,9 +679,11 @@ Fingerprint rule:
 
 After simulated day outputs are derived and stored:
 - stitch uses ACTUAL + TRAVEL_VACANT simulated days only
-- compare uses TEST simulated days only against actual interval data for those same days
+- compare uses holdout TEST simulated days only against actual interval data for those same days (PC-2026-10: no target-day actual in donor/shape pools; `VALIDATION_HOLDOUT`)
 
 TEST simulated days do not go into the stitched Past chart.
+
+Validation holdout (production Past, GB + SMT): `lib/usage/pastValidationHoldout.ts` + `validationHoldoutDateKeysLocal` in shared `buildPastSimulatedBaselineV1`. Compare metric is **Reconstruction check** until `meta.validationHoldoutProof.ok`, then **Holdout WAPE**. Gap-Fill lab bounded test-day keep-ref is lab-only — not production validation. Full contract: `docs/PAST_VALIDATION_HOLDOUT.md`.
 
 Implementation detail (must stay aligned with code): the shared producer may emit pre-projection `SIMULATED_TEST_DAY` tags on daily/intervals for canonical totals; **user-facing** Past applies **`projectBaselineFromCanonicalDataset`** so validation dates display as **ACTUAL (VALIDATION/TEST)** with meter kWh, and scales **15m intervals** on those dates to the meter day total. **`rehydrateValidationCompareMetaFromBuildInputsForRead`** restores `validationOnlyDateKeysLocal` when cache JSON dropped keys so projection + compare attach both run. TRAVEL_VACANT stays **SIMULATED (TRAVEL/VACANT)** in stitch.
 - **Past Sim compare UX:** On the Usage Past tab, **Validation / Test Day Compare** is **collapsed by default**; use **Show details** to expand the metrics + table. Compare rows may include **day-level weather** (Avg/Min/Max °F, HDD65, CDD65) copied from **`dataset.dailyWeather`** for the same local date when the Past dataset has that map—**read-only context**, not a second simulator or scoring path; missing dates show as missing (no fake fill).

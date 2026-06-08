@@ -1,5 +1,9 @@
 import { dateKeyInTimezone } from "@/lib/admin/gapfillLab";
 import { isSimulatedDailySourceForCompare } from "@/lib/usage/dailySourceNotation";
+import {
+  resolveValidationCompareMetricKind,
+  resolveValidationCompareMetricLabel,
+} from "@/lib/usage/pastValidationHoldout";
 import { mergeValidationCanonicalSimulatedTotalsIntoCompareSource } from "@/lib/usage/validationCompareCanonical";
 import { DateTime } from "luxon";
 
@@ -57,7 +61,8 @@ function round2(value: number): number {
 }
 
 function rebuildValidationCompareMetrics(
-  rows: ValidationCompareProjectionSidecar["rows"]
+  rows: ValidationCompareProjectionSidecar["rows"],
+  holdoutProofOk = false
 ): Record<string, unknown> {
   const absErrors = rows.map((r) => Math.abs(Number(r.errorKwh ?? 0) || 0));
   const actualTotal = rows.reduce((sum, row) => sum + (Number(row.actualDayKwh ?? 0) || 0), 0);
@@ -81,7 +86,18 @@ function rebuildValidationCompareMetrics(
     deltaKwhMasked: round2(simTotal - actualTotal),
     mapeFiltered: rows.length > 0 ? round2(wape) : null,
     mapeFilteredCount: rows.length,
+    compareMetricLabel: resolveValidationCompareMetricLabel(holdoutProofOk),
+    compareMetricKind: resolveValidationCompareMetricKind(holdoutProofOk),
   };
+}
+
+function readValidationHoldoutProofOk(dataset: unknown): boolean {
+  const meta =
+    dataset && typeof dataset === "object" && !Array.isArray(dataset)
+      ? ((dataset as { meta?: unknown }).meta as Record<string, unknown> | undefined)
+      : undefined;
+  const proof = meta?.validationHoldoutProof;
+  return Boolean(proof && typeof proof === "object" && !Array.isArray(proof) && (proof as { ok?: unknown }).ok === true);
 }
 
 export function overrideValidationCompareProjectionSimTotals(args: {
@@ -210,7 +226,7 @@ export function buildValidationCompareProjectionFromDatasets(args: {
     .sort((a, b) => a.localDate.localeCompare(b.localDate));
   return {
     rows,
-    metrics: rebuildValidationCompareMetrics(rows),
+    metrics: rebuildValidationCompareMetrics(rows, readValidationHoldoutProofOk(args.simulatedDataset)),
   };
 }
 
@@ -301,10 +317,10 @@ export function projectBaselineFromCanonicalDataset(
     projected.daily = projected.daily.map((row: any) => {
       const dk = String(row?.date ?? "").slice(0, 10);
       if (!validationSet.has(dk)) return row;
-      if (!actualDaily.has(dk)) return row;
+      const kwh = actualDaily.has(dk) ? round2(actualDaily.get(dk)!) : round2(Number(row?.kwh) || 0);
       return {
         ...row,
-        kwh: round2(actualDaily.get(dk)!),
+        kwh,
         source: "ACTUAL",
         sourceDetail: "ACTUAL_VALIDATION_TEST_DAY",
       };
@@ -321,7 +337,6 @@ export function projectBaselineFromCanonicalDataset(
             ? dkFromDaily
             : dateKeyInTimezone(String(row?.timestamp ?? ""), tz);
         if (!validationSet.has(dk)) return row;
-        if (!actualDaily.has(dk)) return row;
         if (!projectedDailyByDate.has(dk)) return row;
         return {
           ...row,

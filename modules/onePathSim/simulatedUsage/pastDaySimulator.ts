@@ -27,6 +27,14 @@ import {
   DEFAULT_SIMULATION_VARIABLE_POLICY,
   type SimulationVariablePolicy,
 } from "@/modules/onePathSim/usageSimulator/simulationVariablePolicy";
+import {
+  DEFAULT_VALIDATION_HOLDOUT_MODE,
+  filterNeighborDayTotalsForHoldout,
+  filterWeatherDonorSamplesForHoldout,
+  normalizeValidationHoldoutDateKeys,
+  resolveDonorExclusionDatesForValidationTarget,
+  resolveValidationHoldoutMode,
+} from "@/lib/usage/pastValidationHoldout";
 
 export { PAST_DAY_SIMULATOR_VERSION, SOURCE_OF_DAY_SIMULATION_CORE } from "./pastDaySimulatorTypes";
 export type { PastDaySimulationContext, PastDaySimulationRequest, PastDaySimulationResult, SimulatedDayResult } from "./pastDaySimulatorTypes";
@@ -1243,6 +1251,9 @@ export function buildPastDaySimulationContext(args: {
   lowDataWeatherEvidence?: PastDaySimulationContext["lowDataWeatherEvidence"];
   weatherEfficiencyDerivedInput?: PastDaySimulationContext["weatherEfficiencyDerivedInput"];
   simulationVariablePolicy?: PastDaySimulationContext["simulationVariablePolicy"];
+  validationHoldoutDateKeys?: PastDaySimulationContext["validationHoldoutDateKeys"];
+  validationHoldoutMode?: PastDaySimulationContext["validationHoldoutMode"];
+  intervalSourceType?: PastDaySimulationContext["intervalSourceType"];
 }): PastDaySimulationContext {
   return {
     profile: args.profile,
@@ -1256,6 +1267,9 @@ export function buildPastDaySimulationContext(args: {
     lowDataWeatherEvidence: args.lowDataWeatherEvidence ?? null,
     weatherEfficiencyDerivedInput: args.weatherEfficiencyDerivedInput ?? null,
     simulationVariablePolicy: args.simulationVariablePolicy ?? null,
+    validationHoldoutDateKeys: args.validationHoldoutDateKeys ?? null,
+    validationHoldoutMode: args.validationHoldoutMode ?? null,
+    intervalSourceType: args.intervalSourceType ?? null,
   };
 }
 
@@ -1271,6 +1285,28 @@ export function simulatePastDay(
 ): SimulatedDayResult {
   const { localDate, isWeekend, gridTimestamps, weatherForDay } = request;
   const simulationVariablePolicy = context.simulationVariablePolicy ?? DEFAULT_SIMULATION_VARIABLE_POLICY;
+  const holdoutKeys = normalizeValidationHoldoutDateKeys(
+    context.validationHoldoutDateKeys instanceof Set
+      ? Array.from(context.validationHoldoutDateKeys)
+      : context.validationHoldoutDateKeys ?? []
+  );
+  const holdoutMode = resolveValidationHoldoutMode(context.validationHoldoutMode ?? DEFAULT_VALIDATION_HOLDOUT_MODE);
+  const donorExclusion =
+    holdoutKeys.size > 0 && holdoutKeys.has(localDate)
+      ? resolveDonorExclusionDatesForValidationTarget({
+          validationDate: localDate,
+          validationHoldoutDateKeys: holdoutKeys,
+          mode: holdoutMode,
+        })
+      : null;
+  const weatherDonorSamplesForDay =
+    donorExclusion && context.weatherDonorSamples
+      ? filterWeatherDonorSamplesForHoldout(context.weatherDonorSamples, donorExclusion)
+      : context.weatherDonorSamples;
+  const neighborDayTotalsForDay =
+    donorExclusion && context.neighborDayTotals
+      ? filterNeighborDayTotalsForHoldout(context.neighborDayTotals, donorExclusion)
+      : context.neighborDayTotals;
   const monthKey = localDate.slice(0, 7);
   const dayTypeUsed: PastDayTypeKey = isWeekend ? "weekend" : "weekday";
   const lowDataMonthBucket = context.lowDataSyntheticDayKwhByMonthDayType?.[monthKey] ?? null;
@@ -1318,8 +1354,8 @@ export function simulatePastDay(
         profile: context.profile,
         weatherForDay,
         modeledDaySelectionStrategy: context.modeledDaySelectionStrategy,
-        neighborDayTotals: context.neighborDayTotals,
-        weatherDonorSamples: context.weatherDonorSamples,
+        neighborDayTotals: neighborDayTotalsForDay,
+        weatherDonorSamples: weatherDonorSamplesForDay,
         policy: simulationVariablePolicy.pastDayCore,
       });
 

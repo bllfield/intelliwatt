@@ -60,7 +60,7 @@ Raw row counts, distinct Chicago slot counts, coverage loader, and ledger reconc
 
 ## Green Button Past display parity (artifact-backed read model)
 
-- Canonical Past simulates **Travel/Vacant** dates only; validation/test **simulated** day totals stay **compare-only** (`compareProjection` / `canonicalArtifactSimulatedDayTotalsByDate`).
+- Canonical Past simulates **Travel/Vacant** dates in the stitch; validation display stays **ACTUAL**; validation **holdout sim** totals are **compare-only** (`compareProjection` / `canonicalArtifactSimulatedDayTotalsByDate`, PC-2026-10 — `docs/PAST_VALIDATION_HOLDOUT.md`).
 - Validation/test days contribute **actual** kWh to the user/admin Past curve via `projectBaselineFromCanonicalDataset` at artifact save and read finalize.
 - Persisted Past headline totals, weather cards, time-of-day buckets, and `displayTotalsAudit` owners are written at artifact save and read from `meta.pastDisplayInsightsSyncedAt` / `meta.pastDisplayWeatherSensitivityScore` — user and admin surfaces share the same artifact-backed read model.
 

@@ -1620,7 +1620,9 @@ export function buildSimulatedUsageDatasetFromCurve(
               ? "SIMULATED_MANUAL_CONSTRAINED"
             : reason === "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
               ? "SIMULATED_MONTHLY_CONSTRAINED_NON_TRAVEL"
-            : reason === "TEST_MODELED_KEEP_REF" || reason === "FORCED_SELECTED_DAY"
+            : reason === "TEST_MODELED_KEEP_REF" ||
+                reason === "FORCED_SELECTED_DAY" ||
+                reason === "VALIDATION_HOLDOUT"
               ? "SIMULATED_TEST_DAY"
               : reason === "INCOMPLETE_METER_DAY"
                 ? "SIMULATED_INCOMPLETE_METER"

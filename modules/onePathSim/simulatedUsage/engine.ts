@@ -32,6 +32,13 @@ import type { DailyWeatherFeatures } from "@/lib/admin/gapfillLab";
 import type { ResolvedSimFingerprint } from "@/modules/onePathSim/usageSimulator/resolvedSimFingerprintTypes";
 import { getMemoryRssMb, logSimPipelineEvent } from "@/modules/onePathSim/usageSimulator/simObservability";
 import {
+  buildValidationHoldoutAuditRow,
+  DEFAULT_VALIDATION_HOLDOUT_MODE,
+  normalizeValidationHoldoutDateKeys,
+  resolveValidationHoldoutMode,
+  type ValidationHoldoutAuditRow,
+} from "@/lib/usage/pastValidationHoldout";
+import {
   DEFAULT_SIMULATION_VARIABLE_POLICY,
   type SimulationVariablePolicy,
 } from "@/modules/onePathSim/usageSimulator/simulationVariablePolicy";
@@ -1644,6 +1651,10 @@ export function buildPastSimulatedBaselineV1(args: {
    * (same core as travel/vacant fills). Mutually exclusive use: do not duplicate keys in `forceSimulateDateKeys`.
    */
   forceModeledOutputKeepReferencePoolDateKeys?: Set<string>;
+  /** Validation/test scored days simulated as strict holdout (excluded from donor + shape pools). */
+  validationHoldoutDateKeysLocal?: Set<string> | readonly string[];
+  validationHoldoutMode?: import("@/lib/usage/pastValidationHoldout").ValidationHoldoutMode;
+  intervalSourceType?: import("@/lib/usage/pastValidationHoldout").PastIntervalSourceType;
   modeledKeepRefReasonCode?: "TEST_MODELED_KEEP_REF" | "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY" | "MANUAL_CONSTRAINED_DAY";
   defaultModeledReasonCode?:
     | "INCOMPLETE_METER_DAY"
@@ -1688,10 +1699,21 @@ export function buildPastSimulatedBaselineV1(args: {
 } {
   const simulationVariablePolicy = args.simulationVariablePolicy ?? DEFAULT_SIMULATION_VARIABLE_POLICY;
   const engineProfilePolicy = simulationVariablePolicy.engineProfile;
-  const forcedDateKeys = args.forceSimulateDateKeys ?? new Set<string>();
+  const validationHoldoutDateKeys = normalizeValidationHoldoutDateKeys(
+    args.validationHoldoutDateKeysLocal instanceof Set
+      ? Array.from(args.validationHoldoutDateKeysLocal)
+      : args.validationHoldoutDateKeysLocal ?? []
+  );
+  const validationHoldoutMode = resolveValidationHoldoutMode(
+    args.validationHoldoutMode ?? DEFAULT_VALIDATION_HOLDOUT_MODE
+  );
+  const intervalSourceType = String(args.intervalSourceType ?? args.intervalTrustedSource ?? "SMT");
+  const forcedDateKeys = new Set(args.forceSimulateDateKeys ?? []);
+  for (const dk of Array.from(validationHoldoutDateKeys)) forcedDateKeys.add(dk);
   const pendingSmtIntervalDateKeys = args.pendingSmtIntervalDateKeys ?? new Set<string>();
   const ledgerIncompleteMeterDateKeys = args.ledgerIncompleteMeterDateKeys ?? new Set<string>();
   const keepRefModeledKeys = args.forceModeledOutputKeepReferencePoolDateKeys ?? new Set<string>();
+  const validationHoldoutAuditRows: ValidationHoldoutAuditRow[] = [];
   const trustedActualDateKeys = args.trustedActualDateKeys ?? new Set<string>();
   const emitAllIntervals = args.emitAllIntervals !== false;
   const lowDataSyntheticContext = args.lowDataSyntheticContext ?? null;
@@ -1824,9 +1846,15 @@ export function buildPastSimulatedBaselineV1(args: {
       dayIsLowDataSyntheticModeled ||
       (!dayCountsAsActualBacked &&
         (dayIsLeadingMissing || dayIsDailyUsageMissing || dayIsIncomplete));
-    /** Reference pool: good at-home days only; excludes travel (forced elsewhere) and incomplete/leading; includes Gap-Fill test days (keep-ref modeled). */
+    const dayIsValidationHoldout = Boolean(dateKey) && validationHoldoutDateKeys.has(dateKey);
+    /** Reference pool: good at-home days only; excludes travel, validation holdout, and incomplete/leading; keep-ref lab days remain pool-eligible. */
     const isReferenceDayForPool =
-      !dayIsForcedSimulate && !dayIsExcluded && !dayIsLeadingMissing && !dayIsDailyUsageMissing && !dayIsIncomplete;
+      !dayIsForcedSimulate &&
+      !dayIsValidationHoldout &&
+      !dayIsExcluded &&
+      !dayIsLeadingMissing &&
+      !dayIsDailyUsageMissing &&
+      !dayIsIncomplete;
     return {
       gridTs,
       dateKey,
@@ -2435,6 +2463,9 @@ export function buildPastSimulatedBaselineV1(args: {
     lowDataWeatherEvidence: lowDataSyntheticContext?.weatherEvidenceSummary ?? null,
     weatherEfficiencyDerivedInput: args.weatherEfficiencyDerivedInput ?? null,
     simulationVariablePolicy,
+    validationHoldoutDateKeys,
+    validationHoldoutMode,
+    intervalSourceType,
   });
   emitStage("buildPastSimulatedBaselineV1_stage_shape_context_ready", {
     elapsedMs: Date.now() - baselineStartedAt,
@@ -2647,6 +2678,7 @@ export function buildPastSimulatedBaselineV1(args: {
     simulatedReasonCode:
       | "TRAVEL_VACANT"
       | "TEST_MODELED_KEEP_REF"
+      | "VALIDATION_HOLDOUT"
       | "MANUAL_CONSTRAINED_DAY"
       | "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
       | "FORCED_SELECTED_DAY"
@@ -2666,7 +2698,9 @@ export function buildPastSimulatedBaselineV1(args: {
         ? "shared_modeled_day_template"
         : args.simulatedReasonCode === "TEST_MODELED_KEEP_REF"
           ? "validation_keep_ref_shared_day_template"
-          : "shared_day_template",
+          : args.simulatedReasonCode === "VALIDATION_HOLDOUT"
+            ? "validation_holdout_day_template"
+            : "shared_day_template",
     selectedFingerprintBucketMonth: args.modeledResult.selectedFingerprintBucketMonth ?? args.monthKey,
     selectedFingerprintBucketDayType: args.modeledResult.dayTypeUsed,
     selectedFingerprintWeatherBucket: args.modeledResult.weatherRegimeUsed,
@@ -2702,6 +2736,7 @@ export function buildPastSimulatedBaselineV1(args: {
     const ym = dateKey.slice(0, 7);
     const dow = new Date(dayStartMs).getUTCDay();
     const shouldSimulateDay = day.shouldSimulateDay;
+    const dayIsValidationHoldout = validationHoldoutDateKeys.has(dateKey);
 
     if (shouldSimulateDay) {
       simulatedDays += 1;
@@ -2734,6 +2769,7 @@ export function buildPastSimulatedBaselineV1(args: {
       const simulatedReasonCode:
         | "TRAVEL_VACANT"
         | "TEST_MODELED_KEEP_REF"
+        | "VALIDATION_HOLDOUT"
         | "MANUAL_CONSTRAINED_DAY"
         | "MONTHLY_CONSTRAINED_NON_TRAVEL_DAY"
         | "FORCED_SELECTED_DAY"
@@ -2743,19 +2779,21 @@ export function buildPastSimulatedBaselineV1(args: {
         | "LEADING_MISSING_DAY" =
         simulatedReason === "EXCLUDED"
           ? "TRAVEL_VACANT"
+          : dayIsValidationHoldout
+            ? "VALIDATION_HOLDOUT"
           : simulatedReason === "GAPFILL_MODELED_KEEP_REF"
             ? modeledKeepRefReasonCode
             : simulatedReason === "LOW_DATA_CONSTRAINED"
               ? modeledKeepRefReasonCode
             : simulatedReason === "PENDING_SMT_INTERVALS"
               ? "INTERVALS_NOT_AVAILABLE_YET_DAY"
-            : simulatedReason === "FORCED_SELECTED_DAY"
-              ? "FORCED_SELECTED_DAY"
-              : simulatedReason === "LEADING_MISSING"
-                ? "LEADING_MISSING_DAY"
-                : simulatedReason === "DAILY_USAGE_MISSING"
-                  ? "DAILY_USAGE_MISSING_DAY"
-                : defaultModeledReasonCode;
+              : simulatedReason === "FORCED_SELECTED_DAY"
+                ? "FORCED_SELECTED_DAY"
+                : simulatedReason === "LEADING_MISSING"
+                  ? "LEADING_MISSING_DAY"
+                  : simulatedReason === "DAILY_USAGE_MISSING"
+                    ? "DAILY_USAGE_MISSING_DAY"
+                    : defaultModeledReasonCode;
       const wx = args.actualWxByDateKey?.get(dateKey) ?? null;
       const weatherForDay = wx ? engineWxToPastDayWeather(wx) : null;
       // One shared core for all modeled-day reasons (travel, incomplete, forced, keep-ref modeled).
@@ -2801,6 +2839,21 @@ export function buildPastSimulatedBaselineV1(args: {
         simulatedReasonCode,
         modeledResult: blendedResult,
       });
+      if (dayIsValidationHoldout) {
+        validationHoldoutAuditRows.push(
+          buildValidationHoldoutAuditRow({
+            sourceType: intervalSourceType,
+            validationDate: dateKey,
+            validationHoldoutMode,
+            selectedDonorLocalDates: classifiedResult.selectedDonorLocalDates,
+            simulatedReasonCode: classifiedResult.simulatedReasonCode ?? simulatedReasonCode,
+            templateSelectionKind: classifiedResult.templateSelectionKind ?? null,
+            shape96Used: classifiedResult.shape96Used,
+            targetDateExcludedFromDonors: true,
+            targetDateExcludedFromShapePool: true,
+          })
+        );
+      }
       if (manualSimulatedReferencePoolEnabled && simulatedReasonCode === "MANUAL_CONSTRAINED_DAY") {
         manualSimulatedDonorCandidates.push(classifiedResult);
       } else if (manualSimulatedReferencePoolEnabled && simulatedReasonCode === "TRAVEL_VACANT") {
@@ -3038,6 +3091,9 @@ export function buildPastSimulatedBaselineV1(args: {
     modeledDayCount: simulatedDays,
     totalDayCount: totalDays,
   });
+  if (args.debug?.out && validationHoldoutAuditRows.length > 0) {
+    (args.debug.out as Record<string, unknown>).validationHoldoutAuditRows = validationHoldoutAuditRows;
+  }
   return { intervals: out, dayResults };
 }
 

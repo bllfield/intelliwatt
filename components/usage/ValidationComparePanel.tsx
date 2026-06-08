@@ -37,7 +37,8 @@ export function ValidationComparePanel(props: {
   if (showMetrics) {
     metricsSummaryEl = (
       <div className={["mt-2 text-xs text-brand-navy/80", props.className ?? ""].join(" ").trim()}>
-        WAPE {Number(metrics?.wape ?? 0).toFixed(2)}% | MAE {Number(metrics?.mae ?? 0).toFixed(2)} | RMSE{" "}
+        {String(metrics?.compareMetricLabel ?? "Reconstruction check")}{" "}
+        {Number(metrics?.wape ?? 0).toFixed(2)}% | MAE {Number(metrics?.mae ?? 0).toFixed(2)} | RMSE{" "}
         {Number(metrics?.rmse ?? 0).toFixed(2)}
       </div>
     );

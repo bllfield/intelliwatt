@@ -324,7 +324,7 @@ describe("buildPastSimulatedBaselineV1 resolvedSimFingerprint consumption", () =
     expect(wxDay?.donorSelectionModeUsed).not.toBe("calendar_fallback");
   });
 
-  it("validation keep-ref keeps scored day actuals in the weather donor pool", () => {
+  it("validation keep-ref (Gap-Fill lab only) keeps scored day actuals in the weather donor pool", () => {
     const home = resolveHomeCalendarForActualSource("GREEN_BUTTON", "America/Chicago");
     const gridCtx = buildHomeDayGridContext({
       startDateKey: "2026-05-14",
@@ -383,6 +383,60 @@ describe("buildPastSimulatedBaselineV1 resolvedSimFingerprint consumption", () =
     expect(forceExcludeDbg.referenceDaysUsed).toBe(2);
     expect(keepRefDbg.referenceDaysUsed).toBe(3);
     expect(keepRefRun.dayResults.length).toBeGreaterThan(0);
+  });
+
+  it("validation holdout excludes scored day from reference pool (Past production path)", () => {
+    const home = resolveHomeCalendarForActualSource("GREEN_BUTTON", "America/Chicago");
+    const gridCtx = buildHomeDayGridContext({
+      startDateKey: "2026-05-14",
+      endDateKey: "2026-05-16",
+      home,
+    });
+    const canonicalDateKeyByDayStartMs = new Map<number, string>();
+    for (const dayStartMs of gridCtx.canonicalDayStartsMs) {
+      const gridTs = gridCtx.getDayGridTimestamps(dayStartMs);
+      if (!gridTs.length) continue;
+      canonicalDateKeyByDayStartMs.set(dayStartMs, gridCtx.dateKeyFromTimestamp(gridTs[0]!));
+    }
+    const validationDate = "2026-05-15";
+    const trustedActualDateKeys = new Set(["2026-05-14", "2026-05-16"]);
+    const actualIntervals: Array<{ timestamp: string; kwh: number }> = [];
+    for (const dayStartMs of gridCtx.canonicalDayStartsMs) {
+      for (const ts of gridCtx.getDayGridTimestamps(dayStartMs)) {
+        actualIntervals.push({ timestamp: ts, kwh: 1.25 });
+      }
+    }
+    const wx = { tAvgF: 82, tMinF: 72, tMaxF: 92, hdd65: 0, cdd65: 10 };
+    const actualWxByDateKey = new Map(
+      ["2026-05-14", "2026-05-15", "2026-05-16"].map((dk) => [dk, wx] as const)
+    );
+    const dbg: { referenceDaysUsed?: number } = {};
+    const run = buildPastSimulatedBaselineV1({
+      actualIntervals,
+      canonicalDayStartsMs: gridCtx.canonicalDayStartsMs,
+      canonicalDateKeyByDayStartMs,
+      excludedDateKeys: new Set<string>(),
+      dateKeyFromTimestamp: gridCtx.dateKeyFromTimestamp,
+      getDayGridTimestamps: gridCtx.getDayGridTimestamps,
+      intervalTrustedSource: "GREEN_BUTTON",
+      trustedActualDateKeys,
+      timezoneForProfile: "America/Chicago",
+      homeProfile: { squareFeet: 2400 },
+      usageShapeProfile: {
+        weekdayAvgByMonthKey: { "2026-05": 45 },
+        weekendAvgByMonthKey: { "2026-05": 36 },
+      },
+      actualWxByDateKey,
+      collectSimulatedDayResults: true,
+      validationHoldoutDateKeysLocal: new Set([validationDate]),
+      validationHoldoutMode: "strict_holdout",
+      intervalSourceType: "GREEN_BUTTON",
+      debug: { out: dbg as any },
+    });
+    expect(dbg.referenceDaysUsed).toBe(2);
+    const validationDay = run.dayResults.find((r) => String(r.localDate).slice(0, 10) === validationDate);
+    expect(validationDay?.simulatedReasonCode).toBe("VALIDATION_HOLDOUT");
+    expect(validationDay?.selectedDonorLocalDates ?? []).not.toContain(validationDate);
   });
 
   it("trusted actual-backed days stay pool-eligible when per-day slot filter is empty", () => {

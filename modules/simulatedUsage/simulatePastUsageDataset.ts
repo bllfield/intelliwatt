@@ -8,6 +8,12 @@ import { prisma } from "@/lib/db";
 import { dateKeyInTimezone } from "@/lib/admin/gapfillLab";
 import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
 import { preparePastSimSmtLedgerDateKeys } from "@/lib/usage/pastSimSmtLedgerPrep";
+import {
+  assertValidationHoldoutProofGates,
+  DEFAULT_VALIDATION_HOLDOUT_MODE,
+  normalizeValidationHoldoutDateKeys,
+  resolveValidationHoldoutMode,
+} from "@/lib/usage/pastValidationHoldout";
 import { buildUniformMonthlyTotalsFromAnnualWindow, travelRangesToExcludeDateKeys } from "@/modules/usageSimulator/build";
 import { boundDateKeysToCoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 import {
@@ -1109,6 +1115,9 @@ export type SimulatePastUsageDatasetArgs = {
    * Must not overlap `forceSimulateDateKeysLocal` (forced days are excluded from the reference pool).
    */
   forceModeledOutputKeepReferencePoolDateKeysLocal?: Set<string>;
+  /** Validation/test scored days — strict holdout sim (not keep-ref). Defaults from buildInputs.validationOnlyDateKeysLocal. */
+  validationHoldoutDateKeysLocal?: Set<string>;
+  validationHoldoutMode?: import("@/lib/usage/pastValidationHoldout").ValidationHoldoutMode;
   /** When false, omit passthrough actual intervals for non-simulated days. */
   emitAllIntervals?: boolean;
   /** Optional local dates whose simulated-day payloads should be retained for downstream consumers. */
@@ -1453,6 +1462,8 @@ export async function simulatePastUsageDataset(
     actualIntervals: preloadedIntervals,
     forceSimulateDateKeysLocal,
     forceModeledOutputKeepReferencePoolDateKeysLocal,
+    validationHoldoutDateKeysLocal,
+    validationHoldoutMode,
     emitAllIntervals = true,
     retainSimulatedDayResultDateKeysLocal,
   } = args;
@@ -1646,6 +1657,20 @@ export async function simulatePastUsageDataset(
         .map((dk) => String(dk ?? "").slice(0, 10))
         .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
     );
+    const validationHoldoutDateKeysLocalSet = normalizeValidationHoldoutDateKeys(
+      validationHoldoutDateKeysLocal
+        ? Array.from(validationHoldoutDateKeysLocal)
+        : Array.isArray((buildInputs as { validationOnlyDateKeysLocal?: string[] }).validationOnlyDateKeysLocal)
+          ? (buildInputs as { validationOnlyDateKeysLocal: string[] }).validationOnlyDateKeysLocal
+          : []
+    );
+    const resolvedValidationHoldoutMode = resolveValidationHoldoutMode(
+      validationHoldoutMode ?? DEFAULT_VALIDATION_HOLDOUT_MODE
+    );
+    for (const dk of Array.from(validationHoldoutDateKeysLocalSet)) {
+      forcedSimulateDateKeysLocal.add(dk);
+      forceModeledOutputKeepReferencePoolDateKeysLocalSet.delete(dk);
+    }
     // Keep exclusion metadata and downstream simulated-day labeling aligned to the
     // active usage coverage window only (older travel ranges naturally fall off).
     const excludedDateKeys = boundDateKeysToCoverageWindow(
@@ -2043,6 +2068,10 @@ export async function simulatePastUsageDataset(
           forcedSimulateDateKeysLocal.size > 0 ? forcedSimulateDateKeysLocal : undefined,
         forceModeledOutputKeepReferencePoolDateKeys:
           mergedKeepRefLocalDateKeys.size > 0 ? mergedKeepRefLocalDateKeys : undefined,
+        validationHoldoutDateKeysLocal:
+          validationHoldoutDateKeysLocalSet.size > 0 ? validationHoldoutDateKeysLocalSet : undefined,
+        validationHoldoutMode: resolvedValidationHoldoutMode,
+        intervalSourceType: intervalActualSource === "GREEN_BUTTON" ? "GREEN_BUTTON" : "SMT",
         emitAllIntervals,
         modeledKeepRefReasonCode: buildInputs.mode === "MANUAL_TOTALS" ? "MANUAL_CONSTRAINED_DAY" : "TEST_MODELED_KEEP_REF",
         defaultModeledReasonCode: buildInputs.mode === "MANUAL_TOTALS" ? "MANUAL_CONSTRAINED_DAY" : "INCOMPLETE_METER_DAY",
@@ -2584,6 +2613,20 @@ export async function simulatePastUsageDataset(
             forceModeledOutputKeepReferencePoolDateKeysLocalSet.size > 0
               ? Array.from(forceModeledOutputKeepReferencePoolDateKeysLocalSet).sort()
               : undefined,
+          validationHoldoutMode:
+            validationHoldoutDateKeysLocalSet.size > 0 ? resolvedValidationHoldoutMode : undefined,
+          validationHoldoutDateKeysLocal:
+            validationHoldoutDateKeysLocalSet.size > 0
+              ? Array.from(validationHoldoutDateKeysLocalSet).sort()
+              : undefined,
+          validationHoldoutAuditRows: Array.isArray((pastDayCounts as { validationHoldoutAuditRows?: unknown }).validationHoldoutAuditRows)
+            ? (pastDayCounts as { validationHoldoutAuditRows: unknown[] }).validationHoldoutAuditRows
+            : undefined,
+          validationHoldoutProof: (() => {
+            const rows = (pastDayCounts as { validationHoldoutAuditRows?: unknown }).validationHoldoutAuditRows;
+            if (!Array.isArray(rows) || rows.length === 0) return undefined;
+            return assertValidationHoldoutProofGates(rows as any);
+          })(),
           gapfillForceModeledKeepRefUtcKeyCount: keepRefUtcDateKeys.size,
           resolvedSimFingerprint: (buildInputs as { resolvedSimFingerprint?: unknown }).resolvedSimFingerprint ?? undefined,
           monthlyTargetConstructionDiagnostics:
