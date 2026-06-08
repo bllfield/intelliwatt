@@ -1,0 +1,141 @@
+{
+  "proofVersion": "manual_cross_surface_parity_v2",
+  "generatedAt": "2026-06-08T18:23:01.871Z",
+  "proofMode": "audit_only",
+  "sourceHouseId": "8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8",
+  "labHouseId": "29a3d820-2593-4673-9dd6-cd161bbd7f6f",
+  "mode": "ANNUAL",
+  "payloadMode": "ANNUAL",
+  "auditGapfillMode": "ANNUAL_FROM_SOURCE_INTERVALS",
+  "auditProofFamily": "GAPFILL_DERIVED",
+  "anchorDate": "2026-06-04",
+  "canonicalCoverageStart": "2025-06-07",
+  "canonicalCoverageEnd": "2026-06-06",
+  "allowProdManualRecalc": true,
+  "fixtureManifestPath": "C:\\Users\\bllfi\\Documents\\Intellipath Solutions\\Intelliwatt Website\\intelliwatt-clean\\scripts\\audit\\manual-cross-surface-fixture-manifest.json",
+  "comparisonFamilies": {
+    "same_payload_parity": [],
+    "gapfill_derived_payload_parity": [
+      "gapfill_annual_from_source_intervals"
+    ]
+  },
+  "onePathFacadeParity": {
+    "ok": true,
+    "checked": [
+      "validateManualUsagePayload",
+      "buildManualBillPeriodTargets"
+    ],
+    "mismatches": []
+  },
+  "legs": [
+    {
+      "legId": "user_manual_monthly",
+      "status": "not_available",
+      "unavailableReason": "leg_mode_mismatch: AUDIT_MANUAL_MODE=ANNUAL",
+      "canonicalCoverageStart": "2025-06-07",
+      "canonicalCoverageEnd": "2026-06-06",
+      "coverageWindowMatch": null
+    },
+    {
+      "legId": "user_manual_annual",
+      "status": "not_available",
+      "unavailableReason": "reference_leg_out_of_scope: auditProofFamily=GAPFILL_DERIVED",
+      "canonicalCoverageStart": "2025-06-07",
+      "canonicalCoverageEnd": "2026-06-06",
+      "coverageWindowMatch": null
+    },
+    {
+      "legId": "manual_monthly_lab",
+      "status": "not_available",
+      "unavailableReason": "leg_mode_mismatch: AUDIT_MANUAL_MODE=ANNUAL",
+      "canonicalCoverageStart": "2025-06-07",
+      "canonicalCoverageEnd": "2026-06-06",
+      "coverageWindowMatch": null
+    },
+    {
+      "legId": "one_path_admin_manual_monthly",
+      "status": "not_available",
+      "unavailableReason": "leg_mode_mismatch: AUDIT_MANUAL_MODE=ANNUAL",
+      "canonicalCoverageStart": "2025-06-07",
+      "canonicalCoverageEnd": "2026-06-06",
+      "coverageWindowMatch": null
+    },
+    {
+      "legId": "one_path_admin_manual_annual",
+      "status": "not_available",
+      "unavailableReason": "fixture_family_scope: leg=SAME_PAYLOAD audit=GAPFILL_DERIVED",
+      "canonicalCoverageStart": "2025-06-07",
+      "canonicalCoverageEnd": "2026-06-06",
+      "coverageWindowMatch": null
+    },
+    {
+      "legId": "gapfill_manual_monthly",
+      "status": "not_available",
+      "unavailableReason": "leg_mode_mismatch: AUDIT_MANUAL_MODE=ANNUAL",
+      "canonicalCoverageStart": "2025-06-07",
+      "canonicalCoverageEnd": "2026-06-06",
+      "coverageWindowMatch": null
+    },
+    {
+      "legId": "gapfill_monthly_from_source_intervals",
+      "status": "not_available",
+      "unavailableReason": "leg_mode_mismatch: AUDIT_MANUAL_MODE=ANNUAL",
+      "canonicalCoverageStart": "2025-06-07",
+      "canonicalCoverageEnd": "2026-06-06",
+      "coverageWindowMatch": null
+    },
+    {
+      "legId": "gapfill_annual_from_source_intervals",
+      "houseId": "29a3d820-2593-4673-9dd6-cd161bbd7f6f",
+      "userId": "cmkjaxudm0002ky0450pl2opa",
+      "scenarioId": "3d42aecf-7517-4c86-808e-88a861aeafc6",
+      "mode": "ANNUAL_FROM_SOURCE_INTERVALS",
+      "canonicalCoverageStart": "2025-06-07",
+      "canonicalCoverageEnd": "2026-06-06",
+      "runDispatchPath": "dispatchPastSimRecalc(MANUAL_TOTALS)->usageSimulator wrapper->onePath recalcSimulatorBuild",
+      "readModelPath": "buildOnePathManualUsagePastSimReadResult->readOnePathSimulatedUsageScenario",
+      "producerVersion": "production_past_stitched_v16",
+      "gapfillDerivedPayloadHash": "AHGIrBOAoFkku0CgCvWmas",
+      "gapfillActualComparison": {
+        "ok": false,
+        "billPeriodCount": 1,
+        "comparedBillPeriodCount": 0,
+        "reconciledCount": 0,
+        "deltaPresentCount": 1
+      },
+      "comparisonFamily": "gapfill_derived_payload_parity",
+      "payloadProvenance": "gapfill_derived",
+      "fixtureArtifactInputHash": "yKzKtXxP0A1De-tDENhy_pnsKn1KfIacezEvwARychs",
+      "fixtureFamily": "GAPFILL_DERIVED",
+      "applyAdminRemap": false,
+      "sourcePayloadHash": "KKB7EY244paFVWOtz-1BQk",
+      "normalizedPayloadHash": "AHGIrBOAoFkku0CgCvWmas",
+      "billPeriodHash": "X12wnS93pJX7fvI5z45Ns5",
+      "statementRangesHash": "T1PNoYwrqgwDVLtfmj7L5e",
+      "travelRangesHash": "nMsHDM8gT4XvreU9n6zxu_",
+      "validationResultHash": "DncEoP0Qpt1sZOCeVTFGxs",
+      "anchorDate": "2026-06-04",
+      "payloadMode": "ANNUAL",
+      "annualKwh": 14502.74,
+      "monthlyTotals": null,
+      "status": "ok",
+      "unavailableReason": null,
+      "artifactCoverageStart": "2025-06-05",
+      "artifactCoverageEnd": "2026-06-04",
+      "displayCoverageStart": "2025-06-05",
+      "displayCoverageEnd": "2026-06-04",
+      "coverageWindowMatch": true,
+      "artifactInputHash": null,
+      "finalizedDailyRowsHash": "g8Xh8tvo1gnbrKQs9pCBmR",
+      "displayTruthRevision": "co4Zgqq-kqST3DhkeKQwXq",
+      "monthlyRowsHash": "skaJ2a5OOA6kDPn82rxRZZ",
+      "timeOfDayBucketsHash": "xnXVzfMIrSSC_i0OM_Ze8S"
+    }
+  ],
+  "violations": [
+    "gapfill_annual_from_source_intervals: artifact coverage 2025-06-05→2026-06-04 != canonical 2025-06-07→2026-06-06",
+    "gapfill_annual_from_source_intervals: gapfill actual comparison failed for derived payload"
+  ],
+  "warnings": [],
+  "verdict": "MANUAL_CROSS_SURFACE_PARITY_FAIL"
+}

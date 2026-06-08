@@ -2,10 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import {
   aggregateManualCrossSurfaceProofViolations,
+  assertManifestLegMatchesProofFamily,
   hashManualPayloadFields,
+  isZeroAnnualManualPayload,
+  isZeroMonthlyManualPayload,
   normalizeManualPayloadForProof,
+  resolveAuditProofFamilyFromGapfillMode,
+  resolveManifestFixtureFamily,
   resolveManualProofComparisonFamily,
   stableManualProofHash,
+  validateManifestFixtureIsolation,
 } from "@/lib/usage/manualCrossSurfaceParityProof";
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
 
@@ -102,6 +108,7 @@ describe("manualCrossSurfaceParityProof helpers", () => {
           legId: "user_manual_monthly",
           status: "ok",
           comparisonFamily: "same_payload_parity",
+          fixtureFamily: "SAME_PAYLOAD",
           normalizedPayloadHash: "user-hash",
           validationResultHash: stableManualProofHash({ ok: true, error: null }),
           finalizedDailyRowsHash: "daily-user",
@@ -110,6 +117,7 @@ describe("manualCrossSurfaceParityProof helpers", () => {
           legId: "gapfill_manual_monthly",
           status: "ok",
           comparisonFamily: "same_payload_parity",
+          fixtureFamily: "SAME_PAYLOAD",
           normalizedPayloadHash: "derived-hash",
           gapfillDerivedPayloadHash: "derived-hash",
           validationResultHash: stableManualProofHash({ ok: true, error: null }),
@@ -119,8 +127,108 @@ describe("manualCrossSurfaceParityProof helpers", () => {
       ],
       onePathFacadeParity: { ok: true, checked: [], mismatches: [] },
     });
-    expect(violations.some((v) => v.includes("normalizedPayloadHash != user_manual_monthly"))).toBe(false);
-    expect(warnings.some((w) => w.includes("gapfill_manual_monthly payload"))).toBe(true);
+    expect(violations).toContain("same_payload_parity: gapfill_manual_monthly normalizedPayloadHash != anchor");
+    expect(warnings.some((w) => w.includes("gapfill_manual_monthly payload"))).toBe(false);
+  });
+
+  it("allows gapfill derived payload hash difference only in GAPFILL_DERIVED family", () => {
+    const { violations, warnings } = aggregateManualCrossSurfaceProofViolations({
+      auditManualMode: "MONTHLY",
+      auditGapfillMode: "MONTHLY_FROM_SOURCE_INTERVALS",
+      legs: [
+        {
+          legId: "user_manual_monthly",
+          status: "not_available",
+          unavailableReason: "gapfill_mode_scope",
+        },
+        {
+          legId: "gapfill_monthly_from_source_intervals",
+          status: "ok",
+          comparisonFamily: "gapfill_derived_payload_parity",
+          fixtureFamily: "GAPFILL_DERIVED",
+          normalizedPayloadHash: "derived-hash",
+          gapfillDerivedPayloadHash: "derived-hash",
+          validationResultHash: stableManualProofHash({ ok: true, error: null }),
+          gapfillActualComparison: { ok: true, comparedBillPeriodCount: 3 },
+        },
+      ],
+      onePathFacadeParity: { ok: true, checked: [], mismatches: [] },
+      manifest: {
+        legs: {
+          gapfill_monthly_from_source_intervals: {
+            fixtureFamily: "GAPFILL_DERIVED",
+            normalizedPayloadHash: "derived-hash",
+          },
+        },
+      },
+    });
+    expect(violations.some((v) => v.includes("normalizedPayloadHash"))).toBe(false);
+    expect(
+      warnings.some((w) => w.includes("gapfillDerivedPayloadHash differs from user-entered payload"))
+    ).toBe(false);
+  });
+
+  it("fail closed when SAME_PAYLOAD leg is compared against GAPFILL_DERIVED manifest entry", () => {
+    const violation = assertManifestLegMatchesProofFamily({
+      legId: "manual_monthly_lab",
+      manifestLeg: { fixtureFamily: "GAPFILL_DERIVED" },
+      auditProofFamily: "SAME_PAYLOAD",
+    });
+    expect(violation).toContain("manifest fixtureFamily GAPFILL_DERIVED != audit proof family SAME_PAYLOAD");
+
+    const { violations } = aggregateManualCrossSurfaceProofViolations({
+      auditManualMode: "MONTHLY",
+      auditGapfillMode: "MANUAL_MONTHLY",
+      legs: [
+        {
+          legId: "manual_monthly_lab",
+          status: "ok",
+          fixtureFamily: "GAPFILL_DERIVED",
+          comparisonFamily: "same_payload_parity",
+          normalizedPayloadHash: "hash-a",
+          validationResultHash: stableManualProofHash({ ok: true, error: null }),
+        },
+      ],
+      onePathFacadeParity: { ok: true, checked: [], mismatches: [] },
+      manifest: {
+        samePayloadAnchor: { monthly: { normalizedPayloadHash: "hash-a" } },
+        legs: {
+          manual_monthly_lab: { fixtureFamily: "GAPFILL_DERIVED", normalizedPayloadHash: "hash-a" },
+        },
+      },
+    });
+    expect(violations.some((v) => v.includes("fixture family GAPFILL_DERIVED cannot be compared"))).toBe(true);
+    expect(violations.some((v) => v.includes("manifest fixtureFamily GAPFILL_DERIVED"))).toBe(true);
+  });
+
+  it("validateManifestFixtureIsolation enforces proof family boundaries", () => {
+    const result = validateManifestFixtureIsolation({
+      auditManualMode: "MONTHLY",
+      auditGapfillMode: "MONTHLY_FROM_SOURCE_INTERVALS",
+      inScopeLegIds: ["gapfill_monthly_from_source_intervals", "gapfill_manual_monthly"],
+      manifest: {
+        legs: {
+          gapfill_monthly_from_source_intervals: { fixtureFamily: "GAPFILL_DERIVED" },
+          gapfill_manual_monthly: { fixtureFamily: "SAME_PAYLOAD" },
+        },
+      },
+    });
+    expect(result.auditProofFamily).toBe("GAPFILL_DERIVED");
+    expect(result.violations.some((v) => v.includes("gapfill_manual_monthly"))).toBe(true);
+  });
+
+  it("detects all-zero monthly and annual fixture payloads", () => {
+    expect(isZeroMonthlyManualPayload({ mode: "MONTHLY", anchorEndDate: "2026-05-31", monthlyKwh: [{ month: "2026-05", kwh: 0 }] })).toBe(true);
+    expect(isZeroMonthlyManualPayload(monthlyPayload)).toBe(false);
+    expect(isZeroAnnualManualPayload({ mode: "ANNUAL", anchorEndDate: "2026-05-31", annualKwh: 0 })).toBe(true);
+    expect(isZeroAnnualManualPayload(annualPayload)).toBe(false);
+  });
+
+  it("resolveAuditProofFamilyFromGapfillMode and resolveManifestFixtureFamily label families", () => {
+    expect(resolveAuditProofFamilyFromGapfillMode("MANUAL_MONTHLY")).toBe("SAME_PAYLOAD");
+    expect(resolveAuditProofFamilyFromGapfillMode("MONTHLY_FROM_SOURCE_INTERVALS")).toBe("GAPFILL_DERIVED");
+    expect(resolveManifestFixtureFamily("gapfill_manual_monthly")).toBe("SAME_PAYLOAD");
+    expect(resolveManifestFixtureFamily("gapfill_monthly_from_source_intervals")).toBe("GAPFILL_DERIVED");
   });
 
   it("resolveManualProofComparisonFamily separates derived gapfill legs", () => {

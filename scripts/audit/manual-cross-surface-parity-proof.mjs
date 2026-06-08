@@ -94,7 +94,8 @@ function legPayloadMode(legId) {
 function legInManualModeScope(legId, auditManualMode) {
   const mode = legPayloadMode(legId);
   if (!mode) return true;
-  if (legId.startsWith("gapfill_")) return true;
+  if (legId === "gapfill_manual_monthly") return auditManualMode === "MONTHLY";
+  if (legId.startsWith("gapfill_")) return mode === auditManualMode || legId.includes(auditManualMode.toLowerCase());
   return mode === auditManualMode;
 }
 
@@ -110,11 +111,11 @@ function legInGapfillScope(legId, auditGapfillMode) {
 
 async function resolveGapfillDerivedPayload(args) {
   const {
-    addDaysToIsoDate,
     reanchorGapfillManualStageOnePayload,
     resolveGapfillSyntheticAnchorEndDate,
     resolveSharedManualStageOneContract,
   } = await import("../../modules/manualUsage/prefill.ts");
+  const { addDaysToIsoDate } = await import("../../modules/manualUsage/statementRanges.ts");
   const { getManualUsageInputForUserHouse } = await import("../../modules/manualUsage/store.ts");
   const { getActualUsageDatasetForHouse } = await import("../../lib/usage/actualDatasetForHouse.ts");
   const { getHouseAddressForUserHouse } = await import("../../modules/onePathSim/usageSimulator/repo.ts");
@@ -186,6 +187,8 @@ async function probeArtifactLeg(args) {
     comparisonFamily: args.comparisonFamily ?? null,
     payloadProvenance: args.payloadProvenance ?? null,
     fixtureArtifactInputHash: args.exactArtifactInputHash ?? null,
+    fixtureFamily: args.fixtureFamily ?? null,
+    applyAdminRemap: args.applyAdminRemap === true,
     ...payloadHashes,
   };
 
@@ -270,6 +273,8 @@ async function buildGapfillActualComparison(args) {
       houseId: args.labHouseId,
       scenarioId: args.scenarioId,
       readMode: "artifact_only",
+      exactArtifactInputHash: args.exactArtifactInputHash ?? undefined,
+      requireExactArtifactMatch: args.exactArtifactInputHash != null,
       projectionMode: "baseline",
       readContext: {
         artifactReadMode: "artifact_only",
@@ -326,7 +331,9 @@ async function main() {
     aggregateManualCrossSurfaceProofViolations,
     buildUnavailableLeg,
     hashManualPayloadFields,
+    resolveAuditProofFamilyFromGapfillMode,
     resolveCanonicalCoverageForProof,
+    resolveManifestFixtureFamily,
     resolveManualProofComparisonFamily,
     resolveManualProofPayloadProvenance,
     runOnePathManualFacadeParityCheck,
@@ -389,6 +396,11 @@ async function main() {
       ? entry.artifactInputHash.trim()
       : null;
   };
+  const fixtureFamilyForLeg = (legId) => {
+    const entry = fixtureManifest?.legs?.[legId];
+    return entry?.fixtureFamily ?? resolveManifestFixtureFamily(legId);
+  };
+  const auditProofFamily = resolveAuditProofFamilyFromGapfillMode(AUDIT_GAPFILL_MODE);
 
   const samplePayloads = [sourceManual.payload, labManual.payload, gapfillDerived.payload].filter(Boolean);
   const onePathFacadeParity = await runOnePathManualFacadeParityCheck({
@@ -417,11 +429,37 @@ async function main() {
       );
       continue;
     }
+    const legFixtureFamily = fixtureFamilyForLeg(legId);
+    if (legFixtureFamily !== auditProofFamily && !legId.startsWith("user_")) {
+      legs.push(
+        buildUnavailableLeg({
+          legId,
+          reason: `fixture_family_scope: leg=${legFixtureFamily} audit=${auditProofFamily}`,
+          canonicalCoverage,
+        })
+      );
+      continue;
+    }
+    if (auditProofFamily === "GAPFILL_DERIVED" && legId.startsWith("user_")) {
+      legs.push(
+        buildUnavailableLeg({
+          legId,
+          reason: `reference_leg_out_of_scope: auditProofFamily=${auditProofFamily}`,
+          canonicalCoverage,
+        })
+      );
+      continue;
+    }
 
     if (legId === "user_manual_monthly" || legId === "user_manual_annual") {
       const wantMode = legId.endsWith("annual") ? "ANNUAL" : "MONTHLY";
+      const manifestLeg = fixtureManifest?.legs?.[legId] ?? null;
       const payload =
-        sourceManual.payload?.mode === wantMode ? sourceManual.payload : null;
+        sourceManual.payload?.mode === wantMode
+          ? sourceManual.payload
+          : manifestLeg?.normalizedPayloadHash
+            ? sourceManual.payload
+            : null;
       legs.push(
         await probeArtifactLeg({
           legId,
@@ -434,6 +472,7 @@ async function main() {
           surfaceMode: wantMode === "MONTHLY" ? "MANUAL_MONTHLY" : "MANUAL_ANNUAL",
           applyAdminRemap: false,
           exactArtifactInputHash: fixtureArtifactHashForLeg(legId),
+          fixtureFamily: fixtureFamilyForLeg(legId),
           comparisonFamily: resolveManualProofComparisonFamily(legId),
           payloadProvenance: resolveManualProofPayloadProvenance(legId),
           runDispatchPath: "dispatchPastSimRecalc(MANUAL_TOTALS)->onePath recalcSimulatorBuild",
@@ -456,6 +495,7 @@ async function main() {
           surfaceMode: "MANUAL_MONTHLY",
           applyAdminRemap: true,
           exactArtifactInputHash: fixtureArtifactHashForLeg(legId),
+          fixtureFamily: fixtureFamilyForLeg(legId),
           comparisonFamily: resolveManualProofComparisonFamily(legId),
           payloadProvenance: resolveManualProofPayloadProvenance(legId),
           runDispatchPath: "onePathSim/usageSimulator/pastSimRecalcDispatch(MANUAL_TOTALS)",
@@ -479,6 +519,7 @@ async function main() {
           surfaceMode: wantMode === "MONTHLY" ? "MANUAL_MONTHLY" : "MANUAL_ANNUAL",
           applyAdminRemap: true,
           exactArtifactInputHash: fixtureArtifactHashForLeg(legId),
+          fixtureFamily: fixtureFamilyForLeg(legId),
           comparisonFamily: resolveManualProofComparisonFamily(legId),
           payloadProvenance: resolveManualProofPayloadProvenance(legId),
           runDispatchPath: "adaptManual*RawInput->runSharedSimulation->runOnePathSimulatorBuild",
@@ -495,8 +536,23 @@ async function main() {
     };
     const gapfillMode = gapfillModeMap[legId];
     const wantPayloadMode = legId.includes("annual") ? "ANNUAL" : "MONTHLY";
-    const derivedPayload =
-      gapfillDerived.payload?.mode === wantPayloadMode ? gapfillDerived.payload : null;
+    let derivedPayload = null;
+    if (legId === "gapfill_manual_monthly") {
+      derivedPayload = labManual.payload?.mode === "MONTHLY" ? labManual.payload : null;
+    } else if (legId.includes("source_intervals")) {
+      const perLegDerived = await resolveGapfillDerivedPayload({
+        sourceUserId: user.id,
+        sourceHouseId: SOURCE_HOUSE,
+        labOwnerUserId: owner.id,
+        labHouseId: LAB_HOUSE,
+        gapfillMode,
+      });
+      derivedPayload =
+        perLegDerived.payload?.mode === wantPayloadMode ? perLegDerived.payload : null;
+    }
+    const gapfillPayloadHashForLeg = derivedPayload
+      ? hashManualPayloadFields(derivedPayload).normalizedPayloadHash
+      : null;
     const gapfillActualComparison =
       legId.includes("source_intervals") && derivedPayload
         ? await buildGapfillActualComparison({
@@ -506,6 +562,7 @@ async function main() {
             labHouseId: LAB_HOUSE,
             scenarioId: labPast?.id ?? null,
             payload: derivedPayload,
+            exactArtifactInputHash: fixtureArtifactHashForLeg(legId),
           })
         : legId === "gapfill_manual_monthly"
           ? null
@@ -522,7 +579,8 @@ async function main() {
         surfaceMode: gapfillMode,
         applyAdminRemap: false,
         exactArtifactInputHash: fixtureArtifactHashForLeg(legId),
-        gapfillDerivedPayloadHash: gapfillPayloadHash,
+        fixtureFamily: fixtureFamilyForLeg(legId),
+        gapfillDerivedPayloadHash: gapfillPayloadHashForLeg,
         gapfillActualComparison,
         comparisonFamily: resolveManualProofComparisonFamily(legId),
         payloadProvenance: resolveManualProofPayloadProvenance(legId),
@@ -532,11 +590,12 @@ async function main() {
     );
   }
 
-  const { violations, warnings } = aggregateManualCrossSurfaceProofViolations({
+  const { violations, warnings, auditProofFamily: resolvedAuditProofFamily } = aggregateManualCrossSurfaceProofViolations({
     legs,
     auditManualMode: AUDIT_MANUAL_MODE,
     auditGapfillMode: AUDIT_GAPFILL_MODE,
     onePathFacadeParity,
+    manifest: fixtureManifest,
   });
 
   await prisma.$disconnect();
@@ -550,6 +609,7 @@ async function main() {
     mode: AUDIT_MANUAL_MODE,
     payloadMode: AUDIT_MANUAL_MODE,
     auditGapfillMode: AUDIT_GAPFILL_MODE,
+    auditProofFamily: resolvedAuditProofFamily,
     anchorDate: legs.find((leg) => leg.status === "ok")?.anchorDate ?? null,
     canonicalCoverageStart: canonicalCoverage.startDate,
     canonicalCoverageEnd: canonicalCoverage.endDate,
@@ -568,7 +628,9 @@ async function main() {
     verdict: violations.length === 0 ? "MANUAL_CROSS_SURFACE_PARITY_PASS" : "MANUAL_CROSS_SURFACE_PARITY_FAIL",
   };
 
-  const outPath = resolve(process.cwd(), "scripts/audit/manual-cross-surface-parity-proof-output.json");
+  const outPath =
+    String(process.env.AUDIT_PROOF_OUTPUT ?? "").trim() ||
+    resolve(process.cwd(), "scripts/audit/manual-cross-surface-parity-proof-output.json");
   writeFileSync(outPath, JSON.stringify(out, null, 2));
   console.log(JSON.stringify(out, null, 2));
   console.log("Wrote", outPath);

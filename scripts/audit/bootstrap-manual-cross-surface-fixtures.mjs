@@ -1,8 +1,8 @@
 /**
- * Phase 1B — bootstrap manual Past cross-surface proof fixtures (WRITES database).
+ * Phase 2B — bootstrap manual Past cross-surface proof fixtures (WRITES database).
  *
- * Uses existing dispatch/save paths only. Lab/test-home writes are isolated to AUDIT_LAB_HOUSE_ID.
- * Source-house manual payloads are never overwritten — only recalc when payload already exists.
+ * Separates SAME_PAYLOAD fixtures from GAPFILL_DERIVED fixtures so derived GapFill
+ * bootstrap cannot overwrite same-payload lab/admin state used for parity proof.
  *
  * Guardrails — refuses to run unless ALL are set:
  *   ALLOW_PROD_MANUAL_RECALC=1
@@ -10,7 +10,11 @@
  *   AUDIT_SOURCE_HOUSE_ID
  *   AUDIT_LAB_HOUSE_ID
  *
+ * Optional:
+ *   AUDIT_FIXTURE_PHASE=ALL|SAME_PAYLOAD|GAPFILL_DERIVED  (default ALL)
+ *
  * Usage:
+ *   PAST_SIM_RECALC_INLINE=true \
  *   ALLOW_PROD_MANUAL_RECALC=1 \
  *   AUDIT_USER_EMAIL=user@example.com \
  *   AUDIT_SOURCE_HOUSE_ID=<source-uuid> \
@@ -19,6 +23,8 @@
  */
 import { readFileSync, existsSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+
+process.env.PAST_SIM_RECALC_INLINE = "true";
 
 const envLocalPath = resolve(process.cwd(), ".env.local");
 if (existsSync(envLocalPath)) {
@@ -45,6 +51,24 @@ function requireEnv(name) {
   return value;
 }
 
+function parseFixturePhase() {
+  const raw = String(process.env.AUDIT_FIXTURE_PHASE ?? "ALL").trim().toUpperCase();
+  if (raw !== "ALL" && raw !== "SAME_PAYLOAD" && raw !== "GAPFILL_DERIVED") {
+    console.error("Invalid AUDIT_FIXTURE_PHASE (expected ALL, SAME_PAYLOAD, or GAPFILL_DERIVED).");
+    process.exit(2);
+  }
+  return raw;
+}
+
+function parseFixtureFinalMode() {
+  const raw = String(process.env.AUDIT_FIXTURE_FINAL_MODE ?? "MONTHLY").trim().toUpperCase();
+  if (raw !== "MONTHLY" && raw !== "ANNUAL") {
+    console.error("Invalid AUDIT_FIXTURE_FINAL_MODE (expected MONTHLY or ANNUAL).");
+    process.exit(2);
+  }
+  return raw;
+}
+
 function assertProdWriteAllowed() {
   const flag = String(process.env.ALLOW_PROD_MANUAL_RECALC ?? "").trim().toLowerCase();
   if (flag !== "1" && flag !== "true" && flag !== "yes") {
@@ -55,11 +79,13 @@ function assertProdWriteAllowed() {
   }
 }
 
-const GAPFILL_MODES = [
-  { legId: "gapfill_manual_monthly", usageInputMode: "MANUAL_MONTHLY" },
-  { legId: "gapfill_monthly_from_source_intervals", usageInputMode: "MONTHLY_FROM_SOURCE_INTERVALS" },
-  { legId: "gapfill_annual_from_source_intervals", usageInputMode: "ANNUAL_FROM_SOURCE_INTERVALS" },
-];
+const SAME_PAYLOAD_READ_MODEL =
+  "buildOnePathManualUsagePastSimReadResult->readOnePathSimulatedUsageScenario";
+const USER_RUN_DISPATCH = "dispatchPastSimRecalc(MANUAL_TOTALS)->onePath recalcSimulatorBuild";
+const LAB_RUN_DISPATCH =
+  "dispatchPastSimRecalc(MANUAL_TOTALS)->usageSimulator wrapper->onePath recalcSimulatorBuild";
+const ADMIN_RUN_DISPATCH =
+  "adaptManual*RawInput->runSharedSimulation->runOnePathSimulatorBuild";
 
 async function findPastScenarioId(prisma, userId, houseId) {
   const row = await prisma.usageSimulatorScenario.findFirst({
@@ -70,13 +96,19 @@ async function findPastScenarioId(prisma, userId, houseId) {
   return row?.id ?? null;
 }
 
-async function readLatestArtifactInputHash(usagePrisma, houseId, scenarioId) {
-  const row = await usagePrisma.pastSimulatedDatasetCache.findFirst({
+async function readArtifactRow(usagePrisma, houseId, scenarioId, inputHash) {
+  if (inputHash) {
+    const pinned = await usagePrisma.pastSimulatedDatasetCache.findFirst({
+      where: { houseId, scenarioId: String(scenarioId), inputHash },
+      select: { id: true, inputHash: true, updatedAt: true },
+    });
+    if (pinned) return pinned;
+  }
+  return usagePrisma.pastSimulatedDatasetCache.findFirst({
     where: { houseId, scenarioId: String(scenarioId) },
     orderBy: { updatedAt: "desc" },
-    select: { inputHash: true, id: true, updatedAt: true },
+    select: { id: true, inputHash: true, updatedAt: true },
   });
-  return row?.inputHash ?? null;
 }
 
 async function resolveGapfillPayload(args) {
@@ -123,6 +155,25 @@ async function resolveGapfillPayload(args) {
       anchorEndDate: syntheticAnchorEndDate,
     }),
   };
+}
+
+async function validateNonZeroPayload(payload) {
+  const { validateManualUsagePayload } = await import("../../modules/manualUsage/validation.ts");
+  const {
+    isZeroAnnualManualPayload,
+    isZeroMonthlyManualPayload,
+  } = await import("../../lib/usage/manualCrossSurfaceParityProof.ts");
+  const validation = validateManualUsagePayload(payload);
+  if (!validation.ok) {
+    throw new Error(`manual payload validation failed: ${validation.error}`);
+  }
+  if (payload.mode === "MONTHLY" && isZeroMonthlyManualPayload(payload)) {
+    throw new Error("manual monthly payload is all-zero");
+  }
+  if (payload.mode === "ANNUAL" && isZeroAnnualManualPayload(payload)) {
+    throw new Error("manual annual payload is all-zero");
+  }
+  return validation.value;
 }
 
 async function dispatchManualRecalc(args) {
@@ -175,10 +226,22 @@ async function dispatchManualRecalc(args) {
 
 async function main() {
   assertProdWriteAllowed();
+  const fixturePhase = parseFixturePhase();
+  const fixtureFinalMode = parseFixtureFinalMode();
   const EMAIL = requireEnv("AUDIT_USER_EMAIL");
   const SOURCE_HOUSE = requireEnv("AUDIT_SOURCE_HOUSE_ID");
   const LAB_HOUSE = requireEnv("AUDIT_LAB_HOUSE_ID");
   const OWNER_EMAIL = String(process.env.AUDIT_OWNER_EMAIL ?? EMAIL).trim() || EMAIL;
+
+  const manifestPath = resolve(process.cwd(), "scripts/audit/manual-cross-surface-fixture-manifest.json");
+  let existingManifest = null;
+  if (existsSync(manifestPath)) {
+    try {
+      existingManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    } catch {
+      existingManifest = null;
+    }
+  }
 
   const { prisma } = await import("../../lib/db.ts");
   const { usagePrisma } = await import("../../lib/db/usageClient.ts");
@@ -199,7 +262,7 @@ async function main() {
     process.exit(2);
   }
 
-  const [sourcePastId, labPastId, sourceManual, sourceHouse] = await Promise.all([
+  const [sourcePastId, labPastId, sourceManualBefore, sourceHouse] = await Promise.all([
     findPastScenarioId(prisma, user.id, SOURCE_HOUSE),
     findPastScenarioId(prisma, owner.id, LAB_HOUSE),
     getManualUsageInputForUserHouse({ userId: user.id, houseId: SOURCE_HOUSE }),
@@ -208,226 +271,445 @@ async function main() {
   const sourceTravelRanges = await getTravelRangesFromDb(user.id, SOURCE_HOUSE);
   const labTravelRanges = await getTravelRangesFromDb(owner.id, LAB_HOUSE);
   const correlationBase = `manual-fixture-bootstrap-${Date.now()}`;
-  const legs = {};
+  const legs = { ...(existingManifest?.legs ?? {}) };
+  const samePayloadAnchor = { ...(existingManifest?.samePayloadAnchor ?? {}) };
+  let canonicalSamePayloadMonthly = null;
+  let canonicalSamePayloadAnnual = null;
+
+  const nowIso = () => new Date().toISOString();
 
   async function recordLeg(legId, result) {
-    legs[legId] = result;
+    const prior = legs[legId] ?? {};
+    legs[legId] = {
+      ...prior,
+      ...result,
+      updatedAt: nowIso(),
+      createdAt: prior.createdAt ?? nowIso(),
+    };
+    if (legs[legId].status === "ok") {
+      delete legs[legId].reason;
+    }
   }
 
-  if (sourceManual.payload?.mode === "MONTHLY" && sourcePastId) {
-    const recalc = await dispatchManualRecalc({
-      userId: user.id,
-      houseId: SOURCE_HOUSE,
-      esiid: sourceHouse?.esiid ?? null,
-      actualContextHouseId: SOURCE_HOUSE,
-      scenarioId: sourcePastId,
-      travelRanges: sourceTravelRanges,
-      correlationId: `${correlationBase}-user-monthly`,
-      callerLabel: "manual_fixture_user_monthly",
-      surface: "user_site",
-    });
-    const artifactInputHash =
-      recalc.ok && recalc.artifactInputHash
-        ? recalc.artifactInputHash
-        : await readLatestArtifactInputHash(usagePrisma, SOURCE_HOUSE, sourcePastId);
-    await recordLeg("user_manual_monthly", {
-      status: recalc.ok ? "ok" : "recalc_failed",
-      scenarioId: sourcePastId,
-      artifactInputHash,
-      normalizedPayloadHash: hashManualPayloadFields(sourceManual.payload).normalizedPayloadHash,
-      error: recalc.ok ? null : recalc.error,
-    });
-  } else {
-    await recordLeg("user_manual_monthly", {
-      status: "skipped",
-      reason: sourceManual.payload?.mode === "MONTHLY" ? "past_scenario_missing" : "source_manual_monthly_missing",
-    });
+  function anchorFromPayload(payload) {
+    const hashed = hashManualPayloadFields(payload);
+    return {
+      normalizedPayloadHash: hashed.normalizedPayloadHash,
+      sourcePayloadHash: hashed.sourcePayloadHash,
+      billPeriodHash: hashed.billPeriodHash,
+      statementRangesHash: hashed.statementRangesHash,
+      validationResultHash: hashed.validationResultHash,
+    };
   }
 
-  if (sourceManual.payload?.mode === "ANNUAL" && sourcePastId) {
-    const recalc = await dispatchManualRecalc({
-      userId: user.id,
-      houseId: SOURCE_HOUSE,
-      esiid: sourceHouse?.esiid ?? null,
-      actualContextHouseId: SOURCE_HOUSE,
-      scenarioId: sourcePastId,
-      travelRanges: sourceTravelRanges,
-      correlationId: `${correlationBase}-user-annual`,
-      callerLabel: "manual_fixture_user_annual",
-      surface: "user_site",
-    });
-    const artifactInputHash =
-      recalc.ok && recalc.artifactInputHash
-        ? recalc.artifactInputHash
-        : await readLatestArtifactInputHash(usagePrisma, SOURCE_HOUSE, sourcePastId);
-    await recordLeg("user_manual_annual", {
-      status: recalc.ok ? "ok" : "recalc_failed",
-      scenarioId: sourcePastId,
-      artifactInputHash,
-      normalizedPayloadHash: hashManualPayloadFields(sourceManual.payload).normalizedPayloadHash,
-      error: recalc.ok ? null : recalc.error,
-    });
-  } else {
-    await recordLeg("user_manual_annual", {
-      status: "skipped",
-      reason: sourceManual.payload?.mode === "ANNUAL" ? "past_scenario_missing" : "source_manual_annual_missing",
-    });
-  }
-
-  if (labPastId && sourceManual.payload?.mode === "MONTHLY") {
-    await replaceGlobalManualMonthlyLabTestHomeFromSource({
-      ownerUserId: owner.id,
-      sourceUserId: user.id,
-      sourceHouseId: SOURCE_HOUSE,
-    }).catch(() => null);
-    const labManual = await getManualUsageInputForUserHouse({ userId: owner.id, houseId: LAB_HOUSE });
-    const recalc = await dispatchManualRecalc({
-      userId: owner.id,
-      houseId: LAB_HOUSE,
-      esiid: null,
-      actualContextHouseId: SOURCE_HOUSE,
-      scenarioId: labPastId,
-      travelRanges: labTravelRanges.length > 0 ? labTravelRanges : sourceTravelRanges,
-      correlationId: `${correlationBase}-lab-monthly`,
-      callerLabel: "manual_fixture_lab_monthly",
-      surface: "admin_lab",
-    });
-    const artifactInputHash =
-      recalc.ok && recalc.artifactInputHash
-        ? recalc.artifactInputHash
-        : await readLatestArtifactInputHash(usagePrisma, LAB_HOUSE, labPastId);
-    await recordLeg("manual_monthly_lab", {
-      status: recalc.ok ? "ok" : "recalc_failed",
-      scenarioId: labPastId,
-      artifactInputHash,
-      normalizedPayloadHash: labManual.payload ? hashManualPayloadFields(labManual.payload).normalizedPayloadHash : null,
-      error: recalc.ok ? null : recalc.error,
-    });
-    await recordLeg("one_path_admin_manual_monthly", {
-      status: recalc.ok ? "ok" : "recalc_failed",
-      scenarioId: labPastId,
-      artifactInputHash,
-      normalizedPayloadHash: labManual.payload ? hashManualPayloadFields(labManual.payload).normalizedPayloadHash : null,
-      error: recalc.ok ? null : recalc.error,
-      note: "shares lab Past artifact with manual_monthly_lab",
-    });
-  } else {
-    await recordLeg("manual_monthly_lab", { status: "skipped", reason: "lab_past_or_source_monthly_missing" });
-    await recordLeg("one_path_admin_manual_monthly", {
-      status: "skipped",
-      reason: "lab_past_or_source_monthly_missing",
-    });
-  }
-
-  const annualDerived = await resolveGapfillPayload({
-    sourceUserId: user.id,
-    sourceHouseId: SOURCE_HOUSE,
-    sourceEsiid: sourceHouse?.esiid ?? null,
-    labOwnerUserId: owner.id,
-    labHouseId: LAB_HOUSE,
-    usageInputMode: "ANNUAL_FROM_SOURCE_INTERVALS",
-  });
-  if (labPastId && annualDerived.payload?.mode === "ANNUAL") {
+  async function bootstrapLabLeg(args) {
+    if (!labPastId) {
+      await recordLeg(args.legId, { status: "skipped", reason: "lab_past_missing" });
+      return null;
+    }
     await saveManualUsageInputForUserHouse({
       userId: owner.id,
       houseId: LAB_HOUSE,
-      payload: annualDerived.payload,
+      payload: args.payload,
     });
     const recalc = await dispatchManualRecalc({
       userId: owner.id,
       houseId: LAB_HOUSE,
-      esiid: sourceHouse?.esiid ?? null,
+      esiid: args.esiid ?? null,
       actualContextHouseId: SOURCE_HOUSE,
       scenarioId: labPastId,
       travelRanges: labTravelRanges.length > 0 ? labTravelRanges : sourceTravelRanges,
-      correlationId: `${correlationBase}-lab-annual`,
-      callerLabel: "manual_fixture_lab_annual",
+      correlationId: `${correlationBase}-${args.legId}`,
+      callerLabel: `manual_fixture_${args.legId}`,
       surface: "admin_lab",
     });
     const artifactInputHash =
       recalc.ok && recalc.artifactInputHash
         ? recalc.artifactInputHash
-        : await readLatestArtifactInputHash(usagePrisma, LAB_HOUSE, labPastId);
-    await recordLeg("one_path_admin_manual_annual", {
+        : (await readArtifactRow(usagePrisma, LAB_HOUSE, labPastId, null))?.inputHash ?? null;
+    const artifactRow = await readArtifactRow(usagePrisma, LAB_HOUSE, labPastId, artifactInputHash);
+    const hashed = hashManualPayloadFields(args.payload);
+    await recordLeg(args.legId, {
       status: recalc.ok ? "ok" : "recalc_failed",
       scenarioId: labPastId,
+      fixtureFamily: args.fixtureFamily,
+      fixturePayloadMode: args.fixturePayloadMode,
+      artifactId: artifactRow?.id ?? null,
       artifactInputHash,
-      gapfillDerivedPayloadHash: hashManualPayloadFields(annualDerived.payload).normalizedPayloadHash,
-      normalizedPayloadHash: hashManualPayloadFields(annualDerived.payload).normalizedPayloadHash,
+      sourcePayloadHash: hashed.sourcePayloadHash,
+      normalizedPayloadHash: hashed.normalizedPayloadHash,
+      billPeriodHash: hashed.billPeriodHash,
+      statementRangesHash: hashed.statementRangesHash,
+      validationResultHash: hashed.validationResultHash,
+      gapfillDerivedPayloadHash: args.gapfillDerivedPayloadHash ?? null,
+      readModelPath: args.readModelPath ?? SAME_PAYLOAD_READ_MODEL,
+      runDispatchPath: args.runDispatchPath ?? LAB_RUN_DISPATCH,
+      payloadSource: args.payloadSource ?? null,
       error: recalc.ok ? null : recalc.error,
-      note: "lab-only annual payload derived from source intervals",
+      note: args.note ?? null,
     });
-  } else {
-    await recordLeg("one_path_admin_manual_annual", {
-      status: "skipped",
-      reason: annualDerived.payload ? "lab_past_missing" : "annual_derived_payload_unresolved",
-    });
+    return { recalc, artifactInputHash, hashed };
   }
 
-  for (const mode of GAPFILL_MODES) {
-    if (!labPastId) {
-      await recordLeg(mode.legId, { status: "skipped", reason: "lab_past_missing" });
-      continue;
+  async function bootstrapSourceLeg(args) {
+    if (!sourcePastId) {
+      await recordLeg(args.legId, { status: "skipped", reason: "past_scenario_missing" });
+      return null;
     }
-    const derived = await resolveGapfillPayload({
+    await saveManualUsageInputForUserHouse({
+      userId: user.id,
+      houseId: SOURCE_HOUSE,
+      payload: args.payload,
+    });
+    const recalc = await dispatchManualRecalc({
+      userId: user.id,
+      houseId: SOURCE_HOUSE,
+      esiid: sourceHouse?.esiid ?? null,
+      actualContextHouseId: SOURCE_HOUSE,
+      scenarioId: sourcePastId,
+      travelRanges: sourceTravelRanges,
+      correlationId: `${correlationBase}-${args.legId}`,
+      callerLabel: `manual_fixture_${args.legId}`,
+      surface: "user_site",
+    });
+    const artifactInputHash =
+      recalc.ok && recalc.artifactInputHash
+        ? recalc.artifactInputHash
+        : (await readArtifactRow(usagePrisma, SOURCE_HOUSE, sourcePastId, null))?.inputHash ?? null;
+    const artifactRow = await readArtifactRow(usagePrisma, SOURCE_HOUSE, sourcePastId, artifactInputHash);
+    const hashed = hashManualPayloadFields(args.payload);
+    await recordLeg(args.legId, {
+      status: recalc.ok ? "ok" : "recalc_failed",
+      scenarioId: sourcePastId,
+      fixtureFamily: "SAME_PAYLOAD",
+      fixturePayloadMode: args.fixturePayloadMode,
+      artifactId: artifactRow?.id ?? null,
+      artifactInputHash,
+      sourcePayloadHash: hashed.sourcePayloadHash,
+      normalizedPayloadHash: hashed.normalizedPayloadHash,
+      billPeriodHash: hashed.billPeriodHash,
+      statementRangesHash: hashed.statementRangesHash,
+      validationResultHash: hashed.validationResultHash,
+      readModelPath: "readOnePathSimulatedUsageScenario + buildManualUsageReadDecorations",
+      runDispatchPath: USER_RUN_DISPATCH,
+      error: recalc.ok ? null : recalc.error,
+    });
+    return { recalc, artifactInputHash, hashed };
+  }
+
+  if (fixturePhase === "ALL" || fixturePhase === "SAME_PAYLOAD") {
+    const monthlyDerived = await resolveGapfillPayload({
       sourceUserId: user.id,
       sourceHouseId: SOURCE_HOUSE,
       sourceEsiid: sourceHouse?.esiid ?? null,
       labOwnerUserId: owner.id,
       labHouseId: LAB_HOUSE,
-      usageInputMode: mode.usageInputMode,
+      usageInputMode: "MONTHLY_FROM_SOURCE_INTERVALS",
     });
-    if (!derived.payload) {
-      await recordLeg(mode.legId, { status: "skipped", reason: "gapfill_payload_unresolved" });
-      continue;
+    if (!monthlyDerived.payload || monthlyDerived.payload.mode !== "MONTHLY") {
+      console.error("Failed to derive canonical non-zero monthly same-payload fixture");
+      process.exit(2);
     }
+    canonicalSamePayloadMonthly = await validateNonZeroPayload(monthlyDerived.payload);
+    samePayloadAnchor.monthly = anchorFromPayload(canonicalSamePayloadMonthly);
+
+    const annualDerived = await resolveGapfillPayload({
+      sourceUserId: user.id,
+      sourceHouseId: SOURCE_HOUSE,
+      sourceEsiid: sourceHouse?.esiid ?? null,
+      labOwnerUserId: owner.id,
+      labHouseId: LAB_HOUSE,
+      usageInputMode: "ANNUAL_FROM_SOURCE_INTERVALS",
+    });
+    if (!annualDerived.payload || annualDerived.payload.mode !== "ANNUAL") {
+      console.error("Failed to derive canonical non-zero annual same-payload fixture");
+      process.exit(2);
+    }
+    canonicalSamePayloadAnnual = await validateNonZeroPayload(annualDerived.payload);
+    samePayloadAnchor.annual = anchorFromPayload(canonicalSamePayloadAnnual);
+
+    // Annual artifacts first — Past cache keeps one surviving row per scenario; monthly must be recalculated last.
+    await bootstrapSourceLeg({
+      legId: "user_manual_annual",
+      payload: canonicalSamePayloadAnnual,
+      fixturePayloadMode: "ANNUAL",
+    });
+
+    if (labPastId) {
+      await bootstrapLabLeg({
+        legId: "one_path_admin_manual_annual",
+        payload: canonicalSamePayloadAnnual,
+        fixtureFamily: "SAME_PAYLOAD",
+        fixturePayloadMode: "ANNUAL",
+        readModelPath: "buildOnePathManualUsagePastSimReadResult + remapManualDisplayDatasetToCanonicalWindow",
+        runDispatchPath: ADMIN_RUN_DISPATCH,
+        note: "same-payload annual fixture — not gapfill-derived family",
+      });
+    } else {
+      await recordLeg("one_path_admin_manual_annual", { status: "skipped", reason: "lab_past_missing" });
+    }
+
+    await bootstrapSourceLeg({
+      legId: "user_manual_monthly",
+      payload: canonicalSamePayloadMonthly,
+      fixturePayloadMode: "MONTHLY",
+    });
+
+    if (labPastId) {
+      await replaceGlobalManualMonthlyLabTestHomeFromSource({
+        ownerUserId: owner.id,
+        sourceUserId: user.id,
+        sourceHouseId: SOURCE_HOUSE,
+      }).catch(() => null);
+      await saveManualUsageInputForUserHouse({
+        userId: owner.id,
+        houseId: LAB_HOUSE,
+        payload: canonicalSamePayloadMonthly,
+      });
+      const labMonthly = await bootstrapLabLeg({
+        legId: "manual_monthly_lab",
+        payload: canonicalSamePayloadMonthly,
+        fixtureFamily: "SAME_PAYLOAD",
+        fixturePayloadMode: "MONTHLY",
+        readModelPath: "buildOnePathManualUsagePastSimReadResult + remapManualDisplayDatasetToCanonicalWindow",
+        runDispatchPath: ADMIN_RUN_DISPATCH,
+      });
+      if (labMonthly) {
+        await recordLeg("one_path_admin_manual_monthly", {
+          ...legs.manual_monthly_lab,
+          note: "shares lab Past artifact with manual_monthly_lab",
+          runDispatchPath: ADMIN_RUN_DISPATCH,
+          readModelPath: "buildOnePathManualUsagePastSimReadResult + remapManualDisplayDatasetToCanonicalWindow",
+        });
+      } else {
+        await recordLeg("one_path_admin_manual_monthly", {
+          status: "skipped",
+          reason: "lab_past_or_source_monthly_missing",
+        });
+      }
+      await bootstrapLabLeg({
+        legId: "gapfill_manual_monthly",
+        payload: canonicalSamePayloadMonthly,
+        fixtureFamily: "SAME_PAYLOAD",
+        fixturePayloadMode: "MONTHLY",
+        payloadSource: "same_payload_anchor",
+        note: "GapFill MANUAL_MONTHLY fed canonical same-payload fixture",
+      });
+    } else {
+      await recordLeg("manual_monthly_lab", { status: "skipped", reason: "lab_past_missing" });
+      await recordLeg("one_path_admin_manual_monthly", { status: "skipped", reason: "lab_past_missing" });
+      await recordLeg("gapfill_manual_monthly", { status: "skipped", reason: "lab_past_missing" });
+    }
+  }
+
+  if (fixturePhase === "ALL" || fixturePhase === "GAPFILL_DERIVED") {
+    const derivedModes = [
+      {
+        legId: "gapfill_annual_from_source_intervals",
+        usageInputMode: "ANNUAL_FROM_SOURCE_INTERVALS",
+        fixturePayloadMode: "ANNUAL",
+      },
+      {
+        legId: "gapfill_monthly_from_source_intervals",
+        usageInputMode: "MONTHLY_FROM_SOURCE_INTERVALS",
+        fixturePayloadMode: "MONTHLY",
+      },
+    ];
+    for (const mode of derivedModes) {
+      const derived = await resolveGapfillPayload({
+        sourceUserId: user.id,
+        sourceHouseId: SOURCE_HOUSE,
+        sourceEsiid: sourceHouse?.esiid ?? null,
+        labOwnerUserId: owner.id,
+        labHouseId: LAB_HOUSE,
+        usageInputMode: mode.usageInputMode,
+      });
+      if (!derived.payload) {
+        await recordLeg(mode.legId, { status: "skipped", reason: "gapfill_payload_unresolved" });
+        continue;
+      }
+      try {
+        await validateNonZeroPayload(derived.payload);
+      } catch (error) {
+        await recordLeg(mode.legId, {
+          status: "skipped",
+          reason: error instanceof Error ? error.message : "gapfill_payload_invalid",
+        });
+        continue;
+      }
+      const hashed = hashManualPayloadFields(derived.payload);
+      await bootstrapLabLeg({
+        legId: mode.legId,
+        payload: derived.payload,
+        fixtureFamily: "GAPFILL_DERIVED",
+        fixturePayloadMode: mode.fixturePayloadMode,
+        esiid: sourceHouse?.esiid ?? null,
+        gapfillDerivedPayloadHash: hashed.normalizedPayloadHash,
+        payloadSource: derived.payloadSource ?? null,
+        note: "GapFill source-interval-derived payload family",
+      });
+    }
+
+    if (canonicalSamePayloadMonthly || samePayloadAnchor.monthly) {
+      const restorePayload =
+        canonicalSamePayloadMonthly ??
+        (await resolveGapfillPayload({
+          sourceUserId: user.id,
+          sourceHouseId: SOURCE_HOUSE,
+          sourceEsiid: sourceHouse?.esiid ?? null,
+          labOwnerUserId: owner.id,
+          labHouseId: LAB_HOUSE,
+          usageInputMode: "MONTHLY_FROM_SOURCE_INTERVALS",
+        }).then((resolved) => resolved.payload));
+      if (restorePayload?.mode === "MONTHLY") {
+        await saveManualUsageInputForUserHouse({
+          userId: owner.id,
+          houseId: LAB_HOUSE,
+          payload: restorePayload,
+        });
+      }
+    }
+  }
+
+  async function finalizeSurvivingArtifacts() {
+    if (fixtureFinalMode === "MONTHLY") {
+      if (canonicalSamePayloadMonthly && (fixturePhase === "ALL" || fixturePhase === "SAME_PAYLOAD")) {
+        await bootstrapSourceLeg({
+          legId: "user_manual_monthly",
+          payload: canonicalSamePayloadMonthly,
+          fixturePayloadMode: "MONTHLY",
+        });
+        if (labPastId) {
+          await bootstrapLabLeg({
+            legId: "manual_monthly_lab",
+            payload: canonicalSamePayloadMonthly,
+            fixtureFamily: "SAME_PAYLOAD",
+            fixturePayloadMode: "MONTHLY",
+            readModelPath: "buildOnePathManualUsagePastSimReadResult + remapManualDisplayDatasetToCanonicalWindow",
+            runDispatchPath: ADMIN_RUN_DISPATCH,
+          });
+          await recordLeg("one_path_admin_manual_monthly", {
+            ...legs.manual_monthly_lab,
+            note: "shares lab Past artifact with manual_monthly_lab",
+            runDispatchPath: ADMIN_RUN_DISPATCH,
+            readModelPath: "buildOnePathManualUsagePastSimReadResult + remapManualDisplayDatasetToCanonicalWindow",
+          });
+          await bootstrapLabLeg({
+            legId: "gapfill_manual_monthly",
+            payload: canonicalSamePayloadMonthly,
+            fixtureFamily: "SAME_PAYLOAD",
+            fixturePayloadMode: "MONTHLY",
+            payloadSource: "same_payload_anchor",
+            note: "GapFill MANUAL_MONTHLY fed canonical same-payload fixture",
+          });
+        }
+        return;
+      }
+      if (fixturePhase === "ALL" || fixturePhase === "GAPFILL_DERIVED") {
+        const derived = await resolveGapfillPayload({
+          sourceUserId: user.id,
+          sourceHouseId: SOURCE_HOUSE,
+          sourceEsiid: sourceHouse?.esiid ?? null,
+          labOwnerUserId: owner.id,
+          labHouseId: LAB_HOUSE,
+          usageInputMode: "MONTHLY_FROM_SOURCE_INTERVALS",
+        });
+        if (derived.payload?.mode === "MONTHLY" && labPastId) {
+          await validateNonZeroPayload(derived.payload);
+          const hashed = hashManualPayloadFields(derived.payload);
+          await bootstrapLabLeg({
+            legId: "gapfill_monthly_from_source_intervals",
+            payload: derived.payload,
+            fixtureFamily: "GAPFILL_DERIVED",
+            fixturePayloadMode: "MONTHLY",
+            esiid: sourceHouse?.esiid ?? null,
+            gapfillDerivedPayloadHash: hashed.normalizedPayloadHash,
+            payloadSource: derived.payloadSource ?? null,
+            note: "GapFill source-interval-derived payload family (final surviving artifact)",
+          });
+        }
+      }
+      return;
+    }
+
+    if (canonicalSamePayloadAnnual && (fixturePhase === "ALL" || fixturePhase === "SAME_PAYLOAD")) {
+      await bootstrapSourceLeg({
+        legId: "user_manual_annual",
+        payload: canonicalSamePayloadAnnual,
+        fixturePayloadMode: "ANNUAL",
+      });
+      if (labPastId) {
+        await bootstrapLabLeg({
+          legId: "one_path_admin_manual_annual",
+          payload: canonicalSamePayloadAnnual,
+          fixtureFamily: "SAME_PAYLOAD",
+          fixturePayloadMode: "ANNUAL",
+          readModelPath: "buildOnePathManualUsagePastSimReadResult + remapManualDisplayDatasetToCanonicalWindow",
+          runDispatchPath: ADMIN_RUN_DISPATCH,
+          note: "same-payload annual fixture — not gapfill-derived family",
+        });
+      }
+      return;
+    }
+    if (fixturePhase === "ALL" || fixturePhase === "GAPFILL_DERIVED") {
+      const derived = await resolveGapfillPayload({
+        sourceUserId: user.id,
+        sourceHouseId: SOURCE_HOUSE,
+        sourceEsiid: sourceHouse?.esiid ?? null,
+        labOwnerUserId: owner.id,
+        labHouseId: LAB_HOUSE,
+        usageInputMode: "ANNUAL_FROM_SOURCE_INTERVALS",
+      });
+      if (derived.payload?.mode === "ANNUAL" && labPastId) {
+        await validateNonZeroPayload(derived.payload);
+        const hashed = hashManualPayloadFields(derived.payload);
+        await bootstrapLabLeg({
+          legId: "gapfill_annual_from_source_intervals",
+          payload: derived.payload,
+          fixtureFamily: "GAPFILL_DERIVED",
+          fixturePayloadMode: "ANNUAL",
+          esiid: sourceHouse?.esiid ?? null,
+          gapfillDerivedPayloadHash: hashed.normalizedPayloadHash,
+          payloadSource: derived.payloadSource ?? null,
+          note: "GapFill source-interval-derived payload family (final surviving artifact)",
+        });
+      }
+    }
+  }
+
+  await finalizeSurvivingArtifacts();
+
+  if (fixtureFinalMode === "MONTHLY" && canonicalSamePayloadMonthly) {
     await saveManualUsageInputForUserHouse({
-      userId: owner.id,
-      houseId: LAB_HOUSE,
-      payload: derived.payload,
+      userId: user.id,
+      houseId: SOURCE_HOUSE,
+      payload: canonicalSamePayloadMonthly,
     });
-    const recalc = await dispatchManualRecalc({
-      userId: owner.id,
-      houseId: LAB_HOUSE,
-      esiid: mode.usageInputMode === "MANUAL_MONTHLY" ? null : sourceHouse?.esiid ?? null,
-      actualContextHouseId: SOURCE_HOUSE,
-      scenarioId: labPastId,
-      travelRanges: labTravelRanges.length > 0 ? labTravelRanges : sourceTravelRanges,
-      correlationId: `${correlationBase}-${mode.legId}`,
-      callerLabel: `manual_fixture_${mode.legId}`,
-      surface: "admin_lab",
-    });
-    const artifactInputHash =
-      recalc.ok && recalc.artifactInputHash
-        ? recalc.artifactInputHash
-        : await readLatestArtifactInputHash(usagePrisma, LAB_HOUSE, labPastId);
-    await recordLeg(mode.legId, {
-      status: recalc.ok ? "ok" : "recalc_failed",
-      scenarioId: labPastId,
-      usageInputMode: mode.usageInputMode,
-      artifactInputHash,
-      gapfillDerivedPayloadHash: hashManualPayloadFields(derived.payload).normalizedPayloadHash,
-      normalizedPayloadHash: hashManualPayloadFields(derived.payload).normalizedPayloadHash,
-      payloadSource: derived.payloadSource ?? null,
-      error: recalc.ok ? null : recalc.error,
+  } else if (fixtureFinalMode === "ANNUAL" && canonicalSamePayloadAnnual) {
+    await saveManualUsageInputForUserHouse({
+      userId: user.id,
+      houseId: SOURCE_HOUSE,
+      payload: canonicalSamePayloadAnnual,
     });
   }
 
   await prisma.$disconnect();
 
   const manifest = {
-    bootstrapVersion: "manual_cross_surface_fixture_v1",
-    generatedAt: new Date().toISOString(),
+    bootstrapVersion: "manual_cross_surface_fixture_v2",
+    generatedAt: nowIso(),
+    fixturePhase,
+    fixtureFinalMode,
     sourceHouseId: SOURCE_HOUSE,
     labHouseId: LAB_HOUSE,
     sourceUserEmail: EMAIL,
     ownerEmail: OWNER_EMAIL,
+    samePayloadAnchor,
     legs,
   };
-  const outPath = resolve(process.cwd(), "scripts/audit/manual-cross-surface-fixture-manifest.json");
-  writeFileSync(outPath, JSON.stringify(manifest, null, 2));
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
   console.log(JSON.stringify(manifest, null, 2));
-  console.log("Wrote", outPath);
+  console.log("Wrote", manifestPath);
 }
 
 main().catch((error) => {

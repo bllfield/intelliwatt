@@ -1,13 +1,13 @@
 {
   "proofVersion": "manual_cross_surface_parity_v2",
-  "generatedAt": "2026-06-08T17:44:33.952Z",
+  "generatedAt": "2026-06-08T18:10:38.606Z",
   "proofMode": "audit_only",
   "sourceHouseId": "8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8",
   "labHouseId": "29a3d820-2593-4673-9dd6-cd161bbd7f6f",
   "mode": "MONTHLY",
   "payloadMode": "MONTHLY",
-  "auditGapfillMode": "MONTHLY_FROM_SOURCE_INTERVALS",
-  "auditProofFamily": "GAPFILL_DERIVED",
+  "auditGapfillMode": "MANUAL_MONTHLY",
+  "auditProofFamily": "SAME_PAYLOAD",
   "anchorDate": "2026-06-06",
   "canonicalCoverageStart": "2025-06-07",
   "canonicalCoverageEnd": "2026-06-06",
@@ -17,11 +17,10 @@
     "same_payload_parity": [
       "user_manual_monthly",
       "manual_monthly_lab",
-      "one_path_admin_manual_monthly"
+      "one_path_admin_manual_monthly",
+      "gapfill_manual_monthly"
     ],
-    "gapfill_derived_payload_parity": [
-      "gapfill_monthly_from_source_intervals"
-    ]
+    "gapfill_derived_payload_parity": []
   },
   "onePathFacadeParity": {
     "ok": true,
@@ -42,7 +41,7 @@
       "canonicalCoverageEnd": "2026-06-06",
       "runDispatchPath": "dispatchPastSimRecalc(MANUAL_TOTALS)->onePath recalcSimulatorBuild",
       "readModelPath": "readOnePathSimulatedUsageScenario + buildManualUsageReadDecorations",
-      "producerVersion": null,
+      "producerVersion": "production_past_stitched_v16",
       "gapfillDerivedPayloadHash": null,
       "gapfillActualComparison": null,
       "comparisonFamily": "same_payload_parity",
@@ -109,9 +108,18 @@
           "kwh": 1177.76
         }
       ],
-      "status": "missing_fixture",
-      "unavailableReason": "ARTIFACT_MISSING",
-      "coverageWindowMatch": null
+      "status": "ok",
+      "unavailableReason": null,
+      "artifactCoverageStart": "2025-06-07",
+      "artifactCoverageEnd": "2026-06-06",
+      "displayCoverageStart": "2025-06-07",
+      "displayCoverageEnd": "2026-06-06",
+      "coverageWindowMatch": true,
+      "artifactInputHash": null,
+      "finalizedDailyRowsHash": "Q8rawlLrNE7IVy1utJdvs6",
+      "displayTruthRevision": "DdXPa5PVjLuuw2E-bdoE9J",
+      "monthlyRowsHash": "tcWCiL8QtW_LhKKKeuhQ3Y",
+      "timeOfDayBucketsHash": "InQZspZUvFpDF4LgQNkeDe"
     },
     {
       "legId": "user_manual_annual",
@@ -311,37 +319,23 @@
     },
     {
       "legId": "gapfill_manual_monthly",
-      "status": "not_available",
-      "unavailableReason": "gapfill_mode_scope: AUDIT_GAPFILL_MODE=MONTHLY_FROM_SOURCE_INTERVALS",
-      "canonicalCoverageStart": "2025-06-07",
-      "canonicalCoverageEnd": "2026-06-06",
-      "coverageWindowMatch": null
-    },
-    {
-      "legId": "gapfill_monthly_from_source_intervals",
       "houseId": "29a3d820-2593-4673-9dd6-cd161bbd7f6f",
       "userId": "cmkjaxudm0002ky0450pl2opa",
       "scenarioId": "3d42aecf-7517-4c86-808e-88a861aeafc6",
-      "mode": "MONTHLY_FROM_SOURCE_INTERVALS",
+      "mode": "MANUAL_MONTHLY",
       "canonicalCoverageStart": "2025-06-07",
       "canonicalCoverageEnd": "2026-06-06",
       "runDispatchPath": "dispatchPastSimRecalc(MANUAL_TOTALS)->usageSimulator wrapper->onePath recalcSimulatorBuild",
       "readModelPath": "buildOnePathManualUsagePastSimReadResult->readOnePathSimulatedUsageScenario",
       "producerVersion": "production_past_stitched_v16",
       "gapfillDerivedPayloadHash": "_zfR_qerMs5TFYYPYhiYg9",
-      "gapfillActualComparison": {
-        "ok": false,
-        "billPeriodCount": 12,
-        "comparedBillPeriodCount": 0,
-        "reconciledCount": 10,
-        "deltaPresentCount": 2
-      },
-      "comparisonFamily": "gapfill_derived_payload_parity",
+      "gapfillActualComparison": null,
+      "comparisonFamily": "same_payload_parity",
       "payloadProvenance": "gapfill_derived",
       "fixtureArtifactInputHash": "Hs2hwwOMOCLzG1ytI11orXUUhYf3aSolHycBuhNjxj0",
-      "fixtureFamily": "GAPFILL_DERIVED",
+      "fixtureFamily": "SAME_PAYLOAD",
       "applyAdminRemap": false,
-      "sourcePayloadHash": "-2SnuKiYpeZx8Lxptk5ahJ",
+      "sourcePayloadHash": "Ms0wDferZWmZgTgRrji49k",
       "normalizedPayloadHash": "_zfR_qerMs5TFYYPYhiYg9",
       "billPeriodHash": "T-qmMMn--0Zg_dnyRnojEk",
       "statementRangesHash": "CxByDgmxMNCQrEWLTL3pdw",
@@ -414,22 +408,24 @@
       "timeOfDayBucketsHash": "InQZspZUvFpDF4LgQNkeDe"
     },
     {
+      "legId": "gapfill_monthly_from_source_intervals",
+      "status": "not_available",
+      "unavailableReason": "gapfill_mode_scope: AUDIT_GAPFILL_MODE=MANUAL_MONTHLY",
+      "canonicalCoverageStart": "2025-06-07",
+      "canonicalCoverageEnd": "2026-06-06",
+      "coverageWindowMatch": null
+    },
+    {
       "legId": "gapfill_annual_from_source_intervals",
       "status": "not_available",
-      "unavailableReason": "gapfill_mode_scope: AUDIT_GAPFILL_MODE=MONTHLY_FROM_SOURCE_INTERVALS",
+      "unavailableReason": "leg_mode_mismatch: AUDIT_MANUAL_MODE=MONTHLY",
       "canonicalCoverageStart": "2025-06-07",
       "canonicalCoverageEnd": "2026-06-06",
       "coverageWindowMatch": null
     }
   ],
   "violations": [
-    "user_manual_monthly: manifest fixtureFamily SAME_PAYLOAD != audit proof family GAPFILL_DERIVED",
-    "manual_monthly_lab: manifest fixtureFamily SAME_PAYLOAD != audit proof family GAPFILL_DERIVED",
-    "one_path_admin_manual_monthly: manifest fixtureFamily SAME_PAYLOAD != audit proof family GAPFILL_DERIVED",
-    "user_manual_monthly: missing_fixture (ARTIFACT_MISSING)",
-    "manual_monthly_lab: fixture family SAME_PAYLOAD cannot be compared in GAPFILL_DERIVED proof run",
-    "one_path_admin_manual_monthly: fixture family SAME_PAYLOAD cannot be compared in GAPFILL_DERIVED proof run",
-    "gapfill_monthly_from_source_intervals: gapfill actual comparison failed for derived payload"
+    "same_payload_parity: displayTruthRevision differs for _zfR_qerMs5TFYYPYhiYg9:user_read"
   ],
   "warnings": [],
   "verdict": "MANUAL_CROSS_SURFACE_PARITY_FAIL"
