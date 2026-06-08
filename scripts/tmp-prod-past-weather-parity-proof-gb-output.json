@@ -1,0 +1,272 @@
+{
+  "at": "2026-06-08T14:02:30.012Z",
+  "proofMode": "audit_only",
+  "base": "https://intelliwatt.com",
+  "proofSourceType": "GREEN_BUTTON",
+  "sourceHouseId": "0bbd25b6-9b8b-40ba-9382-dd85a1e1eda4",
+  "labHouseId": "29a3d820-2593-4673-9dd6-cd161bbd7f6f",
+  "houses": {
+    "sourceHouse": "0bbd25b6-9b8b-40ba-9382-dd85a1e1eda4",
+    "testHome": "29a3d820-2593-4673-9dd6-cd161bbd7f6f"
+  },
+  "labArtifactSourceFamily": "GREEN_BUTTON",
+  "labHomeOpsNote": "Because GB and SMT currently share the same mutable lab home, the latest dual recalc determines what the admin/test leg contains. The lab home is single-occupancy by source family; GB recalc invalidates SMT lab proof state and SMT recalc invalidates GB lab proof state. Always run the source-specific dual recalc immediately before that source's acceptance proof.",
+  "staleLabHomeSourceFamily": null,
+  "userPastScenarioId": "334ee842-96fd-4978-a837-faefebff5647",
+  "adminPastScenarioId": "680d63d7-4990-47b3-ad9b-2c9039ed80ac",
+  "scenarios": {
+    "sourcePastScenarioId": "334ee842-96fd-4978-a837-faefebff5647",
+    "testPastScenarioId": "680d63d7-4990-47b3-ad9b-2c9039ed80ac"
+  },
+  "userArtifactId": "u2jnf4fNBUYT5gVXzjQTEfZ4a1_nqd1_Q8X8ZXsekzY",
+  "adminArtifactId": "il_DDYeO5QOip1QcWKpL4ujZMMZEEjfW-i_YbJCVt1Y",
+  "userArtifactUpdatedAt": "2026-06-08T13:53:42.841Z",
+  "adminArtifactUpdatedAt": "2026-06-08T14:00:57.936Z",
+  "userDisplayTruthRevision": "xdPszFKaTtxRJE7CZJJNDR",
+  "adminDisplayTruthRevision": "xdPszFKaTtxRJE7CZJJNDR",
+  "userFinalizedDailyRowsHash": "PBB5tbG0VpS7g_RnG79qPL",
+  "adminFinalizedDailyRowsHash": "PBB5tbG0VpS7g_RnG79qPL",
+  "userBundleC": {
+    "weatherEfficiency": 50,
+    "cooling": 96,
+    "heating": 73,
+    "confidence": 100
+  },
+  "adminBundleC": {
+    "weatherEfficiency": 50,
+    "cooling": 96,
+    "heating": 73,
+    "confidence": 100
+  },
+  "userVisibleBundleC": {
+    "weatherEfficiency": 50,
+    "cooling": 96,
+    "heating": 73,
+    "confidence": 100
+  },
+  "adminVisibleBundleC": {
+    "weatherEfficiency": 50,
+    "cooling": 96,
+    "heating": 73,
+    "confidence": 100
+  },
+  "userReadPath": "past_display_finalize_recompute",
+  "adminReadPath": "past_display_finalize_recompute",
+  "userPast": {
+    "bundleC": {
+      "weatherEfficiency": 50,
+      "cooling": 96,
+      "heating": 73,
+      "confidence": 100
+    },
+    "visibleEqualsBundleC": true,
+    "visibleBundleC": {
+      "weatherEfficiency": 50,
+      "cooling": 96,
+      "heating": 73,
+      "confidence": 100
+    }
+  },
+  "adminPast": {
+    "bundleC": {
+      "weatherEfficiency": 50,
+      "cooling": 96,
+      "heating": 73,
+      "confidence": 100
+    },
+    "visibleEqualsBundleC": true,
+    "source": "cross_surface_finalize"
+  },
+  "pastWeatherCrossSurfaceParity": {
+    "ok": true,
+    "violations": [],
+    "sourceArtifactLoaded": true,
+    "sourceArtifactInputHash": "u2jnf4fNBUYT5gVXzjQTEfZ4a1_nqd1_Q8X8ZXsekzY",
+    "sourceReadPath": "past_display_finalize_recompute",
+    "adminReadPath": "past_display_finalize_recompute",
+    "artifactSelection": {
+      "sourceHouseId": "0bbd25b6-9b8b-40ba-9382-dd85a1e1eda4",
+      "labHouseId": "29a3d820-2593-4673-9dd6-cd161bbd7f6f",
+      "userPastScenarioId": "334ee842-96fd-4978-a837-faefebff5647",
+      "adminPastScenarioId": "680d63d7-4990-47b3-ad9b-2c9039ed80ac",
+      "userArtifactInputHash": "u2jnf4fNBUYT5gVXzjQTEfZ4a1_nqd1_Q8X8ZXsekzY",
+      "adminArtifactInputHash": "il_DDYeO5QOip1QcWKpL4ujZMMZEEjfW-i_YbJCVt1Y",
+      "userArtifactUpdatedAt": "2026-06-08T13:53:42.841Z",
+      "adminArtifactUpdatedAt": "2026-06-08T14:00:57.936Z",
+      "userDisplayTruthRevision": "xdPszFKaTtxRJE7CZJJNDR",
+      "adminDisplayTruthRevision": "xdPszFKaTtxRJE7CZJJNDR",
+      "userFinalizedDailyRowsHash": "PBB5tbG0VpS7g_RnG79qPL",
+      "adminFinalizedDailyRowsHash": "PBB5tbG0VpS7g_RnG79qPL",
+      "userBundleC": {
+        "weatherEfficiency": 50,
+        "cooling": 96,
+        "heating": 73,
+        "confidence": 100
+      },
+      "adminBundleC": {
+        "weatherEfficiency": 50,
+        "cooling": 96,
+        "heating": 73,
+        "confidence": 100
+      },
+      "userVisibleBundleC": {
+        "weatherEfficiency": 50,
+        "cooling": 96,
+        "heating": 73,
+        "confidence": 100
+      },
+      "adminVisibleBundleC": {
+        "weatherEfficiency": 50,
+        "cooling": 96,
+        "heating": 73,
+        "confidence": 100
+      },
+      "userReadPath": "past_display_finalize_recompute",
+      "adminReadPath": "past_display_finalize_recompute"
+    },
+    "acceptanceProof": {
+      "ok": true,
+      "profileFingerprintsMatch": true,
+      "profileHouseIdMatch": true,
+      "usageShapeProfileIdentityMatch": true,
+      "displayTruthRevisionMatch": true,
+      "finalizedDailyRowsHashMatch": true,
+      "dailyWeatherHashMatch": true,
+      "intervalDataFingerprintMatch": true,
+      "trustedDateKeysMatch": true,
+      "validationKeysMatch": true,
+      "travelVacantFingerprintMatch": true,
+      "scorerVersionMatch": true,
+      "calculationVersionMatch": true,
+      "userVisibleEqualsUserBundleC": true,
+      "adminVisibleEqualsAdminBundleC": true,
+      "userBundleCEqualsAdminBundleC": true,
+      "resolvedSimFingerprint": {
+        "user": "tTeI4oM-jB6FkRNTQS7KEz",
+        "admin": "tTeI4oM-jB6FkRNTQS7KEz",
+        "matches": true,
+        "parityRequired": false,
+        "reason": "house_local_artifact_identity",
+        "acceptanceComparedInstead": [
+          "finalizedDailyRowsHash",
+          "displayTruthRevision",
+          "pastDisplayWeatherSensitivityScore",
+          "timeOfDayBuckets",
+          "monthlyRows",
+          "usageShapeProfileIdentity",
+          "intervalDataFingerprint",
+          "trustedDateKeys"
+        ],
+        "rule": "resolvedSimFingerprint may differ between source and lab artifacts because it is house-local. Cross-surface acceptance does not waive parity. It compares canonical display/weather truth instead: finalizedDailyRowsHash, displayTruthRevision, Bundle C, TOD/monthly read-model parity, weather hash, profile identity, usage shape identity, validation/travel-vacant fingerprints, scorer/calculation versions, and source interval/trusted-date fingerprints."
+      },
+      "violations": [],
+      "user": {
+        "artifactInputHash": "EiU69SRXLaQtBTK-7gSDtBcqllYd7WbpKj21XKzmEGk",
+        "fullChainHash": "EiU69SRXLaQtBTK-7gSDtBcqllYd7WbpKj21XKzmEGk",
+        "displayTruthRevision": "xdPszFKaTtxRJE7CZJJNDR",
+        "finalizedDailyRowsHash": "PBB5tbG0VpS7g_RnG79qPL",
+        "dailyWeatherHash": "J-quPup011pckz8XP4AouV",
+        "greenButtonTrustedDateKeys": "2025-06-07,2025-06-08,2025-06-09,2025-06-10,2025-06-11,2025-06-12,2025-06-13,2025-06-14,2025-06-15,2025-06-16,2025-06-17,2025-06-18,2025-06-19,2025-06-20,2025-06-21,2025-06-22,2025-06-23,2025-06-24,2025-06-25,2025-06-26,2025-06-27,2025-06-28,2025-06-29,2025-06-30,2025-07-01,2025-07-02,2025-07-03,2025-07-04,2025-07-05,2025-07-06,2025-07-07,2025-07-08,2025-07-09,2025-07-10,2025-07-11,2025-07-12,2025-07-13,2025-07-14,2025-07-15,2025-07-16,2025-07-17,2025-07-18,2025-07-19,2025-07-20,2025-07-21,2025-07-22,2025-07-23,2025-07-24,2025-07-25,2025-07-26,2025-07-27,2025-07-28,2025-07-29,2025-07-30,2025-07-31,2025-08-01,2025-08-02,2025-08-03,2025-08-04,2025-08-05,2025-08-06,2025-08-07,2025-08-08,2025-08-09,2025-08-10,2025-08-11,2025-08-12,2025-08-13,2025-08-14,2025-08-15,2025-08-16,2025-08-17,2025-08-18,2025-08-19,2025-08-20,2025-08-21,2025-08-22,2025-08-23,2025-08-24,2025-08-25,2025-08-26,2025-08-27,2025-08-28,2025-08-29,2025-08-30,2025-08-31,2025-09-01,2025-09-02,2025-09-03,2025-09-04,2025-09-05,2025-09-06,2025-09-07,2025-09-08,2025-09-09,2025-09-10,2025-09-11,2025-09-12,2025-09-13,2025-09-14,2025-09-15,2025-09-16,2025-09-17,2025-09-18,2025-09-19,2025-09-20,2025-09-21,2025-09-22,2025-09-23,2025-09-24,2025-09-25,2025-09-26,2025-09-27,2025-09-28,2025-09-29,2025-09-30,2025-10-01,2025-10-02,2025-10-03,2025-10-04,2025-10-05,2025-10-06,2025-10-07,2025-10-08,2025-10-09,2025-10-10,2025-10-11,2025-10-12,2025-10-13,2025-10-14,2025-10-15,2025-10-16,2025-10-17,2025-10-18,2025-10-19,2025-10-20,2025-10-21,2025-10-22,2025-10-23,2025-10-24,2025-10-25,2025-10-26,2025-10-27,2025-10-28,2025-10-29,2025-10-30,2025-10-31,2025-11-01,2025-11-02,2025-11-03,2025-11-04,2025-11-05,2025-11-06,2025-11-07,2025-11-08,2025-11-09,2025-11-10,2025-11-11,2025-11-12,2025-11-13,2025-11-14,2025-11-15,2025-11-16,2025-11-17,2025-11-18,2025-11-19,2025-11-20,2025-11-21,2025-11-22,2025-11-23,2025-11-24,2025-11-25,2025-11-26,2025-11-27,2025-11-28,2025-11-29,2025-11-30,2025-12-01,2025-12-02,2025-12-03,2025-12-04,2025-12-05,2025-12-06,2025-12-07,2025-12-08,2025-12-09,2025-12-10,2025-12-11,2025-12-12,2025-12-13,2025-12-14,2025-12-15,2025-12-16,2025-12-17,2025-12-18,2025-12-19,2025-12-20,2025-12-21,2025-12-22,2025-12-23,2025-12-24,2025-12-25,2025-12-26,2025-12-27,2025-12-28,2025-12-29,2025-12-30,2025-12-31,2026-01-01,2026-01-02,2026-01-03,2026-01-04,2026-01-05,2026-01-06,2026-01-07,2026-01-08,2026-01-09,2026-01-10,2026-01-11,2026-01-12,2026-01-13,2026-01-14,2026-01-15,2026-01-16,2026-01-17,2026-01-18,2026-01-19,2026-01-20,2026-01-21,2026-01-22,2026-01-23,2026-01-24,2026-01-25,2026-01-26,2026-01-27,2026-01-28,2026-01-29,2026-01-30,2026-01-31,2026-02-01,2026-02-02,2026-02-03,2026-02-04,2026-02-05,2026-02-06,2026-02-07,2026-02-08,2026-02-09,2026-02-10,2026-02-11,2026-02-12,2026-02-13,2026-02-14,2026-02-15,2026-02-16,2026-02-17,2026-02-18,2026-02-19,2026-02-20,2026-02-21,2026-02-22,2026-02-23,2026-02-24,2026-02-25,2026-02-26,2026-02-27,2026-02-28,2026-03-01,2026-03-02,2026-03-03,2026-03-04,2026-03-05,2026-03-06,2026-03-07,2026-03-08,2026-03-09,2026-03-10,2026-03-11,2026-03-12,2026-03-13,2026-03-14,2026-03-15,2026-03-16,2026-03-17,2026-03-18,2026-03-19,2026-03-20,2026-03-21,2026-03-22,2026-03-23,2026-03-24,2026-03-25,2026-03-26,2026-03-27,2026-03-28,2026-03-29,2026-03-30,2026-03-31,2026-04-01,2026-04-02,2026-04-03,2026-04-04,2026-04-05,2026-04-06,2026-04-07,2026-04-08,2026-04-09,2026-04-10,2026-04-11,2026-04-12,2026-04-13,2026-04-14,2026-04-15,2026-04-16,2026-04-17,2026-04-18,2026-04-19,2026-04-20,2026-04-21,2026-04-22,2026-04-23,2026-04-24,2026-04-25,2026-04-26,2026-04-27,2026-04-28,2026-04-29,2026-04-30,2026-05-01,2026-05-02,2026-05-03,2026-05-04,2026-05-05,2026-05-06,2026-05-07,2026-05-08,2026-05-09,2026-05-10,2026-05-11,2026-05-12,2026-05-13,2026-05-14,2026-05-15,2026-05-16,2026-05-17,2026-05-18,2026-05-19,2026-05-20,2026-05-21,2026-05-22,2026-05-23,2026-05-24,2026-05-25,2026-05-26,2026-05-27,2026-05-28,2026-05-29,2026-05-30,2026-05-31,2026-06-01,2026-06-02,2026-06-03,2026-06-04,2026-06-05,2026-06-06",
+        "profileHouseId": "0bbd25b6-9b8b-40ba-9382-dd85a1e1eda4",
+        "usageShapeProfileIdentity": "cmpvjdvr60004i304jvfw9yew:v1:4d800a23f2a37743e5ed6f71786dcc9f294d456d0df57d18c64c26d58d975127",
+        "resolvedSimFingerprint": "tTeI4oM-jB6FkRNTQS7KEz",
+        "intervalDataFingerprint": "32736:1778733900000:d6fb2636cacb43f8da82532b7a956f9a",
+        "usageFingerprint": null,
+        "weatherIdentity": "ZbqB_GtWwezWBTmqqUEeLiPmzWCm-L1nm51O3IycxZk",
+        "validationKeys": [
+          "2025-06-07",
+          "2025-07-12",
+          "2025-08-01",
+          "2025-09-01",
+          "2025-10-01",
+          "2025-11-01",
+          "2025-12-01",
+          "2025-12-02",
+          "2026-01-01",
+          "2026-02-01",
+          "2026-03-01",
+          "2026-04-01",
+          "2026-05-01",
+          "2026-06-01"
+        ],
+        "travelVacantFingerprint": "ytfsGkkbN9h7cWxnNxwbha",
+        "simulationVariableVersion": null,
+        "simVersion": "production_past_stitched_v16",
+        "scorerVersion": "weather-sensitivity-v1",
+        "calculationVersion": "weather-sensitivity-v1",
+        "finalizeVersion": "past_display_weather_finalize_v2",
+        "bundleC": {
+          "weatherEfficiency": 50,
+          "cooling": 96,
+          "heating": 73,
+          "confidence": 100
+        },
+        "bundleB": {
+          "weatherEfficiency": 56,
+          "cooling": 80,
+          "heating": 79,
+          "confidence": 100
+        },
+        "netKwhDailySum": 14448.98
+      },
+      "admin": {
+        "artifactInputHash": "eObIdCieFyXMOXMyLGGcqD5O5306lhVcefhiIzTdQOs",
+        "fullChainHash": "eObIdCieFyXMOXMyLGGcqD5O5306lhVcefhiIzTdQOs",
+        "displayTruthRevision": "xdPszFKaTtxRJE7CZJJNDR",
+        "finalizedDailyRowsHash": "PBB5tbG0VpS7g_RnG79qPL",
+        "dailyWeatherHash": "J-quPup011pckz8XP4AouV",
+        "greenButtonTrustedDateKeys": "2025-06-07,2025-06-08,2025-06-09,2025-06-10,2025-06-11,2025-06-12,2025-06-13,2025-06-14,2025-06-15,2025-06-16,2025-06-17,2025-06-18,2025-06-19,2025-06-20,2025-06-21,2025-06-22,2025-06-23,2025-06-24,2025-06-25,2025-06-26,2025-06-27,2025-06-28,2025-06-29,2025-06-30,2025-07-01,2025-07-02,2025-07-03,2025-07-04,2025-07-05,2025-07-06,2025-07-07,2025-07-08,2025-07-09,2025-07-10,2025-07-11,2025-07-12,2025-07-13,2025-07-14,2025-07-15,2025-07-16,2025-07-17,2025-07-18,2025-07-19,2025-07-20,2025-07-21,2025-07-22,2025-07-23,2025-07-24,2025-07-25,2025-07-26,2025-07-27,2025-07-28,2025-07-29,2025-07-30,2025-07-31,2025-08-01,2025-08-02,2025-08-03,2025-08-04,2025-08-05,2025-08-06,2025-08-07,2025-08-08,2025-08-09,2025-08-10,2025-08-11,2025-08-12,2025-08-13,2025-08-14,2025-08-15,2025-08-16,2025-08-17,2025-08-18,2025-08-19,2025-08-20,2025-08-21,2025-08-22,2025-08-23,2025-08-24,2025-08-25,2025-08-26,2025-08-27,2025-08-28,2025-08-29,2025-08-30,2025-08-31,2025-09-01,2025-09-02,2025-09-03,2025-09-04,2025-09-05,2025-09-06,2025-09-07,2025-09-08,2025-09-09,2025-09-10,2025-09-11,2025-09-12,2025-09-13,2025-09-14,2025-09-15,2025-09-16,2025-09-17,2025-09-18,2025-09-19,2025-09-20,2025-09-21,2025-09-22,2025-09-23,2025-09-24,2025-09-25,2025-09-26,2025-09-27,2025-09-28,2025-09-29,2025-09-30,2025-10-01,2025-10-02,2025-10-03,2025-10-04,2025-10-05,2025-10-06,2025-10-07,2025-10-08,2025-10-09,2025-10-10,2025-10-11,2025-10-12,2025-10-13,2025-10-14,2025-10-15,2025-10-16,2025-10-17,2025-10-18,2025-10-19,2025-10-20,2025-10-21,2025-10-22,2025-10-23,2025-10-24,2025-10-25,2025-10-26,2025-10-27,2025-10-28,2025-10-29,2025-10-30,2025-10-31,2025-11-01,2025-11-02,2025-11-03,2025-11-04,2025-11-05,2025-11-06,2025-11-07,2025-11-08,2025-11-09,2025-11-10,2025-11-11,2025-11-12,2025-11-13,2025-11-14,2025-11-15,2025-11-16,2025-11-17,2025-11-18,2025-11-19,2025-11-20,2025-11-21,2025-11-22,2025-11-23,2025-11-24,2025-11-25,2025-11-26,2025-11-27,2025-11-28,2025-11-29,2025-11-30,2025-12-01,2025-12-02,2025-12-03,2025-12-04,2025-12-05,2025-12-06,2025-12-07,2025-12-08,2025-12-09,2025-12-10,2025-12-11,2025-12-12,2025-12-13,2025-12-14,2025-12-15,2025-12-16,2025-12-17,2025-12-18,2025-12-19,2025-12-20,2025-12-21,2025-12-22,2025-12-23,2025-12-24,2025-12-25,2025-12-26,2025-12-27,2025-12-28,2025-12-29,2025-12-30,2025-12-31,2026-01-01,2026-01-02,2026-01-03,2026-01-04,2026-01-05,2026-01-06,2026-01-07,2026-01-08,2026-01-09,2026-01-10,2026-01-11,2026-01-12,2026-01-13,2026-01-14,2026-01-15,2026-01-16,2026-01-17,2026-01-18,2026-01-19,2026-01-20,2026-01-21,2026-01-22,2026-01-23,2026-01-24,2026-01-25,2026-01-26,2026-01-27,2026-01-28,2026-01-29,2026-01-30,2026-01-31,2026-02-01,2026-02-02,2026-02-03,2026-02-04,2026-02-05,2026-02-06,2026-02-07,2026-02-08,2026-02-09,2026-02-10,2026-02-11,2026-02-12,2026-02-13,2026-02-14,2026-02-15,2026-02-16,2026-02-17,2026-02-18,2026-02-19,2026-02-20,2026-02-21,2026-02-22,2026-02-23,2026-02-24,2026-02-25,2026-02-26,2026-02-27,2026-02-28,2026-03-01,2026-03-02,2026-03-03,2026-03-04,2026-03-05,2026-03-06,2026-03-07,2026-03-08,2026-03-09,2026-03-10,2026-03-11,2026-03-12,2026-03-13,2026-03-14,2026-03-15,2026-03-16,2026-03-17,2026-03-18,2026-03-19,2026-03-20,2026-03-21,2026-03-22,2026-03-23,2026-03-24,2026-03-25,2026-03-26,2026-03-27,2026-03-28,2026-03-29,2026-03-30,2026-03-31,2026-04-01,2026-04-02,2026-04-03,2026-04-04,2026-04-05,2026-04-06,2026-04-07,2026-04-08,2026-04-09,2026-04-10,2026-04-11,2026-04-12,2026-04-13,2026-04-14,2026-04-15,2026-04-16,2026-04-17,2026-04-18,2026-04-19,2026-04-20,2026-04-21,2026-04-22,2026-04-23,2026-04-24,2026-04-25,2026-04-26,2026-04-27,2026-04-28,2026-04-29,2026-04-30,2026-05-01,2026-05-02,2026-05-03,2026-05-04,2026-05-05,2026-05-06,2026-05-07,2026-05-08,2026-05-09,2026-05-10,2026-05-11,2026-05-12,2026-05-13,2026-05-14,2026-05-15,2026-05-16,2026-05-17,2026-05-18,2026-05-19,2026-05-20,2026-05-21,2026-05-22,2026-05-23,2026-05-24,2026-05-25,2026-05-26,2026-05-27,2026-05-28,2026-05-29,2026-05-30,2026-05-31,2026-06-01,2026-06-02,2026-06-03,2026-06-04,2026-06-05,2026-06-06",
+        "profileHouseId": "0bbd25b6-9b8b-40ba-9382-dd85a1e1eda4",
+        "usageShapeProfileIdentity": "cmpvjdvr60004i304jvfw9yew:v1:4d800a23f2a37743e5ed6f71786dcc9f294d456d0df57d18c64c26d58d975127",
+        "resolvedSimFingerprint": "tTeI4oM-jB6FkRNTQS7KEz",
+        "intervalDataFingerprint": "32736:1778733900000:d6fb2636cacb43f8da82532b7a956f9a",
+        "usageFingerprint": null,
+        "weatherIdentity": "ZbqB_GtWwezWBTmqqUEeLiPmzWCm-L1nm51O3IycxZk",
+        "validationKeys": [
+          "2025-06-07",
+          "2025-07-12",
+          "2025-08-01",
+          "2025-09-01",
+          "2025-10-01",
+          "2025-11-01",
+          "2025-12-01",
+          "2025-12-02",
+          "2026-01-01",
+          "2026-02-01",
+          "2026-03-01",
+          "2026-04-01",
+          "2026-05-01",
+          "2026-06-01"
+        ],
+        "travelVacantFingerprint": "ytfsGkkbN9h7cWxnNxwbha",
+        "simulationVariableVersion": null,
+        "simVersion": "production_past_stitched_v16",
+        "scorerVersion": "weather-sensitivity-v1",
+        "calculationVersion": "weather-sensitivity-v1",
+        "finalizeVersion": "past_display_weather_finalize_v2",
+        "bundleC": {
+          "weatherEfficiency": 50,
+          "cooling": 96,
+          "heating": 73,
+          "confidence": 100
+        },
+        "bundleB": {
+          "weatherEfficiency": 56,
+          "cooling": 80,
+          "heating": 79,
+          "confidence": 100
+        },
+        "netKwhDailySum": 14448.98
+      },
+      "profileFingerprints": {
+        "userHomeProfile": "xedAsISfRmVDP-lv",
+        "userApplianceProfile": "ZXd6UsQchLmsicmS",
+        "adminHomeProfile": "xedAsISfRmVDP-lv",
+        "adminApplianceProfile": "ZXd6UsQchLmsicmS",
+        "homeProfilesMatch": true,
+        "applianceProfilesMatch": true
+      }
+    }
+  },
+  "verdict": "PROD_WEATHER_PARITY_PASS"
+}

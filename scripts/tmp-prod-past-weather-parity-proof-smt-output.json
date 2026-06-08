@@ -1,0 +1,272 @@
+{
+  "at": "2026-06-08T13:52:33.876Z",
+  "proofMode": "audit_only",
+  "base": "https://intelliwatt.com",
+  "proofSourceType": "SMT",
+  "sourceHouseId": "8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8",
+  "labHouseId": "29a3d820-2593-4673-9dd6-cd161bbd7f6f",
+  "houses": {
+    "sourceHouse": "8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8",
+    "testHome": "29a3d820-2593-4673-9dd6-cd161bbd7f6f"
+  },
+  "labArtifactSourceFamily": "SMT",
+  "labHomeOpsNote": "Because GB and SMT currently share the same mutable lab home, the latest dual recalc determines what the admin/test leg contains. The lab home is single-occupancy by source family; GB recalc invalidates SMT lab proof state and SMT recalc invalidates GB lab proof state. Always run the source-specific dual recalc immediately before that source's acceptance proof.",
+  "staleLabHomeSourceFamily": null,
+  "userPastScenarioId": "7968944f-7a08-425c-8008-6dc49eaccc34",
+  "adminPastScenarioId": "680d63d7-4990-47b3-ad9b-2c9039ed80ac",
+  "scenarios": {
+    "sourcePastScenarioId": "7968944f-7a08-425c-8008-6dc49eaccc34",
+    "testPastScenarioId": "680d63d7-4990-47b3-ad9b-2c9039ed80ac"
+  },
+  "userArtifactId": "UQm2x31RugIIrNBz0XcGSBw836DQEvL1ovj_M7QAH-E",
+  "adminArtifactId": "EF2gfWVQthv21lXo8S9p7azNi31oYnqW5EFXDtaE2_8",
+  "userArtifactUpdatedAt": "2026-06-08T13:49:53.275Z",
+  "adminArtifactUpdatedAt": "2026-06-08T13:51:16.168Z",
+  "userDisplayTruthRevision": "BRB7BfKiSpf1HOCIHzq9SV",
+  "adminDisplayTruthRevision": "BRB7BfKiSpf1HOCIHzq9SV",
+  "userFinalizedDailyRowsHash": "7uJySapMuMs8RdqKmEC6SY",
+  "adminFinalizedDailyRowsHash": "7uJySapMuMs8RdqKmEC6SY",
+  "userBundleC": {
+    "weatherEfficiency": 46,
+    "cooling": 100,
+    "heating": 64,
+    "confidence": 100
+  },
+  "adminBundleC": {
+    "weatherEfficiency": 46,
+    "cooling": 100,
+    "heating": 64,
+    "confidence": 100
+  },
+  "userVisibleBundleC": {
+    "weatherEfficiency": 46,
+    "cooling": 100,
+    "heating": 64,
+    "confidence": 100
+  },
+  "adminVisibleBundleC": {
+    "weatherEfficiency": 46,
+    "cooling": 100,
+    "heating": 64,
+    "confidence": 100
+  },
+  "userReadPath": "past_display_finalize_recompute",
+  "adminReadPath": "past_display_finalize_recompute",
+  "userPast": {
+    "bundleC": {
+      "weatherEfficiency": 46,
+      "cooling": 100,
+      "heating": 64,
+      "confidence": 100
+    },
+    "visibleEqualsBundleC": true,
+    "visibleBundleC": {
+      "weatherEfficiency": 46,
+      "cooling": 100,
+      "heating": 64,
+      "confidence": 100
+    }
+  },
+  "adminPast": {
+    "bundleC": {
+      "weatherEfficiency": 46,
+      "cooling": 100,
+      "heating": 64,
+      "confidence": 100
+    },
+    "visibleEqualsBundleC": true,
+    "source": "cross_surface_finalize"
+  },
+  "pastWeatherCrossSurfaceParity": {
+    "ok": true,
+    "violations": [],
+    "sourceArtifactLoaded": true,
+    "sourceArtifactInputHash": "UQm2x31RugIIrNBz0XcGSBw836DQEvL1ovj_M7QAH-E",
+    "sourceReadPath": "past_display_finalize_recompute",
+    "adminReadPath": "past_display_finalize_recompute",
+    "artifactSelection": {
+      "sourceHouseId": "8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8",
+      "labHouseId": "29a3d820-2593-4673-9dd6-cd161bbd7f6f",
+      "userPastScenarioId": "7968944f-7a08-425c-8008-6dc49eaccc34",
+      "adminPastScenarioId": "680d63d7-4990-47b3-ad9b-2c9039ed80ac",
+      "userArtifactInputHash": "UQm2x31RugIIrNBz0XcGSBw836DQEvL1ovj_M7QAH-E",
+      "adminArtifactInputHash": "EF2gfWVQthv21lXo8S9p7azNi31oYnqW5EFXDtaE2_8",
+      "userArtifactUpdatedAt": "2026-06-08T13:49:53.275Z",
+      "adminArtifactUpdatedAt": "2026-06-08T13:51:16.168Z",
+      "userDisplayTruthRevision": "BRB7BfKiSpf1HOCIHzq9SV",
+      "adminDisplayTruthRevision": "BRB7BfKiSpf1HOCIHzq9SV",
+      "userFinalizedDailyRowsHash": "7uJySapMuMs8RdqKmEC6SY",
+      "adminFinalizedDailyRowsHash": "7uJySapMuMs8RdqKmEC6SY",
+      "userBundleC": {
+        "weatherEfficiency": 46,
+        "cooling": 100,
+        "heating": 64,
+        "confidence": 100
+      },
+      "adminBundleC": {
+        "weatherEfficiency": 46,
+        "cooling": 100,
+        "heating": 64,
+        "confidence": 100
+      },
+      "userVisibleBundleC": {
+        "weatherEfficiency": 46,
+        "cooling": 100,
+        "heating": 64,
+        "confidence": 100
+      },
+      "adminVisibleBundleC": {
+        "weatherEfficiency": 46,
+        "cooling": 100,
+        "heating": 64,
+        "confidence": 100
+      },
+      "userReadPath": "past_display_finalize_recompute",
+      "adminReadPath": "past_display_finalize_recompute"
+    },
+    "acceptanceProof": {
+      "ok": true,
+      "profileFingerprintsMatch": true,
+      "profileHouseIdMatch": true,
+      "usageShapeProfileIdentityMatch": true,
+      "displayTruthRevisionMatch": true,
+      "finalizedDailyRowsHashMatch": true,
+      "dailyWeatherHashMatch": true,
+      "intervalDataFingerprintMatch": true,
+      "trustedDateKeysMatch": true,
+      "validationKeysMatch": true,
+      "travelVacantFingerprintMatch": true,
+      "scorerVersionMatch": true,
+      "calculationVersionMatch": true,
+      "userVisibleEqualsUserBundleC": true,
+      "adminVisibleEqualsAdminBundleC": true,
+      "userBundleCEqualsAdminBundleC": true,
+      "resolvedSimFingerprint": {
+        "user": "6J7E9RwuB5n5dPen_YNIIY",
+        "admin": "6J7E9RwuB5n5dPen_YNIIY",
+        "matches": true,
+        "parityRequired": false,
+        "reason": "house_local_artifact_identity",
+        "acceptanceComparedInstead": [
+          "finalizedDailyRowsHash",
+          "displayTruthRevision",
+          "pastDisplayWeatherSensitivityScore",
+          "timeOfDayBuckets",
+          "monthlyRows",
+          "usageShapeProfileIdentity",
+          "intervalDataFingerprint",
+          "trustedDateKeys"
+        ],
+        "rule": "resolvedSimFingerprint may differ between source and lab artifacts because it is house-local. Cross-surface acceptance does not waive parity. It compares canonical display/weather truth instead: finalizedDailyRowsHash, displayTruthRevision, Bundle C, TOD/monthly read-model parity, weather hash, profile identity, usage shape identity, validation/travel-vacant fingerprints, scorer/calculation versions, and source interval/trusted-date fingerprints."
+      },
+      "violations": [],
+      "user": {
+        "artifactInputHash": "zZ8yx-l9c8P0Behr4WRyeirWJ_NDu-I8atSoVU-i6Ls",
+        "fullChainHash": "zZ8yx-l9c8P0Behr4WRyeirWJ_NDu-I8atSoVU-i6Ls",
+        "displayTruthRevision": "4qrsj-LgUtmKap252UBj14",
+        "finalizedDailyRowsHash": "7uJySapMuMs8RdqKmEC6SY",
+        "dailyWeatherHash": "J-quPup011pckz8XP4AouV",
+        "greenButtonTrustedDateKeys": "",
+        "profileHouseId": "8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8",
+        "usageShapeProfileIdentity": "cmmnk24oe00l3l504sjtn9qqd:v1:4ab81e199366d90b0923d57d5a9d17c521c148bf23720c530a484c7bf634bfaa",
+        "resolvedSimFingerprint": "6J7E9RwuB5n5dPen_YNIIY",
+        "intervalDataFingerprint": "35036:1780807500000:26f773f0283f5714e6efedf19f0c5c32",
+        "usageFingerprint": null,
+        "weatherIdentity": "18rzW4-KyjWzwFv8fRC6GJdC5qGVu4GRMkge-8a26TE",
+        "validationKeys": [
+          "2025-06-07",
+          "2025-07-01",
+          "2025-08-01",
+          "2025-09-01",
+          "2025-10-01",
+          "2025-11-01",
+          "2025-12-01",
+          "2025-12-02",
+          "2026-01-01",
+          "2026-02-01",
+          "2026-03-01",
+          "2026-04-01",
+          "2026-05-01",
+          "2026-06-01"
+        ],
+        "travelVacantFingerprint": "9mQPKz2oMo_hLLjm5PAdRq",
+        "simulationVariableVersion": null,
+        "simVersion": "production_past_stitched_v16",
+        "scorerVersion": "weather-sensitivity-v1",
+        "calculationVersion": "weather-sensitivity-v1",
+        "finalizeVersion": "past_display_weather_finalize_v2",
+        "bundleC": {
+          "weatherEfficiency": 46,
+          "cooling": 100,
+          "heating": 64,
+          "confidence": 100
+        },
+        "bundleB": {
+          "weatherEfficiency": 48,
+          "cooling": 100,
+          "heating": 64,
+          "confidence": 100
+        },
+        "netKwhDailySum": 14693.09
+      },
+      "admin": {
+        "artifactInputHash": "UJEg_8XGlPE21KYWOAiteHEv_Gek_koqy0LvSMSxK40",
+        "fullChainHash": "UJEg_8XGlPE21KYWOAiteHEv_Gek_koqy0LvSMSxK40",
+        "displayTruthRevision": "4qrsj-LgUtmKap252UBj14",
+        "finalizedDailyRowsHash": "7uJySapMuMs8RdqKmEC6SY",
+        "dailyWeatherHash": "J-quPup011pckz8XP4AouV",
+        "greenButtonTrustedDateKeys": "",
+        "profileHouseId": "8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8",
+        "usageShapeProfileIdentity": "cmmnk24oe00l3l504sjtn9qqd:v1:4ab81e199366d90b0923d57d5a9d17c521c148bf23720c530a484c7bf634bfaa",
+        "resolvedSimFingerprint": "6J7E9RwuB5n5dPen_YNIIY",
+        "intervalDataFingerprint": "35036:1780807500000:26f773f0283f5714e6efedf19f0c5c32",
+        "usageFingerprint": null,
+        "weatherIdentity": "18rzW4-KyjWzwFv8fRC6GJdC5qGVu4GRMkge-8a26TE",
+        "validationKeys": [
+          "2025-06-07",
+          "2025-07-01",
+          "2025-08-01",
+          "2025-09-01",
+          "2025-10-01",
+          "2025-11-01",
+          "2025-12-01",
+          "2025-12-02",
+          "2026-01-01",
+          "2026-02-01",
+          "2026-03-01",
+          "2026-04-01",
+          "2026-05-01",
+          "2026-06-01"
+        ],
+        "travelVacantFingerprint": "9mQPKz2oMo_hLLjm5PAdRq",
+        "simulationVariableVersion": null,
+        "simVersion": "production_past_stitched_v16",
+        "scorerVersion": "weather-sensitivity-v1",
+        "calculationVersion": "weather-sensitivity-v1",
+        "finalizeVersion": "past_display_weather_finalize_v2",
+        "bundleC": {
+          "weatherEfficiency": 46,
+          "cooling": 100,
+          "heating": 64,
+          "confidence": 100
+        },
+        "bundleB": {
+          "weatherEfficiency": 48,
+          "cooling": 100,
+          "heating": 64,
+          "confidence": 100
+        },
+        "netKwhDailySum": 14693.09
+      },
+      "profileFingerprints": {
+        "userHomeProfile": "3loiDgvlsCU6shDj",
+        "userApplianceProfile": "-6kx7TdvMYT5QCEi",
+        "adminHomeProfile": "3loiDgvlsCU6shDj",
+        "adminApplianceProfile": "-6kx7TdvMYT5QCEi",
+        "homeProfilesMatch": true,
+        "applianceProfilesMatch": true
+      }
+    }
+  },
+  "verdict": "PROD_WEATHER_PARITY_PASS"
+}
