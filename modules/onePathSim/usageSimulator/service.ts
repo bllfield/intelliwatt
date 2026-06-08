@@ -152,6 +152,7 @@ import {
   computePastSimFullChainHash,
   digestEncodedIntervalsBuffer,
   finalizePastSimLockboxInput,
+  shouldPreservePastCacheVariants,
   type PastSimLockboxInput,
   type PastSimPerRunTrace,
   type PastSimReadContext,
@@ -412,7 +413,13 @@ import type { ResolvedSimFingerprint } from "@/modules/onePathSim/usageSimulator
 
 type ManualUsagePayloadAny = any;
 
-function cleanupStalePastCacheVariants(args: { houseId: string; scenarioId: string; keepInputHash: string }) {
+function cleanupStalePastCacheVariants(args: {
+  houseId: string;
+  scenarioId: string;
+  keepInputHash: string;
+  runContext?: Partial<PastSimRunContext> | null;
+}) {
+  if (shouldPreservePastCacheVariants(args.runContext)) return;
   void deleteCachedPastDatasetsForScenario({
     houseId: args.houseId,
     scenarioId: args.scenarioId,
@@ -1161,6 +1168,9 @@ export async function rebuildGapfillSharedPastArtifact(args: {
       simMode: String((buildInputs as any)?.mode ?? ""),
       scenarioKey: "gapfill_lab",
       buildInputs,
+      serviceTree: "onePathSim",
+      callerLabel: "gapfill_lab_artifact_rebuild",
+      runType: "recalc",
       applyLegacyCanonicalCoverageMetadata: () => {
         applyCanonicalCoverageMetadataForNonBaseline(rebuiltDataset, "gapfill_lab", { buildInputs });
       },
@@ -2193,6 +2203,9 @@ export async function buildGapfillCompareSimShared(args: {
       simMode: String((buildInputs as any)?.mode ?? ""),
       scenarioKey: "gapfill_lab",
       buildInputs,
+      serviceTree: "onePathSim",
+      callerLabel: "gapfill_lab_artifact_rebuild",
+      runType: "recalc",
       applyLegacyCanonicalCoverageMetadata: () => {
         applyCanonicalCoverageMetadataForNonBaseline(rebuiltDataset, "gapfill_lab", { buildInputs });
       },
@@ -4570,6 +4583,7 @@ async function recalcSimulatorBuildImpl(args: {
     callerLabel: args.runContext?.callerLabel ?? "user_recalc",
     buildPathKind: args.runContext?.buildPathKind ?? "recalc",
     persistRequested: args.runContext?.persistRequested ?? (args.persistPastSimBaseline === true),
+    preservePastCacheVariants: args.runContext?.preservePastCacheVariants === true,
     adminLabTreatmentMode: args.runContext?.adminLabTreatmentMode ?? args.adminLabTreatmentMode ?? undefined,
     preferredActualSource,
     asyncMetadata: args.runContext?.asyncMetadata ?? undefined,
@@ -6627,6 +6641,9 @@ async function recalcSimulatorBuildImpl(args: {
         manualUsagePayload,
         buildInputs,
         now: args.now,
+        serviceTree: "onePathSim",
+        callerLabel: runContext.callerLabel,
+        runType: runContext.buildPathKind,
         applyLegacyCanonicalCoverageMetadata: () => {
           applyCanonicalCoverageMetadataForNonBaseline(dataset, scenarioKey, { buildInputs });
         },
@@ -6810,6 +6827,7 @@ async function recalcSimulatorBuildImpl(args: {
         houseId,
         scenarioId: scenarioIdForCache,
         keepInputHash: artifactInputHash,
+        runContext,
       });
       logSimPipelineEvent("recalc_artifact_readback_start", {
         correlationId: args.correlationId,
@@ -8540,6 +8558,9 @@ export async function getSimulatedUsageForHouseScenario(args: {
                 simMode: mode,
                 scenarioKey,
                 buildInputs,
+                serviceTree: "onePathSim",
+                callerLabel: "getSimulatedUsageForHouseScenario_allow_rebuild",
+                runType: "cache_restore",
                 applyLegacyCanonicalCoverageMetadata: () => {
                   if (scenarioKey !== "BASELINE") {
                     applyCanonicalCoverageMetadataForNonBaseline(dataset, scenarioKey, { buildInputs });
@@ -8601,6 +8622,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
               houseId: args.houseId,
               scenarioId: scenarioIdForCache,
               keepInputHash: inputHash,
+              runContext: args.runContext,
             });
             if (!dataset.meta || typeof dataset.meta !== "object") (dataset as any).meta = {};
             (dataset.meta as any).artifactReadMode = "allow_rebuild";

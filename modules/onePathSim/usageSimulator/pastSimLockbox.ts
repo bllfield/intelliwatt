@@ -57,6 +57,8 @@ export type PastSimRunContext = {
   callerLabel: string;
   buildPathKind: "recalc" | "cold_build" | "lab_validation" | "cache_restore";
   persistRequested: boolean;
+  /** When true, skip deleting sibling Past cache rows after persist (fixture bootstrap). */
+  preservePastCacheVariants?: boolean;
   adminLabTreatmentMode?: string;
   preferredActualSource?: "SMT" | "GREEN_BUTTON";
   asyncMetadata?: { jobId?: string; queueFlags?: Record<string, unknown> };
@@ -167,6 +169,7 @@ export function buildPastSimRunContext(args: {
   callerLabel?: string | null;
   buildPathKind?: "recalc" | "cold_build" | "lab_validation" | "cache_restore";
   persistRequested?: boolean;
+  preservePastCacheVariants?: boolean;
   adminLabTreatmentMode?: string | null;
   preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
   asyncMetadata?: { jobId?: string; queueFlags?: Record<string, unknown> } | null;
@@ -176,10 +179,19 @@ export function buildPastSimRunContext(args: {
     callerLabel: String(args.callerLabel ?? "user_recalc").trim() || "user_recalc",
     buildPathKind: args.buildPathKind ?? "recalc",
     persistRequested: args.persistRequested === true,
+    ...(args.preservePastCacheVariants === true ? { preservePastCacheVariants: true } : {}),
     ...(args.adminLabTreatmentMode ? { adminLabTreatmentMode: String(args.adminLabTreatmentMode) } : {}),
     ...(args.preferredActualSource ? { preferredActualSource: args.preferredActualSource } : {}),
     ...(args.asyncMetadata ? { asyncMetadata: args.asyncMetadata } : {}),
   };
+}
+
+export function shouldPreservePastCacheVariants(
+  runContext?: Partial<PastSimRunContext> | null,
+  env: NodeJS.ProcessEnv = process.env
+): boolean {
+  if (runContext?.preservePastCacheVariants === true) return true;
+  return String(env.MANUAL_CROSS_SURFACE_FIXTURE_BOOTSTRAP ?? "").trim() === "1";
 }
 
 export function buildPastSimReadContext(args: {

@@ -10,6 +10,8 @@ import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboard
 import { buildOnePathRunReadOnlyView } from "@/modules/onePathSim/runReadOnlyView";
 import { remapManualDisplayDatasetToCanonicalWindow } from "@/modules/onePathSim/manualDisplayDataset";
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
+import { MANUAL_CANONICAL_ARTIFACT_WINDOW_VERSION } from "@/lib/usage/persistManualPastArtifactCanonicalWindow";
+import { isManualCanonicalArtifactWindowPersistEnabled } from "@/lib/usage/manualPastArtifactCanonicalWindowPersist";
 
 export const MANUAL_CROSS_SURFACE_PROOF_VERSION = "manual_cross_surface_parity_v2";
 
@@ -105,6 +107,9 @@ export type ManualCrossSurfaceProofLeg = {
   fixtureArtifactInputHash?: string | null;
   fixtureFamily?: ManualFixtureFamily | null;
   applyAdminRemap?: boolean | null;
+  manualCanonicalArtifactWindowVersion?: string | null;
+  manualCanonicalArtifactWindowPersistAudit?: Record<string, unknown> | null;
+  fixtureManualCanonicalArtifactWindowVersion?: string | null;
 };
 
 export function resolveManualProofComparisonFamily(
@@ -324,6 +329,14 @@ export function readArtifactCoverageFromDataset(dataset: Record<string, unknown>
   if (!dataset) return { artifactCoverageStart: null, artifactCoverageEnd: null };
   const meta = asRecord(dataset.meta);
   const summary = asRecord(dataset.summary);
+  const audit = asRecord(meta.manualCanonicalArtifactWindowPersistAudit);
+  if (meta.manualCanonicalArtifactWindowVersion === MANUAL_CANONICAL_ARTIFACT_WINDOW_VERSION) {
+    const auditStart = asDateKey(audit.afterCoverageStart);
+    const auditEnd = asDateKey(audit.afterCoverageEnd);
+    if (auditStart && auditEnd) {
+      return { artifactCoverageStart: auditStart, artifactCoverageEnd: auditEnd };
+    }
+  }
   return {
     artifactCoverageStart: asDateKey(meta.coverageStart ?? summary.start),
     artifactCoverageEnd: asDateKey(meta.coverageEnd ?? summary.end),
@@ -469,17 +482,44 @@ export function buildMissingLeg(args: {
   };
 }
 
+/** Resolve proof payload when live saved manual mode drifted after multi-leg fixture bootstrap. */
+export function resolveManualProofLegPayload(args: {
+  livePayload: ManualUsagePayload | null | undefined;
+  wantMode: ManualFixturePayloadMode;
+  manifestLeg?: ManualFixtureManifestLeg | null;
+  fallbackPayload?: ManualUsagePayload | null;
+}): ManualUsagePayload | null {
+  if (args.livePayload?.mode === args.wantMode) return args.livePayload;
+  if (args.fallbackPayload?.mode === args.wantMode) {
+    if (args.manifestLeg?.status === "ok" && args.manifestLeg?.fixturePayloadMode === args.wantMode) {
+      return args.fallbackPayload;
+    }
+    if (!args.livePayload?.mode) return args.fallbackPayload;
+  }
+  if (
+    args.manifestLeg?.status === "ok" &&
+    args.manifestLeg?.fixturePayloadMode === args.wantMode &&
+    args.fallbackPayload?.mode === args.wantMode
+  ) {
+    return args.fallbackPayload;
+  }
+  return null;
+}
+
 export function aggregateManualCrossSurfaceProofViolations(args: {
   legs: ManualCrossSurfaceProofLeg[];
   auditManualMode: "MONTHLY" | "ANNUAL";
   auditGapfillMode: "MANUAL_MONTHLY" | "MONTHLY_FROM_SOURCE_INTERVALS" | "ANNUAL_FROM_SOURCE_INTERVALS";
   onePathFacadeParity?: Record<string, unknown> | null;
   manifest?: ManualFixtureManifest | null;
+  expectCanonicalArtifactPersist?: boolean;
 }): { violations: string[]; warnings: string[]; auditProofFamily: ManualFixtureFamily } {
   const violations: string[] = [];
   const warnings: string[] = [];
   const inScope = (leg: ManualCrossSurfaceProofLeg) => leg.status === "ok";
   const auditProofFamily = resolveAuditProofFamilyFromGapfillMode(args.auditGapfillMode);
+  const expectCanonicalArtifactPersist =
+    args.expectCanonicalArtifactPersist ?? isManualCanonicalArtifactWindowPersistEnabled();
 
   const inScopeLegIds = args.legs
     .filter((leg) => leg.status !== "not_available")
@@ -498,6 +538,16 @@ export function aggregateManualCrossSurfaceProofViolations(args: {
       continue;
     }
     if (leg.status === "not_available") continue;
+
+    if (expectCanonicalArtifactPersist) {
+      const versionStamp =
+        leg.manualCanonicalArtifactWindowVersion ?? leg.fixtureManualCanonicalArtifactWindowVersion ?? null;
+      if (versionStamp !== MANUAL_CANONICAL_ARTIFACT_WINDOW_VERSION) {
+        violations.push(
+          `${leg.legId}: missing manualCanonicalArtifactWindowVersion stamp (Phase 4C persist hook not applied)`
+        );
+      }
+    }
 
     const legFixtureFamily = leg.fixtureFamily ?? resolveManifestFixtureFamily(leg.legId);
     if (legFixtureFamily !== auditProofFamily && !leg.legId.startsWith("user_")) {

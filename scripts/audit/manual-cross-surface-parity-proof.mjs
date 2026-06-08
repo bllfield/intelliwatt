@@ -258,6 +258,16 @@ async function probeArtifactLeg(args) {
       artifactCoverage.artifactCoverageEnd === display.displayCoverageEnd,
     artifactInputHash: readback.artifactInputHash ?? meta.inputHash ?? null,
     producerVersion: meta.simVersion ?? meta.engineVersion ?? null,
+    manualCanonicalArtifactWindowVersion:
+      typeof meta.manualCanonicalArtifactWindowVersion === "string"
+        ? meta.manualCanonicalArtifactWindowVersion
+        : args.fixtureManualCanonicalArtifactWindowVersion ?? null,
+    manualCanonicalArtifactWindowPersistAudit:
+      meta.manualCanonicalArtifactWindowPersistAudit &&
+      typeof meta.manualCanonicalArtifactWindowPersistAudit === "object"
+        ? meta.manualCanonicalArtifactWindowPersistAudit
+        : null,
+    fixtureManualCanonicalArtifactWindowVersion: args.fixtureManualCanonicalArtifactWindowVersion ?? null,
     ...fingerprints,
   };
 }
@@ -334,6 +344,7 @@ async function main() {
     resolveCanonicalCoverageForProof,
     resolveManifestFixtureFamily,
     resolveManualProofComparisonFamily,
+    resolveManualProofLegPayload,
     resolveManualProofPayloadProvenance,
     runOnePathManualFacadeParityCheck,
   } = await import("../../lib/usage/manualCrossSurfaceParityProof.ts");
@@ -378,6 +389,24 @@ async function main() {
     labHouseId: LAB_HOUSE,
     gapfillMode: AUDIT_GAPFILL_MODE,
   });
+  const samePayloadMonthlyDerived = await resolveGapfillDerivedPayload({
+    sourceUserId: user.id,
+    sourceHouseId: SOURCE_HOUSE,
+    labOwnerUserId: owner.id,
+    labHouseId: LAB_HOUSE,
+    gapfillMode: "MONTHLY_FROM_SOURCE_INTERVALS",
+  });
+  const samePayloadAnnualDerived = await resolveGapfillDerivedPayload({
+    sourceUserId: user.id,
+    sourceHouseId: SOURCE_HOUSE,
+    labOwnerUserId: owner.id,
+    labHouseId: LAB_HOUSE,
+    gapfillMode: "ANNUAL_FROM_SOURCE_INTERVALS",
+  });
+  const samePayloadMonthlyFallback =
+    samePayloadMonthlyDerived.payload?.mode === "MONTHLY" ? samePayloadMonthlyDerived.payload : null;
+  const samePayloadAnnualFallback =
+    samePayloadAnnualDerived.payload?.mode === "ANNUAL" ? samePayloadAnnualDerived.payload : null;
   const gapfillPayloadHash = gapfillDerived.payload
     ? hashManualPayloadFields(gapfillDerived.payload).normalizedPayloadHash
     : null;
@@ -398,6 +427,12 @@ async function main() {
     const entry = fixtureManifest?.legs?.[legId];
     return typeof entry?.artifactInputHash === "string" && entry.artifactInputHash.trim()
       ? entry.artifactInputHash.trim()
+      : null;
+  };
+  const fixturePersistVersionForLeg = (legId) => {
+    const entry = fixtureManifest?.legs?.[legId];
+    return typeof entry?.manualCanonicalArtifactWindowVersion === "string"
+      ? entry.manualCanonicalArtifactWindowVersion
       : null;
   };
   const fixtureFamilyForLeg = (legId) => {
@@ -458,12 +493,13 @@ async function main() {
     if (legId === "user_manual_monthly" || legId === "user_manual_annual") {
       const wantMode = legId.endsWith("annual") ? "ANNUAL" : "MONTHLY";
       const manifestLeg = fixtureManifest?.legs?.[legId] ?? null;
-      const payload =
-        sourceManual.payload?.mode === wantMode
-          ? sourceManual.payload
-          : manifestLeg?.normalizedPayloadHash
-            ? sourceManual.payload
-            : null;
+      const payload = resolveManualProofLegPayload({
+        livePayload: sourceManual.payload,
+        wantMode,
+        manifestLeg,
+        fallbackPayload:
+          wantMode === "MONTHLY" ? samePayloadMonthlyFallback : samePayloadAnnualFallback,
+      });
       legs.push(
         await probeArtifactLeg({
           legId,
@@ -476,6 +512,7 @@ async function main() {
           surfaceMode: wantMode === "MONTHLY" ? "MANUAL_MONTHLY" : "MANUAL_ANNUAL",
           applyAdminRemap: false,
           exactArtifactInputHash: fixtureArtifactHashForLeg(legId),
+          fixtureManualCanonicalArtifactWindowVersion: fixturePersistVersionForLeg(legId),
           fixtureFamily: fixtureFamilyForLeg(legId),
           comparisonFamily: resolveManualProofComparisonFamily(legId),
           payloadProvenance: resolveManualProofPayloadProvenance(legId),
@@ -487,6 +524,13 @@ async function main() {
     }
 
     if (legId === "manual_monthly_lab") {
+      const manifestLeg = fixtureManifest?.legs?.[legId] ?? null;
+      const payload = resolveManualProofLegPayload({
+        livePayload: labManual.payload,
+        wantMode: "MONTHLY",
+        manifestLeg,
+        fallbackPayload: samePayloadMonthlyFallback,
+      });
       legs.push(
         await probeArtifactLeg({
           legId,
@@ -494,11 +538,12 @@ async function main() {
           labOwnerUserId: owner.id,
           houseId: LAB_HOUSE,
           scenarioId: labPast?.id ?? null,
-          payload: labManual.payload?.mode === "MONTHLY" ? labManual.payload : null,
+          payload,
           missingPayloadReason: "lab_manual_monthly_missing",
           surfaceMode: "MANUAL_MONTHLY",
           applyAdminRemap: true,
           exactArtifactInputHash: fixtureArtifactHashForLeg(legId),
+          fixtureManualCanonicalArtifactWindowVersion: fixturePersistVersionForLeg(legId),
           fixtureFamily: fixtureFamilyForLeg(legId),
           comparisonFamily: resolveManualProofComparisonFamily(legId),
           payloadProvenance: resolveManualProofPayloadProvenance(legId),
@@ -511,6 +556,14 @@ async function main() {
 
     if (legId === "one_path_admin_manual_monthly" || legId === "one_path_admin_manual_annual") {
       const wantMode = legId.endsWith("annual") ? "ANNUAL" : "MONTHLY";
+      const manifestLeg = fixtureManifest?.legs?.[legId] ?? null;
+      const payload = resolveManualProofLegPayload({
+        livePayload: labManual.payload,
+        wantMode,
+        manifestLeg,
+        fallbackPayload:
+          wantMode === "MONTHLY" ? samePayloadMonthlyFallback : samePayloadAnnualFallback,
+      });
       legs.push(
         await probeArtifactLeg({
           legId,
@@ -518,11 +571,12 @@ async function main() {
           labOwnerUserId: owner.id,
           houseId: LAB_HOUSE,
           scenarioId: labPast?.id ?? null,
-          payload: labManual.payload?.mode === wantMode ? labManual.payload : null,
+          payload,
           missingPayloadReason: `lab_manual_${wantMode.toLowerCase()}_missing`,
           surfaceMode: wantMode === "MONTHLY" ? "MANUAL_MONTHLY" : "MANUAL_ANNUAL",
           applyAdminRemap: true,
           exactArtifactInputHash: fixtureArtifactHashForLeg(legId),
+          fixtureManualCanonicalArtifactWindowVersion: fixturePersistVersionForLeg(legId),
           fixtureFamily: fixtureFamilyForLeg(legId),
           comparisonFamily: resolveManualProofComparisonFamily(legId),
           payloadProvenance: resolveManualProofPayloadProvenance(legId),
@@ -541,8 +595,14 @@ async function main() {
     const gapfillMode = gapfillModeMap[legId];
     const wantPayloadMode = legId.includes("annual") ? "ANNUAL" : "MONTHLY";
     let derivedPayload = null;
+    const manifestLeg = fixtureManifest?.legs?.[legId] ?? null;
     if (legId === "gapfill_manual_monthly") {
-      derivedPayload = labManual.payload?.mode === "MONTHLY" ? labManual.payload : null;
+      derivedPayload = resolveManualProofLegPayload({
+        livePayload: labManual.payload,
+        wantMode: "MONTHLY",
+        manifestLeg,
+        fallbackPayload: samePayloadMonthlyFallback,
+      });
     } else if (legId.includes("source_intervals")) {
       const perLegDerived = await resolveGapfillDerivedPayload({
         sourceUserId: user.id,
@@ -584,6 +644,7 @@ async function main() {
         surfaceMode: gapfillMode,
         applyAdminRemap: false,
         exactArtifactInputHash: fixtureArtifactHashForLeg(legId),
+        fixtureManualCanonicalArtifactWindowVersion: fixturePersistVersionForLeg(legId),
         fixtureFamily: fixtureFamilyForLeg(legId),
         gapfillDerivedPayloadHash: gapfillPayloadHashForLeg,
         gapfillActualComparison,
@@ -601,6 +662,8 @@ async function main() {
     auditGapfillMode: AUDIT_GAPFILL_MODE,
     onePathFacadeParity,
     manifest: fixtureManifest,
+    expectCanonicalArtifactPersist:
+      String(process.env.MANUAL_CANONICAL_ARTIFACT_WINDOW_PERSIST ?? "").trim() === "1",
   });
 
   await prisma.$disconnect();

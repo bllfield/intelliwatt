@@ -8,6 +8,7 @@ import {
   prepareManualPastDatasetForArtifactPersist,
   resolveManualPastPersistUsageInputMode,
   shouldProjectManualPastDatasetAtPersist,
+  type ManualCanonicalArtifactWindowPersistAudit,
 } from "@/lib/usage/manualPastArtifactCanonicalWindowPersist";
 import { MANUAL_CANONICAL_ARTIFACT_WINDOW_VERSION } from "@/lib/usage/persistManualPastArtifactCanonicalWindow";
 
@@ -245,4 +246,124 @@ describe("manualPastArtifactCanonicalWindowPersist", () => {
       })
     ).toBe(false);
   });
+
+  it("stamps manualCanonicalArtifactWindowPersistAudit when projection runs", () => {
+    vi.stubEnv(MANUAL_CANONICAL_ARTIFACT_WINDOW_PERSIST_ENV, "1");
+    const source = buildManualBillWindowDataset({ mode: "ANNUAL" });
+
+    const out = prepareManualPastDatasetForArtifactPersist({
+      dataset: source,
+      simMode: "MANUAL_TOTALS",
+      scenarioKey: "PAST",
+      manualUsagePayload: { mode: "ANNUAL" },
+      serviceTree: "onePathSim",
+      callerLabel: "manual_fixture_one_path_admin_manual_annual",
+      runType: "recalc",
+      now: annualProofNow,
+      applyLegacyCanonicalCoverageMetadata: () => {},
+    });
+
+    const audit = out.persistAudit as ManualCanonicalArtifactWindowPersistAudit;
+    expect(out.projected).toBe(true);
+    expect(audit.enabled).toBe(true);
+    expect(audit.hookVersion).toBe(MANUAL_CANONICAL_ARTIFACT_WINDOW_VERSION);
+    expect(audit.serviceTree).toBe("onePathSim");
+    expect(audit.beforeCoverageStart).toBe("2025-06-05");
+    expect(audit.beforeCoverageEnd).toBe("2026-06-04");
+    expect(audit.afterCoverageStart).toBe("2025-06-07");
+    expect(audit.afterCoverageEnd).toBe("2026-06-06");
+    expect(out.dataset.meta.manualCanonicalArtifactWindowPersistAudit).toEqual(audit);
+  });
+
+  const manualPersistPathCases: Array<{
+    label: string;
+    serviceTree: "usageSimulator" | "onePathSim";
+    callerLabel: string;
+    manualUsagePayload: { mode: "MONTHLY" | "ANNUAL" };
+    buildInputs?: Record<string, unknown>;
+  }> = [
+    {
+      label: "user manual monthly",
+      serviceTree: "onePathSim",
+      callerLabel: "manual_fixture_user_manual_monthly",
+      manualUsagePayload: { mode: "MONTHLY" },
+    },
+    {
+      label: "user manual annual",
+      serviceTree: "onePathSim",
+      callerLabel: "manual_fixture_user_manual_annual",
+      manualUsagePayload: { mode: "ANNUAL" },
+    },
+    {
+      label: "manual monthly lab",
+      serviceTree: "onePathSim",
+      callerLabel: "manual_fixture_manual_monthly_lab",
+      manualUsagePayload: { mode: "MONTHLY" },
+    },
+    {
+      label: "one path admin manual monthly",
+      serviceTree: "onePathSim",
+      callerLabel: "manual_fixture_one_path_admin_manual_monthly",
+      manualUsagePayload: { mode: "MONTHLY" },
+    },
+    {
+      label: "one path admin manual annual",
+      serviceTree: "onePathSim",
+      callerLabel: "manual_fixture_one_path_admin_manual_annual",
+      manualUsagePayload: { mode: "ANNUAL" },
+    },
+    {
+      label: "gapfill MANUAL_MONTHLY",
+      serviceTree: "onePathSim",
+      callerLabel: "manual_fixture_gapfill_manual_monthly",
+      manualUsagePayload: { mode: "MONTHLY" },
+    },
+    {
+      label: "gapfill MONTHLY_FROM_SOURCE_INTERVALS",
+      serviceTree: "usageSimulator",
+      callerLabel: "gapfill_lab_artifact_rebuild",
+      manualUsagePayload: { mode: "MONTHLY" },
+      buildInputs: { gapfillUsageInputMode: "MONTHLY_FROM_SOURCE_INTERVALS", mode: "MANUAL_TOTALS" },
+    },
+    {
+      label: "gapfill ANNUAL_FROM_SOURCE_INTERVALS",
+      serviceTree: "usageSimulator",
+      callerLabel: "gapfill_lab_artifact_rebuild",
+      manualUsagePayload: { mode: "ANNUAL" },
+      buildInputs: { gapfillUsageInputMode: "ANNUAL_FROM_SOURCE_INTERVALS", mode: "MANUAL_TOTALS" },
+    },
+  ];
+
+  it.each(manualPersistPathCases)(
+    "projects $label persist hook when flag is enabled",
+    ({ serviceTree, callerLabel, manualUsagePayload, buildInputs }) => {
+      vi.stubEnv(MANUAL_CANONICAL_ARTIFACT_WINDOW_PERSIST_ENV, "1");
+      const source = buildManualBillWindowDataset({
+        mode: manualUsagePayload.mode,
+        anchorEndDate: "2026-06-06",
+      });
+
+      const out = prepareManualPastDatasetForArtifactPersist({
+        dataset: source,
+        simMode: "MANUAL_TOTALS",
+        scenarioKey: "PAST",
+        manualUsagePayload,
+        buildInputs,
+        serviceTree,
+        callerLabel,
+        runType: "recalc",
+        now: annualProofNow,
+        applyLegacyCanonicalCoverageMetadata: () => {},
+      });
+
+      expect(out.projected).toBe(true);
+      expect(out.persistWindowStartDate).toBe("2025-06-07");
+      expect(out.persistWindowEndDate).toBe("2026-06-06");
+      expect(out.dataset.meta.manualCanonicalArtifactWindowVersion).toBe(
+        MANUAL_CANONICAL_ARTIFACT_WINDOW_VERSION
+      );
+      expect(out.persistAudit?.serviceTree).toBe(serviceTree);
+      expect(out.persistAudit?.callerLabel).toBe(callerLabel);
+    }
+  );
 });

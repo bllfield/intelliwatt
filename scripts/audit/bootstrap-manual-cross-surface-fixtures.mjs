@@ -25,6 +25,8 @@ import { readFileSync, existsSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 process.env.PAST_SIM_RECALC_INLINE = "true";
+process.env.MANUAL_CANONICAL_ARTIFACT_WINDOW_PERSIST = "1";
+process.env.MANUAL_CROSS_SURFACE_FIXTURE_BOOTSTRAP = "1";
 
 const envLocalPath = resolve(process.cwd(), ".env.local");
 if (existsSync(envLocalPath)) {
@@ -100,15 +102,34 @@ async function readArtifactRow(usagePrisma, houseId, scenarioId, inputHash) {
   if (inputHash) {
     const pinned = await usagePrisma.pastSimulatedDatasetCache.findFirst({
       where: { houseId, scenarioId: String(scenarioId), inputHash },
-      select: { id: true, inputHash: true, updatedAt: true },
+      select: { id: true, inputHash: true, updatedAt: true, datasetJson: true, windowStartUtc: true, windowEndUtc: true },
     });
     if (pinned) return pinned;
   }
   return usagePrisma.pastSimulatedDatasetCache.findFirst({
     where: { houseId, scenarioId: String(scenarioId) },
     orderBy: { updatedAt: "desc" },
-    select: { id: true, inputHash: true, updatedAt: true },
+    select: { id: true, inputHash: true, updatedAt: true, datasetJson: true, windowStartUtc: true, windowEndUtc: true },
   });
+}
+
+function readArtifactPersistDiagnostics(artifactRow) {
+  const datasetJson = artifactRow?.datasetJson ?? null;
+  const meta = datasetJson && typeof datasetJson === "object" ? datasetJson.meta ?? {} : {};
+  const summary =
+    datasetJson && typeof datasetJson === "object" ? datasetJson.summary ?? {} : {};
+  return {
+    artifactCoverageStart: String(meta.coverageStart ?? summary.start ?? artifactRow?.windowStartUtc ?? "").slice(0, 10) || null,
+    artifactCoverageEnd: String(meta.coverageEnd ?? summary.end ?? artifactRow?.windowEndUtc ?? "").slice(0, 10) || null,
+    manualCanonicalArtifactWindowVersion:
+      typeof meta.manualCanonicalArtifactWindowVersion === "string"
+        ? meta.manualCanonicalArtifactWindowVersion
+        : null,
+    manualCanonicalArtifactWindowPersistAudit:
+      meta.manualCanonicalArtifactWindowPersistAudit && typeof meta.manualCanonicalArtifactWindowPersistAudit === "object"
+        ? meta.manualCanonicalArtifactWindowPersistAudit
+        : null,
+  };
 }
 
 async function resolveGapfillPayload(args) {
@@ -201,6 +222,7 @@ async function dispatchManualRecalc(args) {
       callerLabel: args.callerLabel ?? "manual_fixture_bootstrap",
       buildPathKind: "recalc",
       persistRequested: true,
+      preservePastCacheVariants: true,
     },
   });
   if (dispatched.executionMode === "droplet_async") {
@@ -328,6 +350,7 @@ async function main() {
         ? recalc.artifactInputHash
         : (await readArtifactRow(usagePrisma, LAB_HOUSE, labPastId, null))?.inputHash ?? null;
     const artifactRow = await readArtifactRow(usagePrisma, LAB_HOUSE, labPastId, artifactInputHash);
+    const persistDiagnostics = readArtifactPersistDiagnostics(artifactRow);
     const hashed = hashManualPayloadFields(args.payload);
     await recordLeg(args.legId, {
       status: recalc.ok ? "ok" : "recalc_failed",
@@ -336,6 +359,7 @@ async function main() {
       fixturePayloadMode: args.fixturePayloadMode,
       artifactId: artifactRow?.id ?? null,
       artifactInputHash,
+      ...persistDiagnostics,
       sourcePayloadHash: hashed.sourcePayloadHash,
       normalizedPayloadHash: hashed.normalizedPayloadHash,
       billPeriodHash: hashed.billPeriodHash,
@@ -377,6 +401,7 @@ async function main() {
         ? recalc.artifactInputHash
         : (await readArtifactRow(usagePrisma, SOURCE_HOUSE, sourcePastId, null))?.inputHash ?? null;
     const artifactRow = await readArtifactRow(usagePrisma, SOURCE_HOUSE, sourcePastId, artifactInputHash);
+    const persistDiagnostics = readArtifactPersistDiagnostics(artifactRow);
     const hashed = hashManualPayloadFields(args.payload);
     await recordLeg(args.legId, {
       status: recalc.ok ? "ok" : "recalc_failed",
@@ -385,6 +410,7 @@ async function main() {
       fixturePayloadMode: args.fixturePayloadMode,
       artifactId: artifactRow?.id ?? null,
       artifactInputHash,
+      ...persistDiagnostics,
       sourcePayloadHash: hashed.sourcePayloadHash,
       normalizedPayloadHash: hashed.normalizedPayloadHash,
       billPeriodHash: hashed.billPeriodHash,
@@ -679,18 +705,36 @@ async function main() {
 
   await finalizeSurvivingArtifacts();
 
-  if (fixtureFinalMode === "MONTHLY" && canonicalSamePayloadMonthly) {
-    await saveManualUsageInputForUserHouse({
-      userId: user.id,
-      houseId: SOURCE_HOUSE,
-      payload: canonicalSamePayloadMonthly,
-    });
-  } else if (fixtureFinalMode === "ANNUAL" && canonicalSamePayloadAnnual) {
-    await saveManualUsageInputForUserHouse({
-      userId: user.id,
-      houseId: SOURCE_HOUSE,
-      payload: canonicalSamePayloadAnnual,
-    });
+  if (canonicalSamePayloadMonthly || canonicalSamePayloadAnnual) {
+    const monthlyPayload = canonicalSamePayloadMonthly;
+    const annualPayload = canonicalSamePayloadAnnual;
+    if (fixtureFinalMode === "ANNUAL" && annualPayload) {
+      await saveManualUsageInputForUserHouse({
+        userId: user.id,
+        houseId: SOURCE_HOUSE,
+        payload: annualPayload,
+      });
+      if (labPastId) {
+        await saveManualUsageInputForUserHouse({
+          userId: owner.id,
+          houseId: LAB_HOUSE,
+          payload: annualPayload,
+        });
+      }
+    } else if (monthlyPayload) {
+      await saveManualUsageInputForUserHouse({
+        userId: user.id,
+        houseId: SOURCE_HOUSE,
+        payload: monthlyPayload,
+      });
+      if (labPastId) {
+        await saveManualUsageInputForUserHouse({
+          userId: owner.id,
+          houseId: LAB_HOUSE,
+          payload: monthlyPayload,
+        });
+      }
+    }
   }
 
   await prisma.$disconnect();

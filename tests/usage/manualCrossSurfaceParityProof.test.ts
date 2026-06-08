@@ -13,9 +13,12 @@ import {
   resolveManifestFixtureFamily,
   resolveManualDisplayTruthWeatherHouseId,
   resolveManualProofComparisonFamily,
+  resolveManualProofLegPayload,
   stableManualProofHash,
   validateManifestFixtureIsolation,
 } from "@/lib/usage/manualCrossSurfaceParityProof";
+import { MANUAL_CANONICAL_ARTIFACT_WINDOW_VERSION } from "@/lib/usage/persistManualPastArtifactCanonicalWindow";
+import { shouldPreservePastCacheVariants } from "@/modules/usageSimulator/pastSimLockbox";
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
 
 const monthlyPayload: ManualUsagePayload = {
@@ -355,5 +358,89 @@ describe("manualCrossSurfaceParityProof helpers", () => {
     expect(warnings.some((w) => w.includes("gapfillDerivedPayloadHash differs from user-entered payload"))).toBe(
       false
     );
+  });
+
+  it("resolveManualProofLegPayload uses manifest fallback when live lab payload mode drifted", () => {
+    const fallback = { ...monthlyPayload };
+    const resolved = resolveManualProofLegPayload({
+      livePayload: { ...annualPayload },
+      wantMode: "MONTHLY",
+      manifestLeg: { status: "ok", fixturePayloadMode: "MONTHLY" },
+      fallbackPayload: fallback,
+    });
+    expect(resolved).toEqual(fallback);
+  });
+
+  it("missing_fixture is a hard violation for required proof legs", () => {
+    const { violations } = aggregateManualCrossSurfaceProofViolations({
+      auditManualMode: "MONTHLY",
+      auditGapfillMode: "MANUAL_MONTHLY",
+      legs: [
+        {
+          legId: "manual_monthly_lab",
+          status: "missing_fixture",
+          unavailableReason: "lab_manual_monthly_missing",
+        },
+      ],
+    });
+    expect(violations).toContain("manual_monthly_lab: missing_fixture (lab_manual_monthly_missing)");
+  });
+
+  it("flags stale artifact selection when live hash differs from manifest-pinned hash", () => {
+    const { violations } = aggregateManualCrossSurfaceProofViolations({
+      auditManualMode: "MONTHLY",
+      auditGapfillMode: "MANUAL_MONTHLY",
+      legs: [
+        {
+          legId: "user_manual_monthly",
+          status: "ok",
+          fixtureFamily: "SAME_PAYLOAD",
+          fixtureArtifactInputHash: "manifest-hash",
+          artifactInputHash: "latest-survivor-hash",
+          manualCanonicalArtifactWindowVersion: MANUAL_CANONICAL_ARTIFACT_WINDOW_VERSION,
+        },
+      ],
+    });
+    expect(violations).toContain(
+      "user_manual_monthly: live artifactInputHash latest-survivor-hash != manifest-pinned manifest-hash"
+    );
+  });
+
+  it("requires canonical persist stamp when expectCanonicalArtifactPersist is enabled", () => {
+    const { violations } = aggregateManualCrossSurfaceProofViolations({
+      auditManualMode: "ANNUAL",
+      auditGapfillMode: "ANNUAL_FROM_SOURCE_INTERVALS",
+      expectCanonicalArtifactPersist: true,
+      legs: [
+        {
+          legId: "gapfill_annual_from_source_intervals",
+          status: "ok",
+          fixtureFamily: "GAPFILL_DERIVED",
+          artifactCoverageStart: "2025-06-05",
+          artifactCoverageEnd: "2026-06-04",
+          canonicalCoverageStart: "2025-06-07",
+          canonicalCoverageEnd: "2026-06-06",
+        },
+      ],
+    });
+    expect(violations).toContain(
+      "gapfill_annual_from_source_intervals: missing manualCanonicalArtifactWindowVersion stamp (Phase 4C persist hook not applied)"
+    );
+  });
+
+  it("shouldPreservePastCacheVariants honors runContext and bootstrap env", () => {
+    expect(shouldPreservePastCacheVariants({ preservePastCacheVariants: true })).toBe(true);
+    expect(
+      shouldPreservePastCacheVariants(undefined, {
+        ...process.env,
+        MANUAL_CROSS_SURFACE_FIXTURE_BOOTSTRAP: "1",
+      })
+    ).toBe(true);
+    expect(
+      shouldPreservePastCacheVariants(undefined, {
+        ...process.env,
+        MANUAL_CROSS_SURFACE_FIXTURE_BOOTSTRAP: "0",
+      })
+    ).toBe(false);
   });
 });

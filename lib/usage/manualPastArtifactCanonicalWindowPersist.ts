@@ -1,10 +1,37 @@
 import {
   isCanonicalManualPastArtifact,
+  MANUAL_CANONICAL_ARTIFACT_WINDOW_VERSION,
   projectManualPastDatasetToCanonicalWindow,
   resolveManualPastUsageInputMode,
 } from "@/lib/usage/persistManualPastArtifactCanonicalWindow";
 
 export const MANUAL_CANONICAL_ARTIFACT_WINDOW_PERSIST_ENV = "MANUAL_CANONICAL_ARTIFACT_WINDOW_PERSIST";
+
+export type ManualCanonicalArtifactWindowPersistServiceTree = "usageSimulator" | "onePathSim";
+
+export type ManualCanonicalArtifactWindowPersistAudit = {
+  enabled: true;
+  hookVersion: typeof MANUAL_CANONICAL_ARTIFACT_WINDOW_VERSION;
+  serviceTree: ManualCanonicalArtifactWindowPersistServiceTree;
+  callerLabel: string;
+  usageMode: "MANUAL_MONTHLY" | "MANUAL_ANNUAL";
+  runType: string;
+  beforeCoverageStart: string | null;
+  beforeCoverageEnd: string | null;
+  afterCoverageStart: string | null;
+  afterCoverageEnd: string | null;
+  projectedAt: string;
+  source: "persist_hook";
+};
+
+function readDatasetCoverageDates(dataset: unknown): { start: string | null; end: string | null } {
+  const start = String((dataset as any)?.meta?.coverageStart ?? (dataset as any)?.summary?.start ?? "").slice(0, 10);
+  const end = String((dataset as any)?.meta?.coverageEnd ?? (dataset as any)?.summary?.end ?? "").slice(0, 10);
+  return {
+    start: /^\d{4}-\d{2}-\d{2}$/.test(start) ? start : null,
+    end: /^\d{4}-\d{2}-\d{2}$/.test(end) ? end : null,
+  };
+}
 
 export function isManualCanonicalArtifactWindowPersistEnabled(
   env: NodeJS.ProcessEnv = process.env
@@ -76,12 +103,16 @@ export function prepareManualPastDatasetForArtifactPersist(args: {
   manualUsagePayload?: unknown;
   buildInputs?: unknown;
   now?: Date;
+  serviceTree?: ManualCanonicalArtifactWindowPersistServiceTree | null;
+  callerLabel?: string | null;
+  runType?: string | null;
   applyLegacyCanonicalCoverageMetadata: () => void;
 }): {
   dataset: any;
   projected: boolean;
   persistWindowStartDate: string | null;
   persistWindowEndDate: string | null;
+  persistAudit: ManualCanonicalArtifactWindowPersistAudit | null;
 } {
   const usageInputMode = resolveManualPastPersistUsageInputMode({
     simMode: args.simMode,
@@ -106,24 +137,49 @@ export function prepareManualPastDatasetForArtifactPersist(args: {
       projected: false,
       persistWindowStartDate: null,
       persistWindowEndDate: null,
+      persistAudit: null,
     };
   }
 
+  const beforeCoverage = readDatasetCoverageDates(args.dataset);
   let dataset = args.dataset;
-  if (!isCanonicalManualPastArtifact(dataset)) {
+  let projected = isCanonicalManualPastArtifact(dataset);
+  if (!projected) {
     dataset = projectManualPastDatasetToCanonicalWindow(dataset, {
       usageInputMode: usageInputMode ?? undefined,
       now: args.now,
     });
+    projected = isCanonicalManualPastArtifact(dataset);
   }
 
-  const coverageStart = String(dataset?.meta?.coverageStart ?? dataset?.summary?.start ?? "").slice(0, 10);
-  const coverageEnd = String(dataset?.meta?.coverageEnd ?? dataset?.summary?.end ?? "").slice(0, 10);
+  const afterCoverage = readDatasetCoverageDates(dataset);
+  const persistAudit: ManualCanonicalArtifactWindowPersistAudit = {
+    enabled: true,
+    hookVersion: MANUAL_CANONICAL_ARTIFACT_WINDOW_VERSION,
+    serviceTree: args.serviceTree ?? "usageSimulator",
+    callerLabel: String(args.callerLabel ?? "unknown").trim() || "unknown",
+    usageMode: usageInputMode ?? "MANUAL_MONTHLY",
+    runType: String(args.runType ?? "recalc").trim() || "recalc",
+    beforeCoverageStart: beforeCoverage.start,
+    beforeCoverageEnd: beforeCoverage.end,
+    afterCoverageStart: afterCoverage.start,
+    afterCoverageEnd: afterCoverage.end,
+    projectedAt: new Date().toISOString(),
+    source: "persist_hook",
+  };
+  dataset = {
+    ...dataset,
+    meta: {
+      ...(dataset?.meta ?? {}),
+      manualCanonicalArtifactWindowPersistAudit: persistAudit,
+    },
+  };
 
   return {
     dataset,
-    projected: true,
-    persistWindowStartDate: /^\d{4}-\d{2}-\d{2}$/.test(coverageStart) ? coverageStart : null,
-    persistWindowEndDate: /^\d{4}-\d{2}-\d{2}$/.test(coverageEnd) ? coverageEnd : null,
+    projected,
+    persistWindowStartDate: afterCoverage.start,
+    persistWindowEndDate: afterCoverage.end,
+    persistAudit,
   };
 }
