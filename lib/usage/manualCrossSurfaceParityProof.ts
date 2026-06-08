@@ -276,7 +276,8 @@ export function hashManualPayloadFields(payload: ManualUsagePayload | null | und
     endDate: row.endDate,
     enteredKwh: row.enteredKwh,
     inputKind: row.inputKind,
-    travelExcluded: row.travelExcluded,
+    eligibleForConstraint: row.eligibleForConstraint,
+    exclusionReason: row.exclusionReason,
   }));
   const statementRanges =
     payload.mode === "MONTHLY"
