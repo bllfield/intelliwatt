@@ -6,7 +6,10 @@ import {
   buildPastWeatherInputFingerprint,
   computeSimulatedProfileFingerprint,
 } from "@/lib/usage/pastWeatherInputParity";
-import { auditUserAdminPastReadModelParity } from "@/lib/usage/intervalReadModelInvariants";
+import {
+  auditUserAdminPastReadModelParity,
+  buildPastMonthlyRowsParityDebug,
+} from "@/lib/usage/intervalReadModelInvariants";
 import { finalizePastDatasetDisplayReadModel } from "@/lib/usage/finalizePastDatasetDisplayReadModel";
 import {
   readPastDisplayWeatherFinalizeOutcomeFromMeta,
