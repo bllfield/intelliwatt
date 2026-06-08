@@ -8622,7 +8622,6 @@ export async function getSimulatedUsageForHouseScenario(args: {
               houseId: args.houseId,
               scenarioId: scenarioIdForCache,
               keepInputHash: inputHash,
-              runContext: args.runContext,
             });
             if (!dataset.meta || typeof dataset.meta !== "object") (dataset as any).meta = {};
             (dataset.meta as any).artifactReadMode = "allow_rebuild";
