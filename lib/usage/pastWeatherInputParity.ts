@@ -31,14 +31,36 @@ function stableHash(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value), "utf8").digest("base64url").slice(0, 22);
 }
 
+function readPastCoverageWindow(dataset: Record<string, unknown>): { start: string | null; end: string | null } {
+  const meta = asRecord(dataset.meta);
+  const summary = asRecord(dataset.summary);
+  return {
+    start: asDateKey(meta.coverageStart ?? summary.start),
+    end: asDateKey(meta.coverageEnd ?? summary.end),
+  };
+}
+
+/** Canonical 365-day display window only — exclude raw boundary rows outside coverage. */
+function dailyRowsInPastCoverageWindow(
+  dataset: Record<string, unknown>
+): Array<{ date?: unknown; kwh?: unknown; source?: unknown; sourceDetail?: unknown }> {
+  const daily = Array.isArray(dataset.daily)
+    ? (dataset.daily as Array<{ date?: unknown; kwh?: unknown; source?: unknown; sourceDetail?: unknown }>)
+    : [];
+  const { start, end } = readPastCoverageWindow(dataset);
+  if (!start || !end) return daily;
+  return daily.filter((row) => {
+    const dateKey = asDateKey(row.date);
+    return dateKey != null && dateKey >= start && dateKey <= end;
+  });
+}
+
 function computePastDisplayTruthRevision(args: {
   dataset: Record<string, unknown>;
   weatherHouseId?: string | null;
 }): string {
   const meta = asRecord(args.dataset.meta);
-  const daily = Array.isArray(args.dataset.daily)
-    ? (args.dataset.daily as Array<{ date?: unknown; kwh?: unknown; source?: unknown }>)
-    : [];
+  const daily = dailyRowsInPastCoverageWindow(args.dataset);
   const dailyFingerprint = daily
     .map((row) => {
       const date = String(row.date ?? "").slice(0, 10);
@@ -79,9 +101,7 @@ function readArtifactInputHash(meta: Record<string, unknown>): string | null {
 }
 
 function hashFinalizedDailyRows(dataset: Record<string, unknown>): string {
-  const daily = Array.isArray(dataset.daily)
-    ? (dataset.daily as Array<{ date?: unknown; kwh?: unknown; source?: unknown; sourceDetail?: unknown }>)
-    : [];
+  const daily = dailyRowsInPastCoverageWindow(dataset);
   const fingerprint = daily
     .map((row) => {
       const date = String(row.date ?? "").slice(0, 10);
@@ -175,7 +195,7 @@ export function buildPastWeatherInputFingerprint(args: {
   const weatherHouseId =
     String(args.weatherHouseId ?? meta.actualContextHouseId ?? lockboxRunContext.actualContextHouseId ?? "").trim() ||
     null;
-  const daily = Array.isArray(args.dataset.daily) ? (args.dataset.daily as Array<{ kwh?: unknown }>) : [];
+  const daily = dailyRowsInPastCoverageWindow(args.dataset);
   const netKwhDailySum = daily.length > 0 ? round2(daily.reduce((sum, row) => sum + (Number(row.kwh) || 0), 0)) : null;
 
   return {

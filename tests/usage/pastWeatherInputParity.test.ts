@@ -174,6 +174,30 @@ describe("pastWeatherInputParity", () => {
     expect(buildPastWeatherInputFingerprint({ dataset: userDataset }).bundleC.cooling).toBe(93);
   });
 
+  it("bounds finalized daily row hash to canonical coverage window only", () => {
+    const inWindow = pastDatasetFixture({
+      houseLabel: "user",
+      usageShapeProfileIdentity: "shape-shared",
+      dailyKwhByDate: { "2025-06-05": 40, "2026-06-04": 42 },
+      bundleC: { eff: 46, cool: 100, heat: 64 },
+      bundleB: { eff: 48, cool: 100, heat: 64 },
+      artifactInputHash: "hash-shared",
+      displayTruthRevision: "rev-shared",
+    });
+    const withBoundaryRows = {
+      ...inWindow,
+      daily: [
+        ...(inWindow.daily as Array<Record<string, unknown>>),
+        { date: "2025-06-04", kwh: 99, source: "ACTUAL", sourceDetail: "ACTUAL" },
+        { date: "2026-06-05", kwh: 88, source: "ACTUAL", sourceDetail: "ACTUAL" },
+      ],
+    };
+    const bounded = buildPastWeatherInputFingerprint({ dataset: inWindow });
+    const withExtra = buildPastWeatherInputFingerprint({ dataset: withBoundaryRows });
+    expect(withExtra.finalizedDailyRowsHash).toBe(bounded.finalizedDailyRowsHash);
+    expect(withExtra.displayTruthRevision).toBe(bounded.displayTruthRevision);
+  });
+
   it("flags same-dataset audit as false green", () => {
     const dataset = pastDatasetFixture({
       houseLabel: "user",
