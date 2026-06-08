@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { buildManualUsageReadModel as buildLiveManualUsageReadModel } from "@/modules/manualUsage/readModel";
 import { buildManualUsageReadModel } from "@/modules/onePathSim/manualReadModel";
 
-describe("one path manual read model", () => {
-  it("prefers raw interval totals for simulated bill-period parity so exact matches do not drift on rounded daily rows", () => {
+describe("one path manual read model facade", () => {
+  it("delegates to modules/manualUsage/readModel (prefers persisted daily totals over interval rescans)", () => {
     const payload = {
       mode: "MONTHLY" as const,
       anchorEndDate: "2025-04-30",
@@ -32,13 +33,15 @@ describe("one path manual read model", () => {
       },
     };
 
-    const readModel = buildManualUsageReadModel({ payload, dataset, actualDataset: null });
+    const forkReadModel = buildManualUsageReadModel({ payload, dataset, actualDataset: null });
+    const liveReadModel = buildLiveManualUsageReadModel({ payload, dataset, actualDataset: null });
 
-    expect(readModel?.billPeriodCompare.rows[0]).toMatchObject({
+    expect(forkReadModel).toEqual(liveReadModel);
+    expect(forkReadModel?.billPeriodCompare.rows[0]).toMatchObject({
       stageOneTargetTotalKwh: 300,
-      simulatedStatementTotalKwh: 300,
-      deltaKwh: 0,
-      status: "reconciled",
+      simulatedStatementTotalKwh: 290.11,
+      deltaKwh: -9.89,
+      status: "delta_present",
     });
   });
 });
