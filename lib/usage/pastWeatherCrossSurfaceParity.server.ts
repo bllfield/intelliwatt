@@ -13,10 +13,10 @@ import {
   type PastDisplayWeatherFinalizeOutcome,
 } from "@/lib/usage/pastDisplayWeatherFinalizeGuard";
 import { resolveStaleIncompleteMeterSlotCompleteDateKeys } from "@/lib/usage/pastSimStaleIncompleteMeter";
+import { resolvePastSimPreferredActualSource } from "@/lib/usage/pastSimValidationCompareRead";
 import {
   resolvePastProfileLoadContext,
   resolvePastWeatherHouseIdFromDataset,
-  resolvePreferredActualSourceFromDataset,
 } from "@/lib/usage/pastVisibleWeatherReadDiagnostics";
 import { readGreenButtonTrustedHomeDateKeysFromPastMeta } from "@/lib/usage/greenButtonPastTrustedPool";
 import { resolveUserPastVisibleWeatherSensitivityScore } from "@/lib/usage/userPastVisibleWeather";
@@ -47,7 +47,7 @@ async function finalizeSourceDatasetForCrossSurfaceParity(args: {
     requestHouseId: args.sourceHouseId,
     sourceUserId: args.sourceUserId,
   });
-  const preferredActualSource = resolvePreferredActualSourceFromDataset(dataset);
+  const preferredActualSource = resolvePastSimPreferredActualSource({ dataset });
   const sourceHouse = await getHouseAddressForUserHouse({
     userId: args.sourceUserId,
     houseId: args.sourceHouseId,
@@ -67,7 +67,7 @@ async function finalizeSourceDatasetForCrossSurfaceParity(args: {
       actualContextHouseId: profileLoad.profileHouseId,
       smtSourceEsiid: sourceHouse?.esiid ?? null,
       seedIfMissing: false,
-      preferredActualSource: preferredActualSource ?? null,
+      preferredActualSource,
       greenButtonFullYearIntervalsForDisplay: preferredActualSource === "GREEN_BUTTON",
     }).catch(() => null),
     resolveStaleIncompleteMeterSlotCompleteDateKeys({
@@ -110,7 +110,7 @@ async function finalizeAdminDatasetForCrossSurfaceParity(args: {
     sourceUserId: args.sourceUserId,
   });
   const effectiveProfileLoad = { profileUserId: args.sourceUserId, profileHouseId: args.sourceHouseId };
-  const preferredActualSource = resolvePreferredActualSourceFromDataset(dataset);
+  const preferredActualSource = resolvePastSimPreferredActualSource({ dataset });
   const sourceHouse = await getHouseAddressForUserHouse({
     userId: args.sourceUserId,
     houseId: args.sourceHouseId,
@@ -130,7 +130,7 @@ async function finalizeAdminDatasetForCrossSurfaceParity(args: {
       actualContextHouseId: effectiveProfileLoad.profileHouseId,
       smtSourceEsiid: sourceHouse?.esiid ?? null,
       seedIfMissing: false,
-      preferredActualSource: preferredActualSource ?? null,
+      preferredActualSource,
       greenButtonFullYearIntervalsForDisplay: preferredActualSource === "GREEN_BUTTON",
     }).catch(() => null),
     resolveStaleIncompleteMeterSlotCompleteDateKeys({
