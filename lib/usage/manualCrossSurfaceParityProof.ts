@@ -588,7 +588,7 @@ export function aggregateManualCrossSurfaceProofViolations(args: {
           .join(", ")})`
       );
     }
-    for (const [cohortKey, group] of samePayloadHashGroups) {
+    for (const [cohortKey, group] of Array.from(samePayloadHashGroups.entries())) {
       if (group.length < 2) continue;
       const uniqueMonthly = new Set(group.map((leg) => leg.monthlyRowsHash).filter(Boolean));
       if (uniqueMonthly.size > 1) {
