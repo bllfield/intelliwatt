@@ -159,6 +159,7 @@ async function main() {
   }
 
   const acceptanceProof = crossSurface?.acceptanceProof ?? null;
+  const artifactSelection = crossSurface?.artifactSelection ?? null;
 
   let adminRun = { status: null, json: null };
   if (!PROOF_AUDIT_ONLY) {
@@ -191,16 +192,37 @@ async function main() {
     at: new Date().toISOString(),
     proofMode: PROOF_AUDIT_ONLY ? "audit_only" : "audit_then_admin_http",
     base: BASE,
-    houses: { sourceHouse: SOURCE_HOUSE, testHome: TEST_HOUSE },
     proofSourceType,
+    sourceHouseId: SOURCE_HOUSE,
+    labHouseId: TEST_HOUSE,
+    houses: { sourceHouse: SOURCE_HOUSE, testHome: TEST_HOUSE },
     labArtifactSourceFamily,
     labHomeOpsNote: LAB_HOME_SINGLE_OCCUPANCY_OPS_NOTE,
     staleLabHomeSourceFamily: staleLabHomeMessage,
+    userPastScenarioId: sourcePast?.id ?? null,
+    adminPastScenarioId: testPast?.id ?? null,
     scenarios: { sourcePastScenarioId: sourcePast?.id ?? null, testPastScenarioId: testPast?.id ?? null },
+    userArtifactId: artifactSelection?.userArtifactInputHash ?? crossSurface?.sourceArtifactInputHash ?? null,
+    adminArtifactId: artifactSelection?.adminArtifactInputHash ?? null,
+    userArtifactUpdatedAt: artifactSelection?.userArtifactUpdatedAt ?? null,
+    adminArtifactUpdatedAt: artifactSelection?.adminArtifactUpdatedAt ?? null,
+    userDisplayTruthRevision: artifactSelection?.userDisplayTruthRevision ?? acceptanceProof?.user?.displayTruthRevision ?? null,
+    adminDisplayTruthRevision: artifactSelection?.adminDisplayTruthRevision ?? acceptanceProof?.admin?.displayTruthRevision ?? null,
+    userFinalizedDailyRowsHash:
+      artifactSelection?.userFinalizedDailyRowsHash ?? acceptanceProof?.user?.finalizedDailyRowsHash ?? null,
+    adminFinalizedDailyRowsHash:
+      artifactSelection?.adminFinalizedDailyRowsHash ?? acceptanceProof?.admin?.finalizedDailyRowsHash ?? null,
+    userBundleC: artifactSelection?.userBundleC ?? acceptanceProof?.user?.bundleC ?? null,
+    adminBundleC: artifactSelection?.adminBundleC ?? acceptanceProof?.admin?.bundleC ?? null,
+    userVisibleBundleC: artifactSelection?.userVisibleBundleC ?? null,
+    adminVisibleBundleC: artifactSelection?.adminVisibleBundleC ?? null,
+    userReadPath: artifactSelection?.userReadPath ?? crossSurface?.sourceReadPath ?? null,
+    adminReadPath: artifactSelection?.adminReadPath ?? crossSurface?.adminReadPath ?? null,
     userPast: acceptanceProof
       ? {
           bundleC: acceptanceProof.user.bundleC,
           visibleEqualsBundleC: acceptanceProof.userVisibleEqualsUserBundleC,
+          visibleBundleC: artifactSelection?.userVisibleBundleC ?? null,
         }
       : null,
     adminPast: PROOF_AUDIT_ONLY
@@ -238,6 +260,9 @@ async function main() {
           violations: crossSurface.violations,
           sourceArtifactLoaded: crossSurface.sourceArtifactLoaded,
           sourceArtifactInputHash: crossSurface.sourceArtifactInputHash,
+          sourceReadPath: crossSurface.sourceReadPath,
+          adminReadPath: crossSurface.adminReadPath,
+          artifactSelection,
           acceptanceProof,
         }
       : null,

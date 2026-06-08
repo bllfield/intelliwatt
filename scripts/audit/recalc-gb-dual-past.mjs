@@ -114,15 +114,6 @@ async function main() {
     },
   });
 
-  const mirror = await ensureOnePathPastBuildInputsFromSource({
-    ownerUserId: owner.id,
-    sourceUserId: user.id,
-    sourceHouseId: SOURCE_HOUSE,
-    testHomeHouseId: TEST_HOUSE,
-    preferredActualSource: "GREEN_BUTTON",
-    callerLabel: "one_path_admin_gb_past_run",
-  });
-
   await syncOnePathMissingProfilesFromSource({
     ownerUserId: owner.id,
     sourceUserId: user.id,
@@ -141,13 +132,25 @@ async function main() {
     throw new Error("green_button_clone_failed: source Green Button intervals were not copied to the lab test home");
   }
 
+  const mirror = await ensureOnePathPastBuildInputsFromSource({
+    ownerUserId: owner.id,
+    sourceUserId: user.id,
+    sourceHouseId: SOURCE_HOUSE,
+    testHomeHouseId: TEST_HOUSE,
+    preferredActualSource: "GREEN_BUTTON",
+    callerLabel: "one_path_admin_gb_past_run",
+  });
+  if (!mirror.ok) {
+    throw new Error(`past_build_inputs_mirror_failed: ${mirror.code ?? "unknown"} — ${mirror.message ?? ""}`);
+  }
+
   const testRecalc = await dispatchPastSimRecalc({
     userId: owner.id,
     houseId: TEST_HOUSE,
     esiid: testHouse?.esiid ?? sourceHouse?.esiid ?? null,
     mode: "SMT_BASELINE",
     scenarioId: testScenarioId,
-    actualContextHouseId: TEST_HOUSE,
+    actualContextHouseId: SOURCE_HOUSE,
     persistPastSimBaseline: true,
     preLockboxTravelRanges: travelRanges,
     validationDaySelectionMode: adminValidationPolicy.selectionMode,
