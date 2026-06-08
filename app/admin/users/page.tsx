@@ -17,6 +17,8 @@ type InsightsRow = {
   utilityName: string | null;
   hasSmt: boolean;
   hasUsage: boolean;
+  usageSource: "SMT" | "GB" | "MANUAL_MONTHLY" | "MANUAL_ANNUAL" | "NEW_BUILD" | "UNKNOWN";
+  usageSourceLabel: string;
   switchedWithUs: boolean;
   contractEndDate: string | null;
   savingsUntilContractEndNetEtf: number | null;
@@ -101,6 +103,23 @@ function EntryStatusBadge({ status }: { status: InsightsRow["smartMeterEntryStat
   );
 }
 
+function UsageSourceBadge({ label, source }: { label: string; source: InsightsRow["usageSource"] }) {
+  if (source === "UNKNOWN") return <span className="text-slate-500">{label}</span>;
+  const cls =
+    source === "SMT"
+      ? "bg-sky-50 text-sky-800 border-sky-200"
+      : source === "GB"
+        ? "bg-violet-50 text-violet-800 border-violet-200"
+        : source === "MANUAL_MONTHLY" || source === "MANUAL_ANNUAL"
+          ? "bg-amber-50 text-amber-800 border-amber-200"
+          : "bg-emerald-50 text-emerald-800 border-emerald-200";
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${cls}`}>
+      {label}
+    </span>
+  );
+}
+
 export default function AdminUsersPage() {
   const [adminToken, setAdminToken] = React.useState("");
 
@@ -108,6 +127,9 @@ export default function AdminUsersPage() {
   const [hasSmt, setHasSmt] = React.useState<"any" | "true" | "false">("any");
   const [hasUsage, setHasUsage] = React.useState<"any" | "true" | "false">("any");
   const [switched, setSwitched] = React.useState<"any" | "true" | "false">("any");
+  const [usageSource, setUsageSource] = React.useState<
+    "any" | "SMT" | "GB" | "MANUAL_MONTHLY" | "MANUAL_ANNUAL" | "NEW_BUILD" | "UNKNOWN"
+  >("any");
 
   const [sort, setSort] = React.useState("savingsToEndNet");
   const [dir, setDir] = React.useState<"asc" | "desc">("desc");
@@ -145,6 +167,7 @@ export default function AdminUsersPage() {
       params.set("hasSmt", hasSmt);
       params.set("hasUsage", hasUsage);
       params.set("switched", switched);
+      params.set("usageSource", usageSource);
       params.set("sort", sort);
       params.set("dir", dir);
       params.set("page", String(page));
@@ -163,7 +186,7 @@ export default function AdminUsersPage() {
     } finally {
       setLoading(false);
     }
-  }, [q, hasSmt, hasUsage, switched, sort, dir, page, pageSize, withAdminHeaders]);
+  }, [q, hasSmt, hasUsage, switched, usageSource, sort, dir, page, pageSize, withAdminHeaders]);
 
   React.useEffect(() => {
     fetchInsights();
@@ -200,7 +223,7 @@ export default function AdminUsersPage() {
       </div>
 
       <div className="rounded-2xl border border-brand-blue/15 bg-brand-white p-5 shadow-sm">
-        <div className="grid gap-3 md:grid-cols-6">
+        <div className="grid gap-3 md:grid-cols-7">
           <div className="md:col-span-2">
             <label className="block text-xs font-semibold uppercase tracking-wide text-brand-navy/70">Search</label>
             <input
@@ -263,6 +286,26 @@ export default function AdminUsersPage() {
           </div>
 
           <div>
+            <label className="block text-xs font-semibold uppercase tracking-wide text-brand-navy/70">Usage source</label>
+            <select
+              value={usageSource}
+              onChange={(e) => {
+                setUsageSource(e.target.value as typeof usageSource);
+                setPage(1);
+              }}
+              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            >
+              <option value="any">Any</option>
+              <option value="SMT">SMT</option>
+              <option value="GB">GB</option>
+              <option value="MANUAL_MONTHLY">Manual monthly</option>
+              <option value="MANUAL_ANNUAL">Manual annual</option>
+              <option value="NEW_BUILD">New Build</option>
+              <option value="UNKNOWN">Unknown</option>
+            </select>
+          </div>
+
+          <div>
             <label className="block text-xs font-semibold uppercase tracking-wide text-brand-navy/70">Page size</label>
             <select
               value={String(pageSize)}
@@ -315,6 +358,20 @@ export default function AdminUsersPage() {
                     }}
                   >
                     Joined
+                  </button>
+                </th>
+                <th className="py-3 px-3 text-left font-semibold text-brand-navy">
+                  <button
+                    type="button"
+                    className="hover:underline"
+                    onClick={() => {
+                      const nd = nextDir(sort, dir, "usageSource");
+                      setSort("usageSource");
+                      setDir(nd);
+                      setPage(1);
+                    }}
+                  >
+                    Usage source
                   </button>
                 </th>
                 <th className="py-3 px-3 text-left font-semibold text-brand-navy">Usage</th>
@@ -401,7 +458,7 @@ export default function AdminUsersPage() {
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={16} className="py-8 px-3 text-center text-brand-navy/60">
+                  <td colSpan={17} className="py-8 px-3 text-center text-brand-navy/60">
                     {loading ? "Loading…" : "No users found"}
                   </td>
                 </tr>
@@ -429,6 +486,9 @@ export default function AdminUsersPage() {
                         </div>
                       </td>
                       <td className="py-3 px-3 text-brand-navy">{fmtDate(r.joinedAt)}</td>
+                      <td className="py-3 px-3">
+                        <UsageSourceBadge label={r.usageSourceLabel} source={r.usageSource} />
+                      </td>
                       <td className="py-3 px-3">{r.hasUsage ? <span className="text-emerald-700">Yes</span> : <span className="text-slate-500">No</span>}</td>
                       <td className="py-3 px-3">{r.hasSmt ? <span className="text-emerald-700">Yes</span> : <span className="text-slate-500">No</span>}</td>
                       <td className="py-3 px-3 text-brand-navy">{fmtDate(r.contractEndDate)}</td>
@@ -482,7 +542,7 @@ export default function AdminUsersPage() {
                       </td>
                     </tr>
                     <tr className="border-b border-brand-navy/10">
-                      <td colSpan={16} className="px-3 pb-4">
+                      <td colSpan={17} className="px-3 pb-4">
                         <details className="mt-2">
                           <summary className="cursor-pointer select-none text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
                             Details

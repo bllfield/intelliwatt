@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { db } from "@/lib/db";
+import {
+  ADMIN_USER_USAGE_SOURCE_SORT_ORDER,
+  labelAdminUserUsageSource,
+  parseAdminUserUsageSourceFilter,
+  resolveAdminUserUsageSource,
+  type AdminUserUsageSource,
+} from "@/lib/usage/adminUserUsageSource";
 import { normalizeEmailSafe } from "@/lib/utils/email";
 
 export const dynamic = "force-dynamic";
@@ -43,7 +50,8 @@ type SortKey =
   | "entriesEligible"
   | "hasUsage"
   | "hasSmt"
-  | "switched";
+  | "switched"
+  | "usageSource";
 
 function parseSort(v: string | null): SortKey {
   const s = (v ?? "").trim();
@@ -56,6 +64,7 @@ function parseSort(v: string | null): SortKey {
   if (s === "hasUsage") return "hasUsage";
   if (s === "hasSmt") return "hasSmt";
   if (s === "switched") return "switched";
+  if (s === "usageSource") return "usageSource";
   // Default per requirements: sort by savings-until-contract-end (net ETF) when available.
   if (s === "savingsToEndNet") return "savingsToEndNet";
   return "savingsToEndNet";
@@ -127,6 +136,7 @@ export async function GET(request: NextRequest) {
     const hasSmt = parseTri(url.searchParams.get("hasSmt"));
     const hasUsage = parseTri(url.searchParams.get("hasUsage"));
     const switched = parseTri(url.searchParams.get("switched"));
+    const usageSourceFilter = parseAdminUserUsageSourceFilter(url.searchParams.get("usageSource"));
     const sort = parseSort(url.searchParams.get("sort"));
     const dir = parseDir(url.searchParams.get("dir"));
     const page = clampInt(Number(url.searchParams.get("page") ?? "1"), 1, 10_000);
@@ -249,6 +259,30 @@ export async function GET(request: NextRequest) {
         : [];
     const housesWithGb = new Set<string>(gbUploads.map((r) => String(r.houseId)));
 
+    const manualUsageRows =
+      userIds.length > 0
+        ? await db.manualUsageInput.findMany({
+            where: { userId: { in: userIds } },
+            select: { userId: true, houseId: true, mode: true },
+          })
+        : [];
+    const manualUsageByUserHouse = new Map<string, string>();
+    for (const row of manualUsageRows) {
+      manualUsageByUserHouse.set(`${row.userId}:${row.houseId}`, String(row.mode ?? "").trim());
+    }
+
+    const baselineBuildRows =
+      userIds.length > 0
+        ? await db.usageSimulatorBuild.findMany({
+            where: { userId: { in: userIds }, scenarioKey: "BASELINE" },
+            select: { userId: true, houseId: true, mode: true },
+          })
+        : [];
+    const baselineBuildByUserHouse = new Map<string, string>();
+    for (const row of baselineBuildRows) {
+      baselineBuildByUserHouse.set(`${row.userId}:${row.houseId}`, String(row.mode ?? "").trim());
+    }
+
     const [commissionRows, referralRows, entryRows, profileRows] = await Promise.all([
       userIds.length > 0
         ? db.commissionRecord.findMany({
@@ -343,6 +377,8 @@ export async function GET(request: NextRequest) {
       utilityName: string | null;
       hasSmt: boolean;
       hasUsage: boolean;
+      usageSource: AdminUserUsageSource;
+      usageSourceLabel: string;
       switchedWithUs: boolean;
       contractEndDate: string | null;
       savingsUntilContractEndNetEtf: number | null;
@@ -468,6 +504,8 @@ export async function GET(request: NextRequest) {
         utilityName: h?.utilityName ?? null,
         hasSmt: hasSmtNow,
         hasUsage: hasUsageNow,
+        usageSource,
+        usageSourceLabel: labelAdminUserUsageSource(usageSource),
         switchedWithUs,
         contractEndDate: contractEndDateIso,
         savingsUntilContractEndNetEtf:
@@ -520,6 +558,7 @@ export async function GET(request: NextRequest) {
       if (!boolFilter(hasSmt, r.hasSmt)) return false;
       if (!boolFilter(hasUsage, r.hasUsage)) return false;
       if (!boolFilter(switched, r.switchedWithUs)) return false;
+      if (usageSourceFilter !== "any" && r.usageSource !== usageSourceFilter) return false;
       return true;
     });
 
@@ -537,6 +576,13 @@ export async function GET(request: NextRequest) {
       if (sort === "hasUsage") return mul * (Number(a.hasUsage) - Number(b.hasUsage));
       if (sort === "hasSmt") return mul * (Number(a.hasSmt) - Number(b.hasSmt));
       if (sort === "switched") return mul * (Number(a.switchedWithUs) - Number(b.switchedWithUs));
+      if (sort === "usageSource") {
+        return (
+          mul *
+          (ADMIN_USER_USAGE_SOURCE_SORT_ORDER[a.usageSource] -
+            ADMIN_USER_USAGE_SOURCE_SORT_ORDER[b.usageSource])
+        );
+      }
       if (sort === "monthlyNoEtf") return mul * (num(a.monthlySavingsNoEtf) - num(b.monthlySavingsNoEtf));
       if (sort === "entriesEligible") return mul * (num(a.entriesEligibleTotal) - num(b.entriesEligibleTotal));
       if (sort === "savings12Net") return mul * (num(a.savingsNext12MonthsNetEtf) - num(b.savingsNext12MonthsNetEtf));
@@ -553,7 +599,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       ok: true,
       q: q || null,
-      filters: { hasSmt, hasUsage, switched },
+      filters: { hasSmt, hasUsage, switched, usageSource: usageSourceFilter },
       sort,
       dir,
       page: safePage,
