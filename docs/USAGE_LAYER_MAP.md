@@ -107,6 +107,7 @@ Persistence status today:
 | Canonical 365-day window (lag 2 Chicago) | `lib/usage/canonicalCoverageConfig.ts` + `lib/usage/canonicalMetadataWindow.ts` |
 | Chicago date key + 15-min slot index | `lib/time/chicago.ts` |
 | Per-day complete / missing in window | `lib/usage/smtWindowStatus.ts` (96/96 strict) |
+| User-facing SMT backfill eligibility | `lib/usage/smtBackfillEligibility.ts` (`isUserFacingSmtBackfillAllowed`, `isSmtBackfillBlockedForGreenButtonHome`) |
 | Pull, backfill, wait, session throttle | `lib/usage/ensureSmtCoverage.ts` |
 | Targeted incomplete-day backfill | `lib/usage/smtIncompleteMeterBackfill.ts` (called only from ensure) |
 | Ledger labels | `lib/usage/smtDayCoverageLedger.ts` |
@@ -115,6 +116,7 @@ Persistence status today:
 **Rules (ongoing):**
 
 - **Green Button** (`modules/realUsageAdapter/greenButton.ts`) is **not** part of SMT coverage fixes; GB keeps its own looser/trusted-day rules.
+- **User-facing SMT orchestration (PC-2026-12):** pull/heal/refresh only when `isUserFacingSmtBackfillAllowed` — stored or legacy-inferred **SMT** homes. Green Button and manual/uncommitted homes no-op at refresh, user-facing ensure profiles, and upstream seed. One Path admin **`admin_sim`** bypass unchanged.
 - **One Path** may **trigger** `ensureSmtCoverage` only; no parallel SMT pull/backfill/wait in `one-path-sim/route.ts`.
 - **Usage dashboard** displays partial SMT days; **Past Sim** (INTERVAL) does not trust days with fewer than 96 Chicago slots.
 - `/api/user/smt/orchestrate` and `/api/user/usage/status` delegate to `smtWindowStatus` + `ensureSmtCoverage` — do not add a second completeness derivation.

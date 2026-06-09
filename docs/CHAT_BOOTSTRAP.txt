@@ -93,6 +93,7 @@ SMT INTERVAL UNIFICATION (SHIPPED — PC-2026-05 COMPLETE)
 - **SMT completeness:** strict **96/96** Chicago 15-minute slots per day for readiness, ledger, orchestrate/status, Past Sim INTERVAL trusted pool. **Not** 90, **not** 99% span completeness.
 - **Green Button:** do **not** edit `modules/realUsageAdapter/greenButton.ts` when fixing SMT; GB keeps looser trusted-shifted rules (90 + `expectedIntervalsForDateISO()`).
 - **Single heal owner:** `lib/usage/ensureSmtCoverage.ts` — pull, targeted backfill via `smtIncompleteMeterBackfill`, ledger reconcile, per-session throttle. One Path only **triggers** ensure; no targeted backfill or duplicate waits in `one-path-sim/route.ts`.
+- **User-facing SMT gate (PC-2026-12):** `lib/usage/smtBackfillEligibility.ts` — SMT pull/heal/refresh on user paths only for SMT homes (stored or legacy-inferred). Green Button + manual/uncommitted no-op; One Path **`admin_sim`** bypass unchanged.
 - **Single status read:** `lib/usage/smtWindowStatus.ts` for all days in canonical window.
 - **Chicago timestamps (SMT):** `lib/time/chicago.ts` for date keys + slot-96; no duplicate Intl formatters in routes/adapters (except GB file).
 - **Display vs sim:** usage + INTERVAL baseline show partial SMT intervals; Past Sim excludes &lt;96-slot days from trusted pool.

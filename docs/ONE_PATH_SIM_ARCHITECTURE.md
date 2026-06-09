@@ -47,6 +47,7 @@ See **`docs/ONE_PATH_DUAL_RUN_GOAL.md`** for the full spec. Summary:
 **Record:** `docs/SMT_UNIFICATION_COMPLETE.md` · **Rules:** `.cursor/rules/smt-unification-lock.mdc`
 
 - One Path **only** calls `ensureSmtCoverageForHouse` from `lib/usage/ensureSmtCoverage.ts` (`profile: admin_sim`, session keys `run:` / `post:`).
+- User-facing SMT orchestration elsewhere uses `isUserFacingSmtBackfillAllowed` (`lib/usage/smtBackfillEligibility.ts`, PC-2026-12): SMT homes only on refresh/heal/seed; Green Button and manual/uncommitted homes no-op. **`admin_sim`** bypass remains for One Path admin heal.
 - No direct `requestTargetedSmtIntervalBackfillForHouse`, `maybeRunOnePathSmtPostSimHealing`, or duplicate long SMT wait loops in `app/api/admin/tools/one-path-sim/route.ts`.
 - Same per-day status as usage: `lib/usage/smtWindowStatus.ts` (96/96 strict for SMT).
 - Past Sim engines: `MIN_TRUSTED_ACTUAL_INTERVALS_PER_DAY = 96` for INTERVAL/SMT trusted pool; usage/baseline may still **display** partial intervals.

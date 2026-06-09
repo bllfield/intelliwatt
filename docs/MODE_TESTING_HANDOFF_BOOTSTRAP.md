@@ -1,6 +1,6 @@
 # Mode testing handoff — paste into new Cursor chat
 
-**Created:** 2026-05-20 · **Updated:** 2026-06-06 · **Branch:** `main` · **Active work:** verify all One Path + Usage modes; **GB Past weather parity: COMPLETE** (regression proof only).
+**Created:** 2026-05-20 · **Updated:** 2026-06-08 · **Branch:** `main` · **Active work:** verify all One Path + Usage modes; **GB Past weather parity: COMPLETE** (regression proof only).
 
 **Focused handoff (GB Past weather):** `docs/PAST_WEATHER_PARITY_AGENT_BOOTSTRAP.md` — acceptance record + regression commands.
 
@@ -23,12 +23,13 @@ Read these in order and confirm in your first reply that you read them:
 6. docs/USAGE_LAYER_MAP.md
 7. docs/SURFACE_PARITY_OWNERS.md
 8. docs/SMT_UNIFICATION_COMPLETE.md + docs/PROJECT_PLAN.md → PC-2026-05
-9. docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md + docs/PROJECT_PLAN.md → PC-2026-08 (ingest once, read persisted only)
-10. docs/PROJECT_PLAN.md → PC-2026-09 (Past weather parity — **COMPLETE**)
-11. .cursor/rules/one-path-dual-run-lock.mdc
-12. .cursor/rules/smt-unification-lock.mdc
-13. .cursor/rules/usage-interval-ingest-lock.mdc
-14. .cursor/rules/shared-sim-window-lock.mdc
+9. docs/PROJECT_PLAN.md → PC-2026-12 (user-facing SMT backfill gate + manual Past guards)
+10. docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md + docs/PROJECT_PLAN.md → PC-2026-08 (ingest once, read persisted only)
+11. docs/PROJECT_PLAN.md → PC-2026-09 (Past weather parity — **COMPLETE**)
+12. .cursor/rules/one-path-dual-run-lock.mdc
+13. .cursor/rules/smt-unification-lock.mdc
+14. .cursor/rules/usage-interval-ingest-lock.mdc
+15. .cursor/rules/shared-sim-window-lock.mdc
 
 Then skim modules/usageSimulator/kinds.ts for IntervalSeriesKind and the One Path admin route:
 app/api/admin/tools/one-path-sim/route.ts
@@ -59,6 +60,7 @@ We are **testing every mode** to ensure display labels, data ownership, SMT life
 
 - **96/96** Chicago slots = complete day (ledger, heal, Past Sim trusted pool)
 - **One heal owner:** `lib/usage/ensureSmtCoverage.ts`
+- **User-facing gate (PC-2026-12):** `lib/usage/smtBackfillEligibility.ts` — SMT pull/heal/refresh on user paths only for SMT homes; Green Button + manual/uncommitted no-op; One Path **`admin_sim`** bypass unchanged
 - **Heal scope:** only incomplete days **between first and last persisted SMT interval** (`resolveSmtPersistedCoverageSpan`, `resolveSmtHealBackfillDateKeys` in `lib/usage/smtTailCoverage.ts`) — do not chase pre-history canonical days SMT never sent
 - **Full-window admin re-ingest:** `lib/usage/fullWindowSmtReingest.ts` + One Path button `full_window_smt_reingest`
 - **Green Button:** do not edit `modules/realUsageAdapter/greenButton.ts` for SMT fixes

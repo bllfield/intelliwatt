@@ -2,7 +2,7 @@
 
 **PC-2026-05 is complete.** Use this file for **maintenance** (bugfixes, new SMT features) — not for re-running implementation phases unless explicitly restoring history.
 
-**Before any SMT-related code change:** read `docs/SMT_UNIFICATION_COMPLETE.md`, `docs/PROJECT_PLAN.md` → PC-2026-05, and `.cursor/rules/smt-unification-lock.mdc` (permanent, always apply). For interval **ingest/read** (including Green Button), also read `docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md`, PC-2026-08, and `.cursor/rules/usage-interval-ingest-lock.mdc`. Keep docs in sync in the same pass.
+**Before any SMT-related code change:** read `docs/SMT_UNIFICATION_COMPLETE.md`, `docs/PROJECT_PLAN.md` → PC-2026-05, PC-2026-12 (user-facing backfill gate), and `.cursor/rules/smt-unification-lock.mdc` (permanent, always apply). For interval **ingest/read** (including Green Button), also read `docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md`, PC-2026-08, and `.cursor/rules/usage-interval-ingest-lock.mdc`. Keep docs in sync in the same pass.
 
 For historical phase-by-phase work, see `docs/SMT_UNIFICATION_PHASE_PROMPTS.md`.
 
@@ -21,9 +21,10 @@ Before any grep, code, or opinion:
 
 1. Read **docs/SMT_UNIFICATION_COMPLETE.md** (shipped owners + forbidden patterns).
 2. Read **docs/PROJECT_PLAN.md** → **PC-2026-05** (master plan; overrides informal chat summaries).
-3. Read **docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md** + **PC-2026-08** + **.cursor/rules/usage-interval-ingest-lock.mdc** when touching ingest, persisted interval reads, or Green Button.
-4. Read **.cursor/rules/smt-unification-lock.mdc** and **.cursor/rules/shared-sim-window-lock.mdc** — these are permanent constraints.
-5. In your first reply, state: (a) you read COMPLETE + PC-2026-05 (+ PC-2026-08 if GB/ingest), (b) the specific change requested, (c) which single owner module(s) you will touch.
+3. Read **docs/PROJECT_PLAN.md** → **PC-2026-12** when touching user-facing SMT refresh/heal/seed or manual Past backfill guards.
+4. Read **docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md** + **PC-2026-08** + **.cursor/rules/usage-interval-ingest-lock.mdc** when touching ingest, persisted interval reads, or Green Button.
+5. Read **.cursor/rules/smt-unification-lock.mdc** and **.cursor/rules/shared-sim-window-lock.mdc** — these are permanent constraints.
+6. In your first reply, state: (a) you read COMPLETE + PC-2026-05 (+ PC-2026-08 if GB/ingest, + PC-2026-12 if user-facing backfill), (b) the specific change requested, (c) which single owner module(s) you will touch.
 
 Do NOT start implementation until you have read the above.
 
@@ -48,6 +49,7 @@ Any code change must stay consistent with **docs/PROJECT_PLAN.md PC-2026-05** an
 - ONE Chicago time path for SMT: lib/time/chicago.ts
 - ONE day status read: lib/usage/smtWindowStatus.ts (96/96 strict)
 - ONE heal: lib/usage/ensureSmtCoverage.ts (per-session throttle)
+- ONE user-facing backfill gate: lib/usage/smtBackfillEligibility.ts (SMT homes only; admin_sim bypass)
 - ONE 365-day window: lib/usage/canonicalMetadataWindow.ts
 
 Usage + INTERVAL baseline: show partial SMT intervals. Past Sim INTERVAL: fewer than 96 slots → not in trusted pool.

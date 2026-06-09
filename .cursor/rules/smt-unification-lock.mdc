@@ -20,6 +20,7 @@ These rules apply to **every** change that touches SMT interval coverage, readin
 - **SMT completeness:** **96/96** distinct Chicago 15-minute slots per calendar day for readiness, ledger, orchestrate/status, and Past Sim INTERVAL trusted pool. Do not reintroduce `MIN_TRUSTED_ACTUAL_INTERVALS_PER_DAY = 90` on SMT INTERVAL paths.
 - **Green Button:** Do **not** change `modules/realUsageAdapter/greenButton.ts` when fixing SMT coverage unless the user explicitly expands scope. GB keeps looser trusted-shifted rules (90 + `expectedIntervalsForDateISO()`).
 - **Heal owner:** All SMT pull/backfill/wait/targeted-day requests go through `lib/usage/ensureSmtCoverage.ts` and `requestUsageRefreshForUserHouse` (with `skipGapFill` / `skipUsageRefresh` where documented to avoid double work). **Forbidden** in `app/api/admin/tools/one-path-sim/route.ts`: direct `requestTargetedSmtIntervalBackfillForHouse`, `maybeRunOnePathSmtPostSimHealing`, duplicate long SMT wait loops.
+- **User-facing backfill eligibility (PC-2026-12):** Gate all user-path SMT orchestration through `lib/usage/smtBackfillEligibility.ts` → `isUserFacingSmtBackfillAllowed` (stored `SMT` or legacy-inferred active SMT). Block Green Button via `isSmtBackfillBlockedForGreenButtonHome`. Manual/uncommitted homes must no-op at `requestUsageRefreshForUserHouse`, user-facing `ensureSmtCoverage` profiles (`not_smt_committed`), and upstream seed/tail refresh. **`admin_sim`** profile bypass for One Path admin heal only — do not weaken without explicit user confirmation.
 - **Targeted backfill impl:** `lib/usage/smtIncompleteMeterBackfill.ts` — callable **only** from `ensureSmtCoverage`.
 - **Timestamps (SMT):** Use `lib/time/chicago.ts` for `chicagoDateKey`, `chicagoSlot96FromTs`, `smtCoverageDateKey`. No new local `Intl.DateTimeFormat` copies for SMT coverage counting.
 - **One Path isolation:** `modules/onePathSim/**` must not import `modules/usageSimulator/**`. Put shared SMT logic in `lib/**`.
@@ -32,4 +33,4 @@ Stop and ask the user for explicit confirmation before weakening single-owner be
 
 ## Doc sync
 
-Any change that adds a new SMT owner, changes lag/readiness/heal semantics, or moves window metadata must update `docs/SMT_UNIFICATION_COMPLETE.md` and `docs/PROJECT_PLAN.md` PC-2026-05 in the same pass.
+Any change that adds a new SMT owner, changes lag/readiness/heal semantics, or moves window metadata must update `docs/SMT_UNIFICATION_COMPLETE.md` and `docs/PROJECT_PLAN.md` PC-2026-05 / PC-2026-12 in the same pass.

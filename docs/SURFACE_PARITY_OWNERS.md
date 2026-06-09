@@ -33,6 +33,8 @@
 | Day completeness (SMT) | `lib/usage/smtWindowStatus.ts` | 96 distinct Chicago slots | N/A |
 | SMT ledger (Past) | `lib/usage/pastSimSmtLedgerPrep.ts` → `smtDayCoverageLedger.ts` | Pending + incomplete-meter keys | N/A |
 | Heal / backfill | `lib/usage/ensureSmtCoverage.ts` | Only | N/A |
+| User-facing SMT backfill gate | `lib/usage/smtBackfillEligibility.ts` | SMT homes only (`isUserFacingSmtBackfillAllowed`) | Blocked (`isSmtBackfillBlockedForGreenButtonHome`) |
+| Manual Past validation backfill | `lib/usage/pastSimValidationReadBackfill.ts` | SMT baseline + non-MANUAL `baseKind` only | N/A |
 | Actual daily kWh (display) | `lib/usage/sageActualDailyTruth.ts` | Sage dataset daily | Same |
 | Baseload (15-min) | `lib/usage/computeHomeBaseloadKw.ts` | Actual intervals only | Actual intervals only |
 | Past producer | `simulatePastUsageDataset` in **both** trees (see below) | + ledger prep | + `trustedActualDateKeys` from GB fetch |

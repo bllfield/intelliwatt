@@ -64,6 +64,7 @@ Raw files (`rawGreenButton.content`, SMT raw rows, XML/CSV uploads) exist **only
 | Normalize to 15-min | `lib/analysis/normalizeSmt.ts`, `app/lib/smt/normalize.ts` |
 | Persist | `lib/usage/normalizeSmtIntervals.ts` |
 | Heal / coverage (not re-normalize on read) | `lib/usage/ensureSmtCoverage.ts`, `lib/usage/smtWindowStatus.ts` |
+| User-facing SMT backfill eligibility (PC-2026-12) | `lib/usage/smtBackfillEligibility.ts` — SMT homes only on user refresh/heal/seed; GB + manual blocked; One Path `admin_sim` bypass |
 | **Read** | `convertSmtPersistedRowsToHome` via `getActualIntervalsForRangeWithSource` |
 
 SMT ingest routes: `app/api/admin/smt/normalize`, `app/api/admin/smt/raw-upload`, `app/api/internal/smt/ingest-normalize`, `app/api/admin/cron/normalize-smt-catch`, `app/api/admin/smt/pull` (inline persist).

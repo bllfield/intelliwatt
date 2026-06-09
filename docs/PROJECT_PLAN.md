@@ -29,6 +29,7 @@
 - **One Path known-house tuning rule:** repeated One Path tuning runs should use the sandbox-only known-house scenario registry under `modules/onePathSim/**`. Presets may preload keeper-user selection, house/context resolution strategy, scenario selection, validation inputs, weather preference, travel ranges, and review expectations into the existing One Path Admin controls, and the same preset identity should flow into sandbox summaries / AI copy payloads. No live persistence or live-surface wiring is part of this step.
 - **Cutover honesty rule:** internal seal does not mean live cutover is complete. GapFill and user sim pages are still not routed through One Path; Manual Lab now shares the One Path Stage 2 calc/read path while keeping its separate admin Stage 1 surface.
 - **Usage interval source-of-truth rule (PC-2026-08 shipped):** SMT and Green Button intervals are normalized/repaired **only at ingest**, persisted once, read everywhere via shared loaders — **never** raw vendor rows or read-time repair on product paths. GB: `runGreenButtonUsagePipeline` → `GreenButtonInterval`; read: `loadPersistedGreenButtonIntervals` + `greenButtonIntervalReadiness` gate. SMT: `normalizeSmtIntervals` → `SmtInterval`; read: `convertSmtPersistedRowsToHome`. **Contract:** `docs/USAGE_INTERVAL_SOURCE_OF_TRUTH.md`. **Lock:** `.cursor/rules/usage-interval-ingest-lock.mdc`.
+- **User-facing SMT backfill gate (PC-2026-12 shipped):** SMT pull/heal/refresh runs on user paths **only** for SMT homes (`lib/usage/smtBackfillEligibility.ts` → `isUserFacingSmtBackfillAllowed`: stored `SMT` or legacy-inferred active SMT). Green Button and manual/uncommitted homes are no-ops at `requestUsageRefreshForUserHouse`, user-facing `ensureSmtCoverage` profiles (`not_smt_committed`), and upstream seed/tail refresh. **`admin_sim`** bypass remains for One Path admin heal. Manual Past validation backfill stays SMT-baseline-only (`pastSimValidationReadBackfill.ts` + `baseKind !== MANUAL`).
 
 ## PC-2026-08 — Usage interval source of truth (COMPLETE — 2026-05-20)
 
@@ -104,6 +105,29 @@
 **Tests:** `tests/usage/pastValidationHoldout.test.ts`, holdout case in `buildPastSimulatedBaselineV1.resolvedFingerprint.test.ts`.
 
 **Same-pass doc sync:** `PAST_VALIDATION_HOLDOUT.md`, `SURFACE_PARITY_OWNERS.md`, `USAGE_SIMULATION_PLAN.md`, `PAST_SHARED_CORE_UNIFICATION_PLAN.md`, `PROJECT_CONTEXT.md`, `USAGE_LAYER_MAP.md`, `CHAT_BOOTSTRAP.txt`.
+
+---
+
+## PC-2026-12 — User-facing SMT backfill eligibility (COMPLETE — 2026-06-08)
+
+**Status:** **Complete.** **Commits:** `48a8bb35` (manual monthly user-site Past guard), `4d162728` (SMT backfill eligibility gate).
+
+**Problem:** A manual-monthly home could still hit Green Button / `SMT_BASELINE` Past recalc on the user site when stale build snapshots said `actualSource: GREEN_BUTTON`. Separately, user-facing SMT orchestration (refresh, heal, upstream seed) could run for Green Button or manual/uncommitted homes.
+
+**Policy (locked):**
+
+- **Past validation read backfill:** only when `buildInputs.mode === "SMT_BASELINE"` **and** `baseKind !== "MANUAL"` (`lib/usage/pastSimValidationReadBackfill.ts`).
+- **User-site sim isolation:** skip GB stamp/isolation for `MANUAL_TOTALS` / `NEW_BUILD_ESTIMATE`; no default `preferredActualSource: GREEN_BUTTON` on manual recalc (`lib/usage/userSiteSimulationIsolation.ts`, `app/api/user/simulator/recalc/route.ts`, `modules/onePathSim/usageSimulator/service.ts`).
+- **User-facing SMT orchestration:** `isUserFacingSmtBackfillAllowed()` in `lib/usage/smtBackfillEligibility.ts` — allow stored `SMT` or legacy-inferred active SMT (`resolveHouseCommittedUsageSource`); block Green Button (`isSmtBackfillBlockedForGreenButtonHome`) and manual/uncommitted homes.
+- **`ensureSmtCoverage`:** user profiles (`user_session`, `user_refresh`, `sim_run`) skip with `skippedReason: "not_smt_committed"` when gate fails; **`admin_sim`** bypass for One Path admin heal.
+- **Upstream seed/tail:** both `modules/onePathSim/upstreamUsageTruth.ts` and `modules/usageSimulator/upstreamUsageTruth.ts` gate seed/`ensureSmtCoverage` through the same helper.
+- **`requestUsageRefreshForUserHouse`:** no-op success when gate fails (no SMT pull).
+
+**Shipped owners:** `smtBackfillEligibility.ts`, `ensureSmtCoverage.ts`, `userUsageRefresh.ts`, `pastSimValidationReadBackfill.ts`, both upstream usage truth modules, user-site isolation + recalc route guards.
+
+**Tests:** `tests/usage/smtBackfillEligibility.test.ts`, `tests/usage/ensureSmtCoverage.test.ts`, `tests/usage/pastSimValidationReadBackfill.test.ts`, `tests/usage/userSiteSimulationIsolation.test.ts`, `tests/usageSimulator/upstreamUsageTruth.test.ts`, `tests/onePathSim/upstreamUsageTruth.tail.test.ts`.
+
+**Same-pass doc sync:** `SMT_UNIFICATION_COMPLETE.md`, `USAGE_LAYER_MAP.md`, `SURFACE_PARITY_OWNERS.md`, `USAGE_INTERVAL_SOURCE_OF_TRUTH.md`, `PROJECT_CONTEXT.md`, `ONE_PATH_SIM_ARCHITECTURE.md`, `CHAT_BOOTSTRAP.txt`, `.cursor/rules/smt-unification-lock.mdc`.
 
 ---
 
