@@ -207,6 +207,46 @@ function sumRangeTotals(range: { startDate: string; endDate: string }, totalsByD
   );
 }
 
+/** Sum pre-projection Past Sim totals over original bill-period date ranges (not canonical display rows). */
+export function buildManualBillPeriodSimTotalsById(args: {
+  billPeriodTargets: Array<{ id: string; startDate: string; endDate: string }>;
+  dataset: any;
+}): Record<string, number> {
+  const simulatedDailyTotalsByDate = buildDailyTotalsByDate(args.dataset);
+  const simulatedIntervalTotalsByDate =
+    simulatedDailyTotalsByDate.size > 0 ? new Map<string, number>() : buildIntervalTotalsByDate(args.dataset);
+  const simulatedStatementTotalsByDate =
+    simulatedDailyTotalsByDate.size > 0 ? simulatedDailyTotalsByDate : simulatedIntervalTotalsByDate;
+
+  const out: Record<string, number> = {};
+  for (const period of args.billPeriodTargets) {
+    const id = String(period.id ?? "").trim();
+    if (!id) continue;
+    const total = sumRangeTotals(period, simulatedStatementTotalsByDate);
+    if (total == null || !Number.isFinite(total)) continue;
+    out[id] = total;
+  }
+  return out;
+}
+
+export function resolveBillPeriodTargetsFromDatasetMeta(
+  dataset: any
+): Array<{ id: string; startDate: string; endDate: string }> {
+  const periods = Array.isArray(dataset?.meta?.manualBillPeriods) ? dataset.meta.manualBillPeriods : [];
+  return periods
+    .map((period: { id?: unknown; month?: unknown; startDate?: unknown; endDate?: unknown }) => ({
+      id: String(period?.id ?? period?.month ?? "").trim(),
+      startDate: String(period?.startDate ?? "").slice(0, 10),
+      endDate: String(period?.endDate ?? "").slice(0, 10),
+    }))
+    .filter(
+      (period: { id: string; startDate: string; endDate: string }) =>
+        period.id.length > 0 &&
+        /^\d{4}-\d{2}-\d{2}$/.test(period.startDate) &&
+        /^\d{4}-\d{2}-\d{2}$/.test(period.endDate)
+    );
+}
+
 function buildMonthlyTotalsByMonth(dataset: any): Map<string, number> {
   const out = new Map<string, number>();
   const monthlyRows = Array.isArray(dataset?.monthly) ? dataset.monthly : [];
@@ -286,6 +326,10 @@ export function buildManualUsageReadModel(args: {
       : null;
 
   const meta = args.dataset?.meta && typeof args.dataset.meta === "object" ? args.dataset.meta : {};
+  const persistedBillPeriodSimTotalsById =
+    meta.manualBillPeriodSimTotalsById && typeof meta.manualBillPeriodSimTotalsById === "object"
+      ? (meta.manualBillPeriodSimTotalsById as Record<string, number>)
+      : null;
   const inputState = (meta.manualMonthlyInputState ?? null) as ManualMonthlyInputStateLike;
   const filledMonths = new Set(
     Array.isArray(meta.filledMonths) ? meta.filledMonths.map((value: unknown) => String(value ?? "").trim()) : []
@@ -308,7 +352,11 @@ export function buildManualUsageReadModel(args: {
     const stageOneTargetTotalKwh = round2(
       Number.isFinite(Number(billPeriodTotalsKwhById[period.id])) ? Number(billPeriodTotalsKwhById[period.id]) : period.enteredKwh ?? null
     );
-    const simulatedStatementTotalKwh = sumRangeTotals(period, simulatedStatementTotalsByDate);
+    const persistedSimTotal = persistedBillPeriodSimTotalsById?.[period.id];
+    const simulatedStatementTotalKwh =
+      persistedSimTotal != null && Number.isFinite(Number(persistedSimTotal))
+        ? round2(Number(persistedSimTotal))
+        : sumRangeTotals(period, simulatedStatementTotalsByDate);
     const isFilledLater = payload.mode === "MONTHLY" && filledMonths.has(period.month);
 
     let eligible = period.eligibleForConstraint;

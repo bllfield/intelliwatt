@@ -251,9 +251,9 @@ describe("gapfill manual usage compare helpers", () => {
       }),
       expect.objectContaining({
         month: "2025-04",
-        eligible: true,
-        parityRequirement: "exact_match_required",
-        status: "delta_present",
+        eligible: false,
+        parityRequirement: "excluded_travel_overlap",
+        status: "travel_overlap",
       }),
     ]);
   });

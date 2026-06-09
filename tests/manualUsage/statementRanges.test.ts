@@ -87,7 +87,7 @@ describe("manual usage statement ranges", () => {
     expect(summary?.label).toBe("1/1/25 - 12/31/25");
   });
 
-  it("keeps travel-touched entered bill periods eligible for manual bill-period constraints", () => {
+  it("excludes travel-touched monthly bill periods from exact bill-period constraints", () => {
     const periods = buildManualBillPeriodTargets({
       mode: "MONTHLY",
       anchorEndDate: "2025-04-30",
@@ -110,8 +110,8 @@ describe("manual usage statement ranges", () => {
       },
       {
         id: "2025-04",
-        eligibleForConstraint: true,
-        exclusionReason: null,
+        eligibleForConstraint: false,
+        exclusionReason: "travel_overlap",
       },
     ]);
   });

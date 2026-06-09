@@ -294,8 +294,10 @@ describe("manual usage read model", () => {
         actualIntervalTotalKwh: 341,
         stageOneTargetTotalKwh: 310,
         simulatedStatementTotalKwh: 310,
-        eligible: true,
-        status: "reconciled",
+        eligible: false,
+        parityRequirement: "excluded_travel_overlap",
+        status: "travel_overlap",
+        reason: "This entered statement range overlaps travel/vacant exclusions.",
       }),
     ]);
     expect(readModel?.monthlyCompareRows).toEqual([
@@ -365,7 +367,8 @@ describe("manual usage read model", () => {
         expect.objectContaining({
           month: "2025-04",
           kwh: 300,
-          parityRequirement: "exact_match_required",
+          parityRequirement: "excluded_travel_overlap",
+          status: "travel_overlap",
         }),
       ],
     });
@@ -405,12 +408,14 @@ describe("manual usage read model", () => {
         month: "2025-03",
         eligible: true,
         parityRequirement: "exact_match_required",
+        status: "delta_present",
+        simulatedStatementTotalKwh: 0,
       }),
       expect.objectContaining({
         month: "2025-04",
-        eligible: true,
-        status: "delta_present",
-        parityRequirement: "exact_match_required",
+        eligible: false,
+        status: "travel_overlap",
+        parityRequirement: "excluded_travel_overlap",
       }),
     ]);
   });
@@ -494,6 +499,188 @@ describe("manual usage read model", () => {
 
     expect(readModel?.billPeriodCompare.rows[0]?.simulatedStatementTotalKwh).toBe(300);
     expect(readModel?.monthlyCompareRows[0]?.simulatedKwh).toBe(300);
+  });
+
+  it("uses persisted pre-projection bill-period sim totals instead of canonical display rows", () => {
+    const payload = {
+      mode: "MONTHLY" as const,
+      anchorEndDate: "2025-04-30",
+      monthlyKwh: [{ month: "2025-04", kwh: 300 }],
+      statementRanges: [{ month: "2025-04", startDate: "2025-04-01", endDate: "2025-04-30" }],
+      travelRanges: [],
+    };
+    const dataset = {
+      meta: {
+        manualCanonicalArtifactWindowVersion: "manual_canonical_artifact_v1",
+        manualBillPeriodSimTotalsById: { "2025-04": 300 },
+        filledMonths: [],
+        manualMonthlyInputState: {
+          inputKindByMonth: {
+            "2025-04": "entered_nonzero",
+          },
+        },
+      },
+      summary: {
+        start: "2025-06-07",
+        end: "2026-06-06",
+        totalKwh: 300,
+      },
+      daily: Array.from({ length: 30 }, (_, idx) => ({
+        date: `2025-06-${String(idx + 7).padStart(2, "0")}`,
+        kwh: 10,
+      })),
+    };
+
+    const readModel = buildManualUsageReadModel({ payload, dataset, actualDataset: null });
+
+    expect(readModel?.billPeriodCompare.rows[0]).toMatchObject({
+      stageOneTargetTotalKwh: 300,
+      simulatedStatementTotalKwh: 300,
+      deltaKwh: 0,
+      status: "reconciled",
+    });
+    expect(readModel?.billPeriodCompare.reconciledRangeCount).toBe(1);
+  });
+
+  describe("manual monthly bill-period reconciliation policy", () => {
+    function buildMonthlyPayload(args: {
+      count: number;
+      anchorEndDate?: string;
+      travelRanges?: Array<{ startDate: string; endDate: string }>;
+    }) {
+      const anchorEndDate = args.anchorEndDate ?? "2025-12-31";
+      const statementRanges = Array.from({ length: args.count }, (_, index) => {
+        const end = new Date(`${anchorEndDate}T00:00:00.000Z`);
+        end.setUTCMonth(end.getUTCMonth() - index);
+        const endDate = end.toISOString().slice(0, 10);
+        const start = new Date(end.getTime());
+        start.setUTCDate(1);
+        return {
+          month: endDate.slice(0, 7),
+          startDate: start.toISOString().slice(0, 10),
+          endDate,
+        };
+      });
+      return {
+        mode: "MONTHLY" as const,
+        anchorEndDate,
+        monthlyKwh: statementRanges.map((range, index) => ({
+          month: range.month,
+          kwh: 1000 + index,
+        })),
+        statementRanges,
+        travelRanges: args.travelRanges ?? [],
+      };
+    }
+
+    function buildSidecarFromPayload(payload: ReturnType<typeof buildMonthlyPayload>) {
+      const sidecar: Record<string, number> = {};
+      for (const row of payload.monthlyKwh) {
+        if (typeof row.kwh === "number") sidecar[row.month] = row.kwh;
+      }
+      return sidecar;
+    }
+
+    function buildDataset(sidecar: Record<string, number>) {
+      return {
+        meta: {
+          manualCanonicalArtifactWindowVersion: "manual_canonical_artifact_v1",
+          manualBillPeriodSimTotalsById: sidecar,
+          filledMonths: [],
+          manualMonthlyInputState: {
+            inputKindByMonth: Object.fromEntries(
+              Object.keys(sidecar).map((month) => [month, "entered_nonzero" as const])
+            ),
+          },
+        },
+        summary: { start: "2025-06-07", end: "2026-06-06", totalKwh: Object.values(sidecar).reduce((a, b) => a + b, 0) },
+        daily: [{ date: "2025-06-07", kwh: 1 }],
+      };
+    }
+
+    it("reconciles all eligible periods from sidecar when no travel/vacant overlaps exist", () => {
+      const payload = buildMonthlyPayload({ count: 12 });
+      const sidecar = buildSidecarFromPayload(payload);
+      const readModel = buildManualUsageReadModel({ payload, dataset: buildDataset(sidecar), actualDataset: null });
+
+      expect(readModel?.billPeriodCompare.eligibleRangeCount).toBe(12);
+      expect(readModel?.billPeriodCompare.ineligibleRangeCount).toBe(0);
+      expect(readModel?.billPeriodCompare.reconciledRangeCount).toBe(12);
+      expect(readModel?.billPeriodCompare.deltaPresentRangeCount).toBe(0);
+    });
+
+    it("excludes one travel-overlapped bill period without failing eligible reconciliation", () => {
+      const payload = {
+        mode: "MONTHLY" as const,
+        anchorEndDate: "2025-05-31",
+        monthlyKwh: [
+          { month: "2025-05", kwh: 1000 },
+          { month: "2025-04", kwh: 1001 },
+        ],
+        statementRanges: [
+          { month: "2025-05", startDate: "2025-05-01", endDate: "2025-05-31" },
+          { month: "2025-04", startDate: "2025-04-01", endDate: "2025-04-30" },
+        ],
+        travelRanges: [{ startDate: "2025-05-10", endDate: "2025-05-12" }],
+      };
+      const sidecar = { "2025-04": 1001, "2025-05": 999 };
+      const readModel = buildManualUsageReadModel({
+        payload,
+        dataset: buildDataset(sidecar),
+        actualDataset: null,
+      });
+      const may = readModel?.billPeriodCompare.rows.find((row) => row.month === "2025-05");
+      const april = readModel?.billPeriodCompare.rows.find((row) => row.month === "2025-04");
+
+      expect(readModel?.billPeriodCompare.eligibleRangeCount).toBe(1);
+      expect(readModel?.billPeriodCompare.ineligibleRangeCount).toBe(1);
+      expect(readModel?.billPeriodCompare.reconciledRangeCount).toBe(1);
+      expect(may).toMatchObject({
+        eligible: false,
+        parityRequirement: "excluded_travel_overlap",
+        status: "travel_overlap",
+        simulatedStatementTotalKwh: 999,
+        deltaKwh: null,
+      });
+      expect(april).toMatchObject({
+        eligible: true,
+        status: "reconciled",
+        parityRequirement: "exact_match_required",
+      });
+    });
+
+    it("excludes two travel-overlapped bill periods and keeps remaining periods reconciled", () => {
+      const payload = buildMonthlyPayload({
+        count: 3,
+        anchorEndDate: "2025-06-30",
+        travelRanges: [
+          { startDate: "2025-05-10", endDate: "2025-05-12" },
+          { startDate: "2025-06-20", endDate: "2025-06-22" },
+        ],
+      });
+      const sidecar = buildSidecarFromPayload(payload);
+      const readModel = buildManualUsageReadModel({ payload, dataset: buildDataset(sidecar), actualDataset: null });
+
+      expect(readModel?.billPeriodCompare.eligibleRangeCount).toBe(1);
+      expect(readModel?.billPeriodCompare.ineligibleRangeCount).toBe(2);
+      expect(readModel?.billPeriodCompare.reconciledRangeCount).toBe(1);
+      expect(readModel?.billPeriodCompare.rows.filter((row) => row.status === "travel_overlap")).toHaveLength(2);
+      expect(readModel?.billPeriodCompare.rows.every((row) => row.month.length > 0)).toBe(true);
+    });
+
+    it("returns identical billPeriodCompare for user and One Path read-model owners", async () => {
+      const payload = buildMonthlyPayload({
+        count: 3,
+        anchorEndDate: "2025-06-30",
+        travelRanges: [{ startDate: "2025-06-10", endDate: "2025-06-12" }],
+      });
+      const dataset = buildDataset(buildSidecarFromPayload(payload));
+      const userReadModel = buildManualUsageReadModel({ payload, dataset, actualDataset: null });
+      const { buildManualUsageReadModel: buildOnePathReadModel } = await import("@/modules/onePathSim/manualReadModel");
+      const adminReadModel = buildOnePathReadModel({ payload, dataset, actualDataset: null });
+
+      expect(adminReadModel?.billPeriodCompare).toEqual(userReadModel?.billPeriodCompare);
+    });
   });
 
 });

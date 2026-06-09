@@ -1,3 +1,7 @@
+import {
+  buildManualBillPeriodSimTotalsById,
+  resolveBillPeriodTargetsFromDatasetMeta,
+} from "@/modules/manualUsage/readModel";
 import { buildDailyFromIntervals } from "@/modules/onePathSim/usageSimulator/dataset";
 import {
   resolveCanonicalUsage365CoverageWindow,
@@ -533,6 +537,12 @@ export function projectManualPastDatasetToCanonicalWindow(
     return dataset;
   }
 
+  const billPeriodTargets = resolveBillPeriodTargetsFromDatasetMeta(dataset);
+  const manualBillPeriodSimTotalsById =
+    billPeriodTargets.length > 0
+      ? buildManualBillPeriodSimTotalsById({ billPeriodTargets, dataset })
+      : null;
+
   return applyManualPastDatasetDateRemapToDataset({
     dataset,
     remap,
@@ -543,6 +553,9 @@ export function projectManualPastDatasetToCanonicalWindow(
         simulationWindowStart: simulationWindow.startDate,
         simulationWindowEnd: simulationWindow.endDate,
       }),
+      ...(manualBillPeriodSimTotalsById && Object.keys(manualBillPeriodSimTotalsById).length > 0
+        ? { manualBillPeriodSimTotalsById }
+        : {}),
     },
   });
 }

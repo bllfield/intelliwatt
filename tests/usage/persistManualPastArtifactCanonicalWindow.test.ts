@@ -207,6 +207,30 @@ describe("persistManualPastArtifactCanonicalWindow", () => {
     });
   });
 
+  it("persists pre-projection bill-period sim totals for reconciliation readback", () => {
+    const dataset = buildManualDataset({
+      startDate: "2025-03-17",
+      endDate: "2025-04-15",
+      dailyKwh: 10,
+      usageInputMode: "MANUAL_MONTHLY",
+    });
+    dataset.meta.manualBillPeriods = [
+      { id: "2025-03", month: "2025-03", startDate: "2025-03-17", endDate: "2025-03-31" },
+      { id: "2025-04", month: "2025-04", startDate: "2025-04-01", endDate: "2025-04-15" },
+    ];
+
+    const out = projectManualPastDatasetToCanonicalWindow(dataset, {
+      usageInputMode: "MANUAL_MONTHLY",
+      now: annualProofNow,
+    });
+
+    expect(out.meta.manualBillPeriodSimTotalsById).toEqual({
+      "2025-03": 150,
+      "2025-04": 150,
+    });
+    expect(out.summary.start).not.toBe("2025-03-17");
+  });
+
   it("stamps manualCanonicalArtifactWindowVersion", () => {
     const dataset = buildManualDataset({
       startDate: "2025-03-17",
