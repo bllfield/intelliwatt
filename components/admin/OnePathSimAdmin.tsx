@@ -128,6 +128,23 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
 
+async function writeClipboardText(text: string): Promise<void> {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const el = document.createElement("textarea");
+  el.value = text;
+  el.setAttribute("readonly", "true");
+  el.style.position = "fixed";
+  el.style.left = "-9999px";
+  document.body.appendChild(el);
+  el.select();
+  const ok = document.execCommand("copy");
+  document.body.removeChild(el);
+  if (!ok) throw new Error("Clipboard copy failed.");
+}
+
 function parseManualValidationDateKeys(value: string): string[] {
   return value
     .split(/[\s,]+/)
@@ -543,44 +560,52 @@ export function OnePathSimAdmin() {
   );
 
   const copyAllVariablesForAi = useCallback(async () => {
-    if (!variablePolicy) return;
-    const payload = buildSimulationVariableCopyPayload({
-      mode,
-      response: variablePolicy,
-      runSnapshot: (runResult?.readModel?.effectiveSimulationVariablesUsed as any) ?? null,
-      engineInput: (runResult?.engineInput as Record<string, unknown> | undefined) ?? null,
-      readModel: (runResult?.readModel as Record<string, unknown> | undefined) ?? null,
-      artifact: (runResult?.artifact as Record<string, unknown> | undefined) ?? null,
-      runDisplayView: (runResult?.runDisplayView as Record<string, unknown> | undefined) ?? null,
-      loadedSourceContext: asRecord(lookup?.sourceContext),
-      baselineParityReport: lookupBaselineParityReport,
-      baselineParityAudit: lookupBaselineParityAudit,
-      runtimeEnvParityTrace: runtimeEnvParityTrace,
-      intervalPastReadinessTrace: intervalPastReadinessTrace,
-      readOnlyAudit: asRecord(lookup?.sourceContext?.readOnlyAudit),
-      includeSimRunAudit: includeSimRunAuditEnabled || debugDiagnosticsEnabled,
-      performanceAudit:
-        asRecord(runResult?.performanceAudit) ??
-        asRecord(asRecord(runResult?.readModel)?.performanceAudit) ??
-        null,
-      smtIncompleteMeterRetry: asRecord(runResult?.smtIncompleteMeterRetry) ?? null,
-      smtRefreshCheck: asRecord(runResult?.smtRefreshCheck) ?? null,
-      currentControls: {
+    if (!variablePolicy) {
+      setError("Shared simulation variables are still loading. Try again in a moment.");
+      return;
+    }
+    try {
+      const payload = buildSimulationVariableCopyPayload({
         mode,
-        actualContextHouseId: effectiveActualContextHouseId || null,
-        weatherPreference,
-        validationSelectionMode,
-        validationDayCount,
-        validationOnlyDateKeysLocal,
-        persistRequested,
-        runReason,
-        includeSimRunAudit: includeSimRunAuditEnabled,
-      },
-      knownScenario: lastRunKnownScenario ?? selectedKnownScenario,
-      sandboxSummary: sandboxHarnessSummary,
-    });
-    await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
-    setStatus("All simulation variables copied for AI.");
+        response: variablePolicy,
+        runSnapshot: (runResult?.readModel?.effectiveSimulationVariablesUsed as any) ?? null,
+        engineInput: (runResult?.engineInput as Record<string, unknown> | undefined) ?? null,
+        readModel: (runResult?.readModel as Record<string, unknown> | undefined) ?? null,
+        artifact: (runResult?.artifact as Record<string, unknown> | undefined) ?? null,
+        runDisplayView: (runResult?.runDisplayView as Record<string, unknown> | undefined) ?? null,
+        loadedSourceContext: asRecord(lookup?.sourceContext),
+        baselineParityReport: lookupBaselineParityReport,
+        baselineParityAudit: lookupBaselineParityAudit,
+        runtimeEnvParityTrace: runtimeEnvParityTrace,
+        intervalPastReadinessTrace: intervalPastReadinessTrace,
+        readOnlyAudit: asRecord(lookup?.sourceContext?.readOnlyAudit),
+        includeSimRunAudit: includeSimRunAuditEnabled || debugDiagnosticsEnabled,
+        performanceAudit:
+          asRecord(runResult?.performanceAudit) ??
+          asRecord(asRecord(runResult?.readModel)?.performanceAudit) ??
+          null,
+        smtIncompleteMeterRetry: asRecord(runResult?.smtIncompleteMeterRetry) ?? null,
+        smtRefreshCheck: asRecord(runResult?.smtRefreshCheck) ?? null,
+        currentControls: {
+          mode,
+          actualContextHouseId: effectiveActualContextHouseId || null,
+          weatherPreference,
+          validationSelectionMode,
+          validationDayCount,
+          validationOnlyDateKeysLocal,
+          persistRequested,
+          runReason,
+          includeSimRunAudit: includeSimRunAuditEnabled,
+        },
+        knownScenario: lastRunKnownScenario ?? selectedKnownScenario,
+        sandboxSummary: sandboxHarnessSummary,
+      });
+      await writeClipboardText(JSON.stringify(payload, null, 2));
+      setStatus("All simulation variables copied for AI.");
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not copy variables to clipboard.");
+    }
   }, [
     effectiveActualContextHouseId,
     lastRunKnownScenario,
@@ -610,45 +635,50 @@ export function OnePathSimAdmin() {
 
   const copyCurrentFamilyForAi = useCallback(async () => {
     if (!variablePolicy || !variableFamilyOpen) return;
-    const payload = buildSimulationVariableCopyPayload({
-      mode,
-      response: variablePolicy,
-      runSnapshot: (runResult?.readModel?.effectiveSimulationVariablesUsed as any) ?? null,
-      engineInput: (runResult?.engineInput as Record<string, unknown> | undefined) ?? null,
-      readModel: (runResult?.readModel as Record<string, unknown> | undefined) ?? null,
-      artifact: (runResult?.artifact as Record<string, unknown> | undefined) ?? null,
-      runDisplayView: (runResult?.runDisplayView as Record<string, unknown> | undefined) ?? null,
-      loadedSourceContext: asRecord(lookup?.sourceContext),
-      baselineParityReport: lookupBaselineParityReport,
-      baselineParityAudit: lookupBaselineParityAudit,
-      runtimeEnvParityTrace: runtimeEnvParityTrace,
-      intervalPastReadinessTrace: intervalPastReadinessTrace,
-      readOnlyAudit: asRecord(lookup?.sourceContext?.readOnlyAudit),
-      includeSimRunAudit: includeSimRunAuditEnabled || debugDiagnosticsEnabled,
-      performanceAudit:
-        asRecord(runResult?.performanceAudit) ??
-        asRecord(asRecord(runResult?.readModel)?.performanceAudit) ??
-        null,
-      smtIncompleteMeterRetry: asRecord(runResult?.smtIncompleteMeterRetry) ?? null,
-      smtRefreshCheck: asRecord(runResult?.smtRefreshCheck) ?? null,
-      currentControls: {
+    try {
+      const payload = buildSimulationVariableCopyPayload({
         mode,
-        actualContextHouseId: effectiveActualContextHouseId || null,
-        validationOnlyDateKeysLocal,
-        selectedFamily: variableFamilyOpen,
-        includeSimRunAudit: includeSimRunAuditEnabled,
-      },
-      knownScenario: lastRunKnownScenario ?? selectedKnownScenario,
-      sandboxSummary: sandboxHarnessSummary,
-    });
-    const filteredPayload = {
-      ...payload,
-      variableFamilies: Array.isArray(payload.variableFamilies)
-        ? payload.variableFamilies.filter((family: any) => family?.familyKey === variableFamilyOpen)
-        : [],
-    };
-    await navigator.clipboard.writeText(JSON.stringify(filteredPayload, null, 2));
-    setStatus(`Copied ${variableFamilyOpen} variables for AI.`);
+        response: variablePolicy,
+        runSnapshot: (runResult?.readModel?.effectiveSimulationVariablesUsed as any) ?? null,
+        engineInput: (runResult?.engineInput as Record<string, unknown> | undefined) ?? null,
+        readModel: (runResult?.readModel as Record<string, unknown> | undefined) ?? null,
+        artifact: (runResult?.artifact as Record<string, unknown> | undefined) ?? null,
+        runDisplayView: (runResult?.runDisplayView as Record<string, unknown> | undefined) ?? null,
+        loadedSourceContext: asRecord(lookup?.sourceContext),
+        baselineParityReport: lookupBaselineParityReport,
+        baselineParityAudit: lookupBaselineParityAudit,
+        runtimeEnvParityTrace: runtimeEnvParityTrace,
+        intervalPastReadinessTrace: intervalPastReadinessTrace,
+        readOnlyAudit: asRecord(lookup?.sourceContext?.readOnlyAudit),
+        includeSimRunAudit: includeSimRunAuditEnabled || debugDiagnosticsEnabled,
+        performanceAudit:
+          asRecord(runResult?.performanceAudit) ??
+          asRecord(asRecord(runResult?.readModel)?.performanceAudit) ??
+          null,
+        smtIncompleteMeterRetry: asRecord(runResult?.smtIncompleteMeterRetry) ?? null,
+        smtRefreshCheck: asRecord(runResult?.smtRefreshCheck) ?? null,
+        currentControls: {
+          mode,
+          actualContextHouseId: effectiveActualContextHouseId || null,
+          validationOnlyDateKeysLocal,
+          selectedFamily: variableFamilyOpen,
+          includeSimRunAudit: includeSimRunAuditEnabled,
+        },
+        knownScenario: lastRunKnownScenario ?? selectedKnownScenario,
+        sandboxSummary: sandboxHarnessSummary,
+      });
+      const filteredPayload = {
+        ...payload,
+        variableFamilies: Array.isArray(payload.variableFamilies)
+          ? payload.variableFamilies.filter((family: any) => family?.familyKey === variableFamilyOpen)
+          : [],
+      };
+      await writeClipboardText(JSON.stringify(filteredPayload, null, 2));
+      setStatus(`Copied ${variableFamilyOpen} variables for AI.`);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not copy variables to clipboard.");
+    }
   }, [
     effectiveActualContextHouseId,
     lastRunKnownScenario,
@@ -1972,7 +2002,12 @@ export function OnePathSimAdmin() {
               <button
                 type="button"
                 onClick={() => void copyAllVariablesForAi()}
-                disabled={!variablePolicy || !(debugDiagnosticsEnabled || includeSimRunAuditEnabled)}
+                disabled={!variablePolicy}
+                title={
+                  !variablePolicy
+                    ? "Loading shared simulation variables…"
+                    : "Copies variable policy and run context. Enable Debug diagnostics or Include sim run audit for the full simRunAudit block."
+                }
                 className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-brand-navy disabled:opacity-60"
               >
                 Copy all variables for AI
@@ -2477,7 +2512,8 @@ export function OnePathSimAdmin() {
                 <button
                   type="button"
                   onClick={() => void copyCurrentFamilyForAi()}
-                  disabled={!(debugDiagnosticsEnabled || includeSimRunAuditEnabled)}
+                  disabled={!variablePolicy || !variableFamilyOpen}
+                  title="Copies this variable family. Enable Debug diagnostics or Include sim run audit for the full simRunAudit block."
                   className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-brand-navy disabled:opacity-60"
                 >
                   Copy this family for AI
