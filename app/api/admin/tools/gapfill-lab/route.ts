@@ -1022,49 +1022,11 @@ async function replaceTravelRangesForHousePastScenario(
   houseId: string,
   rangesInput: Array<{ startDate: string; endDate: string }>
 ): Promise<void> {
-  const ranges = rangesInput
-    .map((r) => ({
-      startDate: String(r?.startDate ?? "").slice(0, 10),
-      endDate: String(r?.endDate ?? "").slice(0, 10),
-    }))
-    .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(r.endDate));
-
-  await (prisma as any).$transaction(async (tx: any) => {
-    let pastScenario = await tx.usageSimulatorScenario.findFirst({
-      where: {
-        userId,
-        houseId,
-        name: "Past (Corrected)",
-        archivedAt: null,
-      },
-      select: { id: true },
-    });
-    if (!pastScenario?.id) {
-      pastScenario = await tx.usageSimulatorScenario.create({
-        data: {
-          userId,
-          houseId,
-          name: "Past (Corrected)",
-        },
-        select: { id: true },
-      });
-    }
-    await tx.usageSimulatorScenarioEvent.deleteMany({
-      where: {
-        scenarioId: String(pastScenario.id),
-        kind: "TRAVEL_RANGE",
-      },
-    });
-    if (ranges.length > 0) {
-      await tx.usageSimulatorScenarioEvent.createMany({
-        data: ranges.map((r) => ({
-          scenarioId: String(pastScenario.id),
-          effectiveMonth: r.startDate.slice(0, 7),
-          kind: "TRAVEL_RANGE",
-          payloadJson: { startDate: r.startDate, endDate: r.endDate },
-        })),
-      });
-    }
+  const { replacePastCorrectedScenarioTravelRanges } = await import("@/lib/usage/pastSimTravelRanges");
+  await replacePastCorrectedScenarioTravelRanges({
+    userId,
+    houseId,
+    travelRanges: rangesInput,
   });
 }
 

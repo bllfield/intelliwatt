@@ -7,6 +7,10 @@ import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { validateHomeProfile } from "@/modules/homeProfile/validation";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
+import {
+  readTravelRangesForHouse,
+  replacePastCorrectedScenarioTravelRanges,
+} from "@/lib/usage/pastSimTravelRanges";
 
 import {
   GAPFILL_LAB_TEST_HOME_LABEL,
@@ -866,6 +870,16 @@ export async function replaceGlobalLabTestHomeFromSource(args: {
         },
       });
     }
+
+    const sourceTravelRanges = await readTravelRangesForHouse({
+      userId: args.sourceUserId,
+      houseId: args.sourceHouseId,
+    });
+    await replacePastCorrectedScenarioTravelRanges({
+      userId: args.ownerUserId,
+      houseId: testHome!.id,
+      travelRanges: sourceTravelRanges,
+    });
 
     await (prisma as any).houseDailyWeather
       .deleteMany({

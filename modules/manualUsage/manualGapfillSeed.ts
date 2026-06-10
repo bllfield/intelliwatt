@@ -1,6 +1,10 @@
 import { sha256DigestBase64Url } from "@/lib/crypto/sha256Base64Url";
 import { PAST_VALIDATION_POLICY_REVISION } from "@/lib/usage/pastValidationPolicy";
 import {
+  resolveEffectiveTravelRangesForLabHome,
+  type PastSimTravelRange,
+} from "@/lib/usage/pastSimTravelRanges";
+import {
   computeValidationDayPolicyHash,
   resolveActiveValidationDayPolicyLive,
 } from "@/lib/usage/validationDayPolicy";
@@ -20,6 +24,7 @@ import type {
   AnnualManualUsagePayload,
   ManualUsagePayload,
   MonthlyManualUsagePayload,
+  TravelRange,
 } from "@/modules/simulatedUsage/types";
 import { stableStringify } from "@/modules/usageSimulator/fingerprintHash";
 
@@ -239,7 +244,7 @@ function buildFailureResult(args: {
 export function buildManualGapfillMonthlySeedFromSourceContext(args: {
   sourceContext: ManualGapfillSourceContext;
   anchorEndDate: string;
-  travelRanges?: [];
+  travelRanges?: TravelRange[];
 }): MonthlyManualUsagePayload | null {
   const dailyRows = args.sourceContext.actualData.dailyTotals ?? [];
   return deriveMonthlySeedFromActual({
@@ -254,7 +259,7 @@ export function buildManualGapfillAnnualSeedFromSourceContext(args: {
   sourceContext: ManualGapfillSourceContext;
   anchorEndDate: string;
   monthlySeed?: MonthlyManualUsagePayload | null;
-  travelRanges?: [];
+  travelRanges?: TravelRange[];
 }): AnnualManualUsagePayload | null {
   const dailyRows = args.sourceContext.actualData.dailyTotals ?? [];
   return deriveAnnualSeed({
@@ -351,21 +356,29 @@ export async function resolveManualGapfillSeedFromSourceContext(
     sourceContext.coverage.coverageEnd ??
     resolveGapfillSyntheticAnchorEndDate(sourceContext.coverage.latestDate);
 
+  const travelRanges: PastSimTravelRange[] = await resolveEffectiveTravelRangesForLabHome({
+    labOwnerUserId: userId,
+    labHouseId,
+    sourceUserId: sourceContext.userId,
+    sourceHouseId,
+  });
+
   const stageOneMode = resolveStageOneMode(mode);
   const seedSet = buildManualUsageStageOneResolvedSeeds({
     sourcePayload: null,
     actualEndDate: anchorEndDate,
-    travelRanges: [],
+    travelRanges,
     dailyRows: sourceContext.actualData.dailyTotals ?? [],
   });
 
   const payload: ManualUsagePayload | null =
     stageOneMode === "MONTHLY"
-      ? buildManualGapfillMonthlySeedFromSourceContext({ sourceContext, anchorEndDate })
+      ? buildManualGapfillMonthlySeedFromSourceContext({ sourceContext, anchorEndDate, travelRanges })
       : buildManualGapfillAnnualSeedFromSourceContext({
           sourceContext,
           anchorEndDate,
           monthlySeed: seedSet.monthlySeed,
+          travelRanges,
         });
 
   if (!payload) {

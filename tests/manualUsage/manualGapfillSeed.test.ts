@@ -12,6 +12,7 @@ const saveManualUsageInputForUserHouse = vi.fn();
 const dispatchPastSimRecalc = vi.fn();
 const selectValidationDayKeys = vi.fn();
 const getFlag = vi.fn();
+const resolveEffectiveTravelRangesForLabHome = vi.fn();
 
 vi.mock("@/lib/flags", () => ({
   getFlag: (...args: unknown[]) => getFlag(...args),
@@ -60,6 +61,11 @@ vi.mock("@/modules/manualUsage/store", () => ({
 
 vi.mock("@/modules/usageSimulator/pastSimRecalcDispatch", () => ({
   dispatchPastSimRecalc: (...args: unknown[]) => dispatchPastSimRecalc(...args),
+}));
+
+vi.mock("@/lib/usage/pastSimTravelRanges", () => ({
+  resolveEffectiveTravelRangesForLabHome: (...args: unknown[]) =>
+    resolveEffectiveTravelRangesForLabHome(...args),
 }));
 
 vi.mock("@/modules/usageSimulator/validationSelection", async (importOriginal) => {
@@ -128,6 +134,9 @@ describe("resolveManualGapfillSeedFromSourceContext", () => {
       payload: { mode: "MONTHLY" },
     });
     dispatchPastSimRecalc.mockResolvedValue({ ok: true });
+    resolveEffectiveTravelRangesForLabHome.mockResolvedValue([
+      { startDate: "2025-08-14", endDate: "2025-08-17" },
+    ]);
     selectValidationDayKeys.mockReturnValue({
       selectedDateKeys: ["2025-07-04", "2025-08-12"],
       diagnostics: {
@@ -387,6 +396,31 @@ describe("resolveManualGapfillSeedFromSourceContext", () => {
 
     expect(out.diagnostics.compareRun).toBe(false);
     expect(dispatchPastSimRecalc).not.toHaveBeenCalled();
+  });
+
+  it("includes lab/source travel ranges in persisted manual seed payload", async () => {
+    mockSufficientSourceContext();
+    const { resolveManualGapfillSeedFromSourceContext } = await import("@/modules/manualUsage/manualGapfillSeed");
+    const out = await resolveManualGapfillSeedFromSourceContext({
+      userId: USER_ID,
+      sourceHouseId: SOURCE_HOUSE_ID,
+      labHouseId: LAB_HOUSE_ID,
+      mode: "MONTHLY_FROM_SOURCE_INTERVALS",
+      window: WINDOW,
+      persistToLabHome: true,
+      includeDiagnostics: true,
+    });
+
+    expect(out.ok).toBe(true);
+    expect(resolveEffectiveTravelRangesForLabHome).toHaveBeenCalledWith({
+      labOwnerUserId: USER_ID,
+      labHouseId: LAB_HOUSE_ID,
+      sourceUserId: USER_ID,
+      sourceHouseId: SOURCE_HOUSE_ID,
+    });
+    expect(out.payload?.travelRanges).toEqual([
+      { startDate: "2025-08-14", endDate: "2025-08-17" },
+    ]);
   });
 
   it("source house manual payload is never written", async () => {

@@ -585,30 +585,8 @@ export function buildUsage365Payload(args: {
 
 /** Fetch all travel/vacant ranges stored in scenario events for this house (all scenarios). */
 export async function getTravelRangesFromDb(userId: string, houseId: string): Promise<Array<{ startDate: string; endDate: string }>> {
-  const scenarios = await (prisma as any).usageSimulatorScenario.findMany({
-    where: { userId, houseId, archivedAt: null },
-    select: { id: true },
-  }).catch(() => []);
-  if (!scenarios?.length) return [];
-  const scenarioIds = scenarios.map((s: { id: string }) => s.id);
-  const events = await (prisma as any).usageSimulatorScenarioEvent.findMany({
-    where: { scenarioId: { in: scenarioIds }, kind: "TRAVEL_RANGE" },
-    select: { payloadJson: true },
-  }).catch(() => []);
-  const seen = new Set<string>();
-  const out: Array<{ startDate: string; endDate: string }> = [];
-  for (const e of events ?? []) {
-    const p = (e as any)?.payloadJson ?? {};
-    const startDate = typeof p?.startDate === "string" ? String(p.startDate).slice(0, 10) : "";
-    const endDate = typeof p?.endDate === "string" ? String(p.endDate).slice(0, 10) : "";
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) continue;
-    const key = `${startDate}\t${endDate}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ startDate, endDate });
-  }
-  out.sort((a, b) => a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate));
-  return out;
+  const { readTravelRangesForHouse } = await import("@/lib/usage/pastSimTravelRanges");
+  return readTravelRangesForHouse({ userId, houseId });
 }
 
 export const REPORT_VERSION = "gapfill_lab_report_v3";

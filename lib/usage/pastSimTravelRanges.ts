@@ -1,4 +1,8 @@
+import { prisma } from "@/lib/db";
+
 export type PastSimTravelRange = { startDate: string; endDate: string };
+
+export const PAST_CORRECTED_SCENARIO_NAME = "Past (Corrected)";
 
 function asDateKey(value: unknown): string | null {
   const text = String(value ?? "").slice(0, 10);
@@ -112,4 +116,120 @@ export async function resolvePastSimTravelRangesForRecalc(args: {
     .catch(() => []);
 
   return normalizePastSimTravelRanges([...merged, ...travelRangesFromScenarioEvents(sourceEvents)]);
+}
+
+function travelRangesFromManualPayload(payload: unknown): PastSimTravelRange[] {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return [];
+  const travelRanges = (payload as { travelRanges?: unknown }).travelRanges;
+  return normalizePastSimTravelRanges(Array.isArray(travelRanges) ? travelRanges : []);
+}
+
+/** Travel/vacant ranges from scenario events and saved manual payload for one house. */
+export async function readTravelRangesForHouse(args: {
+  userId: string;
+  houseId: string;
+}): Promise<PastSimTravelRange[]> {
+  const userId = String(args.userId ?? "").trim();
+  const houseId = String(args.houseId ?? "").trim();
+  if (!userId || !houseId) return [];
+
+  const scenarios = await (prisma as any).usageSimulatorScenario
+    .findMany({
+      where: { userId, houseId, archivedAt: null },
+      select: { id: true },
+    })
+    .catch(() => []);
+  const scenarioIds = (scenarios ?? []).map((scenario: { id: string }) => String(scenario.id));
+  const events =
+    scenarioIds.length > 0
+      ? await (prisma as any).usageSimulatorScenarioEvent
+          .findMany({
+            where: { scenarioId: { in: scenarioIds }, kind: "TRAVEL_RANGE" },
+            select: { kind: true, payloadJson: true },
+          })
+          .catch(() => [])
+      : [];
+
+  const manualRec = await (prisma as any).manualUsageInput
+    .findUnique({
+      where: { userId_houseId: { userId, houseId } },
+      select: { payload: true },
+    })
+    .catch(() => null);
+
+  return normalizePastSimTravelRanges([
+    ...travelRangesFromScenarioEvents(events ?? []),
+    ...travelRangesFromManualPayload(manualRec?.payload),
+  ]);
+}
+
+/** Lab seed / replace: prefer saved lab-home travel; fall back to linked source home. */
+export async function resolveEffectiveTravelRangesForLabHome(args: {
+  labOwnerUserId: string;
+  labHouseId: string;
+  sourceUserId: string;
+  sourceHouseId: string;
+}): Promise<PastSimTravelRange[]> {
+  const labTravel = await readTravelRangesForHouse({
+    userId: args.labOwnerUserId,
+    houseId: args.labHouseId,
+  });
+  if (labTravel.length > 0) return labTravel;
+  return readTravelRangesForHouse({
+    userId: args.sourceUserId,
+    houseId: args.sourceHouseId,
+  });
+}
+
+/** Replace all TRAVEL_RANGE events on the house Past (Corrected) scenario. */
+export async function replacePastCorrectedScenarioTravelRanges(args: {
+  userId: string;
+  houseId: string;
+  travelRanges: ReadonlyArray<PastSimTravelRange>;
+  pastScenarioName?: string;
+}): Promise<void> {
+  const userId = String(args.userId ?? "").trim();
+  const houseId = String(args.houseId ?? "").trim();
+  if (!userId || !houseId) return;
+
+  const pastScenarioName = args.pastScenarioName ?? PAST_CORRECTED_SCENARIO_NAME;
+  const ranges = normalizePastSimTravelRanges(args.travelRanges);
+
+  await (prisma as any).$transaction(async (tx: any) => {
+    let pastScenario = await tx.usageSimulatorScenario.findFirst({
+      where: {
+        userId,
+        houseId,
+        name: pastScenarioName,
+        archivedAt: null,
+      },
+      select: { id: true },
+    });
+    if (!pastScenario?.id) {
+      pastScenario = await tx.usageSimulatorScenario.create({
+        data: {
+          userId,
+          houseId,
+          name: pastScenarioName,
+        },
+        select: { id: true },
+      });
+    }
+    await tx.usageSimulatorScenarioEvent.deleteMany({
+      where: {
+        scenarioId: String(pastScenario.id),
+        kind: "TRAVEL_RANGE",
+      },
+    });
+    if (ranges.length > 0) {
+      await tx.usageSimulatorScenarioEvent.createMany({
+        data: ranges.map((range) => ({
+          scenarioId: String(pastScenario.id),
+          effectiveMonth: range.startDate.slice(0, 7),
+          kind: "TRAVEL_RANGE",
+          payloadJson: { startDate: range.startDate, endDate: range.endDate },
+        })),
+      });
+    }
+  });
 }
