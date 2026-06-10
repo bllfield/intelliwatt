@@ -200,6 +200,14 @@
 - **Canonical Past display (keeper house):** 2025-06-08 → 2026-06-07, 365 daily rows, `SIMULATED` / `SIMULATED_MANUAL_CONSTRAINED`, estimated manual-bill Past weather copy
 - **Display copy fixes:** `lib/usage/manualPastDisplayPolicy.ts`, `lib/usage/usageSimulatorSourceStatusCopy.ts` — copy/source labeling only; no sim/reconciliation/scoring changes
 - **Overlay:** no general overlay behavior changed; manual Past skip in `pastSimStaleIncompleteMeter.ts` guards stale/actual display-truth contamination only
+- **Usage Simulator source copy (commit `1b47a52b`):** `lib/usage/usageSimulatorSourceStatusCopy.ts` — manual-active status shows Manual totals / bill-period based, not Actual/0-interval coverage
+
+**MG-0 Audit refresh (Manual GapFill planning — not shipped Manual Monthly truth):**
+
+- MG-0 Audit remains useful for Manual GapFill redesign planning; supersede any pre-closeout “planning-only green” / env-rollout caveats for **shipped** Manual Monthly with this closeout doc.
+- Manual GapFill full overhaul **not started**. Legacy GapFill + `EXACT_INTERVALS` stay until explicitly retired.
+- **Next phase when approved:** MG-1 read-only source context resolver — must not refactor GapFill architecture or touch manual sim math, reconciliation, tolerance, SMT/GB, `EXACT_INTERVALS`, scoring/WAPE, or general overlays.
+- Future Manual GapFill uses shared validation objects + global validation-day policy, not GapFill-only validation math. **MG-1 not started.**
 
 **Future work (separate approval — not started):**
 

@@ -105,12 +105,27 @@ When manual monthly totals are the active saved usage source:
 
 ## Manual GapFill status (future — not started)
 
+**Authoritative shipped Manual Monthly truth:** this closeout doc (`docs/MANUAL_MONTHLY_GREEN_CLOSEOUT.md`). Any pre-audit MG-0 wording that described manual monthly as only “green for planning,” production env uncertainty, or artifact rollout caveats is **superseded here** for shipped user/admin Manual Monthly behavior.
+
+### MG-0 Audit (planning context only)
+
+- The uploaded **MG-0 Audit** remains useful for **Manual GapFill redesign planning**.
+- MG-0 is **not** authoritative for shipped Manual Monthly product truth, Bill Match, canonical Past display, or Usage Simulator source-state copy.
+- Do **not** use MG-0 readiness/planning language to reopen Manual Monthly architecture or sim/reconciliation work.
+
+### Manual GapFill — not started
+
 - **Manual GapFill full overhaul has not started.**
 - Current Manual GapFill may consume shared validation objects from `manualValidationSummary` / bill-period read model.
-- **MG-0** audit docs = planning only; do not treat as shipped Manual Monthly truth.
-- **MG-1** source context resolver: **do not start** without explicit approval.
-- Do **not** remove legacy GapFill / `EXACT_INTERVALS` yet.
-- Future Manual GapFill should use shared validation / global validation policy, not local GapFill-only validation math.
+- **Legacy GapFill and `EXACT_INTERVALS` remain in place** until explicitly retired.
+- Future Manual GapFill must use **shared validation objects and global validation-day policy**, not GapFill-only validation math.
+
+### MG-1 — next phase when explicitly approved (not started)
+
+- **Next implementation phase, when approved:** **MG-1 read-only source context resolver**.
+- MG-1 must **not** refactor GapFill architecture.
+- MG-1 must **not** touch manual sim math, bill-period reconciliation, tolerance, SMT/GB sim math, `EXACT_INTERVALS`, validation holdout/scoring/WAPE, or general overlay behavior.
+- **Do not start MG-1** until explicitly approved after this closeout is pushed and live-verified.
 
 ---
 

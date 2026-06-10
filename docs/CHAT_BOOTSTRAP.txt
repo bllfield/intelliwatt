@@ -165,7 +165,7 @@ MANUAL MONTHLY GREEN CLOSEOUT (2026-06-08)
 - **Baseload (15-min):** kWh per 15-minute interval from daily baseload / 96; must not render blank when baseload exists.
 - **Usage Simulator source state:** manual active source shows Manual totals / bill-period based copy; do not show Actual usage / 0-interval ACTUAL coverage when manual totals are active (`lib/usage/usageSimulatorSourceStatusCopy.ts`).
 - **Env:** `MANUAL_CANONICAL_ARTIFACT_WINDOW_PERSIST=1` in Vercel Production (server-only); redeploy after change.
-- **Manual GapFill:** full overhaul not started; MG-0 = planning only; MG-1 requires explicit approval; keep `EXACT_INTERVALS` and legacy GapFill until approved redesign.
+- **Manual GapFill:** full overhaul not started. **MG-0 Audit** = Manual GapFill redesign planning only (supersedes any pre-closeout “planning-only green” manual-monthly readiness wording). **MG-1** read-only source context resolver is the next approved phase when explicitly green-lit; MG-1 must not refactor GapFill architecture or touch sim/reconciliation/SMT/GB/EXACT_INTERVALS/scoring/WAPE/overlays. Keep legacy GapFill and `EXACT_INTERVALS` until explicitly retired. Future Manual GapFill uses shared validation + global validation-day policy, not GapFill-only validation math.
 - **Overlay note:** no general overlay behavior changed; manual Past guarded from stale/actual display-truth contamination only.
 
 ========================================
