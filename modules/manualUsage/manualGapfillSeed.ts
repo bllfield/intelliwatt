@@ -22,6 +22,10 @@ import type {
 } from "@/modules/simulatedUsage/types";
 import { stableStringify } from "@/modules/usageSimulator/fingerprintHash";
 
+export function hashManualGapfillSavedSeedPayload(payload: ManualUsagePayload): string {
+  return sha256DigestBase64Url(stableStringify(payload), 22);
+}
+
 export type ManualGapfillSeedMode = "MONTHLY_FROM_SOURCE_INTERVALS" | "ANNUAL_FROM_SOURCE_INTERVALS";
 
 export type ManualGapfillSeedStatus =
@@ -129,7 +133,7 @@ function buildSeedView(args: {
   parsed: { ok: true; value: ManualUsagePayload } | { ok: false; error: string };
 }): ManualGapfillSeedPayloadView {
   const validationResultHash = hashValidationResult(args.parsed);
-  const normalizedPayloadHash = sha256DigestBase64Url(stableStringify(args.payload), 22);
+  const normalizedPayloadHash = hashManualGapfillSavedSeedPayload(args.payload);
 
   if (args.payload.mode === "MONTHLY") {
     const monthly = args.payload as MonthlyManualUsagePayload;
