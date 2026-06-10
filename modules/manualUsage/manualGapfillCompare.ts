@@ -639,9 +639,9 @@ export async function compareManualGapfillSourceActualToLabSim(
   const manualRecord = await getManualUsageInputForUserHouse({ userId, houseId: labHouseId });
   const parsed = manualRecord.payload ? validateManualUsagePayload(manualRecord.payload) : null;
   const labManualPayload = parsed?.ok ? parsed.value : null;
-  const seedHash = labManualPayload ? hashManualGapfillSavedSeedPayload(labManualPayload) : null;
 
   if (!labManualPayload || labManualPayload.mode !== expectedPayloadMode(mode)) {
+    const seedHash = labManualPayload ? hashManualGapfillSavedSeedPayload(labManualPayload) : null;
     return buildFailureEnvelope({
       status: "compare_unavailable",
       mode,
@@ -656,6 +656,8 @@ export async function compareManualGapfillSourceActualToLabSim(
       ],
     });
   }
+
+  const seedHash = hashManualGapfillSavedSeedPayload(labManualPayload);
 
   if (args.expectedSeedHash && seedHash !== args.expectedSeedHash) {
     return buildFailureEnvelope({
