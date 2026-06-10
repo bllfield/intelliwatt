@@ -77,6 +77,9 @@ const DOC_HOST_ALLOWLIST = new Set<string>([
 
   // Payless
   'paylesspower.com',
+
+  // Rhythm (WattBuy offer_data.efl uses api.gotrhythm.com snapshot PDFs; TOS/YRAC on cdn.gotrhythm.com)
+  'gotrhythm.com',
 ]);
 
 export function sanitizeDocURL(url: string | null): string | null {
@@ -102,6 +105,8 @@ function looksLikeEflDocUrlLoose(u: string): boolean {
     s.includes('electricity') && s.includes('facts') ||
     s.includes('facts') && s.includes('label') ||
     s.includes('efl') ||
+    (s.includes('offer-snapshots') && s.includes('/efl')) ||
+    s.includes('gotrhythm.com') ||
     // SmartGridCIS/OhmConnect doc host uses a non-.pdf download endpoint.
     (s.includes('/documents/download.aspx') && s.includes('productdocumentid=')) ||
     s.endsWith('.pdf') ||
@@ -127,6 +132,7 @@ function deepFindBestDocUrl(
       if (u.includes('/documents/download.aspx') && u.includes('productdocumentid=')) score += 120;
       if (u.includes('smartgridcis')) score += 40;
       if (u.includes('ohm')) score += 20;
+      if (u.includes('gotrhythm') && u.includes('offer-snapshots')) score += 180;
     } else if (opts.kind === 'tos') {
       if (p.includes('tos') || p.includes('terms')) score += 200;
       if (u.includes('terms')) score += 80;
@@ -207,6 +213,7 @@ function deepFindAllDocUrls(
       if (u.includes('/documents/download.aspx') && u.includes('productdocumentid=')) score += 120;
       if (u.includes('smartgridcis')) score += 40;
       if (u.includes('ohm')) score += 20;
+      if (u.includes('gotrhythm') && u.includes('offer-snapshots')) score += 180;
     } else if (opts.kind === 'tos') {
       if (p.includes('tos') || p.includes('terms')) score += 200;
       if (u.includes('terms')) score += 80;

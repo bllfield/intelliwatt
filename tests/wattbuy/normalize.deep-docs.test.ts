@@ -83,6 +83,28 @@ describe("wattbuy normalizeOffer - deep doc URL discovery", () => {
       "https://eflviewer.companionenergy.com/eflviewer.aspx?lang=EN&prodcode=YRAC",
     );
   });
+
+  it("keeps Rhythm offer-snapshot EFL URLs from offer_data.efl", () => {
+    const raw = {
+      offer_id: "wbdb-JlW2kww1",
+      offer_name: "Simply Select 9",
+      offer_data: {
+        supplier_name: "Rhythm",
+        utility: "Oncor Electric Delivery",
+        term: 9,
+        efl: "https://api.gotrhythm.com/api/v2/offer-snapshots/65fe73ee-d7cc-4539-9b6b-f0b97d340d78/efl/?locale=EN",
+        tos: "https://cdn.gotrhythm.com/rhythm-tos-en-version-9.pdf",
+        yrac: "https://cdn.gotrhythm.com/RhythmYRAC_en.pdf",
+      },
+    };
+
+    const n = normalizeOffer(raw);
+    expect(n.docs.efl).toBe(
+      "https://api.gotrhythm.com/api/v2/offer-snapshots/65fe73ee-d7cc-4539-9b6b-f0b97d340d78/efl/?locale=EN",
+    );
+    expect(n.docs.tos).toBe("https://cdn.gotrhythm.com/rhythm-tos-en-version-9.pdf");
+    expect(n.docs.yrac).toBe("https://cdn.gotrhythm.com/RhythmYRAC_en.pdf");
+  });
 });
 
 
