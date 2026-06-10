@@ -939,9 +939,9 @@ export default function AdminDashboard() {
               href="/admin/tools/gapfill-lab"
               className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
             >
-              <div className="font-semibold text-brand-navy mb-1">📊 Gap-Fill Lab</div>
+              <div className="font-semibold text-brand-navy mb-1">Manual GapFill Lab</div>
               <div className="text-sm text-brand-navy/60">
-                Compare gap-fill simulation vs actual usage on masked (travel/vacant) intervals by email
+                Primary admin workflow: SMT source → manual monthly/annual seed → One Path lab Past Sim → compare (MG-1–MG-5)
               </div>
             </a>
             <a
@@ -966,9 +966,9 @@ export default function AdminDashboard() {
               href="/admin/tools/manual-gapfill"
               className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
             >
-              <div className="font-semibold text-brand-navy mb-1">Manual GapFill</div>
+              <div className="font-semibold text-brand-navy mb-1">Manual GapFill API Debug</div>
               <div className="text-sm text-brand-navy/60">
-                Wire MG-1 through MG-5: source context, validation policy, seed, run/readback, and compare
+                Debug-only MG route harness — primary workflow is Manual GapFill Lab
               </div>
             </a>
             <a

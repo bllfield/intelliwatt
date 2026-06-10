@@ -37,6 +37,8 @@ import {
   formatIdentityReadout,
 } from "./readoutTruth";
 import { buildGapfillFullTuningPayload } from "@/modules/usageSimulator/tuningPayload";
+import ManualGapfillLabWorkflow from "@/components/admin/ManualGapfillLabWorkflow";
+import type { ManualGapfillSeedMode } from "@/lib/admin/manualGapfillClient";
 
 type HouseOption = { id: string; label: string; esiid?: string | null };
 type DateRange = { startDate: string; endDate: string };
@@ -592,8 +594,10 @@ export default function GapFillLabCanonicalClient() {
   const [weatherKind, setWeatherKind] = useState<"LAST_YEAR_ACTUAL_WEATHER" | "LONG_TERM_AVERAGE_WEATHER">("LAST_YEAR_ACTUAL_WEATHER");
   const [userDefaultValidationSelectionMode, setUserDefaultValidationSelectionMode] = useState("random_simple");
   const [adminLabValidationSelectionMode, setAdminLabValidationSelectionMode] = useState("stratified_weather_balanced");
-  /** Test-home usage input split; sent on recalc only before the shared lockbox entry. */
+  /** Legacy advanced calibration only — primary workflow uses Manual GapFill Lab MG routes. */
   const [adminLabTreatmentMode, setAdminLabTreatmentMode] = useState("EXACT_INTERVALS");
+  const [manualLabMode, setManualLabMode] = useState<ManualGapfillSeedMode>("MONTHLY_FROM_SOURCE_INTERVALS");
+  const [showLegacyAdvanced, setShowLegacyAdvanced] = useState(false);
   const [supportedValidationSelectionModes, setSupportedValidationSelectionModes] = useState<string[]>([
     "manual",
     "random_simple",
@@ -618,6 +622,24 @@ export default function GapFillLabCanonicalClient() {
   const [manualStageOneMonthlyView, setManualStageOneMonthlyView] = useState<"chart" | "table">("chart");
 
   const effectiveTestHomeId = String(testHomeLink?.testHomeHouseId ?? testHome?.id ?? "").trim();
+  const resolvedSourceUserId = useMemo(() => {
+    if (result?.ok) {
+      const uid = result.sourceUser?.id ?? result.sourceUserId;
+      if (uid) return String(uid).trim();
+    }
+    return String(testHomeLink?.sourceUserId ?? "").trim();
+  }, [result, testHomeLink]);
+  const resolvedSourceHouseId = useMemo(() => {
+    if (result?.ok && result.sourceHouseId) return String(result.sourceHouseId).trim();
+    return String(sourceHouse?.id ?? sourceHouseId ?? "").trim();
+  }, [result, sourceHouse, sourceHouseId]);
+  const resolvedSourceEsiid =
+    sourceHouse?.esiid ??
+    sourceHouses.find((house) => house.id === resolvedSourceHouseId)?.esiid ??
+    null;
+  const manualLabReady =
+    Boolean(resolvedSourceUserId && resolvedSourceHouseId && effectiveTestHomeId) &&
+    String(testHomeLink?.status ?? "") === "ready";
   const parsedHomeProfile = useMemo(() => parseJsonSafe(homeProfileJson), [homeProfileJson]);
   const parsedApplianceProfile = useMemo(() => parseJsonSafe(applianceProfileJson), [applianceProfileJson]);
 
@@ -1436,9 +1458,10 @@ export default function GapFillLabCanonicalClient() {
   return (
     <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold text-brand-navy">Past Sim Canonical Calibration Lab</h1>
+        <h1 className="text-2xl font-semibold text-brand-navy">Manual GapFill Lab</h1>
         <p className="text-sm text-brand-navy/70 mt-1">
-          One reusable test home, one canonical recalc chain, one saved artifact family, plus separate accuracy projection.
+          Primary admin workflow: SMT source truth → manual monthly/annual seed → One Path lab Past Sim → source actual vs
+          lab simulated compare (MG-1 through MG-5). Legacy EXACT_INTERVALS calibration is under Advanced Legacy GapFill below.
         </p>
       </div>
 
@@ -1504,6 +1527,51 @@ export default function GapFillLabCanonicalClient() {
         </div>
       )}
 
+      <section className="rounded-2xl border border-brand-blue/20 bg-white p-4 space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold text-brand-navy">Manual GapFill Lab (One Path)</h2>
+          <p className="mt-1 text-sm text-brand-navy/70">
+            Uses MG-1 source context, MG-2 global validation-day policy, MG-3 seed, MG-4 run/readback, and MG-5 compare.
+            No legacy gapfill-lab recalc or compare_core on this path.
+          </p>
+        </div>
+        <ManualGapfillLabWorkflow
+          showHeader={false}
+          showIdentityForm={false}
+          identity={{
+            userId: resolvedSourceUserId,
+            userEmail: email,
+            sourceHouseId: resolvedSourceHouseId,
+            labHouseId: effectiveTestHomeId,
+            esiid: resolvedSourceEsiid,
+          }}
+          mode={manualLabMode}
+          onModeChange={setManualLabMode}
+          disabled={!manualLabReady}
+          disabledReason={
+            manualLabReady
+              ? null
+              : "Load/replace the lab test home and wait for ready status before running Manual GapFill Lab."
+          }
+        />
+      </section>
+
+      <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-4">
+        <button
+          type="button"
+          className="text-sm font-semibold text-brand-navy underline"
+          onClick={() => setShowLegacyAdvanced((value) => !value)}
+        >
+          {showLegacyAdvanced ? "Hide" : "Show"} Advanced Legacy GapFill (EXACT_INTERVALS / canonical recalc)
+        </button>
+        <p className="mt-2 text-xs text-brand-navy/70">
+          Legacy interval calibration, compare_core-era panels, and EXACT_INTERVALS recalc remain available here without
+          changing their behavior.
+        </p>
+      </div>
+
+      {showLegacyAdvanced ? (
+        <>
       <div className="border rounded p-4 bg-white space-y-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -2626,6 +2694,9 @@ export default function GapFillLabCanonicalClient() {
           ))}
         </div>
       </details>
+
+        </>
+      ) : null}
 
       <GapFillCalculationLogicModal
         open={openCalculationLogic}

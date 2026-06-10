@@ -211,7 +211,7 @@
 - **MG-3 shipped:** seed preparation from MG-1 source context (`f1159ef5`); dry-run default, optional lab-home persist only; no Past Sim/compare.
 - **MG-4 shipped:** run/readback from prepared lab manual seed (`be2ff2cf`); canonical Past Sim on lab home only; no source-vs-sim compare.
 - **MG-5 shipped:** source actual vs lab simulated compare (`8205fa1e` + build hotfixes); admin/lab diagnostic only; no Past Sim, seed prep, or production WAPE/scoring changes.
-- **MG-6 shipped:** Manual GapFill admin UI at `/admin/tools/manual-gapfill` (`ae380115`); wires MG-1–MG-5 via existing endpoints only; legacy GapFill + `EXACT_INTERVALS` unchanged.
+- **MG-6 shipped:** Manual GapFill admin UI wiring MG-1–MG-5 (`ae380115`); retargeted **ML-1–ML-4 (local):** primary workflow `/admin/tools/gapfill-lab` Manual GapFill Lab; `/admin/tools/manual-gapfill` demoted to API Debug; legacy EXACT_INTERVALS under Advanced Legacy GapFill only.
 - **MG-7 (local):** proof/docs closeout — `docs/MANUAL_GAPFILL_CLOSEOUT.md` + docs sync; no new product behavior.
 - Shipped Manual GapFill (MG-1–MG-6) uses shared validation objects + global compare-day policy (`docs/GLOBAL_COMPARE_DAY_POLICY.md`), not GapFill-only validation math.
 

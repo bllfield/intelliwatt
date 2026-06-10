@@ -107,7 +107,7 @@ Inventory derived from the admin dashboard and codebase scan. Purpose is one-lin
 | `/admin/tools/prisma-studio` | Prisma Studio shortcuts (DB/ports) |
 | `/admin/plan-engine` | Plan Engine Lab: estimate-set, TOU/Free Weekends, backfill |
 | `/admin/tools/bot-messages` | IntelliWattBot copy per dashboard page |
-| `/admin/tools/gapfill-lab` | Gap-Fill Lab: compare gap-fill vs actual on masked (travel/vacant) intervals |
+| `/admin/tools/gapfill-lab` | **Manual GapFill Lab** (primary): One Path manual monthly/annual from SMT source via MG-1–MG-5; legacy EXACT_INTERVALS under Advanced Legacy GapFill |
 | `/admin/tools/usage-shape-profile` | Usage Shape Profile: derive/save shape from 15-min intervals |
 | `/admin/helpdesk/impersonate` | Help desk: impersonate user dashboard (audited) |
 | `/admin/wattbuy/inspector` | WattBuy Inspector: electricity, retail rates, offers |
@@ -131,12 +131,12 @@ Inventory derived from the admin dashboard and codebase scan. Purpose is one-lin
 
 ### Representative API areas
 
-- `/api/admin/tools/gapfill-lab` — Gap-Fill Lab
+- `/api/admin/tools/gapfill-lab` — Gap-Fill Lab legacy route (EXACT_INTERVALS / advanced calibration only; manual workflow uses MG routes below)
 - `/api/admin/tools/manual-gapfill/source-context` — Manual GapFill read-only source context (MG-1)
 - `/api/admin/tools/manual-gapfill/prepare-seed` — Manual GapFill seed preparation from MG-1 source context (MG-3; dry-run default; optional lab-home persist only; no Past Sim/compare)
 - `/api/admin/tools/manual-gapfill/run-readback` — Manual GapFill run/readback from prepared lab seed (MG-4; canonical Past Sim on lab home; no source-vs-sim compare; no inline seed derivation)
 - `/api/admin/tools/manual-gapfill/compare` — Manual GapFill source actual vs lab simulated compare (MG-5; admin diagnostic only; no Past Sim/seed writes; no production WAPE/scoring changes)
-- `/admin/tools/manual-gapfill` — Manual GapFill admin UI (MG-6 shipped `ae380115`; wires MG-1–MG-5 endpoints client-side; see `docs/MANUAL_GAPFILL_CLOSEOUT.md`)
+- `/admin/tools/manual-gapfill` — Manual GapFill **API Debug** (MG-6 route wiring; primary workflow is `/admin/tools/gapfill-lab` Manual GapFill Lab; see `docs/MANUAL_GAPFILL_CLOSEOUT.md`)
 - `/api/admin/tools/validation-day-policy` — Global compare-day policy control (MG-2): snapshot, save, reset, email-based preview
 - `/admin/tools/validation-day-policy` — Compare Day Policy admin UI (global policy + guardrails + preview by email)
 - `/api/admin/usage/normalize` — Usage normalization

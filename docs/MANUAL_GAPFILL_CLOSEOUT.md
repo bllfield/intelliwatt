@@ -35,11 +35,12 @@ Default mode: `MONTHLY_FROM_SOURCE_INTERVALS`.
 
 ---
 
-## Admin pipeline (MG-6)
+## Admin pipeline (MG-6 + ML retarget)
 
-**Page:** `/admin/tools/manual-gapfill`  
-**Component:** `components/admin/ManualGapfillAdmin.tsx`  
-**Client:** `lib/admin/manualGapfillClient.ts`
+**Primary workflow:** `/admin/tools/gapfill-lab` — **Manual GapFill Lab**  
+**Primary client:** `app/admin/tools/gapfill-lab/GapFillLabCanonicalClient.tsx` → `components/admin/ManualGapfillLabWorkflow.tsx`  
+**Debug surface:** `/admin/tools/manual-gapfill` — `components/admin/ManualGapfillAdmin.tsx` (same MG-1–MG-5 wiring; not primary nav)  
+**Client helpers:** `lib/admin/manualGapfillClient.ts`
 
 ### Steps (each independently runnable)
 

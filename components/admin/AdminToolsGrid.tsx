@@ -18,8 +18,9 @@ const TOOL_CARDS = [
   },
   {
     href: "/admin/tools/gapfill-lab",
-    title: "Gap-Fill Lab",
-    description: "Compare gap-fill simulation versus actual usage on masked travel and vacant intervals.",
+    title: "Manual GapFill Lab",
+    description:
+      "Primary admin workflow: SMT source → manual monthly/annual seed → One Path lab Past Sim → compare (MG-1–MG-5).",
   },
   {
     href: "/admin/tools/manual-monthly",
@@ -34,8 +35,8 @@ const TOOL_CARDS = [
   },
   {
     href: "/admin/tools/manual-gapfill",
-    title: "Manual GapFill",
-    description: "Wire MG-1 through MG-5: source context, validation policy, seed, run/readback, and compare.",
+    title: "Manual GapFill API Debug",
+    description: "Debug-only MG-1–MG-5 route harness. Primary workflow: Manual GapFill Lab.",
   },
   {
     href: "/admin/tools/one-path-sim",

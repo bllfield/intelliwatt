@@ -11,6 +11,12 @@ const ensureSmtCoverageForHouse = vi.fn();
 const saveManualUsageInputForUserHouse = vi.fn();
 const dispatchPastSimRecalc = vi.fn();
 const selectValidationDayKeys = vi.fn();
+const getFlag = vi.fn();
+
+vi.mock("@/lib/flags", () => ({
+  getFlag: (...args: unknown[]) => getFlag(...args),
+  setFlag: vi.fn(),
+}));
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -110,6 +116,7 @@ function mockSufficientSourceContext() {
 describe("resolveManualGapfillSeedFromSourceContext", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getFlag.mockResolvedValue("");
     findFirstBuild.mockResolvedValue(null);
     getLatestUsageFingerprintByHouseId.mockResolvedValue(null);
     computePastWeatherIdentity.mockResolvedValue("weather:test");
