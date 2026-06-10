@@ -4,7 +4,7 @@
 >
 > This file records a point-in-time code audit and must not be treated as the canonical product/architecture contract for One Path Sim, usage-upstream ownership, cutover status, or reader/producer rules.
 >
-> **Manual Monthly shipped truth:** use `docs/MANUAL_MONTHLY_GREEN_CLOSEOUT.md` (GREEN closeout). MG-0 / GapFill audit material here is planning context for Manual GapFill redesign only — not authoritative for Bill Match, canonical Past display, or user Manual Monthly behavior.
+> **Manual GapFill phases:** MG-1 shipped read-only source context (`814e0839`). MG-2 adds global validation-day policy/admin preview (`lib/usage/validationDayPolicy.ts`). MG-3 = seed prep; MG-4 = compare. Legacy GapFill local selectors remain until explicit retirement.
 >
 > Canonical architecture references:
 > - `docs/ONE_PATH_SIM_ARCHITECTURE.md`

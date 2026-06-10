@@ -120,12 +120,23 @@ When manual monthly totals are the active saved usage source:
 - **Legacy GapFill and `EXACT_INTERVALS` remain in place** until explicitly retired.
 - Future Manual GapFill must use **shared validation objects and global validation-day policy**, not GapFill-only validation math.
 
-### MG-1 — next phase when explicitly approved (not started)
+### MG-1 — read-only source context resolver (shipped)
 
-- **Next implementation phase, when approved:** **MG-1 read-only source context resolver**.
-- MG-1 must **not** refactor GapFill architecture.
-- MG-1 must **not** touch manual sim math, bill-period reconciliation, tolerance, SMT/GB sim math, `EXACT_INTERVALS`, validation holdout/scoring/WAPE, or general overlay behavior.
-- **Do not start MG-1** until explicitly approved after this closeout is pushed and live-verified.
+- **Shipped:** `resolveManualGapfillSmtSourceContext()` + admin `POST /api/admin/tools/manual-gapfill/source-context` (commit `814e0839`).
+- Read-only source-house actual usage context only; no seed/recalc/compare.
+
+### MG-2 — global validation-day policy / admin preview (local — pending commit approval)
+
+- Shared module: `lib/usage/validationDayPolicy.ts`
+- Admin API: `GET|POST /api/admin/tools/validation-day-policy`
+- Admin UI: `/admin/tools/validation-day-policy`
+- Future Manual GapFill must consume this global policy read-only; legacy GapFill local selectors remain until explicit retirement.
+
+### MG-3 — seed preparation from MG-1 source context (not started)
+
+- Proposed `resolveManualGapfillSeedFromSourceContext` / prepare-seed route belongs here, not MG-2.
+
+### Manual GapFill — full overhaul not started
 
 ---
 

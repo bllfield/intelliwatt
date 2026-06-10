@@ -11,8 +11,12 @@ import {
 import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
 import { resolveHouseCommittedUsageSource } from "@/lib/usage/houseCommittedUsageSource";
 import {
-  PAST_VALIDATION_POLICY_REVISION,
-} from "@/lib/usage/pastValidationPolicy";
+  computeValidationDayPolicyHash,
+  previewGlobalValidationDaySelection,
+  resolveActiveValidationDayPolicy,
+  VALIDATION_DAY_POLICY_LAYER,
+} from "@/lib/usage/validationDayPolicy";
+import { PAST_VALIDATION_POLICY_REVISION } from "@/lib/usage/pastValidationPolicy";
 import { readPastValidationPolicyRevisionFromMeta } from "@/lib/usage/pastSimulationCoreLabel";
 import type { ActualUsageSource } from "@/modules/realUsageAdapter/actual";
 import { getLatestUsageFingerprintByHouseId } from "@/modules/usageSimulator/fingerprintArtifactsRepo";
@@ -71,6 +75,11 @@ export type ManualGapfillSourceContextActualData = {
 
 export type ManualGapfillSourceContextValidation = {
   canonicalPastValidationPolicyRevision: string;
+  activeValidationDayPolicyRevision: string;
+  activeValidationDayPolicyLayer: string;
+  activeValidationDayPolicyHash: string;
+  policyPreviewSelectionMode: string | null;
+  selectedValidationDateKeys: string[] | null;
   stampedPastValidationPolicyRevision: string | null;
   stampedValidationDateKeys: string[] | null;
   validationSelectionMode: string | null;
@@ -188,6 +197,26 @@ async function readStampedValidationContext(args: {
   };
 }
 
+function buildGlobalValidationContext(args: {
+  stampedValidation: Awaited<ReturnType<typeof readStampedValidationContext>>;
+  policyPreview: Awaited<ReturnType<typeof previewGlobalValidationDaySelection>> | null;
+}): ManualGapfillSourceContextValidation {
+  const activePolicy = resolveActiveValidationDayPolicy({ surface: "admin_lab" });
+  return {
+    canonicalPastValidationPolicyRevision: PAST_VALIDATION_POLICY_REVISION,
+    activeValidationDayPolicyRevision: PAST_VALIDATION_POLICY_REVISION,
+    activeValidationDayPolicyLayer: VALIDATION_DAY_POLICY_LAYER,
+    activeValidationDayPolicyHash:
+      args.policyPreview?.policyHash ?? computeValidationDayPolicyHash(activePolicy),
+    policyPreviewSelectionMode: args.policyPreview?.selectionMode ?? activePolicy.selectionMode,
+    selectedValidationDateKeys: args.policyPreview?.selectedValidationDateKeys ?? null,
+    stampedPastValidationPolicyRevision: args.stampedValidation.stampedPastValidationPolicyRevision,
+    stampedValidationDateKeys: args.stampedValidation.stampedValidationDateKeys,
+    validationSelectionMode: args.stampedValidation.validationSelectionMode,
+    localValidationSelectorRan: false,
+  };
+}
+
 function buildEmptyContext(args: {
   sourceHouseId: string;
   userId: string;
@@ -230,13 +259,14 @@ function buildEmptyContext(args: {
       monthlyTotals: null,
       annualTotal: null,
     },
-    validation: {
-      canonicalPastValidationPolicyRevision: PAST_VALIDATION_POLICY_REVISION,
-      stampedPastValidationPolicyRevision: null,
-      stampedValidationDateKeys: null,
-      validationSelectionMode: null,
-      localValidationSelectorRan: false,
-    },
+    validation: buildGlobalValidationContext({
+      stampedValidation: {
+        stampedPastValidationPolicyRevision: null,
+        stampedValidationDateKeys: null,
+        validationSelectionMode: null,
+      },
+      policyPreview: null,
+    }),
     alternatives: { smt: null, greenButton: null },
     diagnostics: {
       lookedForActualDataset: false,
@@ -349,7 +379,8 @@ export async function resolveManualGapfillSmtSourceContext(
     warnings.push("Actual usage truth exists but coverage is insufficient for Manual GapFill source context.");
   }
 
-  const [intervalFingerprint, weatherIdentity, usageFingerprintArtifact, stampedValidation] = await Promise.all([
+  const [intervalFingerprint, weatherIdentity, usageFingerprintArtifact, stampedValidation, policyPreview] =
+    await Promise.all([
     sourceCoverageSufficient
       ? getIntervalDataFingerprint({
           houseId: sourceHouseId,
@@ -368,6 +399,16 @@ export async function resolveManualGapfillSmtSourceContext(
       : Promise.resolve(null),
     getLatestUsageFingerprintByHouseId(sourceHouseId).catch(() => null),
     readStampedValidationContext({ userId, sourceHouseId }),
+    sourceCoverageSufficient
+      ? previewGlobalValidationDaySelection({
+          sourceHouseId,
+          houseId: sourceHouseId,
+          userId,
+          esiid: effectiveEsiid,
+          window,
+          surface: "admin_lab",
+        }).catch(() => null)
+      : Promise.resolve(null),
   ]);
 
   const dailyFingerprint = hashTotalsFingerprint(dailyTotals);
@@ -416,13 +457,7 @@ export async function resolveManualGapfillSmtSourceContext(
       monthlyTotals: args.includeDiagnostics ? monthlyTotals : null,
       annualTotal,
     },
-    validation: {
-      canonicalPastValidationPolicyRevision: PAST_VALIDATION_POLICY_REVISION,
-      stampedPastValidationPolicyRevision: stampedValidation.stampedPastValidationPolicyRevision,
-      stampedValidationDateKeys: stampedValidation.stampedValidationDateKeys,
-      validationSelectionMode: stampedValidation.validationSelectionMode,
-      localValidationSelectorRan: false,
-    },
+    validation: buildGlobalValidationContext({ stampedValidation, policyPreview }),
     alternatives,
     diagnostics: {
       lookedForActualDataset: true,

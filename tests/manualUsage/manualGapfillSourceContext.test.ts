@@ -52,9 +52,13 @@ vi.mock("@/modules/usageSimulator/pastSimRecalcDispatch", () => ({
   dispatchPastSimRecalc: (...args: unknown[]) => dispatchPastSimRecalc(...args),
 }));
 
-vi.mock("@/modules/usageSimulator/validationSelection", () => ({
-  selectValidationDayKeys: (...args: unknown[]) => selectValidationDayKeys(...args),
-}));
+vi.mock("@/modules/usageSimulator/validationSelection", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/modules/usageSimulator/validationSelection")>();
+  return {
+    ...actual,
+    selectValidationDayKeys: (...args: unknown[]) => selectValidationDayKeys(...args),
+  };
+});
 
 const WINDOW = { startDate: "2025-06-08", endDate: "2026-06-07" };
 
@@ -82,7 +86,21 @@ describe("resolveManualGapfillSmtSourceContext", () => {
     ensureSmtCoverageForHouse.mockResolvedValue({ ok: true });
     saveManualUsageInputForUserHouse.mockResolvedValue({ ok: true });
     dispatchPastSimRecalc.mockResolvedValue({ ok: true });
-    selectValidationDayKeys.mockReturnValue(["2025-07-01"]);
+    selectValidationDayKeys.mockReturnValue({
+      selectedDateKeys: ["2025-07-04", "2025-08-12"],
+      diagnostics: {
+        modeUsed: "stratified_weather_balanced",
+        targetCount: 14,
+        selectedCount: 2,
+        fallbackSubstitutions: 0,
+        excludedTravelVacantCount: 0,
+        excludedWeakCoverageCount: 0,
+        weekdayWeekendSplit: { weekday: 1, weekend: 1 },
+        seasonalSplit: { winter: 0, summer: 1, shoulder: 1 },
+        bucketCounts: {},
+        shortfallReason: null,
+      },
+    });
   });
 
   it("returns missing status with warnings when the source house is not found", async () => {
@@ -238,7 +256,7 @@ describe("resolveManualGapfillSmtSourceContext", () => {
     expect(out.diagnostics.warnings.join(" ")).toContain("No persisted actual usage truth");
   });
 
-  it("reads validation policy info without running a local GapFill validation selector", async () => {
+  it("reads global validation-day policy context without a GapFill-local selector", async () => {
     findFirstHouse.mockResolvedValueOnce({ id: "source-house-1", esiid: "E123" });
     resolveHouseCommittedUsageSource.mockResolvedValueOnce("SMT");
     getActualUsageDatasetForHouse.mockResolvedValueOnce({
@@ -261,9 +279,12 @@ describe("resolveManualGapfillSmtSourceContext", () => {
     });
 
     expect(out.validation.localValidationSelectorRan).toBe(false);
+    expect(out.validation.activeValidationDayPolicyLayer).toBe("global_validation_day_policy_v1");
+    expect(out.validation.activeValidationDayPolicyHash).toEqual(expect.any(String));
     expect(out.validation.canonicalPastValidationPolicyRevision).toBe("unified_past_validation_stratified_14_v4");
     expect(out.validation.stampedValidationDateKeys).toEqual(["2025-07-04", "2025-08-12"]);
-    expect(selectValidationDayKeys).not.toHaveBeenCalled();
+    expect(out.validation.selectedValidationDateKeys).toEqual(["2025-07-04", "2025-08-12"]);
+    expect(selectValidationDayKeys).toHaveBeenCalled();
   });
 
   it("reports insufficient status when intervals exist but daily coverage is empty", async () => {

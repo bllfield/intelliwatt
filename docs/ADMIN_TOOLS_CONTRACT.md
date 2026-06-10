@@ -104,6 +104,8 @@ Inventory derived from the admin dashboard and codebase scan. Purpose is one-lin
 ### Representative API areas
 
 - `/api/admin/tools/gapfill-lab` — Gap-Fill Lab
+- `/api/admin/tools/manual-gapfill/source-context` — Manual GapFill read-only source context (MG-1)
+- `/api/admin/tools/validation-day-policy` — Global validation-day policy snapshot + preview (MG-2)
 - `/api/admin/usage/normalize` — Usage normalization
 - `/api/admin/smt/*` — SMT agreements, pull, normalize, billing, etc.
 - `/api/admin/efl-review/*` — EFL review queue, process, stats
