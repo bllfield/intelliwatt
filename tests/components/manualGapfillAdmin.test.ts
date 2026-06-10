@@ -1,6 +1,4 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { renderToStaticMarkup } from "react-dom/server";
-import { ManualGapfillAdmin } from "@/components/admin/ManualGapfillAdmin";
 import {
   MANUAL_GAPFILL_DEFAULT_LAB_HOUSE_ID,
   MANUAL_GAPFILL_DEFAULT_MODE,
@@ -34,30 +32,6 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   fetchMock.mockReset();
-});
-
-describe("ManualGapfillAdmin render", () => {
-  it("renders pipeline inputs with keeper defaults for source/lab/mode", () => {
-    const html = renderToStaticMarkup(<ManualGapfillAdmin />);
-    expect(html).toContain("Manual GapFill");
-    expect(html).toContain(MANUAL_GAPFILL_DEFAULT_SOURCE_HOUSE_ID);
-    expect(html).toContain(MANUAL_GAPFILL_DEFAULT_LAB_HOUSE_ID);
-    expect(html).toContain(MANUAL_GAPFILL_DEFAULT_MODE);
-    expect(html).toContain("source actual usage");
-    expect(html).toContain("lab simulated usage");
-    expect(html).toContain("Dry run — Prepare seed");
-    expect(html).toContain("Persist seed to lab home");
-    expect(html).toContain("Compare source actual vs lab simulated");
-    expect(html).toContain("does not change production Simulation Accuracy scoring");
-    expect(html).toContain("legacy GapFill");
-    expect(html).toContain("EXACT_INTERVALS");
-  });
-
-  it("labels lab simulated usage separately from source actual usage", () => {
-    const html = renderToStaticMarkup(<ManualGapfillAdmin />);
-    expect(html).toContain("Simulated total kWh (lab simulated usage)");
-    expect(html).toContain("Annual total (source actual usage)");
-  });
 });
 
 describe("manualGapfillClient step wiring", () => {

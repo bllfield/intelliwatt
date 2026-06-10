@@ -103,40 +103,14 @@ When manual monthly totals are the active saved usage source:
 
 ---
 
-## Manual GapFill status (future — not started)
+## Manual GapFill status (admin pipeline — separate from Manual Monthly GREEN)
 
-**Authoritative shipped Manual Monthly truth:** this closeout doc (`docs/MANUAL_MONTHLY_GREEN_CLOSEOUT.md`). Any pre-audit MG-0 wording that described manual monthly as only “green for planning,” production env uncertainty, or artifact rollout caveats is **superseded here** for shipped user/admin Manual Monthly behavior.
+**Authoritative shipped Manual Monthly truth:** this closeout doc (`docs/MANUAL_MONTHLY_GREEN_CLOSEOUT.md`).
 
-### MG-0 Audit (planning context only)
+**Authoritative Manual GapFill admin pipeline (MG-1–MG-6):** `docs/MANUAL_GAPFILL_CLOSEOUT.md` — source actual vs lab simulated admin lab only; does not change Manual Monthly production Bill Match, canonical Past display, or Usage Simulator source-state copy.
 
-- The uploaded **MG-0 Audit** remains useful for **Manual GapFill redesign planning**.
-- MG-0 is **not** authoritative for shipped Manual Monthly product truth, Bill Match, canonical Past display, or Usage Simulator source-state copy.
-- Do **not** use MG-0 readiness/planning language to reopen Manual Monthly architecture or sim/reconciliation work.
-
-### Manual GapFill — not started
-
-- **Manual GapFill full overhaul has not started.**
-- Current Manual GapFill may consume shared validation objects from `manualValidationSummary` / bill-period read model.
-- **Legacy GapFill and `EXACT_INTERVALS` remain in place** until explicitly retired.
-- Future Manual GapFill must use **shared validation objects and global validation-day policy**, not GapFill-only validation math.
-
-### MG-1 — read-only source context resolver (shipped)
-
-- **Shipped:** `resolveManualGapfillSmtSourceContext()` + admin `POST /api/admin/tools/manual-gapfill/source-context` (commit `814e0839`).
-- Read-only source-house actual usage context only; no seed/recalc/compare.
-
-### MG-2 — global validation-day policy / admin preview (local — pending commit approval)
-
-- Shared module: `lib/usage/validationDayPolicy.ts`
-- Admin API: `GET|POST /api/admin/tools/validation-day-policy`
-- Admin UI: `/admin/tools/validation-day-policy`
-- Future Manual GapFill must consume this global policy read-only; legacy GapFill local selectors remain until explicit retirement.
-
-### MG-3 — seed preparation from MG-1 source context (not started)
-
-- Proposed `resolveManualGapfillSeedFromSourceContext` / prepare-seed route belongs here, not MG-2.
-
-### Manual GapFill — full overhaul not started
+- **Legacy GapFill** (`/admin/tools/gapfill-lab`) and **`EXACT_INTERVALS`** remain until explicitly retired.
+- MG-0 Audit remains planning context for future GapFill retirement only.
 
 ---
 

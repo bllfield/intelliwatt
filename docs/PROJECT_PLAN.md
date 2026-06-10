@@ -205,13 +205,14 @@
 **MG-0 Audit refresh (Manual GapFill planning — not shipped Manual Monthly truth):**
 
 - MG-0 Audit remains useful for Manual GapFill redesign planning; supersede any pre-closeout “planning-only green” / env-rollout caveats for **shipped** Manual Monthly with this closeout doc.
-- Manual GapFill full overhaul **not started**. Legacy GapFill + `EXACT_INTERVALS` stay until explicitly retired.
+- Manual GapFill admin pipeline **MG-1–MG-6 shipped** (`docs/MANUAL_GAPFILL_CLOSEOUT.md`). Legacy GapFill retirement + `EXACT_INTERVALS` migration **not started**.
 - **MG-1 shipped:** read-only Manual GapFill source context resolver (`814e0839`).
 - **MG-2 shipped:** global validation-day policy module + admin preview API/UI (`d9542e06`); future Manual GapFill consumes read-only; legacy GapFill local selectors remain.
 - **MG-3 shipped:** seed preparation from MG-1 source context (`f1159ef5`); dry-run default, optional lab-home persist only; no Past Sim/compare.
 - **MG-4 shipped:** run/readback from prepared lab manual seed (`be2ff2cf`); canonical Past Sim on lab home only; no source-vs-sim compare.
 - **MG-5 shipped:** source actual vs lab simulated compare (`8205fa1e` + build hotfixes); admin/lab diagnostic only; no Past Sim, seed prep, or production WAPE/scoring changes.
-- **MG-6 (local):** Manual GapFill admin UI at `/admin/tools/manual-gapfill` — wires MG-1 source context, MG-2 validation policy preview, MG-3 seed, MG-4 run/readback, MG-5 compare via existing endpoints only; legacy GapFill + `EXACT_INTERVALS` unchanged. **MG-7** = proof/docs closeout.
+- **MG-6 shipped:** Manual GapFill admin UI at `/admin/tools/manual-gapfill` (`ae380115`); wires MG-1–MG-5 via existing endpoints only; legacy GapFill + `EXACT_INTERVALS` unchanged.
+- **MG-7 (local):** proof/docs closeout — `docs/MANUAL_GAPFILL_CLOSEOUT.md` + docs sync; no new product behavior.
 - Future Manual GapFill uses shared validation objects + global validation-day policy, not GapFill-only validation math.
 
 **Future work (separate approval — not started):**
