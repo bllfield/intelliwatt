@@ -353,8 +353,8 @@ export async function resolveManualGapfillSmtSourceContext(
 
   const house = await prisma.houseAddress
     .findFirst({
-      where: { id: sourceHouseId, userId, archivedAt: null },
-      select: { id: true, esiid: true },
+      where: { id: sourceHouseId, archivedAt: null },
+      select: { id: true, esiid: true, userId: true },
     })
     .catch(() => null);
 
@@ -365,19 +365,36 @@ export async function resolveManualGapfillSmtSourceContext(
       esiid: args.esiid ?? null,
       window,
       status: "missing",
-      warnings: ["Source house was not found for the provided user."],
+      warnings: ["Source house was not found."],
+    });
+  }
+
+  const ownerUserId = String(house.userId ?? "").trim();
+  const effectiveUserId = ownerUserId || userId;
+  if (userId && ownerUserId && userId !== ownerUserId) {
+    warnings.push(
+      `Provided userId did not match source house owner; resolved owner ${ownerUserId} from house record.`
+    );
+  } else if (!userId && !ownerUserId) {
+    return await buildEmptyContext({
+      sourceHouseId,
+      userId: userId || "missing",
+      esiid: args.esiid ?? null,
+      window,
+      status: "missing",
+      warnings: ["Source house owner userId could not be resolved."],
     });
   }
 
   const effectiveEsiid = args.esiid ?? house.esiid ?? null;
   const committedUsageSource = await resolveHouseCommittedUsageSource({
     houseId: sourceHouseId,
-    userId,
+    userId: effectiveUserId,
     esiid: effectiveEsiid,
   }).catch(() => null);
 
   const actualLoad = await loadManualGapfillSourceActualDataset({
-    userId,
+    userId: effectiveUserId,
     sourceHouseId,
     esiid: effectiveEsiid,
     preferredActualSource: committedUsageSource ?? null,
@@ -449,12 +466,12 @@ export async function resolveManualGapfillSmtSourceContext(
         }).catch(() => null)
       : Promise.resolve(null),
     getLatestUsageFingerprintByHouseId(sourceHouseId).catch(() => null),
-    readStampedValidationContext({ userId, sourceHouseId }),
+    readStampedValidationContext({ userId: effectiveUserId, sourceHouseId }),
     sourceCoverageSufficient
       ? previewGlobalValidationDaySelection({
           sourceHouseId,
           houseId: sourceHouseId,
-          userId,
+          userId: effectiveUserId,
           esiid: effectiveEsiid,
           window,
           surface: "admin_lab",
@@ -478,7 +495,7 @@ export async function resolveManualGapfillSmtSourceContext(
   return {
     status,
     sourceHouseId,
-    userId,
+    userId: effectiveUserId,
     esiid: effectiveEsiid,
     committedUsageSource,
     actualSource,

@@ -623,16 +623,24 @@ export default function GapFillLabCanonicalClient() {
 
   const effectiveTestHomeId = String(testHomeLink?.testHomeHouseId ?? testHome?.id ?? "").trim();
   const resolvedSourceUserId = useMemo(() => {
+    const linkUserId = String(testHomeLink?.sourceUserId ?? "").trim();
+    if (String(testHomeLink?.status ?? "") === "ready" && linkUserId) {
+      return linkUserId;
+    }
     if (result?.ok) {
       const uid = result.sourceUser?.id ?? result.sourceUserId;
       if (uid) return String(uid).trim();
     }
-    return String(testHomeLink?.sourceUserId ?? "").trim();
+    return linkUserId;
   }, [result, testHomeLink]);
   const resolvedSourceHouseId = useMemo(() => {
+    const linkHouseId = String(testHomeLink?.sourceHouseId ?? "").trim();
+    if (String(testHomeLink?.status ?? "") === "ready" && linkHouseId) {
+      return linkHouseId;
+    }
     if (result?.ok && result.sourceHouseId) return String(result.sourceHouseId).trim();
     return String(sourceHouse?.id ?? sourceHouseId ?? "").trim();
-  }, [result, sourceHouse, sourceHouseId]);
+  }, [result, sourceHouse, sourceHouseId, testHomeLink]);
   const resolvedSourceEsiid =
     sourceHouse?.esiid ??
     sourceHouses.find((house) => house.id === resolvedSourceHouseId)?.esiid ??

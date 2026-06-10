@@ -55,7 +55,7 @@ describe("Manual GapFill Lab retarget (ML-1–ML-4)", () => {
   it("requires SMT source actual kind for manual lab workflow", () => {
     const workflowSource = readRepoFile("components/admin/ManualGapfillLabWorkflow.tsx");
     expect(workflowSource).toContain('sourceActualKind !== "SMT"');
-    expect(workflowSource).toContain("Manual GapFill Lab requires SMT source actual usage");
+    expect(workflowSource).toContain("persisted SMT meter intervals on the real source home");
   });
 
   it("preserves legacy gapfill-lab route code path inside advanced section only", () => {

@@ -163,7 +163,7 @@ describe("resolveManualGapfillSmtSourceContext", () => {
   });
 
   it("returns coverage, totals, and source identity for a source house with actual usage", async () => {
-    findFirstHouse.mockResolvedValueOnce({ id: "source-house-1", esiid: "E123" });
+    findFirstHouse.mockResolvedValueOnce({ id: "source-house-1", esiid: "E123", userId: "user-1" });
     resolveHouseCommittedUsageSource.mockResolvedValueOnce("SMT");
     mockOnePathUpstreamTruth({ sourceHouseId: "source-house-1", esiid: "E123", dataset: sampleDataset });
 
@@ -193,7 +193,7 @@ describe("resolveManualGapfillSmtSourceContext", () => {
   });
 
   it("keeps fingerprints stable for the same source and window", async () => {
-    findFirstHouse.mockResolvedValue({ id: "source-house-1", esiid: "E123" });
+    findFirstHouse.mockResolvedValue({ id: "source-house-1", esiid: "E123", userId: "user-1" });
     resolveHouseCommittedUsageSource.mockResolvedValue("SMT");
     mockOnePathUpstreamTruth({
       sourceHouseId: "source-house-1",
@@ -226,7 +226,7 @@ describe("resolveManualGapfillSmtSourceContext", () => {
   });
 
   it("never writes manual payloads or dispatches Past Sim recalc", async () => {
-    findFirstHouse.mockResolvedValueOnce({ id: "source-house-1", esiid: "E123" });
+    findFirstHouse.mockResolvedValueOnce({ id: "source-house-1", esiid: "E123", userId: "user-1" });
     resolveHouseCommittedUsageSource.mockResolvedValueOnce("SMT");
     mockOnePathUpstreamTruth({ sourceHouseId: "source-house-1", esiid: "E123", dataset: sampleDataset });
 
@@ -243,7 +243,7 @@ describe("resolveManualGapfillSmtSourceContext", () => {
   });
 
   it("loads actual truth from the source house id, not a lab test home", async () => {
-    findFirstHouse.mockResolvedValueOnce({ id: "source-house-1", esiid: "E123" });
+    findFirstHouse.mockResolvedValueOnce({ id: "source-house-1", esiid: "E123", userId: "user-1" });
     resolveHouseCommittedUsageSource.mockResolvedValueOnce("SMT");
     mockOnePathUpstreamTruth({ sourceHouseId: "source-house-1", esiid: "E123", dataset: sampleDataset });
 
@@ -268,8 +268,28 @@ describe("resolveManualGapfillSmtSourceContext", () => {
     );
   });
 
+  it("resolves source house owner from house record when client userId mismatches", async () => {
+    findFirstHouse.mockResolvedValueOnce({ id: "source-house-1", esiid: "E123", userId: "owner-user" });
+    resolveHouseCommittedUsageSource.mockResolvedValueOnce("SMT");
+    mockOnePathUpstreamTruth({ sourceHouseId: "source-house-1", esiid: "E123", dataset: sampleDataset });
+
+    const { resolveManualGapfillSmtSourceContext } = await import("@/modules/manualUsage/manualGapfillSourceContext");
+    const out = await resolveManualGapfillSmtSourceContext({
+      sourceHouseId: "source-house-1",
+      userId: "wrong-user",
+      window: WINDOW,
+    });
+
+    expect(out.userId).toBe("owner-user");
+    expect(out.actualSourceKind).toBe("SMT");
+    expect(out.diagnostics.warnings.join(" ")).toContain("did not match source house owner");
+    expect(resolveOnePathUpstreamUsageTruthForSimulation).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "owner-user", houseId: "source-house-1" })
+    );
+  });
+
   it("reports missing actual usage without faking SMT truth", async () => {
-    findFirstHouse.mockResolvedValueOnce({ id: "source-house-1", esiid: null });
+    findFirstHouse.mockResolvedValueOnce({ id: "source-house-1", esiid: null, userId: "user-1" });
     resolveHouseCommittedUsageSource.mockResolvedValueOnce(null);
     mockOnePathUpstreamTruth({ sourceHouseId: "source-house-1", dataset: null });
 
@@ -289,7 +309,7 @@ describe("resolveManualGapfillSmtSourceContext", () => {
   });
 
   it("reads global validation-day policy context without a GapFill-local selector", async () => {
-    findFirstHouse.mockResolvedValueOnce({ id: "source-house-1", esiid: "E123" });
+    findFirstHouse.mockResolvedValueOnce({ id: "source-house-1", esiid: "E123", userId: "user-1" });
     resolveHouseCommittedUsageSource.mockResolvedValueOnce("SMT");
     mockOnePathUpstreamTruth({ sourceHouseId: "source-house-1", esiid: "E123", dataset: sampleDataset });
     findFirstBuild.mockResolvedValueOnce({
@@ -317,7 +337,7 @@ describe("resolveManualGapfillSmtSourceContext", () => {
   });
 
   it("reports insufficient status when intervals exist but daily coverage is empty", async () => {
-    findFirstHouse.mockResolvedValueOnce({ id: "source-house-1", esiid: "E123" });
+    findFirstHouse.mockResolvedValueOnce({ id: "source-house-1", esiid: "E123", userId: "user-1" });
     resolveHouseCommittedUsageSource.mockResolvedValueOnce("SMT");
     mockOnePathUpstreamTruth({
       sourceHouseId: "source-house-1",
@@ -338,7 +358,7 @@ describe("resolveManualGapfillSmtSourceContext", () => {
   });
 
   it("marks available status when source coverage is sufficient", async () => {
-    findFirstHouse.mockResolvedValueOnce({ id: "source-house-1", esiid: "E123" });
+    findFirstHouse.mockResolvedValueOnce({ id: "source-house-1", esiid: "E123", userId: "user-1" });
     resolveHouseCommittedUsageSource.mockResolvedValueOnce("SMT");
     mockOnePathUpstreamTruth({
       sourceHouseId: "source-house-1",

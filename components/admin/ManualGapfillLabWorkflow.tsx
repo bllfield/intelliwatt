@@ -719,10 +719,20 @@ export function ManualGapfillLabWorkflow(props: ManualGapfillLabWorkflowProps = 
         </div>
       ) : null}
       {smtSourceRequired ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-          Manual GapFill Lab requires SMT source actual usage. Source actual kind is{" "}
-          <span className="font-mono">{sourceActualKind ?? "unknown"}</span>. Green Button or other sources need explicit
-          approval before use here.
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 space-y-2">
+          <p>
+            Manual GapFill Lab requires persisted SMT meter intervals on the real source home. Home and appliance
+            profiles (including on the lab test home) are not source actual usage. Source actual kind is{" "}
+            <span className="font-mono">{sourceActualKind ?? "unknown"}</span>
+            {sourceActualKind === "GREEN_BUTTON"
+              ? "; Green Button needs explicit approval before use here."
+              : sourceActualKind === "missing"
+                ? ". Re-run Load/Replace Test Home, then Step 1 with the linked source house ID — not the lab test home ID."
+                : "."}
+          </p>
+          {Array.isArray(diagnostics?.warnings) && diagnostics!.warnings.length > 0 ? (
+            <WarningsList warnings={diagnostics!.warnings.map((value) => String(value))} />
+          ) : null}
         </div>
       ) : null}
 
