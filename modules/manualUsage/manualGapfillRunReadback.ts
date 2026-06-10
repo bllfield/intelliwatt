@@ -119,10 +119,10 @@ export type ManualGapfillRunReadbackResult = {
 
 const MANUAL_GAPFILL_RUN_ISOLATION_DIAGNOSTICS = {
   manualRunIsolation: "manual_totals_only" as const,
-  sourceActualIntervalsPassedToSimulator: false,
-  sourceActualDailyRowsPassedToSimulator: false,
-  validationDayActualsPassedToSimulator: false,
-  validationDaysCopiedFromActual: false,
+  sourceActualIntervalsPassedToSimulator: false as const,
+  sourceActualDailyRowsPassedToSimulator: false as const,
+  validationDayActualsPassedToSimulator: false as const,
+  validationDaysCopiedFromActual: false as const,
 };
 
 function mapSourceContextBlock(
