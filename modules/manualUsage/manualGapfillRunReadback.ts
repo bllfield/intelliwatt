@@ -362,9 +362,7 @@ export async function runManualGapfillSeededPastSim(args: {
     typeof dispatched.result.canonicalArtifactInputHash === "string" &&
     dispatched.result.canonicalArtifactInputHash.trim()
       ? dispatched.result.canonicalArtifactInputHash.trim()
-      : typeof dispatched.result.artifactInputHash === "string" && dispatched.result.artifactInputHash.trim()
-        ? dispatched.result.artifactInputHash.trim()
-        : null;
+      : null;
 
   const [buildRow, artifactRow] = await Promise.all([
     (prisma as any).usageSimulatorBuild

@@ -1,19 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  buildManualGapfillRunReadbackResult,
-  type ManualGapfillRunReadbackArgs,
-} from "@/modules/manualUsage/manualGapfillRunReadback";
+import { buildManualGapfillRunReadbackResult } from "@/modules/manualUsage/manualGapfillRunReadback";
 import type { ManualGapfillSeedMode } from "@/modules/manualUsage/manualGapfillSeed";
+import type { WeatherPreference } from "@/modules/weatherNormalization/normalizer";
 import { gateManualGapfillAdmin } from "../_helpers";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const MODES: ManualGapfillSeedMode[] = ["MONTHLY_FROM_SOURCE_INTERVALS", "ANNUAL_FROM_SOURCE_INTERVALS"];
-const WEATHER: NonNullable<ManualGapfillRunReadbackArgs["weatherPreference"]>[] = [
-  "LAST_YEAR_WEATHER",
-  "LONG_TERM_NORMAL",
-];
+const WEATHER: WeatherPreference[] = ["LAST_YEAR_WEATHER", "LONG_TERM_AVERAGE"];
+
+function normalizeWeatherPreference(value: unknown): WeatherPreference | undefined {
+  if (typeof value !== "string") return undefined;
+  if (value === "LONG_TERM_NORMAL") return "LONG_TERM_AVERAGE";
+  return WEATHER.includes(value as WeatherPreference) ? (value as WeatherPreference) : undefined;
+}
 
 export async function POST(request: NextRequest) {
   const denied = gateManualGapfillAdmin(request);
@@ -27,11 +28,7 @@ export async function POST(request: NextRequest) {
     const mode = String(body.mode ?? "").trim() as ManualGapfillSeedMode;
     const esiid = typeof body.esiid === "string" ? body.esiid : null;
     const scenarioId = typeof body.scenarioId === "string" ? body.scenarioId : null;
-    const weatherPreference =
-      typeof body.weatherPreference === "string" &&
-      WEATHER.includes(body.weatherPreference as ManualGapfillRunReadbackArgs["weatherPreference"])
-        ? (body.weatherPreference as ManualGapfillRunReadbackArgs["weatherPreference"])
-        : undefined;
+    const weatherPreference = normalizeWeatherPreference(body.weatherPreference);
     const validationDayCount =
       typeof body.validationDayCount === "number" && Number.isFinite(body.validationDayCount)
         ? body.validationDayCount
