@@ -353,7 +353,9 @@ export function buildManualGapfillDailyCompareSummary(args: {
   const actualSource = normalizeActualSourceLabel(args.actualSourceKind);
   const actualByDate = new Map(args.sourceDaily.map((row) => [row.date.slice(0, 10), round2(row.kwh)]));
   const simByDate = new Map(args.labDaily.map((row) => [row.date.slice(0, 10), round2(row.kwh)]));
-  const dates = Array.from(new Set([...actualByDate.keys(), ...simByDate.keys()])).sort();
+  const dates = Array.from(
+    new Set(Array.from(actualByDate.keys()).concat(Array.from(simByDate.keys())))
+  ).sort();
 
   const dailyRows: NonNullable<ManualGapfillCompareEnvelope["compare"]["dailyRows"]> = [];
   const absDeltas: number[] = [];
