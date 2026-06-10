@@ -158,16 +158,15 @@ export type HouseUsage = {
   weatherCardsSourceOwner?: string | null;
 };
 
-function houseNeedsSmtIngestionPoll(house: HouseUsage | null | undefined): boolean {
-  return houseShowsSmtTailFinishingState(house);
-}
-
 function houseShowsSmtTailFinishingState(house: HouseUsage | null | undefined): boolean {
   if (!house?.esiid) return false;
   const ingestion = house.usageIngestion;
-  if (ingestion && !ingestion.tailReady && !ingestion.tailTimedOut) return true;
-  if (!house.dataset) return false;
-  return houseNeedsSmtIngestionPoll(house);
+  if (!ingestion) return false;
+  return !ingestion.tailReady && !ingestion.tailTimedOut;
+}
+
+function houseNeedsSmtIngestionPoll(house: HouseUsage | null | undefined): boolean {
+  return houseShowsSmtTailFinishingState(house);
 }
 
 type UsageApiResponse =
