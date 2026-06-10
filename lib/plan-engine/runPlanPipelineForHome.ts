@@ -589,8 +589,8 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
     stitchMode: "DAILY_OR_INTERVAL",
   });
 
-  const yearMonthsForCalc = bucketBuild.yearMonths.slice();
-  const usageBucketsByMonthForCalc = bucketBuild.usageBucketsByMonth;
+  let yearMonthsForCalc = bucketBuild.yearMonths.slice();
+  let usageBucketsByMonthForCalc = bucketBuild.usageBucketsByMonth;
   const annualKwhForCalc =
     typeof bucketBuild.annualKwh === "number" && Number.isFinite(bucketBuild.annualKwh) ? bucketBuild.annualKwh : null;
 
@@ -817,7 +817,39 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
       // Ensure required buckets are present in the stitched bucket union we built above.
       const requiredKeys = Array.isArray(requiredBucketKeysForKey) ? requiredBucketKeysForKey : [];
       requiredBucketKeysForKey = requiredKeys.map((k) => String(k));
-      const missing = requiredKeys.filter((k) => !unionKeys.has(String(k ?? "").trim()));
+      let missing = requiredKeys.filter((k) => !unionKeys.has(String(k ?? "").trim()));
+      if (missing.length > 0) {
+        try {
+          const supplemental = await buildUsageBucketsForEstimate({
+            homeId,
+            usageSource,
+            esiid: usageSource === "SMT" ? esiid : null,
+            rawId: usageSource === "GREEN_BUTTON" ? gbRawId : null,
+            windowEnd: usageWindowEnd,
+            cutoff: usageCutoff,
+            requiredBucketKeys: missing,
+            monthsCount: 12,
+            maxStepDays: 2,
+            stitchMode: "DAILY_OR_INTERVAL",
+          });
+          for (const ym of supplemental.yearMonths ?? []) {
+            if (!yearMonthsForCalc.includes(ym)) yearMonthsForCalc.push(ym);
+          }
+          for (const [ym, buckets] of Object.entries(supplemental.usageBucketsByMonth ?? {})) {
+            usageBucketsByMonthForCalc = {
+              ...usageBucketsByMonthForCalc,
+              [ym]: { ...(usageBucketsByMonthForCalc[ym] ?? {}), ...(buckets as Record<string, number>) },
+            };
+            for (const key of Object.keys(buckets as Record<string, number>)) {
+              const kk = String(key ?? "").trim();
+              if (kk) unionKeys.add(kk);
+            }
+          }
+          missing = requiredKeys.filter((k) => !unionKeys.has(String(k ?? "").trim()));
+        } catch {
+          // fall through to skip counter below
+        }
+      }
       if (missing.length > 0) {
         ratePlansMissingRequiredKeys++;
         continue;

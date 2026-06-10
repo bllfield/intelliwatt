@@ -79,12 +79,14 @@ export function summarizePlanPipelineEstimateReadiness(
 
   const ratePlanIdsCount = readCount(latest, "ratePlanIdsCount");
   const ratePlansLoaded = readCount(latest, "ratePlansLoaded") ?? ratePlanIdsCount;
+  // Missing required usage buckets is not terminal: the plan can still become calculable after
+  // bucket backfill or a wider union build. Counting it as terminal makes the pipeline stop while
+  // the plans page still shows CACHE_MISS / actively calculating offers.
   const terminalEstimateCount =
     (readCount(latest, "estimatesComputed") ?? 0) +
     (readCount(latest, "estimatesAlreadyCached") ?? 0) +
     (readCount(latest, "ratePlansMissingRateStructure") ?? 0) +
-    (readCount(latest, "ratePlansDerivedNotComputable") ?? 0) +
-    (readCount(latest, "ratePlansMissingRequiredKeys") ?? 0);
+    (readCount(latest, "ratePlansDerivedNotComputable") ?? 0);
   const expectedTerminalCount =
     ratePlanIdsCount == null
       ? null

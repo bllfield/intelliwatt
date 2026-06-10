@@ -28,7 +28,7 @@ describe("summarizePlanPipelineEstimateReadiness", () => {
     expect(readiness.reason).toBe("PIPELINE_INCOMPLETE");
   });
 
-  it("counts non-computable and missing-bucket plans as terminal", () => {
+  it("counts non-computable plans as terminal but not missing-bucket skips", () => {
     const readiness = summarizePlanPipelineEstimateReadiness(
       {
         v: 1,
@@ -51,8 +51,8 @@ describe("summarizePlanPipelineEstimateReadiness", () => {
       "v1",
     );
 
-    expect(readiness.complete).toBe(true);
-    expect(readiness.reason).toBe("PIPELINE_COMPLETE");
+    expect(readiness.complete).toBe(false);
+    expect(readiness.reason).toBe("PIPELINE_INCOMPLETE");
   });
 
   it("requires the current estimate version", () => {

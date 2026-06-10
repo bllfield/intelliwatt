@@ -755,10 +755,6 @@ export default function PlansClient() {
   }, [hasUsage]);
   const hasUsageForUi = hasUsage || hasUsageEverRef.current;
   const offersRaw = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
-  const progressSnapshotRef = useRef<{ available: number; target: number }>({
-    available: 0,
-    target: 0,
-  });
   // In datasetMode, the server returns the full dataset and we apply all sort/filter/paging client-side.
   const offers = useMemo(() => {
     if (!datasetMode) return offersRaw;
@@ -896,32 +892,9 @@ export default function PlansClient() {
     () => rawAvailableEstimateCount + rawPendingCount,
     [rawAvailableEstimateCount, rawPendingCount],
   );
-  useEffect(() => {
-    progressSnapshotRef.current = { available: 0, target: 0 };
-  }, [serverDatasetKey]);
-  useEffect(() => {
-    if (!resp?.ok || !resp?.hasUsage) return;
-    progressSnapshotRef.current = {
-      available: Math.max(progressSnapshotRef.current.available, rawAvailableEstimateCount),
-      target: Math.max(
-        progressSnapshotRef.current.target,
-        rawEstimateTargetCount,
-        rawAvailableEstimateCount,
-      ),
-    };
-  }, [resp?.ok, resp?.hasUsage, rawAvailableEstimateCount, rawEstimateTargetCount]);
-  const availableEstimateCount = useMemo(() => {
-    if (!hasUsageForUi) return 0;
-    return Math.max(rawAvailableEstimateCount, progressSnapshotRef.current.available);
-  }, [hasUsageForUi, rawAvailableEstimateCount, rawPendingCount, resp?.ok]);
-  const estimateTargetCount = useMemo(() => {
-    if (!hasUsageForUi) return 0;
-    return Math.max(rawEstimateTargetCount, progressSnapshotRef.current.target, availableEstimateCount);
-  }, [hasUsageForUi, rawEstimateTargetCount, availableEstimateCount, rawPendingCount, resp?.ok]);
-  const pendingCount = useMemo(() => {
-    if (!estimateTargetCount) return 0;
-    return Math.max(0, estimateTargetCount - availableEstimateCount);
-  }, [availableEstimateCount, estimateTargetCount]);
+  const availableEstimateCount = hasUsageForUi ? rawAvailableEstimateCount : 0;
+  const estimateTargetCount = hasUsageForUi ? rawEstimateTargetCount : 0;
+  const pendingCount = hasUsageForUi ? rawPendingCount : 0;
   const displayedPendingCount = pendingCount;
   const retryDisplayOfferIds = useMemo(() => new Set<string>(), []);
   const isRetryDisplayOffer = useCallback(
@@ -935,13 +908,33 @@ export default function PlansClient() {
     () => (hasUsageForUi ? offers.filter((o: any) => isRetryDisplayOffer(o)) : []),
     [hasUsageForUi, offers, isRetryDisplayOffer],
   );
+  const pendingDisplayOffers = useMemo(
+    () =>
+      hasUsageForUi
+        ? offers.filter((o: any) => !isCalculatedOffer(o) && classifyPlanUiState(o) === "CALCULATING")
+        : [],
+    [hasUsageForUi, offers],
+  );
   const unavailableOffers = useMemo(
-    () => (hasUsageForUi ? offers.filter((o: any) => !isCalculatedOffer(o) && !isRetryDisplayOffer(o)) : []),
+    () =>
+      hasUsageForUi
+        ? offers.filter(
+            (o: any) =>
+              !isCalculatedOffer(o) &&
+              classifyPlanUiState(o) !== "CALCULATING" &&
+              !isRetryDisplayOffer(o),
+          )
+        : [],
     [hasUsageForUi, offers, isRetryDisplayOffer],
   );
+  const hasPendingDisplay = !availableFilterOn && pendingDisplayOffers.length > 0;
   const hasUnavailable = !availableFilterOn && unavailableOffers.length > 0;
-  const pinUnavailableToBottom =
-    Boolean(hasUsageForUi && sort === "best_for_you_proxy" && !availableFilterOn && unavailableOffers.length > 0);
+  const pinUnavailableToBottom = Boolean(
+    hasUsageForUi &&
+      sort === "best_for_you_proxy" &&
+      !availableFilterOn &&
+      (pendingDisplayOffers.length > 0 || unavailableOffers.length > 0),
+  );
   const primaryOffers = pinUnavailableToBottom ? [...calculableOffers, ...retryDisplayOffers] : offers;
   const rawUnavailableCount = useMemo(() => {
     if (!hasUsageForUi) return 0;
@@ -962,19 +955,17 @@ export default function PlansClient() {
     const offersNow = offersRaw;
     const pendingNow = pendingCountFromResponse(resp);
 
-    let calculatingCount = 0;
     let unavailableCount = 0;
     let needUsageCount = 0;
     for (const o of offersNow) {
       const k = classifyPlanUiState(o);
-      if (k === "CALCULATING") calculatingCount++;
-      else if (k === "UNAVAILABLE") unavailableCount++;
+      if (k === "UNAVAILABLE") unavailableCount++;
       else if (k === "NEED_USAGE") needUsageCount++;
     }
 
-    const effectiveCalculatingCount = pendingCount;
+    const effectiveCalculatingCount = rawPendingCount;
     const effectiveUnavailableCount = unavailableCount;
-    setAutoPreparing(calculatingCount > 0 && allowWarmupInBackground);
+    setAutoPreparing(rawPendingCount > 0 && allowWarmupInBackground);
     if (allowWarmupInBackground && pendingNow > 0) {
       setPrefetchNote(
         `IntelliWatt estimates: ${availableEstimateCount} available • ${effectiveCalculatingCount} calculating • ${effectiveUnavailableCount} unable to calculate. Results refresh automatically.`,
@@ -993,13 +984,13 @@ export default function PlansClient() {
     }
 
     setPrefetchNote(null);
-  }, [resp?.ok, resp?.offers, allowWarmupInBackground, offersRaw, availableEstimateCount, pendingCount]);
+  }, [resp?.ok, resp?.offers, allowWarmupInBackground, offersRaw, availableEstimateCount, rawPendingCount]);
   const progressPercent = useMemo(() => {
-    if (!estimateTargetCount) return 0;
+    if (!hasUsageForUi || !estimateTargetCount) return 0;
     return Math.max(0, Math.min(100, Math.round((availableEstimateCount / estimateTargetCount) * 100)));
-  }, [availableEstimateCount, estimateTargetCount]);
+  }, [hasUsageForUi, availableEstimateCount, estimateTargetCount]);
   const hasInitialLoadInFlight = Boolean(loading && !resp?.ok);
-  const hasActiveCalculations = Boolean(displayedPendingCount > 0 || autoPreparing);
+  const hasActiveCalculations = Boolean(rawPendingCount > 0);
   const isStillWorking = Boolean(hasInitialLoadInFlight || hasActiveCalculations);
   const showRecommendedBadge = Boolean(recommendedOfferId && !isStillWorking);
   const showCalcBot =
@@ -1650,7 +1641,24 @@ export default function PlansClient() {
               </div>
             ) : null}
 
-            {pinUnavailableToBottom ? (
+            {pinUnavailableToBottom && hasPendingDisplay ? (
+              <div>
+                <div className="mb-3 rounded-2xl border border-brand-cyan/20 bg-brand-navy px-4 py-3">
+                  <div className="text-sm font-semibold text-brand-white">Still calculating IntelliWatt estimates</div>
+                  <div className="mt-1 text-xs text-brand-cyan/70">
+                    These plans have templates and usage inputs; background calculation runs continue until each
+                    calculable plan reaches an IntelliWatt estimate or a terminal unable-to-calculate state.
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  {pendingDisplayOffers.map((o) => (
+                    <OfferCard key={o.offerId} offer={o} recommended={false} forceCalculating={false} />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {pinUnavailableToBottom && hasUnavailable ? (
               <div>
                 <div className="mb-3 rounded-2xl border border-amber-400/20 bg-brand-navy px-4 py-3">
                   <div className="text-sm font-semibold text-brand-white">
