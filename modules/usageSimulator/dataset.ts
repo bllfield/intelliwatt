@@ -979,6 +979,10 @@ export type SimulatorBuildInputsV1 = {
     | "stratified_weather_balanced";
   /** Optional diagnostics snapshot for explainability of selected validation days. */
   validationSelectionDiagnostics?: Record<string, unknown>;
+  /** MG-2 global compare-day policy revision stamped at recalc time. */
+  validationDayPolicyRevision?: string;
+  /** MG-2 global compare-day policy hash stamped at recalc time. */
+  validationDayPolicyHash?: string;
   notes?: string[];
   filledMonths?: string[];
   monthlyTargetConstructionDiagnostics?: MonthlyTargetConstructionDiagnostic[] | null;

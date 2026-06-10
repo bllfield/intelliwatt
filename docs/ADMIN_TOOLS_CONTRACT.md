@@ -79,11 +79,16 @@ This rule applies to Compare Day Policy preview, Manual GapFill, One Path Sim, a
 
 ## 8) Global compare-day policy (MG-2)
 
+**Canonical doc:** `docs/GLOBAL_COMPARE_DAY_POLICY.md`
+
 - **Owner:** `lib/usage/validationDayPolicy.ts` + admin page `/admin/tools/validation-day-policy`.
 - **Persist:** admin saves to FeatureFlag key `validation_day_policy.v1` (confirmation keyword `APPLY`).
 - **Precedence:** deploy env `VALIDATION_DAY_POLICY_OVERRIDE_JSON` > admin-saved policy > code defaults in `pastValidationPolicy.ts`.
-- **Wired surfaces:** One Path, Manual GapFill, GapFill Lab compare (non source-copy parity), user-site Past Sim reconciliation.
+- **Preview:** user **email** via `/api/admin/houses/by-email` — not raw houseId/userId.
+- **Wired surfaces:** One Path, Manual GapFill, GapFill Lab (non source-copy parity), user-site Past reconciliation.
 - **Guardrails:** canonical 365-day window bounding, travel exclusion, shared `selectValidationDayKeys` selector.
+- **Separate contract:** day *selection* (this policy) vs holdout *scoring* (`docs/PAST_VALIDATION_HOLDOUT.md`).
+- **Stale policy gate:** source-copy parity (`EXACT_INTERVALS` + no manual selectors) requires source `usageSimulatorBuild.buildInputs.validationDayPolicyHash` + `validationDayPolicyRevision` to match active global policy; else `409 source_validation_policy_stale`. See `docs/GLOBAL_COMPARE_DAY_POLICY.md`.
 
 ---
 

@@ -39,9 +39,15 @@ import { resolvePastSimTravelRangesForRecalc } from "@/lib/usage/pastSimTravelRa
 import {
   resolveCanonicalPastValidationDayCount,
   resolveCanonicalPastValidationSelectionMode,
+  PAST_VALIDATION_POLICY_REVISION,
   resolvePastValidationPolicy,
   shouldReconcilePastValidationSelection,
 } from "@/lib/usage/pastValidationPolicy";
+import {
+  computeValidationDayPolicyHash,
+  resolveActiveValidationDayPolicyLive,
+  resolveValidationDayPolicySurfaceForRecalc,
+} from "@/lib/usage/validationDayPolicy";
 import { isPastScenarioValidationBackfillEligible } from "@/lib/usage/pastSimValidationReadBackfill";
 import { resolvePastArtifactIdentity } from "@/lib/usage/pastArtifactIdentity";
 import { healPastArtifactIfIdentityMismatch } from "@/lib/usage/pastArtifactHeal";
@@ -5465,6 +5471,16 @@ async function recalcSimulatorBuildImpl(args: {
     validationActualDailyKwhByDateLocal = finalized.actualByDate;
   }
 
+  const validationDayPolicySurface = resolveValidationDayPolicySurfaceForRecalc(args.runContext?.callerLabel);
+  const activeValidationDayPolicyForBuild = await resolveActiveValidationDayPolicyLive({
+    surface: validationDayPolicySurface,
+  });
+  const validationDayPolicyHashForBuild = computeValidationDayPolicyHash(activeValidationDayPolicyForBuild);
+  const validationDayPolicyStamp = {
+    validationDayPolicyRevision: PAST_VALIDATION_POLICY_REVISION,
+    validationDayPolicyHash: validationDayPolicyHashForBuild,
+  };
+
   const canonicalWindowForFp = canonicalWindowDateRange(built.canonicalMonths);
   const fingerprintWindowStart =
     smtAnchorPeriods?.[0]?.startDate ?? canonicalWindowForFp?.start ?? `${built.canonicalMonths[0]}-01`;
@@ -5557,6 +5573,7 @@ async function recalcSimulatorBuildImpl(args: {
         validationOnlyDateKeysLocal: Array.from(boundedValidationOnlyDateKeysLocal).sort(),
         effectiveValidationSelectionMode: effectiveValidationSelectionMode ?? undefined,
         validationSelectionDiagnostics: validationSelectionDiagnostics ?? undefined,
+        ...validationDayPolicyStamp,
         actualContextHouseId,
         sharedProducerPathUsed: true,
         ...(weatherEfficiencyDerivedInput ? { weatherEfficiencyDerivedInput } : {}),
@@ -5810,6 +5827,7 @@ async function recalcSimulatorBuildImpl(args: {
     validationActualDailyKwhByDateLocal,
     effectiveValidationSelectionMode: effectiveValidationSelectionMode ?? undefined,
     validationSelectionDiagnostics: validationSelectionDiagnostics ?? undefined,
+    ...validationDayPolicyStamp,
     timezone: timezoneForStoredBuild,
     notes,
     filledMonths: built.filledMonths,

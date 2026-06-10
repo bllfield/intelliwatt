@@ -52,6 +52,11 @@ const prisma: any = {
 };
 
 const pastSimulatedDatasetCacheFindFirst = vi.fn();
+vi.mock("@/lib/flags", () => ({
+  getFlag: vi.fn().mockResolvedValue(""),
+  setFlag: vi.fn(),
+}));
+
 vi.mock("@/lib/db/usageClient", () => ({
   usagePrisma: {
     pastSimulatedDatasetCache: { findFirst: (...args: any[]) => pastSimulatedDatasetCacheFindFirst(...args) },
@@ -204,6 +209,21 @@ function buildRequest(body: Record<string, unknown>): NextRequest {
     },
     body: JSON.stringify(body),
   });
+}
+
+async function buildMatchingUserSiteValidationPolicyInputs(
+  extra: Record<string, unknown> = {}
+): Promise<Record<string, unknown>> {
+  const { computeValidationDayPolicyHash, resolveActiveValidationDayPolicyLive } = await import(
+    "@/lib/usage/validationDayPolicy"
+  );
+  const { PAST_VALIDATION_POLICY_REVISION } = await import("@/lib/usage/pastValidationPolicy");
+  const activePolicy = await resolveActiveValidationDayPolicyLive({ surface: "user_site" });
+  return {
+    validationDayPolicyRevision: PAST_VALIDATION_POLICY_REVISION,
+    validationDayPolicyHash: computeValidationDayPolicyHash(activePolicy),
+    ...extra,
+  };
 }
 
 function buildCanonicalManualMonthlyPayload() {
@@ -1536,10 +1556,10 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
       id: "source-build-1",
       lastBuiltAt: new Date("2026-01-02T00:00:00.000Z"),
       buildInputsHash: "source-hash",
-      buildInputs: {
+      buildInputs: await buildMatchingUserSiteValidationPolicyInputs({
         validationOnlyDateKeysLocal: ["2025-04-11", "2025-04-12"],
         effectiveValidationSelectionMode: "random_simple",
-      },
+      }),
     });
     getSimulatedUsageForHouseScenario.mockImplementationOnce(async () => ({
       ok: true,
@@ -1622,6 +1642,171 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(recalcSimulatorBuild.mock.calls.at(-1)?.[0]?.preLockboxTravelRanges).toEqual([
       { startDate: "2025-08-13", endDate: "2025-08-17" },
     ]);
+  });
+
+  it("returns 409 source_validation_policy_stale when source build policy hash is stale", async () => {
+    const helpers = await import("@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers");
+    const getTravelRangesFromDbMock = vi.mocked(helpers.getTravelRangesFromDb as any);
+    getTravelRangesFromDbMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ startDate: "2025-08-13", endDate: "2025-08-17" }]);
+    const { PAST_VALIDATION_POLICY_REVISION } = await import("@/lib/usage/pastValidationPolicy");
+    prisma.usageSimulatorBuild.findUnique.mockResolvedValue({
+      id: "source-build-1",
+      buildInputs: {
+        validationOnlyDateKeysLocal: ["2025-04-11", "2025-04-12"],
+        validationDayPolicyRevision: PAST_VALIDATION_POLICY_REVISION,
+        validationDayPolicyHash: "stale-policy-hash",
+      },
+    });
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const res = await POST(
+      buildRequest({
+        action: "run_test_home_canonical_recalc",
+        email: "brian@intellipath-solutions.com",
+        timezone: "America/Chicago",
+        sourceHouseId: "h1",
+        includeUsage365: false,
+        includeDiagnostics: false,
+        includeFullReportText: false,
+        testRanges: [],
+        testUsageInputMode: "EXACT_INTERVALS",
+      })
+    );
+    const body = await res.json();
+    expect(res.status).toBe(409);
+    expect(body.error).toBe("source_validation_policy_stale");
+    expect(body.sourcePolicyHash).toBe("stale-policy-hash");
+    expect(body.currentPolicyHash).toEqual(expect.any(String));
+    expect(body.instruction).toContain("Refresh/re-run the source Past Sim");
+    expect(recalcSimulatorBuild).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 source_validation_policy_stale when source build policy hash is missing", async () => {
+    const helpers = await import("@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers");
+    const getTravelRangesFromDbMock = vi.mocked(helpers.getTravelRangesFromDb as any);
+    getTravelRangesFromDbMock.mockResolvedValue([]);
+    prisma.usageSimulatorBuild.findUnique.mockResolvedValue({
+      id: "source-build-1",
+      buildInputs: {
+        validationOnlyDateKeysLocal: ["2025-04-11", "2025-04-12"],
+      },
+    });
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const res = await POST(
+      buildRequest({
+        action: "run_test_home_canonical_recalc",
+        email: "brian@intellipath-solutions.com",
+        timezone: "America/Chicago",
+        sourceHouseId: "h1",
+        includeUsage365: false,
+        includeDiagnostics: false,
+        includeFullReportText: false,
+        testRanges: [],
+        testUsageInputMode: "EXACT_INTERVALS",
+      })
+    );
+    const body = await res.json();
+    expect(res.status).toBe(409);
+    expect(body.error).toBe("source_validation_policy_stale");
+    expect(body.sourcePolicyHash).toBeNull();
+    expect(body.sourcePolicyRevision).toBeNull();
+    expect(body.sourceHouseId).toBe("h1");
+  });
+
+  it("bounds source-copy validation keys to the canonical coverage window", async () => {
+    const helpers = await import("@/app/api/admin/tools/gapfill-lab/gapfillLabRouteHelpers");
+    const getTravelRangesFromDbMock = vi.mocked(helpers.getTravelRangesFromDb as any);
+    getTravelRangesFromDbMock.mockResolvedValue([]);
+    getSimulatedUsageForHouseScenario.mockImplementationOnce(async () => ({
+      ok: true,
+      houseId: "test-home-1",
+      scenarioKey: "past-s1",
+      scenarioId: "past-s1",
+      dataset: {
+        summary: { source: "SIMULATED", totalKwh: 100, intervalsCount: 1, start: "2025-03-01", end: "2026-02-28", latest: "2026-02-28T23:45:00Z" },
+        daily: [{ date: "2025-04-11", kwh: 2, source: "ACTUAL" }],
+        monthly: [{ month: "2025-04", kwh: 2 }],
+        series: { intervals15: [{ timestamp: "2025-04-11T00:00:00.000Z", kwh: 1 }] },
+        meta: {
+          validationOnlyDateKeysLocal: ["2025-04-11"],
+          validationProjectionApplied: true,
+          validationCompareRows: [
+            {
+              localDate: "2025-04-11",
+              dayType: "weekday",
+              actualDayKwh: 2,
+              simulatedDayKwh: 2,
+              errorKwh: 0,
+              percentError: 0,
+            },
+          ],
+          validationCompareMetrics: { mae: 0, rmse: 0, wape: 0 },
+          canonicalArtifactSimulatedDayTotalsByDate: { "2025-04-11": 2 },
+        },
+      },
+    }));
+    prisma.usageSimulatorBuild.findUnique.mockResolvedValue({
+      id: "source-build-1",
+      buildInputs: await buildMatchingUserSiteValidationPolicyInputs({
+        validationOnlyDateKeysLocal: ["2025-04-11", "2099-12-31"],
+        effectiveValidationSelectionMode: "random_simple",
+      }),
+    });
+    const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+    const res = await POST(
+      buildRequest({
+        action: "run_test_home_canonical_recalc",
+        email: "brian@intellipath-solutions.com",
+        timezone: "America/Chicago",
+        sourceHouseId: "h1",
+        includeUsage365: false,
+        includeDiagnostics: false,
+        includeFullReportText: false,
+        testRanges: [],
+        testUsageInputMode: "EXACT_INTERVALS",
+      })
+    );
+    expect(res.status).toBe(200);
+    expect(Array.from(recalcSimulatorBuild.mock.calls.at(-1)?.[0]?.validationOnlyDateKeysLocal ?? []).sort()).toEqual([
+      "2025-04-11",
+    ]);
+  });
+
+  it("uses resolveGlobalValidationDayKeysForPastSim on non-source-copy GapFill Lab recalc paths", async () => {
+    const validationDayPolicy = await import("@/lib/usage/validationDayPolicy");
+    const spy = vi.spyOn(validationDayPolicy, "resolveGlobalValidationDayKeysForPastSim").mockResolvedValue({
+      policy: validationDayPolicy.resolveActiveValidationDayPolicy({ surface: "admin_lab" }),
+      policyHash: "global-policy-hash",
+      selectionMode: "stratified_weather_balanced",
+      validationDayCount: 14,
+      validationOnlyDateKeysLocal: ["2025-04-10"],
+      window: { startDate: "2025-03-01", endDate: "2026-02-28" },
+      warnings: [],
+      selectionDiagnostics: { modeUsed: "stratified_weather_balanced" } as any,
+    });
+    try {
+      const { POST } = await import("@/app/api/admin/tools/gapfill-lab/route");
+      const res = await POST(
+        buildRequest({
+          action: "run_test_home_canonical_recalc",
+          email: "brian@intellipath-solutions.com",
+          timezone: "America/Chicago",
+          sourceHouseId: "h1",
+          includeUsage365: false,
+          includeDiagnostics: false,
+          includeFullReportText: false,
+          testRanges: [{ startDate: "2025-04-10", endDate: "2025-04-10" }],
+        })
+      );
+      expect(res.status).toBe(200);
+      expect(spy).toHaveBeenCalled();
+      expect(Array.from(recalcSimulatorBuild.mock.calls.at(-1)?.[0]?.validationOnlyDateKeysLocal ?? [])).toEqual([
+        "2025-04-10",
+      ]);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("keeps gapfill compare on shared recalc->stored-artifact read path", async () => {

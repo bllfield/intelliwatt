@@ -14,7 +14,10 @@ async function parseJson<T>(res: Response): Promise<JsonResult<T>> {
 }
 
 export async function fetchValidationDayPolicySnapshot() {
-  return parseJson<Record<string, unknown>>("/api/admin/tools/validation-day-policy?surface=admin_lab");
+  const res = await fetch("/api/admin/tools/validation-day-policy?surface=admin_lab", {
+    credentials: "include",
+  });
+  return parseJson<Record<string, unknown>>(res);
 }
 
 export async function saveValidationDayPolicy(args: {

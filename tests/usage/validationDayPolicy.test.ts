@@ -121,4 +121,67 @@ describe("validationDayPolicy", () => {
     expect(out.diagnostics.sharedPolicySelectorOwner).toBe("selectValidationDayKeys");
     expect(out.selectionMode).toBe("stratified_weather_balanced");
   });
+
+  describe("gateSourceCopyValidationPolicyMatch", () => {
+    it("allows source-copy when source build policy hash/revision match active policy", async () => {
+      const { computeValidationDayPolicyHash, gateSourceCopyValidationPolicyMatch, resolveActiveValidationDayPolicyLive } =
+        await import("@/lib/usage/validationDayPolicy");
+      const { PAST_VALIDATION_POLICY_REVISION } = await import("@/lib/usage/pastValidationPolicy");
+      const activePolicy = await resolveActiveValidationDayPolicyLive({ surface: "user_site" });
+      const policyHash = computeValidationDayPolicyHash(activePolicy);
+      const gate = await gateSourceCopyValidationPolicyMatch({
+        sourceHouseId: "source-1",
+        sourceBuildInputs: {
+          validationDayPolicyRevision: PAST_VALIDATION_POLICY_REVISION,
+          validationDayPolicyHash: policyHash,
+          validationOnlyDateKeysLocal: ["2025-04-11", "2025-04-12"],
+        },
+        surface: "user_site",
+      });
+      expect(gate.ok).toBe(true);
+      if (gate.ok) {
+        expect(gate.policyHash).toBe(policyHash);
+      }
+    });
+
+    it("blocks source-copy when source policy hash is stale", async () => {
+      const { gateSourceCopyValidationPolicyMatch, SOURCE_VALIDATION_POLICY_STALE_INSTRUCTION } =
+        await import("@/lib/usage/validationDayPolicy");
+      const { PAST_VALIDATION_POLICY_REVISION } = await import("@/lib/usage/pastValidationPolicy");
+      const gate = await gateSourceCopyValidationPolicyMatch({
+        sourceHouseId: "source-1",
+        sourceBuildInputs: {
+          validationDayPolicyRevision: PAST_VALIDATION_POLICY_REVISION,
+          validationDayPolicyHash: "stale-hash",
+          validationOnlyDateKeysLocal: ["2025-04-11"],
+        },
+        surface: "user_site",
+      });
+      expect(gate.ok).toBe(false);
+      if (!gate.ok) {
+        expect(gate.stale.error).toBe("source_validation_policy_stale");
+        expect(gate.stale.sourcePolicyHash).toBe("stale-hash");
+        expect(gate.stale.sourceHouseId).toBe("source-1");
+        expect(gate.stale.instruction).toBe(SOURCE_VALIDATION_POLICY_STALE_INSTRUCTION);
+        expect(gate.stale.currentPolicyHash).toEqual(expect.any(String));
+      }
+    });
+
+    it("blocks source-copy when source policy hash/revision are missing", async () => {
+      const { gateSourceCopyValidationPolicyMatch } = await import("@/lib/usage/validationDayPolicy");
+      const gate = await gateSourceCopyValidationPolicyMatch({
+        sourceHouseId: "source-1",
+        sourceBuildInputs: {
+          validationOnlyDateKeysLocal: ["2025-04-11"],
+        },
+        surface: "user_site",
+      });
+      expect(gate.ok).toBe(false);
+      if (!gate.ok) {
+        expect(gate.stale.error).toBe("source_validation_policy_stale");
+        expect(gate.stale.sourcePolicyHash).toBeNull();
+        expect(gate.stale.sourcePolicyRevision).toBeNull();
+      }
+    });
+  });
 });

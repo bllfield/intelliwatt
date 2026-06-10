@@ -71,7 +71,10 @@ import {
   isAdminLabTreatmentMode,
 } from "@/modules/usageSimulator/adminLabTreatment";
 import { resolvePastValidationPolicy } from "@/lib/usage/pastValidationPolicy";
-import { resolveGlobalValidationDayKeysForPastSim } from "@/lib/usage/validationDayPolicy";
+import {
+  gateSourceCopyValidationPolicyMatch,
+  resolveGlobalValidationDayKeysForPastSim,
+} from "@/lib/usage/validationDayPolicy";
 import {
   resolveAdminValidationPolicy,
   resolveTestHomeUsageInputMode,
@@ -1897,21 +1900,38 @@ export async function POST(req: NextRequest) {
           { status: 409 }
         );
       }
+      const sourcePolicyGate = await gateSourceCopyValidationPolicyMatch({
+        sourceHouseId: sourceHouse.id,
+        sourceBuildInputs: sourceBuildInputs ?? null,
+        surface: "user_site",
+      });
+      if (!sourcePolicyGate.ok) {
+        return NextResponse.json(
+          attachFailureContract({
+            ok: false,
+            ...sourcePolicyGate.stale,
+          }),
+          { status: 409 }
+        );
+      }
+      const boundedSourceValidationKeys = Array.from(
+        boundDateKeysToCoverageWindow(sourceValidationKeys, canonicalWindow)
+      ).sort();
       const sourceSelectionMode =
         normalizeValidationSelectionMode(sourceBuildInputs?.effectiveValidationSelectionMode) ??
         userValidationPolicy.selectionMode;
       validationPolicy = resolveAdminValidationPolicy({
         selectionMode: sourceSelectionMode,
-        validationDayCount: sourceValidationKeys.length,
+        validationDayCount: boundedSourceValidationKeys.length,
       });
       travelRangesForRecalc = sourceTravelRangesFromDb;
-      testSelectionMode = validationPolicy.selectionMode;
-      testDateKeysLocal = new Set(sourceValidationKeys);
-      testRangesUsed = mergeDateKeysToRanges(sourceValidationKeys);
-      testDaysSelected = sourceValidationKeys.length;
+      testSelectionMode = sourceSelectionMode;
+      testDateKeysLocal = new Set(boundedSourceValidationKeys);
+      testRangesUsed = mergeDateKeysToRanges(boundedSourceValidationKeys);
+      testDaysSelected = boundedSourceValidationKeys.length;
       selectionDiagnostics = buildSourceCopySelectionDiagnostics({
         selectionMode: sourceSelectionMode,
-        selectedDateKeys: sourceValidationKeys,
+        selectedDateKeys: boundedSourceValidationKeys,
       });
     } else {
       const globalValidation = await resolveGlobalValidationDayKeysForPastSim({

@@ -148,6 +148,10 @@ When some EFL hosts block Vercel/AWS IP ranges (common 403/406), the app can opt
 - `FLAG_STRICT_PII_LOGGING` = true | false  # server-only
 - `WATTBUY_ESIID_DISABLED` — default "true". When "true", WattBuy-backed ESIID admin routes are gated off; plan pulls remain address/zip based.
 
+### Usage / Past validation (server-only)
+
+- `VALIDATION_DAY_POLICY_OVERRIDE_JSON` — Optional deploy override for global compare-day policy (MG-2). JSON shape: `{ "selectionMode": "stratified_weather_balanced", "validationDayCount": 14, "surface": "admin_lab" }`. Takes precedence over admin-saved FeatureFlag policy and code defaults. Prefer admin UI `/admin/tools/validation-day-policy` for routine changes. **Contract:** `docs/GLOBAL_COMPARE_DAY_POLICY.md`.
+
 ## Security
 - `ADMIN_TOKEN` — **Admin route protection.** Required header `x-admin-token` must match this value on admin/debug endpoints.
 

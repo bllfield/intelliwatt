@@ -25,7 +25,7 @@ Default mode: `MONTHLY_FROM_SOURCE_INTERVALS`.
 | Phase | Commit | What shipped |
 |-------|--------|--------------|
 | **MG-1** | `814e0839` | Read-only source context resolver + `POST /api/admin/tools/manual-gapfill/source-context` |
-| **MG-2** | `d9542e06`+ | Global compare-day policy control: FeatureFlag persist (`validation_day_policy.v1`), email-based preview, wired to One Path / Manual GapFill / GapFill Lab |
+| **MG-2** | `d9542e06` / `5021453f` | Global compare-day policy — **canonical doc `docs/GLOBAL_COMPARE_DAY_POLICY.md`**. FeatureFlag persist (`validation_day_policy.v1`), email-based preview, wired to One Path / Manual GapFill / GapFill Lab (non source-copy) |
 | **MG-3** | `f1159ef5` | Seed preparation + `POST /api/admin/tools/manual-gapfill/prepare-seed` (dry-run default; optional lab persist) |
 | **MG-4** | `be2ff2cf` | Run/readback + `POST /api/admin/tools/manual-gapfill/run-readback` (canonical Past Sim on lab home) |
 | **MG-5** | `8205fa1e` | Compare envelope + `POST /api/admin/tools/manual-gapfill/compare` (+ build hotfixes `5b90d4e5`, `41f5c1ea`) |
@@ -44,7 +44,7 @@ Default mode: `MONTHLY_FROM_SOURCE_INTERVALS`.
 ### Steps (each independently runnable)
 
 1. **Source Context** — MG-1 `source-context`
-2. **Validation Policy** — MG-2 snapshot + preview (link to full policy page)
+2. **Validation Policy** — MG-2 snapshot + preview (link to `/admin/tools/validation-day-policy`; contract `docs/GLOBAL_COMPARE_DAY_POLICY.md`)
 3. **Prepare Seed** — MG-3 `prepare-seed`
 4. **Run / Readback** — MG-4 `run-readback`
 5. **Compare** — MG-5 `compare` (`compareScope: source_actual_vs_lab_simulated`)
@@ -97,8 +97,8 @@ MG-5 compare scope is always `source_actual_vs_lab_simulated`. Bill Match (MG-4)
 
 ## Hard boundaries (unchanged by MG-1–MG-7)
 
-- **No** legacy GapFill deletion or behavior change (`/admin/tools/gapfill-lab` unchanged).
-- **No** `EXACT_INTERVALS` changes.
+- **No** legacy GapFill route deletion. GapFill Lab **compare-day selection** uses global MG-2 policy on the main compare path; **`EXACT_INTERVALS` source-copy parity** copies source build validation keys only when source `validationDayPolicyHash` + `validationDayPolicyRevision` match the active global policy (else `409 source_validation_policy_stale`). See `docs/GLOBAL_COMPARE_DAY_POLICY.md`.
+- **No** `EXACT_INTERVALS` scoring/keep-ref behavior changes beyond global compare-day wiring.
 - **No** Manual Monthly GREEN production changes (`docs/MANUAL_MONTHLY_GREEN_CLOSEOUT.md` authoritative).
 - **No** source-house writes from Manual GapFill admin pipeline.
 - **No** lab writes except MG-3 explicit persist and MG-4 explicit Past Sim run when admin triggers those endpoints.

@@ -416,6 +416,127 @@ async function resolveCandidateDateKeys(args: {
   return localDateKeysInRange(args.window.startDate, args.window.endDate, args.timezone);
 }
 
+export const SOURCE_VALIDATION_POLICY_STALE_INSTRUCTION =
+  "Refresh/re-run the source Past Sim under the active global compare-day policy, then retry.";
+
+export type SourceValidationPolicyFromBuildInputs = {
+  validationDayPolicyRevision: string | null;
+  validationDayPolicyHash: string | null;
+  validationOnlyDateKeysLocal: string[];
+  selectionMode: ValidationDaySelectionMode | null;
+  validationDayCount: number | null;
+};
+
+export type SourceValidationPolicyStaleError = {
+  error: "source_validation_policy_stale";
+  message: string;
+  instruction: typeof SOURCE_VALIDATION_POLICY_STALE_INSTRUCTION;
+  currentPolicyRevision: string;
+  currentPolicyHash: string;
+  currentSelectionMode: ValidationDaySelectionMode;
+  currentValidationDayCount: number;
+  sourcePolicyRevision: string | null;
+  sourcePolicyHash: string | null;
+  sourceHouseId: string;
+};
+
+function normalizeStoredPolicyString(value: unknown): string | null {
+  const normalized = String(value ?? "").trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+export function readSourceValidationPolicyFromBuildInputs(
+  buildInputs: Record<string, unknown> | null | undefined
+): SourceValidationPolicyFromBuildInputs {
+  const inputs = asRecord(buildInputs);
+  const validationOnlyDateKeysLocal = Array.isArray(inputs.validationOnlyDateKeysLocal)
+    ? (inputs.validationOnlyDateKeysLocal as unknown[])
+        .map((value) => normalizeDateKey(value))
+        .filter((value): value is string => Boolean(value))
+    : [];
+  const selectionMode = normalizeValidationSelectionMode(inputs.effectiveValidationSelectionMode);
+  const validationDayCount =
+    validationOnlyDateKeysLocal.length > 0
+      ? validationOnlyDateKeysLocal.length
+      : Number.isFinite(Number(inputs.validationDayCount))
+        ? Math.floor(Number(inputs.validationDayCount))
+        : null;
+  return {
+    validationDayPolicyRevision: normalizeStoredPolicyString(inputs.validationDayPolicyRevision),
+    validationDayPolicyHash: normalizeStoredPolicyString(inputs.validationDayPolicyHash),
+    validationOnlyDateKeysLocal,
+    selectionMode,
+    validationDayCount,
+  };
+}
+
+export function resolveValidationDayPolicySurfaceForRecalc(
+  callerLabel?: string | null
+): PastValidationPolicySurface {
+  const label = String(callerLabel ?? "").toLowerCase();
+  if (
+    label.includes("manual_gapfill") ||
+    label.includes("one_path") ||
+    label.includes("gapfill") ||
+    label.includes("admin")
+  ) {
+    return "admin_lab";
+  }
+  return "user_site";
+}
+
+export async function gateSourceCopyValidationPolicyMatch(args: {
+  sourceHouseId: string;
+  sourceBuildInputs: Record<string, unknown> | null | undefined;
+  surface?: PastValidationPolicySurface;
+}): Promise<
+  | {
+      ok: true;
+      activePolicy: ValidationDayPolicyConfig;
+      policyHash: string;
+      source: SourceValidationPolicyFromBuildInputs;
+    }
+  | { ok: false; stale: SourceValidationPolicyStaleError }
+> {
+  const sourceHouseId = String(args.sourceHouseId ?? "").trim();
+  const source = readSourceValidationPolicyFromBuildInputs(args.sourceBuildInputs);
+  const activePolicy = await resolveActiveValidationDayPolicyLive({
+    surface: args.surface ?? "user_site",
+  });
+  const currentPolicyHash = computeValidationDayPolicyHash(activePolicy);
+  const currentPolicyRevision = activePolicy.policyRevision;
+  const sourcePolicyHash = source.validationDayPolicyHash;
+  const sourcePolicyRevision = source.validationDayPolicyRevision;
+  const matches =
+    sourcePolicyHash === currentPolicyHash && sourcePolicyRevision === currentPolicyRevision;
+
+  if (matches) {
+    return {
+      ok: true,
+      activePolicy,
+      policyHash: currentPolicyHash,
+      source,
+    };
+  }
+
+  return {
+    ok: false,
+    stale: {
+      error: "source_validation_policy_stale",
+      message:
+        "Source Past Sim validation-day policy is missing or stale relative to the active global compare-day policy.",
+      instruction: SOURCE_VALIDATION_POLICY_STALE_INSTRUCTION,
+      currentPolicyRevision,
+      currentPolicyHash,
+      currentSelectionMode: activePolicy.selectionMode,
+      currentValidationDayCount: activePolicy.validationDayCount,
+      sourcePolicyRevision,
+      sourcePolicyHash,
+      sourceHouseId,
+    },
+  };
+}
+
 export async function previewGlobalValidationDaySelection(args: {
   houseId: string;
   userId: string;

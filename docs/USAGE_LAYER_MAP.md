@@ -72,6 +72,8 @@ Persistence status today:
 
 **Validation holdout (PC-2026-10):** Production Past recalc wires `validationHoldoutDateKeysLocal` from `buildInputs.validationOnlyDateKeysLocal` into shared `simulatePastUsageDataset` / `buildPastSimulatedBaselineV1`. Display stitch flips validation days to ACTUAL (`projectBaselineFromCanonicalDataset`); compare sidecar uses holdout sim totals (`validationCanonicalSimulatedDayTotalsByDateLocal`, `meta.validationHoldoutProof`). Owners: `lib/usage/pastValidationHoldout.ts`, `modules/usageSimulator/service.ts`. Contract: `docs/PAST_VALIDATION_HOLDOUT.md`.
 
+**Global compare-day selection (MG-2):** Which dates populate `buildInputs.validationOnlyDateKeysLocal` before holdout wiring. Owner: `lib/usage/validationDayPolicy.ts` → `selectValidationDayKeys`; admin control: `/admin/tools/validation-day-policy`; persist: FeatureFlag `validation_day_policy.v1`. Guardrails: canonical 365-day window (`boundDateKeysToCoverageWindow`), travel exclusion, email-based admin preview. Contract: `docs/GLOBAL_COMPARE_DAY_POLICY.md`.
+
 ### `FUTURE_SIM_BASELINE`
 
 - Concept exists (past overlays applied to future starting curve).

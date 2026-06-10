@@ -53,6 +53,15 @@ See **`docs/ONE_PATH_DUAL_RUN_GOAL.md`** for the full spec. Summary:
 - Past Sim engines: `MIN_TRUSTED_ACTUAL_INTERVALS_PER_DAY = 96` for INTERVAL/SMT trusted pool; usage/baseline may still **display** partial intervals.
 - Green Button baseline/adapter behavior unchanged by SMT coverage work.
 
+### Global compare-day policy (shipped — MG-2)
+
+**Contract:** `docs/GLOBAL_COMPARE_DAY_POLICY.md`
+
+- One Path Past runs use **`resolveGlobalValidationDayKeysForPastSim()`** — no per-run validation mode/count overrides from the admin UI.
+- Selected keys populate `buildInputs.validationOnlyDateKeysLocal` before holdout wiring (`docs/PAST_VALIDATION_HOLDOUT.md`).
+- Admin control: `/admin/tools/validation-day-policy`; persist FeatureFlag `validation_day_policy.v1`; deploy override `VALIDATION_DAY_POLICY_OVERRIDE_JSON`.
+- Keys are bounded to the canonical 365-day window and exclude travel/vacant days.
+
 ## Non-negotiable upstream / downstream boundary
 
 ### Usage stays upstream

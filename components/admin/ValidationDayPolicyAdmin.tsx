@@ -119,8 +119,14 @@ export function ValidationDayPolicyAdmin() {
     setError(null);
     try {
       const result = await fetchAdminUserByEmail(email);
-      if (!result.ok || !result.data?.ok) {
-        setError(result.message ?? result.error ?? "User lookup failed.");
+      if (!result.ok) {
+        setError(result.error ?? "User lookup failed.");
+        setPreviewHouses([]);
+        return;
+      }
+      if (!result.data?.ok) {
+        const payload = result.data as { message?: string; error?: string } | undefined;
+        setError(payload?.message ?? payload?.error ?? "User lookup failed.");
         setPreviewHouses([]);
         return;
       }
@@ -159,7 +165,7 @@ export function ValidationDayPolicyAdmin() {
         houseId: previewHouseId,
         useDraft: previewUseDraft,
         draftSelectionMode: draftMode,
-        draftValidationDayCount: Number(draftCount) || null,
+        draftValidationDayCount: Number.isFinite(Number(draftCount)) ? Number(draftCount) : undefined,
       });
       if (!result.ok) {
         setError(result.message ?? result.error);

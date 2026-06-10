@@ -3,6 +3,8 @@
 **Status:** Shipped (2026-06-06). **Plan:** `docs/PROJECT_PLAN.md` → PC-2026-10.  
 **Applies to:** GREEN_BUTTON Past, SMT / INTERVAL Past, and any future interval-backed source.
 
+**Related (day selection, not holdout scoring):** `docs/GLOBAL_COMPARE_DAY_POLICY.md` (MG-2) — which dates populate `validationOnlyDateKeysLocal` before this holdout contract runs.
+
 ## Problem
 
 Production Past validation used `forceModeledOutputKeepReferencePoolDateKeysLocal` (`TEST_MODELED_KEEP_REF`) for scored validation days. That kept the target day’s **actual kWh** and **shape96** in the donor and shape pools, so Validation/Test Compare “WAPE” measured **reconstruction**, not **holdout** accuracy.
