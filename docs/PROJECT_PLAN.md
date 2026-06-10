@@ -209,7 +209,8 @@
 - **MG-1 shipped:** read-only Manual GapFill source context resolver (`814e0839`).
 - **MG-2 shipped:** global validation-day policy module + admin preview API/UI (`d9542e06`); future Manual GapFill consumes read-only; legacy GapFill local selectors remain.
 - **MG-3 shipped:** seed preparation from MG-1 source context (`f1159ef5`); dry-run default, optional lab-home persist only; no Past Sim/compare.
-- **MG-4 (local):** run/readback from prepared lab manual seed via canonical Past Sim on lab home; no source-vs-sim compare. **MG-5** = compare standardization.
+- **MG-4 shipped:** run/readback from prepared lab manual seed (`be2ff2cf`); canonical Past Sim on lab home only; no source-vs-sim compare.
+- **MG-5 (local):** source actual vs lab simulated compare standardization — admin/lab diagnostic only; no Past Sim, seed prep, or production WAPE/scoring changes. **MG-6** = UI simplification/wiring.
 - Future Manual GapFill uses shared validation objects + global validation-day policy, not GapFill-only validation math.
 
 **Future work (separate approval — not started):**
