@@ -103,7 +103,11 @@ export function ManualValidationSummaryPanel(props: {
 
       <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
         <div className="text-sm font-semibold text-neutral-900">Simulation Confidence</div>
-        <p className="mt-1 text-xs text-neutral-600">{manualSimulationConfidence.userFacingSummary}</p>
+        <p className="mt-1 text-xs text-neutral-600">
+          Separate from Bill Match. This reflects interval-shape and model confidence, not whether your entered bill totals
+          were accepted.
+        </p>
+        <p className="mt-2 text-xs text-neutral-600">{manualSimulationConfidence.userFacingSummary}</p>
         <div className="mt-3 text-sm font-semibold text-neutral-900">{titleCaseStatus(manualSimulationConfidence.status)}</div>
         {showAdmin ? (
           <pre className="mt-3 overflow-x-auto rounded-lg bg-white p-3 text-[11px] text-neutral-700">

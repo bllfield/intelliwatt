@@ -5,8 +5,11 @@ import {
 import { buildDailyFromIntervals } from "@/modules/onePathSim/usageSimulator/dataset";
 import {
   resolveCanonicalUsage365CoverageWindow,
+  fillCanonicalDailyTotals,
+  coverageWindowEndingOnDateKey,
   type CoverageWindow,
 } from "@/lib/usage/canonicalMetadataWindow";
+import { CANONICAL_COVERAGE_TOTAL_DAYS } from "@/lib/usage/canonicalCoverageConfig";
 import { buildLoadCurveInsightsFromIntervalRows } from "@/lib/usage/fifteenMinuteLoadCurve";
 
 export const MANUAL_CANONICAL_ARTIFACT_WINDOW_VERSION = "manual_canonical_artifact_v1";
@@ -198,10 +201,63 @@ export function resolveManualArtifactCoverageClass(
 }
 
 /** Keep persisted canonical manual coverage on artifact read; do not re-derive from lockbox/buildInputs. */
+export function normalizeCanonicalManualPastDatasetDailyCoverageForRead(dataset: any): {
+  startDate: string;
+  endDate: string;
+  dailyRowCount: number;
+} | null {
+  if (!isCanonicalManualPastArtifact(dataset)) return null;
+
+  const coverageEnd =
+    asDateKey(dataset?.meta?.coverageEnd) ??
+    asDateKey(dataset?.summary?.end) ??
+    asDateKey(dataset?.summary?.coverageEnd);
+  if (!coverageEnd) return null;
+
+  const window: CoverageWindow =
+    coverageWindowEndingOnDateKey(coverageEnd, CANONICAL_COVERAGE_TOTAL_DAYS) ?? {
+      startDate:
+        asDateKey(dataset?.meta?.coverageStart) ??
+        asDateKey(dataset?.summary?.start) ??
+        asDateKey(dataset?.summary?.coverageStart) ??
+        coverageEnd,
+      endDate: coverageEnd,
+    };
+
+  const filteredDaily = (Array.isArray(dataset.daily) ? dataset.daily : []).filter((row: { date?: unknown }) => {
+    const dateKey = asDateKey(row?.date);
+    return dateKey != null && dateKey >= window.startDate && dateKey <= window.endDate;
+  });
+  const filledDaily = fillCanonicalDailyTotals(filteredDaily, window);
+
+  if (!dataset.summary || typeof dataset.summary !== "object") dataset.summary = {};
+  if (!dataset.meta || typeof dataset.meta !== "object") dataset.meta = {};
+
+  dataset.daily = filledDaily;
+  dataset.summary.start = window.startDate;
+  dataset.summary.end = window.endDate;
+  dataset.summary.coverageStart = window.startDate;
+  dataset.summary.coverageEnd = window.endDate;
+  dataset.summary.latest = `${window.endDate}T23:59:59.999Z`;
+  dataset.meta.coverageStart = window.startDate;
+  dataset.meta.coverageEnd = window.endDate;
+  dataset.meta.dailyRowCount = filledDaily.length;
+
+  return {
+    startDate: window.startDate,
+    endDate: window.endDate,
+    dailyRowCount: filledDaily.length,
+  };
+}
+
 export function preserveCanonicalManualPastArtifactCoverageForRead(
   dataset: any
 ): { startDate: string; endDate: string } | null {
   if (!isCanonicalManualPastArtifact(dataset)) return null;
+  const normalized = normalizeCanonicalManualPastDatasetDailyCoverageForRead(dataset);
+  if (normalized) {
+    return { startDate: normalized.startDate, endDate: normalized.endDate };
+  }
   const start = asDateKey(dataset?.meta?.coverageStart ?? dataset?.summary?.start);
   const end = asDateKey(dataset?.meta?.coverageEnd ?? dataset?.summary?.end);
   if (!start || !end) return null;
@@ -612,5 +668,9 @@ export function resolveManualDisplayDatasetForRead(args: {
   usageInputMode?: string | null;
   displayWindowEndDate?: string | null;
 }): any {
-  return remapManualPastDatasetForDisplayWindow(args);
+  const dataset = remapManualPastDatasetForDisplayWindow(args);
+  if (isCanonicalManualPastArtifact(dataset)) {
+    normalizeCanonicalManualPastDatasetDailyCoverageForRead(dataset);
+  }
+  return dataset;
 }

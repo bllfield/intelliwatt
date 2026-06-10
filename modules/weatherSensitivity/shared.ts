@@ -394,11 +394,22 @@ function buildExplanation(args: {
   if (args.factors.hvacType || args.factors.heatingType) factorNotes.push("HVAC");
   if (args.factors.thermostatSummerF != null || args.factors.thermostatWinterF != null) factorNotes.push("thermostat");
   const factorText = factorNotes.length > 0 ? ` after accounting for ${factorNotes.join(", ")}` : "";
+  const billingPeriodCopy =
+    "estimated usage movement from your manual bills, home details, weather, pool, HVAC, and thermostat inputs";
   if (args.weatherEfficiencyScore0to100 <= 45) {
+    if (args.scoringMode === "BILLING_PERIOD_BASED") {
+      return `This home appears weather sensitive. The score reflects estimated ${dominant}-day usage movement from your manual bills, home details, weather, pool, HVAC, and thermostat inputs.`;
+    }
     return `This home appears weather sensitive. Usage climbs quickly on ${dominant} days${factorText}.`;
   }
   if (args.weatherEfficiencyScore0to100 >= 75) {
+    if (args.scoringMode === "BILLING_PERIOD_BASED") {
+      return `This home looks relatively stable versus weather. The score reflects ${billingPeriodCopy}.`;
+    }
     return `This home looks relatively stable versus weather. The score reflects measured usage movement${factorText}.`;
+  }
+  if (args.scoringMode === "BILLING_PERIOD_BASED") {
+    return `This home's usage has a moderate weather response. The score reflects ${billingPeriodCopy}.`;
   }
   return `This home's usage has a moderate weather response. The score reflects measured hot and cold day movement${factorText}.`;
 }

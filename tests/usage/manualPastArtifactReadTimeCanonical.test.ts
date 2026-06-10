@@ -9,10 +9,13 @@ import {
 import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
 import {
   MANUAL_CANONICAL_ARTIFACT_WINDOW_VERSION,
+  normalizeCanonicalManualPastDatasetDailyCoverageForRead,
   preserveCanonicalManualPastArtifactCoverageForRead,
   projectManualPastDatasetToCanonicalWindow,
   resolveManualArtifactCoverageClass,
+  resolveManualDisplayDatasetForRead,
 } from "@/lib/usage/persistManualPastArtifactCanonicalWindow";
+import { CANONICAL_COVERAGE_TOTAL_DAYS } from "@/lib/usage/canonicalCoverageConfig";
 
 function addDays(dateKey: string, days: number): string {
   const dt = new Date(`${dateKey}T00:00:00.000Z`);
@@ -142,11 +145,41 @@ describe("manualPastArtifactReadTimeCanonical", () => {
     dataset.summary.end = "2026-06-04";
     dataset.meta.coverageStart = "2025-06-07";
     dataset.meta.coverageEnd = "2026-06-06";
+    dataset.daily = [
+      ...(Array.isArray(dataset.daily) ? dataset.daily : []),
+      { date: "2025-06-05", kwh: 99 },
+    ];
 
     const preserved = preserveCanonicalManualPastArtifactCoverageForRead(dataset);
     expect(preserved).toEqual({ startDate: "2025-06-07", endDate: "2026-06-06" });
     expect(dataset.summary.start).toBe("2025-06-07");
     expect(dataset.summary.end).toBe("2026-06-06");
+    expect(dataset.meta.dailyRowCount).toBe(CANONICAL_COVERAGE_TOTAL_DAYS);
+    expect(dataset.daily[0]?.date).toBe("2025-06-07");
+    expect(dataset.daily[dataset.daily.length - 1]?.date).toBe("2026-06-06");
+    expect(dataset.daily.some((row: { date?: string }) => row.date === "2025-06-05")).toBe(false);
+  });
+
+  it("normalizeCanonicalManualPastDatasetDailyCoverageForRead aligns daily rows to the shared 365-day window ending on artifact coverage end", () => {
+    const dataset = projectManualPastDatasetToCanonicalWindow(buildBillWindowManualDataset("MONTHLY"), {
+      usageInputMode: "MANUAL_MONTHLY",
+      now: proofNow,
+    });
+    dataset.meta.coverageEnd = "2026-06-07";
+    dataset.summary.end = "2026-06-07";
+    dataset.meta.coverageStart = "2025-06-09";
+    dataset.summary.start = "2025-06-09";
+    dataset.daily = [{ date: "2025-06-08", kwh: 1 }, { date: "2025-06-09", kwh: 2 }];
+
+    const normalized = normalizeCanonicalManualPastDatasetDailyCoverageForRead(dataset);
+    expect(normalized).toEqual({
+      startDate: "2025-06-08",
+      endDate: "2026-06-07",
+      dailyRowCount: CANONICAL_COVERAGE_TOTAL_DAYS,
+    });
+    expect(resolveManualDisplayDatasetForRead({ dataset, usageInputMode: "MANUAL_MONTHLY" }).daily).toHaveLength(
+      CANONICAL_COVERAGE_TOTAL_DAYS
+    );
   });
 
   it("labels legacy artifacts via readManualArtifactProofDiagnostics", () => {

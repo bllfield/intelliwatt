@@ -115,6 +115,9 @@ describe("shared weather sensitivity scoring owner", () => {
     expect(result?.nextDetailPromptType).toBe("ADD_ENVELOPE_DETAILS");
     expect(result?.recommendationFlags?.needsEnvelopeDetail).toBe(true);
     expect(result?.confidenceScore0to100).toBeGreaterThan(0);
+    expect(result?.explanationSummary).toContain("estimated");
+    expect(result?.explanationSummary).toContain("manual bills");
+    expect(result?.explanationSummary).not.toContain("measured usage movement");
   });
 
   it("prefers interval-backed scoring over manual bill periods when actual interval truth exists", () => {

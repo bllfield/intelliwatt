@@ -232,6 +232,48 @@ describe("buildManualValidationSummary", () => {
     expect(summary?.manualSimulationConfidence.userFacingSummary).toContain("Connect Smart Meter Texas");
   });
 
+  it("does not claim bill totals were matched when bill match fails", () => {
+    const payload = buildMonthlyPayload({ count: 2 });
+    const sidecar = { ...buildSidecarFromPayload(payload), [payload.monthlyKwh[0]!.month]: 9999 };
+    const readModel = buildManualUsageReadModel({ payload, dataset: buildDataset(sidecar), actualDataset: null });
+    const summary = buildManualValidationSummary({
+      manualReadModel: readModel,
+      dataset: buildDataset(sidecar),
+      inputType: "MANUAL_MONTHLY",
+    });
+
+    expect(summary?.billMatchVerification.status).toBe("fail");
+    expect(summary?.manualSimulationConfidence.userFacingSummary).not.toContain("Your bill totals were matched");
+    expect(summary?.manualSimulationConfidence.userFacingSummary).toContain(
+      "one or more bill periods are outside the active reconciliation tolerance"
+    );
+  });
+
+  it("reconciles a period within the documented rounding tolerance while keeping the delta visible", () => {
+    const payload = {
+      mode: "MONTHLY" as const,
+      anchorEndDate: "2025-04-30",
+      monthlyKwh: [{ month: "2025-04", kwh: 2340 }],
+      statementRanges: [{ month: "2025-04", startDate: "2025-03-17", endDate: "2025-04-15" }],
+      travelRanges: [],
+    };
+    const sidecar = { "2025-04": 2340.07 };
+    const readModel = buildManualUsageReadModel({ payload, dataset: buildDataset(sidecar), actualDataset: null });
+    const summary = buildManualValidationSummary({
+      manualReadModel: readModel,
+      dataset: buildDataset(sidecar),
+      inputType: "MANUAL_MONTHLY",
+    });
+
+    expect(readModel?.billPeriodCompare.rows[0]).toMatchObject({
+      simulatedStatementTotalKwh: 2340.07,
+      deltaKwh: 0.07,
+      status: "reconciled",
+    });
+    expect(summary?.billMatchVerification.status).toBe("pass");
+    expect(summary?.billMatchVerification.exactMatchPeriodCount).toBe(1);
+  });
+
   it("marks SMT actual source confidence as measured only when compare rows compare actual vs simulated days", () => {
     const payload = buildMonthlyPayload({ count: 1 });
     const sidecar = buildSidecarFromPayload(payload);

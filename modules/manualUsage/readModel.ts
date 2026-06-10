@@ -8,6 +8,9 @@ import {
 } from "@/modules/manualUsage/statementRanges";
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
 
+/** Absolute per-period tolerance for 15-minute interval rounding accumulation during bill-period constraint shaping. */
+export const MANUAL_BILL_MATCH_TOLERANCE_KWH = 0.1;
+
 export type ManualBillPeriodCompareStatus =
   | "reconciled"
   | "delta_present"
@@ -201,10 +204,20 @@ function dayKeysForRange(startDate: string, endDate: string): string[] {
   return out;
 }
 
-function sumRangeTotals(range: { startDate: string; endDate: string }, totalsByDate: Map<string, number>): number | null {
-  return round2(
-    dayKeysForRange(range.startDate, range.endDate).reduce((sum, dateKey) => sum + (totalsByDate.get(dateKey) ?? 0), 0)
+function sumRangeTotalsRaw(
+  range: { startDate: string; endDate: string },
+  totalsByDate: Map<string, number>
+): number | null {
+  const sum = dayKeysForRange(range.startDate, range.endDate).reduce(
+    (acc, dateKey) => acc + (totalsByDate.get(dateKey) ?? 0),
+    0
   );
+  return Number.isFinite(sum) ? sum : null;
+}
+
+function sumRangeTotals(range: { startDate: string; endDate: string }, totalsByDate: Map<string, number>): number | null {
+  const raw = sumRangeTotalsRaw(range, totalsByDate);
+  return raw == null ? null : round2(raw);
 }
 
 /** Sum pre-projection Past Sim totals over original bill-period date ranges (not canonical display rows). */
@@ -222,7 +235,7 @@ export function buildManualBillPeriodSimTotalsById(args: {
   for (const period of args.billPeriodTargets) {
     const id = String(period.id ?? "").trim();
     if (!id) continue;
-    const total = sumRangeTotals(period, simulatedStatementTotalsByDate);
+    const total = sumRangeTotalsRaw(period, simulatedStatementTotalsByDate);
     if (total == null || !Number.isFinite(total)) continue;
     out[id] = total;
   }
@@ -349,14 +362,17 @@ export function buildManualUsageReadModel(args: {
             ? actualDatasetSummaryTotalKwh
             : null;
     const enteredStatementTotalKwh = period.enteredKwh ?? null;
-    const stageOneTargetTotalKwh = round2(
-      Number.isFinite(Number(billPeriodTotalsKwhById[period.id])) ? Number(billPeriodTotalsKwhById[period.id]) : period.enteredKwh ?? null
-    );
+    const stageOneTargetTotalKwhRaw = Number.isFinite(Number(billPeriodTotalsKwhById[period.id]))
+      ? Number(billPeriodTotalsKwhById[period.id])
+      : period.enteredKwh ?? null;
+    const stageOneTargetTotalKwh = round2(stageOneTargetTotalKwhRaw);
     const persistedSimTotal = persistedBillPeriodSimTotalsById?.[period.id];
-    const simulatedStatementTotalKwh =
+    const simulatedStatementTotalKwhRaw =
       persistedSimTotal != null && Number.isFinite(Number(persistedSimTotal))
-        ? round2(Number(persistedSimTotal))
-        : sumRangeTotals(period, simulatedStatementTotalsByDate);
+        ? Number(persistedSimTotal)
+        : sumRangeTotalsRaw(period, simulatedStatementTotalsByDate);
+    const simulatedStatementTotalKwh =
+      simulatedStatementTotalKwhRaw == null ? null : round2(simulatedStatementTotalKwhRaw);
     const isFilledLater = payload.mode === "MONTHLY" && filledMonths.has(period.month);
 
     let eligible = period.eligibleForConstraint;
@@ -380,11 +396,12 @@ export function buildManualUsageReadModel(args: {
       reason = "Past Sim totals were unavailable for this statement range.";
     }
 
-    const deltaKwh =
-      eligible && stageOneTargetTotalKwh != null && simulatedStatementTotalKwh != null
-        ? round2(simulatedStatementTotalKwh - stageOneTargetTotalKwh)
+    const deltaKwhRaw =
+      eligible && stageOneTargetTotalKwhRaw != null && simulatedStatementTotalKwhRaw != null
+        ? simulatedStatementTotalKwhRaw - stageOneTargetTotalKwhRaw
         : null;
-    if (eligible && deltaKwh != null && Math.abs(deltaKwh) > 0.05) {
+    const deltaKwh = deltaKwhRaw == null ? null : round2(deltaKwhRaw);
+    if (eligible && deltaKwhRaw != null && Math.abs(deltaKwhRaw) > MANUAL_BILL_MATCH_TOLERANCE_KWH) {
       status = "delta_present";
       reason = "Past Sim total differs from the entered statement total.";
     }

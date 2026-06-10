@@ -1,6 +1,7 @@
 import type { ManualBillPeriodCompareRow, ManualUsageReadModel } from "@/modules/manualUsage/readModel";
+import { MANUAL_BILL_MATCH_TOLERANCE_KWH } from "@/modules/manualUsage/readModel";
 
-export const MANUAL_BILL_MATCH_TOLERANCE_KWH = 0.05;
+export { MANUAL_BILL_MATCH_TOLERANCE_KWH };
 
 export type BillMatchVerificationStatus = "pass" | "fail" | "partial" | "not_available";
 export type BillMatchVerificationSource =
@@ -308,8 +309,14 @@ function resolveConfidenceBasis(args: {
   return "insufficient_data";
 }
 
-const MANUAL_ESTIMATED_CONFIDENCE_COPY =
-  "Your bill totals were matched. The 15-minute timing is estimated from your bills, home details, weather, and our usage-shape model. Connect Smart Meter Texas or upload Green Button data to verify actual interval behavior.";
+const MANUAL_ESTIMATED_INTERVAL_TIMING_COPY =
+  "The 15-minute timing is estimated from your bills, home details, weather, and our usage-shape model. Connect Smart Meter Texas or upload Green Button data to verify actual interval behavior.";
+
+const MANUAL_ESTIMATED_CONFIDENCE_PASS_COPY = `Your bill totals were matched. ${MANUAL_ESTIMATED_INTERVAL_TIMING_COPY}`;
+
+const MANUAL_ESTIMATED_CONFIDENCE_PARTIAL_COPY = `Most bill periods matched, but one or more bill periods are outside the active reconciliation tolerance. ${MANUAL_ESTIMATED_INTERVAL_TIMING_COPY}`;
+
+const MANUAL_ESTIMATED_CONFIDENCE_NOT_AVAILABLE_COPY = `Bill match verification is not available yet for this read. ${MANUAL_ESTIMATED_INTERVAL_TIMING_COPY}`;
 
 function buildManualSimulationConfidence(args: {
   billMatch: BillMatchVerification;
@@ -360,19 +367,24 @@ function buildManualSimulationConfidence(args: {
     if (args.billMatch.status === "pass") {
       status = "medium";
       confidenceTier = "constrained_bill_match";
-    } else if (args.billMatch.status === "fail") {
+      userFacingSummary = MANUAL_ESTIMATED_CONFIDENCE_PASS_COPY;
+    } else if (args.billMatch.status === "fail" || args.billMatch.status === "partial") {
       status = "low";
       confidenceTier = "constrained_bill_match";
+      userFacingSummary = MANUAL_ESTIMATED_CONFIDENCE_PARTIAL_COPY;
     } else {
       status = "not_available";
       confidenceTier = "constrained_bill_match";
+      userFacingSummary = MANUAL_ESTIMATED_CONFIDENCE_NOT_AVAILABLE_COPY;
     }
-    userFacingSummary = MANUAL_ESTIMATED_CONFIDENCE_COPY;
+    warnings.push(
+      "Bill Match Verification is separate from Simulation Confidence. Low confidence here reflects estimated interval-shape/model confidence, not whether entered bill totals were accepted."
+    );
     warnings.push("Unconstrained bill-period holdout confidence is deferred; this is not a measured interval-accuracy claim.");
   } else if (basis === "actual_source_backed_not_compared") {
     status = "medium";
     confidenceTier = "actual_source_backed_not_compared";
-    userFacingSummary = `Actual ${measuredSourceLabel ?? "interval"} data is attached, but interval timing has not been compared yet. ${MANUAL_ESTIMATED_CONFIDENCE_COPY}`;
+    userFacingSummary = `Actual ${measuredSourceLabel ?? "interval"} data is attached, but interval timing has not been compared yet. ${MANUAL_ESTIMATED_INTERVAL_TIMING_COPY}`;
     warnings.push("Actual interval truth is present, but no actual-vs-simulated compare rows were attached for this read.");
   } else {
     warnings.push("Insufficient manual or actual-source inputs to estimate simulation confidence.");
@@ -434,7 +446,8 @@ function buildIntervalShapeSummary(args: {
   return {
     label: "Interval Shape",
     accuracyClaim: "estimated",
-    userFacingSummary: "Estimated from manual bills.",
+    userFacingSummary:
+      "Estimated from manual bills. Bill Match Verification is separate and checks statement totals only.",
   };
 }
 
