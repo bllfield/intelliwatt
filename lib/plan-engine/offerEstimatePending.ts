@@ -54,6 +54,10 @@ export function isOfferEstimateActivelyPending(offer: any): boolean {
   return isTransientPlanEstimateEngineState({ tceStatus, tceReason });
 }
 
+export function countActivelyPendingOffers(offers: unknown[]): number {
+  return offers.filter((o) => isOfferEstimateActivelyPending(o)).length;
+}
+
 export function classifyOfferEstimateUiState(offer: any): OfferEstimateUiState {
   const tceStatus = strUpper(offer?.intelliwatt?.trueCostEstimate?.status);
   const tceReason = strUpper(

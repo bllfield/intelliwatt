@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   classifyOfferEstimateUiState,
+  countActivelyPendingOffers,
   isOfferEstimateActivelyPending,
 } from "@/lib/plan-engine/offerEstimatePending";
 
@@ -55,5 +56,26 @@ describe("offerEstimatePending", () => {
     };
     expect(isOfferEstimateActivelyPending(offer)).toBe(false);
     expect(classifyOfferEstimateUiState(offer)).toBe("UNAVAILABLE");
+  });
+
+  it("does not count terminal QUEUED rows in actively pending totals", () => {
+    const offers = [
+      {
+        efl: { eflUrl: "https://example.com/efl.pdf" },
+        intelliwatt: {
+          statusLabel: "QUEUED",
+          trueCostEstimate: { status: "NOT_COMPUTABLE", reason: "UNSUPPORTED_TOU" },
+        },
+      },
+      {
+        efl: { eflUrl: "https://example.com/efl.pdf" },
+        intelliwatt: {
+          statusLabel: "QUEUED",
+          templateAvailable: true,
+          trueCostEstimate: { status: "NOT_IMPLEMENTED", reason: "CACHE_MISS" },
+        },
+      },
+    ];
+    expect(countActivelyPendingOffers(offers)).toBe(1);
   });
 });
