@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { EstimateBreakdownPopover } from "../../components/ui/EstimateBreakdownPopover";
 import { PlanDisclosuresPopover } from "@/app/components/ui/PlanDisclosuresPopover";
+import { isOfferEstimateActivelyPending } from "@/lib/plan-engine/offerEstimatePending";
 
 type OfferRow = {
   offerId: string;
@@ -139,19 +140,8 @@ export default function OfferCard({ offer, recommended, forceCalculating = false
         planCompReason.includes("UNSUPPORTED"))) ||
       tceStatus === "NOT_COMPUTABLE");
 
-  // Customer-facing status language (never show "QUEUED").
   const isCalculating =
-    isForcedCalculating ||
-    // Plans list is read-only: a CACHE_MISS means "pipeline hasn't materialized this input-set yet".
-    (tceStatus === "NOT_IMPLEMENTED" &&
-      (tceReason === "CACHE_MISS" ||
-        tceReason === "PIPELINE_IN_PROGRESS" ||
-        tceReason.includes("MISSING TEMPLATE") ||
-        tceReason.includes("MISSING BUCKET"))) ||
-    // Template missing can be transient (prefetch/pipeline may be building it); treat as calculating on the card.
-    tceStatus === "MISSING_TEMPLATE" ||
-    // Backend says QUEUED but no estimate yet → still processing.
-    (status === "QUEUED" && !(tceStatus === "OK" || tceStatus === "APPROXIMATE") && !isUnsupported);
+    isForcedCalculating || (!isUnsupported && isOfferEstimateActivelyPending(offer));
 
   const statusKind: "AVAILABLE" | "CALCULATING" | "NEED_USAGE" | "NOT_COMPUTABLE_YET" =
     tceStatus === "MISSING_USAGE"

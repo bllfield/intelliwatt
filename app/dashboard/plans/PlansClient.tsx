@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import OfferCard, { type OfferCardProps } from "./OfferCard";
 import IntelliwattBotPopup from "@/components/dashboard/IntelliwattBotPopup";
+import {
+  classifyOfferEstimateUiState,
+  isOfferEstimateActivelyPending,
+} from "@/lib/plan-engine/offerEstimatePending";
 
 type UsageSummary =
   | {
@@ -285,23 +289,14 @@ export default function PlansClient() {
     // IMPORTANT:
     // Do not pin the UI to a cached response when ANY offers are QUEUED.
     // Admin actions (manual EFL processing, pipeline runs) can flip QUEUED → AVAILABLE and the user must see it.
-    return offersNow.some((o: any) => String(o?.intelliwatt?.statusLabel ?? "") === "QUEUED");
+    return offersNow.some((o: any) => isOfferEstimateActivelyPending(o));
   };
 
   const pendingCountFromResponse = (r: ApiResponse | null): number => {
     if (!r?.ok) return 0;
     if (!r?.hasUsage) return 0;
     const offersNow = Array.isArray(r?.offers) ? (r!.offers as OfferRow[]) : [];
-    return offersNow.filter((o: any) => {
-      // Pending = expected to eventually compute (not UNSUPPORTED/NOT_COMPUTABLE).
-      if (String(o?.intelliwatt?.statusLabel ?? "") !== "QUEUED") return false;
-      const tceStatus = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
-      const tceReason = String((o as any)?.intelliwatt?.trueCostEstimate?.reason ?? "").toUpperCase();
-      const isCacheMiss =
-        tceStatus === "NOT_IMPLEMENTED" &&
-        (tceReason === "CACHE_MISS" || tceReason === "PIPELINE_IN_PROGRESS");
-      return !tceStatus || tceStatus === "QUEUED" || tceStatus === "MISSING_TEMPLATE" || isCacheMiss;
-    }).length;
+    return offersNow.filter((o: any) => isOfferEstimateActivelyPending(o)).length;
   };
 
   const countQueuedRetryEligibleOffers = (offers: OfferRow[]): number => {
@@ -312,34 +307,7 @@ export default function PlansClient() {
     }).length;
   };
 
-  const classifyPlanUiState = (o: any): "AVAILABLE" | "NEED_USAGE" | "CALCULATING" | "UNAVAILABLE" => {
-    const tce = (o as any)?.intelliwatt?.trueCostEstimate;
-    const tceStatus = String(tce?.status ?? "").toUpperCase();
-    const tceReason = String(tce?.reason ?? (o as any)?.intelliwatt?.statusReason ?? "").toUpperCase();
-    const statusLabel = String((o as any)?.intelliwatt?.statusLabel ?? "").toUpperCase();
-    if (tceStatus === "OK" || tceStatus === "APPROXIMATE") return "AVAILABLE";
-    if (tceStatus === "MISSING_USAGE") return "NEED_USAGE";
-    if (tceStatus === "NOT_IMPLEMENTED" && tceReason === "MISSING_BUCKETS") return "NEED_USAGE";
-
-    const calculating =
-      tceStatus === "MISSING_TEMPLATE" ||
-      (tceStatus === "NOT_IMPLEMENTED" &&
-        (tceReason === "CACHE_MISS" ||
-          tceReason === "PIPELINE_IN_PROGRESS" ||
-          tceReason.includes("MISSING TEMPLATE") ||
-          tceReason.includes("MISSING BUCKET"))) ||
-      (statusLabel === "QUEUED" &&
-        (!tceStatus ||
-          tceStatus === "QUEUED" ||
-          tceStatus === "MISSING_TEMPLATE" ||
-          (tceStatus === "NOT_IMPLEMENTED" &&
-            (tceReason === "CACHE_MISS" ||
-              tceReason === "PIPELINE_IN_PROGRESS" ||
-              tceReason.includes("MISSING TEMPLATE") ||
-              tceReason.includes("MISSING BUCKET")))));
-    if (calculating) return "CALCULATING";
-    return "UNAVAILABLE";
-  };
+  const classifyPlanUiState = classifyOfferEstimateUiState;
 
   // IMPORTANT:
   // Sort/filter must be display-only: it must never *start* any background warmups.
@@ -956,16 +924,7 @@ export default function PlansClient() {
     }).length;
   }, [offersRaw]);
   const rawPendingCount = useMemo(() => {
-    // Pending = expected to eventually compute (not UNSUPPORTED/NOT_COMPUTABLE).
-    return offersRaw.filter((o: any) => {
-      if (String(o?.intelliwatt?.statusLabel ?? "") !== "QUEUED") return false;
-      const tceStatus = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
-      const tceReason = String((o as any)?.intelliwatt?.trueCostEstimate?.reason ?? "").toUpperCase();
-      const isCacheMiss =
-        tceStatus === "NOT_IMPLEMENTED" &&
-        (tceReason === "CACHE_MISS" || tceReason === "PIPELINE_IN_PROGRESS");
-      return !tceStatus || tceStatus === "QUEUED" || tceStatus === "MISSING_TEMPLATE" || isCacheMiss;
-    }).length;
+    return offersRaw.filter((o: any) => isOfferEstimateActivelyPending(o)).length;
   }, [offersRaw]);
   const rawEstimateTargetCount = useMemo(
     () => rawAvailableEstimateCount + rawPendingCount,
@@ -1091,7 +1050,7 @@ export default function PlansClient() {
       else if (k === "NEED_USAGE") needUsageCount++;
     }
 
-    const effectiveCalculatingCount = Math.max(calculatingCount, pendingCount, queuedRetryInFlightCount);
+    const effectiveCalculatingCount = Math.max(pendingCount, queuedRetryInFlightCount);
     const effectiveUnavailableCount = Math.max(0, unavailableCount - queuedRetryInFlightCount);
     setAutoPreparing(calculatingCount > 0 && allowWarmupInBackground);
     if (allowWarmupInBackground && pendingNow > 0) {
