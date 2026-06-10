@@ -104,12 +104,26 @@ export function ValidationDayPolicyAdmin() {
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
       <div>
-        <h1 className="text-2xl font-semibold text-brand-navy">Validation Day Policy</h1>
+        <h1 className="text-2xl font-semibold text-brand-navy">Compare Day Policy</h1>
         <p className="mt-2 text-sm text-slate-600">
-          Read-only global validation-day policy preview for future Manual GapFill. Uses shared{" "}
-          <code className="rounded bg-slate-100 px-1">selectValidationDayKeys</code>; legacy GapFill local selectors
-          remain unchanged.
+          Global owner for which calendar days are used when surfaces compare interval usage by day. Shared module:{" "}
+          <code className="rounded bg-slate-100 px-1">lib/usage/validationDayPolicy.ts</code> →{" "}
+          <code className="rounded bg-slate-100 px-1">selectValidationDayKeys</code>.
         </p>
+        <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-600">
+          <li>
+            <strong>Wired:</strong> Manual GapFill (MG-2+), One Path manual runs when they use global validation policy.
+          </li>
+          <li>
+            <strong>Not wired:</strong> GapFill Lab local compare-day selectors (legacy; unchanged until retirement).
+          </li>
+          <li>
+            <strong>Runtime changes today:</strong> code defaults in{" "}
+            <code className="rounded bg-slate-100 px-1">pastValidationPolicy.ts</code>, or deploy env{" "}
+            <code className="rounded bg-slate-100 px-1">VALIDATION_DAY_POLICY_OVERRIDE_JSON</code>. This page previews
+            selection; it does not persist a new global policy to the database yet.
+          </li>
+        </ul>
       </div>
 
       {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}

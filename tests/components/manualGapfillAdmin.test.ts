@@ -3,9 +3,14 @@ import {
   MANUAL_GAPFILL_DEFAULT_LAB_HOUSE_ID,
   MANUAL_GAPFILL_DEFAULT_MODE,
   MANUAL_GAPFILL_DEFAULT_SOURCE_HOUSE_ID,
+  MANUAL_GAPFILL_PIPELINE_STOP_AFTER_DRY_RUN_MESSAGE,
   buildManualGapfillIdentityKey,
+  canContinuePipelineAfterPrepareSeed,
   extractArtifactInputHashFromRunResult,
+  extractMonthlyCompareRowsFromCompareResult,
+  extractReadbackSummaryFromRunResult,
   extractSeedHashFromPrepareResult,
+  extractSeedPreviewFromPrepareResult,
   extractSourceIntervalFingerprint,
   fetchAdminUserByEmail,
   fetchManualGapfillCompare,
@@ -13,6 +18,7 @@ import {
   fetchManualGapfillRunReadback,
   fetchManualGapfillSourceContext,
   fetchValidationDayPolicyPreview,
+  isPrepareSeedPersisted,
   MANUAL_GAPFILL_DEFAULT_USER_EMAIL,
   sameHouseBlocked,
 } from "@/lib/admin/manualGapfillClient";
@@ -245,6 +251,104 @@ describe("manualGapfillClient step wiring", () => {
       mode: "ANNUAL_FROM_SOURCE_INTERVALS",
     });
     expect(base).not.toBe(changed);
+  });
+
+  it("pipeline gating stops after dry-run when no persisted seed in session", () => {
+    const dryRunResult = {
+      status: "ready",
+      seed: { normalizedPayloadHash: "seed-hash-dry" },
+      labContext: { wroteManualPayload: false, writeTarget: "none" },
+    };
+    expect(isPrepareSeedPersisted(dryRunResult)).toBe(false);
+    expect(
+      canContinuePipelineAfterPrepareSeed({
+        persistedSeedInSession: false,
+        prepareResult: dryRunResult,
+      })
+    ).toBe(false);
+    expect(MANUAL_GAPFILL_PIPELINE_STOP_AFTER_DRY_RUN_MESSAGE).toContain("Persist seed to lab home");
+  });
+
+  it("pipeline can continue when seed was persisted in session", () => {
+    const dryRunResult = {
+      status: "ready",
+      seed: { normalizedPayloadHash: "seed-hash-dry" },
+      labContext: { wroteManualPayload: false },
+    };
+    expect(
+      canContinuePipelineAfterPrepareSeed({
+        persistedSeedInSession: true,
+        prepareResult: dryRunResult,
+      })
+    ).toBe(true);
+  });
+
+  it("extracts seed preview anchor, statement ranges, and monthly totals from MG-3 response", () => {
+    const preview = extractSeedPreviewFromPrepareResult({
+      seed: {
+        manualUsageMode: "manual_monthly",
+        anchorEndDate: "2025-08-06",
+        totalKwh: 34590,
+        billPeriodCount: 12,
+        normalizedPayloadHash: "norm-hash",
+        billPeriodHash: "bill-hash",
+        validationResultHash: "val-hash",
+        statementRanges: [{ month: "2025-06", startDate: "2025-06-08", endDate: "2025-06-30" }],
+        monthlyTotalsKwhByMonth: { "2025-06": 2800 },
+      },
+    });
+    expect(preview?.anchorEndDate).toBe("2025-08-06");
+    expect(preview?.billPeriodCount).toBe(12);
+    expect(preview?.statementRanges).toHaveLength(1);
+    expect(preview?.statementRanges[0]?.startDate).toBe("2025-06-08");
+    expect(preview?.monthlyTotalsKwhByMonth?.["2025-06"]).toBe(2800);
+  });
+
+  it("extracts readback bill match summary from MG-4 response", () => {
+    const summary = extractReadbackSummaryFromRunResult({
+      readback: {
+        billMatchStatus: "pass",
+        eligiblePeriodCount: 12,
+        reconciledPeriodCount: 12,
+        intervalShape: "estimated",
+        baseload15MinKwh: 0.42,
+        totalKwh: 34590,
+        coverageStart: "2025-06-08",
+        coverageEnd: "2026-06-07",
+      },
+    });
+    expect(summary?.billMatchStatus).toBe("pass");
+    expect(summary?.eligiblePeriodCount).toBe(12);
+    expect(summary?.totalKwh).toBe(34590);
+  });
+
+  it("extracts monthly compare rows with source actual and lab simulated kWh fields", () => {
+    const rows = extractMonthlyCompareRowsFromCompareResult({
+      compare: {
+        compareScope: "source_actual_vs_lab_simulated",
+        monthly: {
+          rows: [
+            {
+              periodId: "2025-06:2025-06-30",
+              startDate: "2025-06-08",
+              endDate: "2025-06-30",
+              actualKwh: 2800,
+              simulatedKwh: 2795,
+              deltaKwh: -5,
+              percentDelta: -0.18,
+              status: "matched",
+              actualSource: "SMT",
+              simulatedSource: "SIMULATED_MANUAL_CONSTRAINED",
+            },
+          ],
+        },
+      },
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.actualKwh).toBe(2800);
+    expect(rows[0]?.simulatedKwh).toBe(2795);
+    expect(rows[0]?.actualSource).toBe("SMT");
+    expect(rows[0]?.simulatedSource).toBe("SIMULATED_MANUAL_CONSTRAINED");
   });
 
   it("surfaces API error payloads without throwing", async () => {

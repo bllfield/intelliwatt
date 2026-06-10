@@ -8,21 +8,30 @@ import {
   MANUAL_GAPFILL_DEFAULT_MODE,
   MANUAL_GAPFILL_DEFAULT_SOURCE_HOUSE_ID,
   MANUAL_GAPFILL_DEFAULT_USER_EMAIL,
+  MANUAL_GAPFILL_PIPELINE_STOP_AFTER_DRY_RUN_MESSAGE,
   buildManualGapfillIdentityKey,
-  fetchAdminUserByEmail,
+  canContinuePipelineAfterPrepareSeed,
   extractArtifactInputHashFromRunResult,
+  extractMonthlyCompareRowsFromCompareResult,
+  extractReadbackSummaryFromRunResult,
   extractSeedHashFromPrepareResult,
+  extractSeedPreviewFromPrepareResult,
   extractSourceIntervalFingerprint,
   extractValidationPolicyHashFromContext,
+  fetchAdminUserByEmail,
   fetchManualGapfillCompare,
   fetchManualGapfillPrepareSeed,
   fetchManualGapfillRunReadback,
   fetchManualGapfillSourceContext,
   fetchValidationDayPolicyPreview,
   fetchValidationDayPolicySnapshot,
+  isPrepareSeedPersisted,
   sameHouseBlocked,
   type ManualGapfillSeedMode,
 } from "@/lib/admin/manualGapfillClient";
+import { BillMatchReconciliationPanel } from "@/components/admin/manual-gapfill/BillMatchReconciliationPanel";
+import { MonthlyCompareRowsTable } from "@/components/admin/manual-gapfill/MonthlyCompareRowsTable";
+import { SeedPreview } from "@/components/admin/manual-gapfill/SeedPreview";
 import {
   Field,
   FieldGrid,
@@ -72,6 +81,8 @@ export function ManualGapfillAdmin() {
   const [step3, setStep3] = useState<StepState<Record<string, unknown>> | null>(null);
   const [step4, setStep4] = useState<StepState<Record<string, unknown>> | null>(null);
   const [step5, setStep5] = useState<StepState<Record<string, unknown>> | null>(null);
+  const [persistedSeedInSession, setPersistedSeedInSession] = useState(false);
+  const persistedSeedHashRef = useRef<string | null>(null);
 
   const identityKey = useMemo(
     () =>
@@ -110,6 +121,8 @@ export function ManualGapfillAdmin() {
     setStep3(null);
     setStep4(null);
     setStep5(null);
+    setPersistedSeedInSession(false);
+    persistedSeedHashRef.current = null;
     setIdentityNotice("Source/lab/mode changed — downstream step results were cleared. Re-run from Step 1.");
   }, [identityKey]);
 
@@ -250,6 +263,10 @@ export function ManualGapfillAdmin() {
         }
         const result = asRecord(res.data.result) ?? {};
         setStep3({ identityKey, data: result });
+        if (persistToLabHome && isPrepareSeedPersisted(result)) {
+          setPersistedSeedInSession(true);
+          persistedSeedHashRef.current = extractSeedHashFromPrepareResult(result);
+        }
         setStatus(
           persistToLabHome
             ? "Seed prepared and persisted to lab home."
@@ -412,7 +429,19 @@ export function ManualGapfillAdmin() {
       }
       const seedResult = asRecord(s3.data.result) ?? {};
       setStep3({ identityKey, data: seedResult });
-      const seedHash = extractSeedHashFromPrepareResult(seedResult);
+
+      if (
+        !canContinuePipelineAfterPrepareSeed({
+          persistedSeedInSession,
+          prepareResult: seedResult,
+        })
+      ) {
+        setStatus(MANUAL_GAPFILL_PIPELINE_STOP_AFTER_DRY_RUN_MESSAGE);
+        return;
+      }
+
+      const seedHash =
+        persistedSeedHashRef.current ?? extractSeedHashFromPrepareResult(seedResult);
       const fp = extractSourceIntervalFingerprint(ctx);
       const policyHash =
         asString(s2.data.policyHash) ?? extractValidationPolicyHashFromContext(ctx) ?? undefined;
@@ -457,7 +486,7 @@ export function ManualGapfillAdmin() {
         return;
       }
       setStep5({ identityKey, data: asRecord(s5.data.result) ?? {} });
-      setStatus("Pipeline completed (dry-run seed through compare). Persist seed separately if needed.");
+      setStatus("Pipeline completed (persisted seed → readback → compare).");
     } catch (err) {
       setError(formatAdminToolErrorMessage(err));
     } finally {
@@ -474,13 +503,17 @@ export function ManualGapfillAdmin() {
     anchorEndDate,
     includeDailyRows,
     identityKey,
+    persistedSeedInSession,
   ]);
+
+  const seedPreview = extractSeedPreviewFromPrepareResult(prepareResult);
+  const readbackSummary = extractReadbackSummaryFromRunResult(runResult);
+  const monthlyCompareRows = extractMonthlyCompareRowsFromCompareResult(compareResult);
 
   const coverage = asRecord(sourceContext?.coverage);
   const fingerprints = asRecord(sourceContext?.fingerprints);
   const validation = asRecord(sourceContext?.validation);
   const diagnostics = asRecord(sourceContext?.diagnostics);
-  const seed = asRecord(prepareResult?.seed);
   const labContext = asRecord(prepareResult?.labContext);
   const seedDiagnostics = asRecord(prepareResult?.diagnostics);
   const run = asRecord(runResult?.run);
@@ -500,11 +533,13 @@ export function ManualGapfillAdmin() {
       <div>
         <h1 className="text-2xl font-semibold text-brand-navy">Manual GapFill</h1>
         <p className="mt-2 text-sm text-slate-600">
-          Admin pipeline wiring for Manual GapFill (MG-1 → MG-5). Uses{" "}
-          <strong>source actual usage</strong> on the source home and{" "}
-          <strong>lab simulated usage</strong> on the lab home. This is separate from legacy GapFill;{" "}
-          <code className="rounded bg-slate-100 px-1">EXACT_INTERVALS</code> is unchanged. MG-5 compare is an
-          admin diagnostic only and does not change production Simulation Accuracy scoring.
+          Manual GapFill uses One Path source actual truth, shared manual seed preparation, One Path manual Past Sim
+          readback, and source actual vs lab simulated compare.{" "}
+          <code className="rounded bg-slate-100 px-1">EXACT_INTERVALS</code> and legacy calibration controls remain in{" "}
+          <Link href="/admin/tools/gapfill-lab" className="text-brand-navy underline">
+            GapFill Lab
+          </Link>
+          . MG-5 compare is an admin diagnostic only and does not change production Simulation Accuracy scoring.
         </p>
       </div>
 
@@ -590,8 +625,17 @@ export function ManualGapfillAdmin() {
           onClick={() => void runPipeline()}
           className="mt-4 rounded-lg border border-brand-navy px-4 py-2 text-sm font-semibold text-brand-navy disabled:opacity-60"
         >
-          {busyStep === "pipeline" ? "Running pipeline…" : "Run pipeline (dry-run seed → readback → compare)"}
+          {busyStep === "pipeline" ? "Running pipeline…" : "Run pipeline (steps 1–3; continues to 4–5 only if seed persisted)"}
         </button>
+        <p className="mt-2 text-xs text-slate-600">
+          Safe pipeline runs source context, validation policy, and dry-run seed only. Persist seed to lab home in Step 3
+          before Steps 4–5 can run.
+        </p>
+        {persistedSeedInSession ? (
+          <p className="mt-1 text-xs font-semibold text-emerald-800">
+            Persisted lab seed detected in this session — pipeline can continue through readback and compare.
+          </p>
+        ) : null}
       </section>
 
       <StepSection
@@ -705,6 +749,9 @@ export function ManualGapfillAdmin() {
             onChange={(e) => setAnchorEndDate(e.target.value)}
             placeholder="YYYY-MM-DD"
           />
+          <span className="text-xs text-slate-500">
+            Blank uses the source coverage/latest available Manual GapFill default.
+          </span>
         </label>
         <label className="mt-3 flex items-center gap-2 text-sm">
           <input
@@ -733,17 +780,16 @@ export function ManualGapfillAdmin() {
           </button>
         </div>
         {prepareResult ? (
-          <FieldGrid>
-            <Field label="Seed status" value={asString(prepareResult.status)} />
-            <Field label="Seed hash" value={extractSeedHashFromPrepareResult(prepareResult)} />
-            <Field label="Manual usage mode" value={asString(seed?.manualUsageMode)} />
-            <Field label="Total kWh" value={asNumber(seed?.totalKwh)} />
-            <Field label="Bill period count" value={asNumber(seed?.billPeriodCount)} />
-            <Field label="Annual total kWh" value={asNumber(seed?.annualTotalKwh)} />
-            <Field label="Lab house ID" value={asString(labContext?.labHouseId)} />
-            <Field label="Wrote manual payload" value={String(labContext?.wroteManualPayload ?? false)} />
-            <Field label="Write target" value={asString(labContext?.writeTarget)} />
-          </FieldGrid>
+          <>
+            <FieldGrid>
+              <Field label="Seed status" value={asString(prepareResult.status)} />
+              <Field label="Seed hash" value={extractSeedHashFromPrepareResult(prepareResult)} />
+              <Field label="Lab house ID" value={asString(labContext?.labHouseId)} />
+              <Field label="Wrote manual payload" value={String(labContext?.wroteManualPayload ?? false)} />
+              <Field label="Write target" value={asString(labContext?.writeTarget)} />
+            </FieldGrid>
+            <SeedPreview preview={seedPreview} mode={mode} />
+          </>
         ) : null}
         <WarningsList
           warnings={Array.isArray(seedDiagnostics?.warnings) ? (seedDiagnostics.warnings as string[]) : undefined}
@@ -770,26 +816,23 @@ export function ManualGapfillAdmin() {
           {busyStep === "step4" ? "Running…" : "Run Past Sim on lab home"}
         </button>
         {runResult ? (
-          <FieldGrid>
-            <Field label="Run status" value={asString(runResult.status)} />
-            <Field label="Dispatched" value={String(run?.dispatched ?? false)} />
-            <Field label="Scenario ID" value={asString(run?.scenarioId)} />
-            <Field label="Artifact input hash" value={asString(run?.artifactInputHash)} />
-            <Field label="Build inputs hash" value={asString(run?.buildInputsHash)} />
-            <Field label="Simulator mode" value={asString(run?.simulatorMode)} />
-            <Field label="Input type" value={asString(run?.inputType)} />
-            <Field label="Artifact persisted" value={String(run?.persisted ?? false)} />
-            <Field label="Readback coverage start" value={asString(readback?.coverageStart)} />
-            <Field label="Readback coverage end" value={asString(readback?.coverageEnd)} />
-            <Field label="Daily row count (lab simulated usage)" value={asNumber(readback?.dailyRowCount)} />
-            <Field label="Interval count (lab simulated usage)" value={asNumber(readback?.intervalCount)} />
-            <Field label="Simulated total kWh (lab simulated usage)" value={asNumber(readback?.totalKwh)} />
-            <Field label="Source" value={asString(readback?.source)} />
-            <Field label="Source detail" value={asString(readback?.sourceDetail)} />
-            <Field label="Bill Match status" value={asString(readback?.billMatchStatus)} />
-            <Field label="Interval shape" value={asString(readback?.intervalShape)} />
-            <Field label="Baseload 15-min kWh" value={asNumber(readback?.baseload15MinKwh)} />
-          </FieldGrid>
+          <>
+            <FieldGrid>
+              <Field label="Run status" value={asString(runResult.status)} />
+              <Field label="Dispatched" value={String(run?.dispatched ?? false)} />
+              <Field label="Scenario ID" value={asString(run?.scenarioId)} />
+              <Field label="Artifact input hash" value={asString(run?.artifactInputHash)} />
+              <Field label="Build inputs hash" value={asString(run?.buildInputsHash)} />
+              <Field label="Simulator mode" value={asString(run?.simulatorMode)} />
+              <Field label="Input type" value={asString(run?.inputType)} />
+              <Field label="Artifact persisted" value={String(run?.persisted ?? false)} />
+              <Field label="Daily row count (lab simulated usage)" value={asNumber(readback?.dailyRowCount)} />
+              <Field label="Interval count (lab simulated usage)" value={asNumber(readback?.intervalCount)} />
+              <Field label="Readback source" value={asString(readback?.source)} />
+              <Field label="Readback source detail" value={asString(readback?.sourceDetail)} />
+            </FieldGrid>
+            <BillMatchReconciliationPanel readback={readbackSummary} />
+          </>
         ) : null}
         <WarningsList
           warnings={Array.isArray(runDiagnostics?.warnings) ? (runDiagnostics.warnings as string[]) : undefined}
@@ -849,6 +892,10 @@ export function ManualGapfillAdmin() {
                 Monthly rows: {asNumber(monthlyCompare.rowCount)} · matched {asNumber(monthlyCompare.matchedCount)}
               </p>
             ) : null}
+            <MonthlyCompareRowsTable
+              rows={monthlyCompareRows}
+              compareScope={asString(compare?.compareScope)}
+            />
             {dailySummary ? (
               <FieldGrid>
                 <Field label="Compared day count" value={asNumber(dailySummary.comparedDayCount)} />

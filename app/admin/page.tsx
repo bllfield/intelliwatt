@@ -954,6 +954,15 @@ export default function AdminDashboard() {
               </div>
             </a>
             <a
+              href="/admin/tools/validation-day-policy"
+              className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
+            >
+              <div className="font-semibold text-brand-navy mb-1">Compare Day Policy</div>
+              <div className="text-sm text-brand-navy/60">
+                Shared validation-day selection for Past Sim compare intervals — global owner for Manual GapFill and One Path
+              </div>
+            </a>
+            <a
               href="/admin/tools/manual-gapfill"
               className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
             >

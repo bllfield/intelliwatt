@@ -27,6 +27,12 @@ const TOOL_CARDS = [
     description: "Browser-based harness for the customer manual-monthly flow with diagnostics.",
   },
   {
+    href: "/admin/tools/validation-day-policy",
+    title: "Compare Day Policy",
+    description:
+      "Shared validation-day selection for Past Sim compare intervals — global policy owner used by Manual GapFill and One Path.",
+  },
+  {
     href: "/admin/tools/manual-gapfill",
     title: "Manual GapFill",
     description: "Wire MG-1 through MG-5: source context, validation policy, seed, run/readback, and compare.",

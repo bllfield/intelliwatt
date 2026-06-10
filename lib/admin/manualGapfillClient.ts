@@ -227,3 +227,159 @@ export type ManualGapfillPipelineRunOutcome = {
   stoppedAt: ManualGapfillPipelineStep | "complete";
   error?: string;
 };
+
+export const MANUAL_GAPFILL_PIPELINE_STOP_AFTER_DRY_RUN_MESSAGE =
+  "Dry-run seed created. Persist seed to lab home before running Past Sim." as const;
+
+export type ManualGapfillSeedStatementRangeRow = {
+  startDate: string;
+  endDate: string;
+  month?: string | null;
+  kwhTotal: number | null;
+  statusOrWarning: string | null;
+};
+
+export type ManualGapfillSeedPreview = {
+  manualUsageMode: string | null;
+  anchorEndDate: string | null;
+  totalKwh: number | null;
+  billPeriodCount: number | null;
+  annualTotalKwh: number | null;
+  normalizedPayloadHash: string | null;
+  billPeriodHash: string | null;
+  validationResultHash: string | null;
+  statementRanges: ManualGapfillSeedStatementRangeRow[];
+  monthlyTotalsKwhByMonth: Record<string, number> | null;
+};
+
+export type ManualGapfillReadbackSummary = {
+  billMatchStatus: string | null;
+  eligiblePeriodCount: number | null;
+  reconciledPeriodCount: number | null;
+  intervalShape: string | null;
+  baseload15MinKwh: number | null;
+  totalKwh: number | null;
+  coverageStart: string | null;
+  coverageEnd: string | null;
+};
+
+export type ManualGapfillMonthlyCompareRow = {
+  periodId: string;
+  startDate: string;
+  endDate: string;
+  actualKwh: number | null;
+  simulatedKwh: number | null;
+  deltaKwh: number | null;
+  percentDelta: number | null;
+  status: string;
+  actualSource: string | null;
+  simulatedSource: string | null;
+};
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function asNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+export function isPrepareSeedPersisted(result: Record<string, unknown> | null | undefined): boolean {
+  if (!result) return false;
+  if (result.status === "persisted") return true;
+  const labContext = asRecord(result.labContext);
+  return labContext?.wroteManualPayload === true;
+}
+
+export function extractSeedPreviewFromPrepareResult(
+  result: Record<string, unknown> | null | undefined
+): ManualGapfillSeedPreview | null {
+  const seed = asRecord(result?.seed);
+  if (!seed) return null;
+
+  const statementRangesRaw = Array.isArray(seed.statementRanges) ? seed.statementRanges : [];
+  const monthlyTotalsRaw = asRecord(seed.monthlyTotalsKwhByMonth);
+  const monthlyTotalsKwhByMonth = monthlyTotalsRaw
+    ? Object.fromEntries(
+        Object.entries(monthlyTotalsRaw).map(([month, kwh]) => [month, Number(kwh) || 0])
+      )
+    : null;
+
+  const statementRanges: ManualGapfillSeedStatementRangeRow[] = statementRangesRaw.map((row) => {
+    const rec = asRecord(row);
+    const month = asString(rec?.month);
+    const kwhFromMonthly =
+      month && monthlyTotalsKwhByMonth ? (monthlyTotalsKwhByMonth[month.slice(0, 7)] ?? null) : null;
+    return {
+      startDate: asString(rec?.startDate) ?? "—",
+      endDate: asString(rec?.endDate) ?? "—",
+      month,
+      kwhTotal: kwhFromMonthly,
+      statusOrWarning: null,
+    };
+  });
+
+  return {
+    manualUsageMode: asString(seed.manualUsageMode),
+    anchorEndDate: asString(seed.anchorEndDate),
+    totalKwh: asNumber(seed.totalKwh),
+    billPeriodCount: asNumber(seed.billPeriodCount),
+    annualTotalKwh: asNumber(seed.annualTotalKwh),
+    normalizedPayloadHash: asString(seed.normalizedPayloadHash),
+    billPeriodHash: asString(seed.billPeriodHash),
+    validationResultHash: asString(seed.validationResultHash),
+    statementRanges,
+    monthlyTotalsKwhByMonth,
+  };
+}
+
+export function extractReadbackSummaryFromRunResult(
+  result: Record<string, unknown> | null | undefined
+): ManualGapfillReadbackSummary | null {
+  const readback = asRecord(result?.readback);
+  if (!readback) return null;
+  return {
+    billMatchStatus: asString(readback.billMatchStatus),
+    eligiblePeriodCount: asNumber(readback.eligiblePeriodCount),
+    reconciledPeriodCount: asNumber(readback.reconciledPeriodCount),
+    intervalShape: asString(readback.intervalShape),
+    baseload15MinKwh: asNumber(readback.baseload15MinKwh),
+    totalKwh: asNumber(readback.totalKwh),
+    coverageStart: asString(readback.coverageStart),
+    coverageEnd: asString(readback.coverageEnd),
+  };
+}
+
+export function extractMonthlyCompareRowsFromCompareResult(
+  result: Record<string, unknown> | null | undefined
+): ManualGapfillMonthlyCompareRow[] {
+  const compare = asRecord(result?.compare);
+  const monthly = asRecord(compare?.monthly);
+  const rows = Array.isArray(monthly?.rows) ? monthly.rows : [];
+  return rows.map((row) => {
+    const rec = asRecord(row);
+    return {
+      periodId: asString(rec?.periodId) ?? "—",
+      startDate: asString(rec?.startDate) ?? "—",
+      endDate: asString(rec?.endDate) ?? "—",
+      actualKwh: asNumber(rec?.actualKwh),
+      simulatedKwh: asNumber(rec?.simulatedKwh),
+      deltaKwh: asNumber(rec?.deltaKwh),
+      percentDelta: asNumber(rec?.percentDelta),
+      status: asString(rec?.status) ?? "—",
+      actualSource: asString(rec?.actualSource),
+      simulatedSource: asString(rec?.simulatedSource),
+    };
+  });
+}
+
+export function canContinuePipelineAfterPrepareSeed(args: {
+  persistedSeedInSession: boolean;
+  prepareResult: Record<string, unknown> | null | undefined;
+}): boolean {
+  return args.persistedSeedInSession || isPrepareSeedPersisted(args.prepareResult);
+}
