@@ -237,14 +237,11 @@ export function normalizeCanonicalManualPastDatasetDailyCoverageForRead(dataset:
     const dateKey = asDateKey(row?.date);
     return dateKey != null && dateKey >= window.startDate && dateKey <= window.endDate;
   });
-  const dailyByDate = new Map(
-    filteredDaily
-      .map((row: { date?: unknown }) => {
-        const dateKey = asDateKey(row?.date);
-        return dateKey ? ([dateKey, row] as const) : null;
-      })
-      .filter((entry): entry is readonly [string, { date?: unknown }] => entry != null)
-  );
+  const dailyByDate = new Map<string, { date?: unknown; source?: unknown; sourceDetail?: unknown }>();
+  for (const row of filteredDaily) {
+    const dateKey = asDateKey(row?.date);
+    if (dateKey) dailyByDate.set(dateKey, row);
+  }
   const manualPastDisplay = isManualPastSimDisplayDataset(asRecord(dataset.meta));
   const filledDaily = fillCanonicalDailyTotals(filteredDaily, window).map((row) => {
     const existing = dailyByDate.get(row.date);
