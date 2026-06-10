@@ -283,6 +283,7 @@ async function computeUsageCoverageForEsiid(
  * Body: { homeId?: string }
  */
 export async function POST(req: NextRequest) {
+  try {
   const cookieStore = cookies();
   const sessionEmail = cookieStore.get("intelliwatt_user")?.value ?? null;
 
@@ -618,4 +619,15 @@ export async function POST(req: NextRequest) {
     },
     actions,
   });
+  } catch (error) {
+    console.error("[user/smt/orchestrate] failed", error);
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "internal_error",
+        message: "SMT orchestration failed due to a temporary backend error.",
+      },
+      { status: 500 }
+    );
+  }
 }

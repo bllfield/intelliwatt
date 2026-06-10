@@ -9,6 +9,7 @@ import { smtLedgerFieldsFromDatasetMeta } from "@/lib/usage/smtDayCoverageLedger
 import {
   isGreenButtonPrimaryDataset,
   isResolvedDatasetTailDisplayReady,
+  loadSmtTailCoverage,
   reconcileUsageIngestionWithDataset,
 } from "@/lib/usage/smtTailCoverage";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
@@ -145,23 +146,41 @@ export async function GET(request: NextRequest) {
           resolvedDataset,
           canonicalCoverage.endDate,
         );
-        usageIngestion = {
-          ...(reconcileUsageIngestionWithDataset({
-            ingestion: null,
-            dataset: resolvedDataset,
+        if (tailDisplayReady) {
+          usageIngestion = {
+            ...(reconcileUsageIngestionWithDataset({
+              ingestion: null,
+              dataset: resolvedDataset,
+              targetEndDate: canonicalCoverage.endDate,
+            }) ?? {
+              tailReady: true,
+              targetEndDate: canonicalCoverage.endDate,
+              tailRefreshAttempted: false,
+              tailRefreshReason: "coverage_tail_current",
+              tailTimedOut: false,
+              incompleteTailDateKeys: [],
+              coverageEndDate: null,
+            }),
+            smtPendingIntervalDateKeys: ledgerFromDataset.pendingDateKeys,
+            smtIncompleteMeterDateKeys: ledgerFromDataset.incompleteMeterDateKeys,
+          };
+        } else {
+          const tailCoverage = await loadSmtTailCoverage({
+            esiid,
             targetEndDate: canonicalCoverage.endDate,
-          }) ?? {
-            tailReady: tailDisplayReady,
+          }).catch(() => null);
+          usageIngestion = {
+            tailReady: Boolean(tailCoverage?.tailReady),
             targetEndDate: canonicalCoverage.endDate,
-            tailRefreshAttempted: !tailDisplayReady,
-            tailRefreshReason: tailDisplayReady ? "coverage_tail_current" : "refresh_requested",
+            tailRefreshAttempted: false,
+            tailRefreshReason: "refresh_requested",
             tailTimedOut: false,
-            incompleteTailDateKeys: [],
-            coverageEndDate: null,
-          }),
-          smtPendingIntervalDateKeys: ledgerFromDataset.pendingDateKeys,
-          smtIncompleteMeterDateKeys: ledgerFromDataset.incompleteMeterDateKeys,
-        };
+            incompleteTailDateKeys: tailCoverage?.incompleteTailDateKeys ?? [],
+            coverageEndDate: tailCoverage?.coverageEndDate ?? null,
+            smtPendingIntervalDateKeys: ledgerFromDataset.pendingDateKeys,
+            smtIncompleteMeterDateKeys: ledgerFromDataset.incompleteMeterDateKeys,
+          };
+        }
       }
       results.push({
         ...contract,

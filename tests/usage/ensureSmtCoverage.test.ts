@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   requestUsageRefreshForUserHouseMock,
+  requestTailGapIngestPullForUserHouseMock,
   requestTargetedSmtIntervalBackfillForHouseMock,
   runDeferredPendingSmtDayRepairsMock,
   reconcileSmtIntervalDayLedgerMock,
@@ -11,6 +12,7 @@ const {
   waitForSmtTailCoverageMock,
 } = vi.hoisted(() => ({
   requestUsageRefreshForUserHouseMock: vi.fn(),
+  requestTailGapIngestPullForUserHouseMock: vi.fn(),
   requestTargetedSmtIntervalBackfillForHouseMock: vi.fn(),
   runDeferredPendingSmtDayRepairsMock: vi.fn(),
   reconcileSmtIntervalDayLedgerMock: vi.fn(),
@@ -30,6 +32,7 @@ vi.mock("@/lib/db", () => ({
 
 vi.mock("@/lib/usage/userUsageRefresh", () => ({
   requestUsageRefreshForUserHouse: requestUsageRefreshForUserHouseMock,
+  requestTailGapIngestPullForUserHouse: requestTailGapIngestPullForUserHouseMock,
 }));
 
 vi.mock("@/lib/usage/smtIncompleteMeterBackfill", () => ({
@@ -115,6 +118,11 @@ beforeEach(() => {
   });
   loadSmtWindowDayStatusMock.mockResolvedValue(windowStatus());
   requestUsageRefreshForUserHouseMock.mockResolvedValue({ ok: true, homes: [], backfill: [] });
+  requestTailGapIngestPullForUserHouseMock.mockResolvedValue({
+    homeId: "house-1",
+    authorizationRefreshed: false,
+    pull: { attempted: true, ok: true, message: "ok" },
+  });
   requestTargetedSmtIntervalBackfillForHouseMock.mockResolvedValue({
     ok: true,
     dateKeys: ["2026-04-12"],
@@ -184,7 +192,8 @@ describe("ensureSmtCoverageForHouse", () => {
     });
     expect(second.healed).toBe(false);
     expect(second.skippedReason).toBe("session_throttle");
-    expect(requestUsageRefreshForUserHouseMock).toHaveBeenCalledTimes(2);
+    expect(requestUsageRefreshForUserHouseMock).not.toHaveBeenCalled();
+    expect(requestTailGapIngestPullForUserHouseMock).toHaveBeenCalledTimes(1);
   });
 
   it("heals again when force=true", async () => {
@@ -252,7 +261,8 @@ describe("ensureSmtCoverageForHouse", () => {
 
     expect(result.healed).toBe(true);
     expect(requestTargetedSmtIntervalBackfillForHouseMock).not.toHaveBeenCalled();
-    expect(requestUsageRefreshForUserHouseMock).toHaveBeenCalled();
+    expect(requestUsageRefreshForUserHouseMock).not.toHaveBeenCalled();
+    expect(requestTailGapIngestPullForUserHouseMock).toHaveBeenCalled();
     expect(waitForSmtTailCoverageMock).toHaveBeenCalled();
   });
 
@@ -271,6 +281,26 @@ describe("ensureSmtCoverageForHouse", () => {
     expect(result.healed).toBe(true);
     expect(loadSmtWindowDayStatusMock).toHaveBeenCalledWith(
       expect.objectContaining({ esiid: "esiid-from-source" })
+    );
+  });
+
+  it("uses tail-gap targeted backfill for user_session instead of wide refresh", async () => {
+    await ensureSmtCoverageForHouse({
+      userId: "user-1",
+      houseId: "house-1",
+      profile: "user_session",
+      sessionKey: "tail-gap-only",
+      tailGapOnly: true,
+    });
+
+    expect(requestTargetedSmtIntervalBackfillForHouseMock).toHaveBeenCalled();
+    expect(requestTailGapIngestPullForUserHouseMock).toHaveBeenCalledWith({
+      userId: "user-1",
+      houseId: "house-1",
+    });
+    expect(requestUsageRefreshForUserHouseMock).not.toHaveBeenCalled();
+    expect(waitForSmtTailCoverageMock).toHaveBeenCalledWith(
+      expect.objectContaining({ timeoutMs: 45_000, exitEarlyWhenStalled: false })
     );
   });
 

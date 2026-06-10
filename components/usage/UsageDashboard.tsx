@@ -159,11 +159,7 @@ export type HouseUsage = {
 };
 
 function houseNeedsSmtIngestionPoll(house: HouseUsage | null | undefined): boolean {
-  if (!house?.esiid) return false;
-  if (!house.dataset) return true;
-  const ingestion = house.usageIngestion;
-  if (!ingestion) return false;
-  return ingestion.tailRefreshAttempted && !ingestion.tailReady && !ingestion.tailTimedOut;
+  return houseShowsSmtTailFinishingState(house);
 }
 
 function houseShowsSmtTailFinishingState(house: HouseUsage | null | undefined): boolean {
@@ -472,9 +468,8 @@ export const UsageDashboard: React.FC<Props> = ({
     };
   }, [datasetMode, fetchModeOverride, housesOverride, preferredHouseId, refreshToken, simulatedHousesOverride]);
 
-  // If usage isn't available yet (common immediately after SMT backfill request),
-  // keep checking until it lands by polling the SMT orchestrator and reloading usage.
-  // Only poll when we're actually showing REAL data (main Usage or simulator Usage tab).
+  // When canonical tail coverage is behind, request targeted tail-gap backfill (not a wide refresh)
+  // and poll usage until the last day lands or the bounded tail wait times out.
   const effectiveFetchMode = fetchModeOverride ?? datasetMode;
   useEffect(() => {
     if (housesOverride && housesOverride.length) {
@@ -492,7 +487,6 @@ export const UsageDashboard: React.FC<Props> = ({
       return;
     }
 
-    // Clear any prior polling
     if (smtPollTimerRef.current) {
       window.clearTimeout(smtPollTimerRef.current);
       smtPollTimerRef.current = null;
@@ -508,6 +502,7 @@ export const UsageDashboard: React.FC<Props> = ({
 
     let cancelled = false;
     let attempts = 0;
+    let reloadsSinceHeal = 0;
 
     async function reloadUsageOnce() {
       const res = await fetch(`/api/user/usage?ts=${Date.now()}`, { cache: "no-store" });
@@ -516,52 +511,87 @@ export const UsageDashboard: React.FC<Props> = ({
         const text = await res.text();
         json = JSON.parse(text) as UsageApiResponse;
       } catch {
-        return; // Non-JSON (e.g. timeout page): skip update, next poll will retry
+        return null;
       }
-      if (!res.ok || (json as any).ok === false) return;
-      if (cancelled) return;
+      if (!res.ok || (json as any).ok === false) return null;
+      if (cancelled) return null;
       writeSessionCache("REAL", json);
       setHouses((json as any).houses || []);
       const nextHouses = (json as any).houses || [];
       setSelectedHouseId(pickSelectedHouseId(nextHouses));
+      return nextHouses.find((h: HouseUsage) => h.houseId === selectedHouseId) ?? null;
+    }
+
+    async function requestTailGapHeal(force = false) {
+      const res = await fetch("/api/user/usage/refresh", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          homeId: selectedHouseId,
+          tailGapOnly: true,
+          force,
+        }),
+        cache: "no-store",
+      });
+      const json: any = await res.json().catch(() => null);
+      if (cancelled || !res.ok || json?.ok === false) return null;
+
+      if (json?.tail && selectedHouseId) {
+        setHouses((prev) =>
+          prev.map((house) =>
+            house.houseId !== selectedHouseId
+              ? house
+              : {
+                  ...house,
+                  usageIngestion: {
+                    ...(house.usageIngestion ?? {
+                      targetEndDate: json.tail.targetEndDate,
+                      tailRefreshAttempted: true,
+                      tailRefreshReason: "refresh_requested",
+                      incompleteTailDateKeys: [],
+                      coverageEndDate: null,
+                    }),
+                    tailReady: Boolean(json.tail.tailReady),
+                    tailTimedOut: Boolean(json.tail.tailTimedOut),
+                    targetEndDate: json.tail.targetEndDate ?? house.usageIngestion?.targetEndDate ?? "",
+                    incompleteTailDateKeys:
+                      json.tail.incompleteTailDateKeys ?? house.usageIngestion?.incompleteTailDateKeys ?? [],
+                    coverageEndDate:
+                      json.tail.coverageEndDate ?? house.usageIngestion?.coverageEndDate ?? null,
+                    tailRefreshAttempted: true,
+                    tailRefreshReason: "refresh_requested",
+                  },
+                }
+          )
+        );
+      }
+      return json;
     }
 
     async function tick() {
       if (cancelled) return;
       attempts += 1;
-      if (attempts > 60) return; // ~20-30 minutes depending on nextPollMs
+      if (attempts > 60) return;
 
       try {
-        const r = await fetch("/api/user/smt/orchestrate", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ homeId: selectedHouseId }),
-          cache: "no-store",
-        });
-        const j: any = await r.json().catch(() => null);
-        if (!cancelled && r.ok && j?.ok) {
-          const intervals = Number(j?.usage?.intervals ?? 0);
-          const ready = Boolean(j?.usage?.ready);
-          const nextPollMs =
-            typeof j?.nextPollMs === "number" && j.nextPollMs > 0 ? j.nextPollMs : 30_000;
+        if (reloadsSinceHeal === 0 || reloadsSinceHeal >= 4) {
+          const retryHeal = reloadsSinceHeal >= 4;
+          reloadsSinceHeal = 0;
+          await requestTailGapHeal(retryHeal);
+        }
 
-          // If intervals increased (or we reached ready), reload the usage dashboard data.
-          if (ready || intervals > lastSmtIntervalsRef.current) {
-            lastSmtIntervalsRef.current = intervals;
-            await reloadUsageOnce();
-          }
-
-          if (!ready) {
-            smtPollTimerRef.current = window.setTimeout(() => void tick(), nextPollMs);
-            return;
-          }
+        const updatedHouse = await reloadUsageOnce();
+        reloadsSinceHeal += 1;
+        const activeAfterReload =
+          updatedHouse ?? houses.find((h) => h.houseId === selectedHouseId) ?? null;
+        if (!houseShowsSmtTailFinishingState(activeAfterReload)) {
           return;
         }
-      } catch {
-        // ignore and back off
-      }
 
-      smtPollTimerRef.current = window.setTimeout(() => void tick(), 60_000);
+        smtPollTimerRef.current = window.setTimeout(() => void tick(), 15_000);
+      } catch {
+        smtPollTimerRef.current = window.setTimeout(() => void tick(), 30_000);
+      }
     }
 
     void tick();

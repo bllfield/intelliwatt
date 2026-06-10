@@ -29,6 +29,8 @@ export const SMT_TAIL_WAIT_TIMEOUT_MS = 60_000;
 export const SMT_TAIL_WAIT_INTERVAL_MS = 2_000;
 /** User-facing usage route budget: leave headroom when multiple homes are loaded. */
 export const USER_USAGE_SMT_TAIL_WAIT_TIMEOUT_MS = 8_000;
+/** Tail-gap heal waits for pull + normalize after targeted backfill (not a full wide refresh). */
+export const USER_USAGE_TAIL_GAP_WAIT_TIMEOUT_MS = 45_000;
 /** Cap internal /api/admin/smt/pull wait from user refresh (Vercel user routes are ~30–60s). */
 export const USER_USAGE_PULL_FETCH_TIMEOUT_MS = 18_000;
 /** After a pull from user refresh, bounded deferred PENDING_SMT repair wait. */
@@ -331,6 +333,21 @@ export function resolveSmtHealBackfillDateKeysWithTailExtension(args: {
       persistedSpan: args.persistedSpan,
     }),
   ]);
+}
+
+export function shouldUseTargetedTailGapHealOnly(args: {
+  profile: "user_session" | "user_refresh" | "sim_run" | "admin_sim";
+  tailGapOnly?: boolean;
+  tailOnlyUserHeal: boolean;
+  backfillDateKeys: string[];
+  spanBehindCanonicalEnd: boolean;
+}): boolean {
+  const userFacing = args.profile === "user_session" || args.profile === "user_refresh";
+  if (!userFacing) return false;
+  if (args.profile === "user_refresh" && args.tailGapOnly !== true) return false;
+  if (args.tailOnlyUserHeal) return true;
+  if (args.backfillDateKeys.length > 0) return true;
+  return args.spanBehindCanonicalEnd;
 }
 
 /** True when heal only needs calendar days after persisted span end (typical 1–2 day SMT lag). */

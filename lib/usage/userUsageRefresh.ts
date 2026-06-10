@@ -86,6 +86,109 @@ export type UsageRefreshResult =
       message?: string;
     };
 
+export async function requestTailGapIngestPullForUserHouse(args: {
+  userId: string;
+  houseId: string;
+}): Promise<HomeRefreshResult | { ok: false; error: "home_not_found" | "admin_token_missing"; message?: string }> {
+  const targetHouse = await prisma.houseAddress.findFirst({
+    where: { id: args.houseId, userId: args.userId, archivedAt: null },
+    select: { id: true, esiid: true },
+  });
+
+  if (!targetHouse) {
+    return { ok: false, error: "home_not_found" };
+  }
+
+  const adminToken = process.env.ADMIN_TOKEN ?? "";
+  if (!adminToken) {
+    return {
+      ok: false,
+      error: "admin_token_missing",
+      message: "ADMIN_TOKEN must be configured to trigger SMT pull/normalize.",
+    };
+  }
+
+  const result: HomeRefreshResult = {
+    homeId: targetHouse.id,
+    authorizationRefreshed: false,
+    pull: {
+      attempted: true,
+      ok: false,
+    },
+  };
+
+  const authCandidates = await prisma.smtAuthorization.findMany({
+    where: { houseAddressId: targetHouse.id, archivedAt: null },
+    orderBy: { createdAt: "desc" },
+    take: 25,
+    select: { id: true },
+  });
+  const latestAuth = pickBestSmtAuthorization(authCandidates as any[]);
+
+  if (latestAuth) {
+    try {
+      await withTimeout(refreshSmtAuthorizationStatus(latestAuth.id), 2500, "refreshSmtAuthorizationStatus");
+      result.authorizationRefreshed = true;
+    } catch (error) {
+      result.authorizationMessage =
+        error instanceof Error ? error.message : "Failed to refresh SMT authorization status.";
+    }
+  }
+
+  if (targetHouse.esiid) {
+    try {
+      const baseUrl = resolveBaseUrl();
+      const pullUrl = new URL("/api/admin/smt/pull", baseUrl);
+      const pullResponse = await fetch(pullUrl, {
+        method: "POST",
+        headers: {
+          "x-admin-token": adminToken,
+          "content-type": "application/json",
+        },
+        cache: "no-store",
+        signal: AbortSignal.timeout(USER_USAGE_PULL_FETCH_TIMEOUT_MS),
+        body: JSON.stringify({ esiid: targetHouse.esiid, houseId: targetHouse.id }),
+      });
+
+      result.pull.status = pullResponse.status;
+      let pullPayload: any = null;
+      try {
+        pullPayload = await pullResponse.json();
+      } catch {
+        pullPayload = null;
+      }
+
+      if (pullResponse.ok && pullPayload?.ok !== false) {
+        result.pull.ok = true;
+        result.pull.message = pullPayload?.message ?? "SMT tail-gap pull triggered.";
+        result.pull.webhookResponse = pullPayload?.webhookResponse ?? null;
+      } else {
+        result.pull.ok = false;
+        result.pull.message =
+          pullPayload?.error ?? pullPayload?.details ?? "SMT tail-gap pull request failed.";
+        result.pull.webhookResponse = pullPayload?.webhookResponse ?? null;
+      }
+    } catch (error) {
+      result.pull.ok = false;
+      result.pull.message =
+        error instanceof Error ? error.message : "Failed to invoke SMT tail-gap pull webhook.";
+    }
+
+    await reconcileSmtLedgerAfterPersist({ esiids: [targetHouse.esiid] }).catch(() => null);
+    if (result.pull.ok) {
+      await finalizeDeferredPendingRepairsAfterPull({
+        esiid: targetHouse.esiid,
+        pullDateKey: chicagoPullDateKey(),
+        waitTimeoutMs: USER_USAGE_DEFERRED_REPAIR_WAIT_MS,
+      }).catch(() => null);
+    }
+  } else {
+    result.pull.message = "House is missing an ESIID; SMT pull not attempted.";
+  }
+
+  return result;
+}
+
 export async function requestUsageRefreshForUserHouse(args: {
   userId: string;
   houseId: string;

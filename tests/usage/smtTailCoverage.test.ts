@@ -15,6 +15,7 @@ import {
   ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS,
   ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS,
   reconcileUsageIngestionWithDataset,
+  shouldUseTargetedTailGapHealOnly,
   smtTailRefreshNeeded,
 } from "@/lib/usage/smtTailCoverage";
 
@@ -85,6 +86,44 @@ describe("smt tail coverage helpers", () => {
       tailReady: true,
       incompleteTailDateKeys: [],
     });
+  });
+
+  it("detects tail-gap-only user heal requests", () => {
+    const dayStatus = {
+      window: { startDate: "2025-05-24", endDate: "2026-06-08" },
+      dateKeys: [],
+      byDate: {},
+      completeDateKeys: [],
+      incompleteDateKeys: ["2026-06-07", "2026-06-08"],
+      pendingDateKeys: ["2026-06-08"],
+      incompleteMeterDateKeys: ["2026-06-07"],
+      canonicalEndDayComplete: false,
+      ready: false,
+    };
+    const persistedSpan = { startDate: "2025-06-09", endDate: "2026-06-07" };
+    const backfillDateKeys = resolveSmtHealBackfillDateKeysWithTailExtension({
+      dayStatus: dayStatus as any,
+      persistedSpan,
+    });
+    expect(backfillDateKeys).toEqual(expect.arrayContaining(["2026-06-07", "2026-06-08"]));
+    expect(
+      shouldUseTargetedTailGapHealOnly({
+        profile: "user_session",
+        tailGapOnly: true,
+        tailOnlyUserHeal: false,
+        backfillDateKeys,
+        spanBehindCanonicalEnd: true,
+      })
+    ).toBe(true);
+    expect(
+      shouldUseTargetedTailGapHealOnly({
+        profile: "user_refresh",
+        tailGapOnly: false,
+        tailOnlyUserHeal: false,
+        backfillDateKeys,
+        spanBehindCanonicalEnd: true,
+      })
+    ).toBe(false);
   });
 
   it("requires refresh when canonical tail day is incomplete", () => {

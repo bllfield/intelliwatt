@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { ensureSmtCoverageForHouse } from "@/lib/usage/ensureSmtCoverage";
 import { isHouseCommittedToGreenButton } from "@/lib/usage/houseCommittedUsageSource";
+import { loadSmtTailCoverage } from "@/lib/usage/smtTailCoverage";
 import {
   resolveUserUsageSessionKey,
   USER_USAGE_SESSION_COOKIE,
@@ -16,111 +17,146 @@ export const runtime = "nodejs"; // ensure Node runtime for longer executions
 export const maxDuration = 120;
 
 export async function POST(req: NextRequest) {
-  const cookieStore = cookies();
-  const sessionEmail = cookieStore.get("intelliwatt_user")?.value ?? null;
-
-  if (!sessionEmail) {
-    return NextResponse.json({ ok: false, error: "not_authenticated" }, { status: 401 });
-  }
-
-  const normalizedEmail = normalizeEmail(sessionEmail);
-  const user = await prisma.user.findUnique({
-    where: { email: normalizedEmail },
-    select: { id: true },
-  });
-
-  if (!user) {
-    return NextResponse.json({ ok: false, error: "user_not_found" }, { status: 404 });
-  }
-
-  let body: any = {};
   try {
-    body = await req.json();
-  } catch {
-    body = {};
-  }
+    const cookieStore = cookies();
+    const sessionEmail = cookieStore.get("intelliwatt_user")?.value ?? null;
 
-  const requestedHomeId =
-    typeof body?.homeId === "string" && body.homeId.trim().length > 0
-      ? body.homeId.trim()
-      : null;
+    if (!sessionEmail) {
+      return NextResponse.json({ ok: false, error: "not_authenticated" }, { status: 401 });
+    }
 
-  if (!requestedHomeId) {
-    return NextResponse.json(
-      { ok: false, error: "home_id_required", message: "homeId is required to refresh usage." },
-      { status: 400 }
-    );
-  }
+    const normalizedEmail = normalizeEmail(sessionEmail);
+    const user = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+      select: { id: true },
+    });
 
-  const sessionKey = resolveUserUsageSessionKey({
-    userId: user.id,
-    request: req,
-    cookieValue: cookieStore.get(USER_USAGE_SESSION_COOKIE)?.value ?? null,
-  });
+    if (!user) {
+      return NextResponse.json({ ok: false, error: "user_not_found" }, { status: 404 });
+    }
 
-  const house = await prisma.houseAddress.findFirst({
-    where: { id: requestedHomeId, userId: user.id, archivedAt: null },
-    select: { id: true, esiid: true },
-  });
-  if (!house) {
-    return NextResponse.json(
-      { ok: false, error: "home_not_found", message: "Home not found for this user." },
-      { status: 404 },
-    );
-  }
+    let body: any = {};
+    try {
+      body = await req.json();
+    } catch {
+      body = {};
+    }
 
-  if (
-    await isHouseCommittedToGreenButton({
-      houseId: house.id,
+    const tailGapOnly = body?.tailGapOnly === true;
+    const force = body?.force === true || tailGapOnly;
+
+    const requestedHomeId =
+      typeof body?.homeId === "string" && body.homeId.trim().length > 0
+        ? body.homeId.trim()
+        : null;
+
+    if (!requestedHomeId) {
+      return NextResponse.json(
+        { ok: false, error: "home_id_required", message: "homeId is required to refresh usage." },
+        { status: 400 }
+      );
+    }
+
+    const sessionKey = resolveUserUsageSessionKey({
       userId: user.id,
-      esiid: house.esiid ?? null,
-    })
-  ) {
+      request: req,
+      cookieValue: cookieStore.get(USER_USAGE_SESSION_COOKIE)?.value ?? null,
+    });
+
+    const house = await prisma.houseAddress.findFirst({
+      where: { id: requestedHomeId, userId: user.id, archivedAt: null },
+      select: { id: true, esiid: true },
+    });
+    if (!house) {
+      return NextResponse.json(
+        { ok: false, error: "home_not_found", message: "Home not found for this user." },
+        { status: 404 }
+      );
+    }
+
+    if (
+      await isHouseCommittedToGreenButton({
+        houseId: house.id,
+        userId: user.id,
+        esiid: house.esiid ?? null,
+      })
+    ) {
+      return NextResponse.json({
+        ok: true,
+        homes: [],
+        backfill: [],
+        ensure: {
+          healed: false,
+          skippedReason: "green_button_committed",
+        },
+        greenButtonCommitted: true,
+        message: "This home uses Green Button; SMT refresh was not requested.",
+      });
+    }
+
+    const ensure = await ensureSmtCoverageForHouse({
+      userId: user.id,
+      houseId: requestedHomeId,
+      profile: tailGapOnly ? "user_session" : "user_refresh",
+      sessionKey: tailGapOnly ? `tail_gap:${sessionKey}:${requestedHomeId}` : sessionKey,
+      force,
+      tailGapOnly,
+    });
+
+    if (ensure.skippedReason === "no_esiid") {
+      return NextResponse.json(
+        { ok: false, error: "home_not_found", message: "Home is missing an ESIID for SMT refresh." },
+        { status: 404 }
+      );
+    }
+
+    const refreshResult = ensure.refreshResult;
+    if (!tailGapOnly && refreshResult && refreshResult.ok === false) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: refreshResult.error,
+          ...(refreshResult.message ? { message: refreshResult.message } : {}),
+          ensure,
+        },
+        { status: refreshResult.error === "home_not_found" ? 404 : 500 }
+      );
+    }
+
+    const esiid = house.esiid ? String(house.esiid).trim() : "";
+    const tailCoverage =
+      esiid && ensure.window?.endDate
+        ? await loadSmtTailCoverage({
+            esiid,
+            targetEndDate: ensure.window.endDate,
+          }).catch(() => null)
+        : null;
+
     return NextResponse.json({
       ok: true,
-      homes: [],
-      backfill: [],
-      ensure: {
-        healed: false,
-        skippedReason: "green_button_committed",
-      },
-      greenButtonCommitted: true,
-      message: "This home uses Green Button; SMT refresh was not requested.",
+      tailGapOnly,
+      houses: refreshResult?.ok ? refreshResult.homes : [],
+      backfill: refreshResult?.ok ? refreshResult.backfill : [],
+      ensure,
+      tail: tailCoverage
+        ? {
+            tailReady: tailCoverage.tailReady,
+            targetEndDate: tailCoverage.targetEndDate,
+            coverageEndDate: tailCoverage.coverageEndDate,
+            incompleteTailDateKeys: tailCoverage.incompleteTailDateKeys,
+            tailTimedOut: Boolean(ensure.tailWaitTimedOut || ensure.incompleteMeterWaitTimedOut),
+          }
+        : null,
     });
-  }
-
-  const ensure = await ensureSmtCoverageForHouse({
-    userId: user.id,
-    houseId: requestedHomeId,
-    profile: "user_refresh",
-    sessionKey,
-    force: true,
-  });
-
-  if (ensure.skippedReason === "no_esiid") {
-    return NextResponse.json(
-      { ok: false, error: "home_not_found", message: "Home is missing an ESIID for SMT refresh." },
-      { status: 404 }
-    );
-  }
-
-  const refreshResult = ensure.refreshResult;
-  if (refreshResult && refreshResult.ok === false) {
+  } catch (error) {
+    console.error("[user/usage/refresh] failed", error);
     return NextResponse.json(
       {
         ok: false,
-        error: refreshResult.error,
-        ...(refreshResult.message ? { message: refreshResult.message } : {}),
-        ensure,
+        error: "internal_error",
+        message: "Usage refresh failed due to a temporary backend error.",
       },
-      { status: refreshResult.error === "home_not_found" ? 404 : 500 }
+      { status: 500 }
     );
   }
-
-  return NextResponse.json({
-    ok: true,
-    homes: refreshResult?.ok ? refreshResult.homes : [],
-    backfill: refreshResult?.ok ? refreshResult.backfill : [],
-    ensure,
-  });
 }

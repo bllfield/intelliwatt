@@ -22,14 +22,17 @@ import {
   ONE_PATH_ADMIN_SMT_INCOMPLETE_METER_WAIT_TIMEOUT_MS,
   resolveSmtHealBackfillDateKeysWithTailExtension,
   ONE_PATH_ADMIN_SMT_TAIL_WAIT_TIMEOUT_MS,
+  shouldUseTargetedTailGapHealOnly,
   SMT_POST_BACKFILL_SETTLE_DELAY_MS,
   SMT_TAIL_WAIT_INTERVAL_MS,
   USER_USAGE_DEFERRED_REPAIR_WAIT_MS,
   USER_USAGE_SMT_TAIL_WAIT_TIMEOUT_MS,
+  USER_USAGE_TAIL_GAP_WAIT_TIMEOUT_MS,
   waitForSmtDateCoverage,
   waitForSmtTailCoverage,
 } from "@/lib/usage/smtTailCoverage";
 import {
+  requestTailGapIngestPullForUserHouse,
   requestUsageRefreshForUserHouse,
   type UsageRefreshResult,
 } from "@/lib/usage/userUsageRefresh";
@@ -68,12 +71,23 @@ function sessionThrottleKey(userId: string, houseId: string, sessionKey: string)
   return `${userId}|${houseId}|${sessionKey}`;
 }
 
-function waitBudgetForProfile(profile: EnsureSmtCoverageProfile): {
+function waitBudgetForProfile(
+  profile: EnsureSmtCoverageProfile,
+  tailGapOnly = false
+): {
   tailWaitMs: number;
   incompleteMeterWaitMs: number;
   deferredWaitMs: number;
   tailExitEarlyWhenStalled: boolean;
 } {
+  if (tailGapOnly && (profile === "user_session" || profile === "user_refresh")) {
+    return {
+      tailWaitMs: USER_USAGE_TAIL_GAP_WAIT_TIMEOUT_MS,
+      incompleteMeterWaitMs: USER_USAGE_TAIL_GAP_WAIT_TIMEOUT_MS,
+      deferredWaitMs: USER_USAGE_DEFERRED_REPAIR_WAIT_MS,
+      tailExitEarlyWhenStalled: false,
+    };
+  }
   if (profile === "user_session" || profile === "user_refresh") {
     return {
       tailWaitMs: USER_USAGE_SMT_TAIL_WAIT_TIMEOUT_MS,
@@ -140,6 +154,8 @@ export async function ensureSmtCoverageForHouse(args: {
   extraBackfillDateKeys?: string[];
   /** When true, skip pull/authorization refresh (caller already ran requestUsageRefreshForUserHouse). */
   skipUsageRefresh?: boolean;
+  /** Dashboard tail wait: targeted backfill + tail pull only (no wide 12-month refresh). */
+  tailGapOnly?: boolean;
 }): Promise<EnsureSmtCoverageResult> {
   const window = resolveSmtCanonicalWindow();
   const { isSmtBackfillBlockedForGreenButtonHome, isUserFacingSmtBackfillAllowed } = await import(
@@ -212,7 +228,7 @@ export async function ensureSmtCoverageForHouse(args: {
     }
   }
 
-  const waits = waitBudgetForProfile(args.profile);
+  const waits = waitBudgetForProfile(args.profile, args.tailGapOnly === true);
   const spanBehindCanonicalEnd = Boolean(
     persistedSpan && persistedSpan.endDate < window.endDate
   );
@@ -228,6 +244,13 @@ export async function ensureSmtCoverageForHouse(args: {
   const tailOnlyUserHeal =
     args.profile === "user_session" &&
     isTailOnlySmtHealRequest({ dayStatus, persistedSpan, backfillDateKeys });
+  const targetedTailGapHealOnly = shouldUseTargetedTailGapHealOnly({
+    profile: args.profile,
+    tailGapOnly: args.tailGapOnly,
+    tailOnlyUserHeal,
+    backfillDateKeys,
+    spanBehindCanonicalEnd,
+  });
 
   let refreshResult: UsageRefreshResult | undefined;
   let targetedBackfill: TargetedSmtIntervalBackfillResult | undefined;
@@ -237,7 +260,7 @@ export async function ensureSmtCoverageForHouse(args: {
   let tailWaitTimedOut = false;
   let incompleteMeterWaitTimedOut = false;
 
-  if (!args.skipUsageRefresh && !tailOnlyUserHeal) {
+  if (!args.skipUsageRefresh && !targetedTailGapHealOnly) {
     refreshResult = await tryUsageRefreshForHouse({
       userId: args.userId,
       houseId: args.houseId,
@@ -256,7 +279,12 @@ export async function ensureSmtCoverageForHouse(args: {
       message: error instanceof Error ? error.message : String(error),
     }));
 
-    if (!tailOnlyUserHeal && args.profile !== "user_refresh") {
+    if (targetedTailGapHealOnly) {
+      await requestTailGapIngestPullForUserHouse({
+        userId: args.userId,
+        houseId: args.houseId,
+      }).catch(() => null);
+    } else if (args.profile !== "user_refresh") {
       postTargetedBackfillRefreshResult = await tryUsageRefreshForHouse({
         userId: args.userId,
         houseId: args.houseId,
@@ -277,14 +305,28 @@ export async function ensureSmtCoverageForHouse(args: {
       exitEarlyWhenStalled: false,
     });
     incompleteMeterWaitTimedOut = incompleteWait.timedOut;
+  } else if (targetedTailGapHealOnly && spanBehindCanonicalEnd) {
+    await requestTailGapIngestPullForUserHouse({
+      userId: args.userId,
+      houseId: args.houseId,
+    }).catch(() => null);
   }
 
-  if (tailOnlyUserHeal) {
+  if (targetedTailGapHealOnly) {
     reconcile = await reconcileSmtIntervalDayLedger({
       esiid,
       canonicalStartDate: window.startDate,
       canonicalEndDate: window.endDate,
     }).catch(() => null) ?? undefined;
+
+    const tailWait = await waitForSmtTailCoverage({
+      esiid,
+      targetEndDate: window.endDate,
+      timeoutMs: tailWaitMs,
+      intervalMs: SMT_TAIL_WAIT_INTERVAL_MS,
+      exitEarlyWhenStalled: waits.tailExitEarlyWhenStalled,
+    });
+    tailWaitTimedOut = tailWait.timedOut;
   } else {
     deferredRepair = await runDeferredPendingSmtDayRepairs({
       esiid,
