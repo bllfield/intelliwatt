@@ -105,6 +105,7 @@ Inventory derived from the admin dashboard and codebase scan. Purpose is one-lin
 
 - `/api/admin/tools/gapfill-lab` — Gap-Fill Lab
 - `/api/admin/tools/manual-gapfill/source-context` — Manual GapFill read-only source context (MG-1)
+- `/api/admin/tools/manual-gapfill/prepare-seed` — Manual GapFill seed preparation from MG-1 source context (MG-3; dry-run default; optional lab-home persist only; no Past Sim/compare)
 - `/api/admin/tools/validation-day-policy` — Global validation-day policy snapshot + preview (MG-2)
 - `/api/admin/usage/normalize` — Usage normalization
 - `/api/admin/smt/*` — SMT agreements, pull, normalize, billing, etc.

@@ -4,7 +4,7 @@
 >
 > This file records a point-in-time code audit and must not be treated as the canonical product/architecture contract for One Path Sim, usage-upstream ownership, cutover status, or reader/producer rules.
 >
-> **Manual GapFill phases:** MG-1 shipped read-only source context (`814e0839`). MG-2 adds global validation-day policy/admin preview (`lib/usage/validationDayPolicy.ts`). MG-3 = seed prep; MG-4 = compare. Legacy GapFill local selectors remain until explicit retirement.
+> **Manual GapFill phases:** MG-1 shipped read-only source context (`814e0839`). MG-2 shipped global validation-day policy/admin preview (`d9542e06`). MG-3 (local) = seed prep from MG-1 via `modules/manualUsage/manualGapfillSeed.ts` + `/api/admin/tools/manual-gapfill/prepare-seed` — dry-run default, optional lab-home persist only, no Past Sim/compare. MG-4 = run/readback; MG-5 = compare standardization. Legacy GapFill local selectors remain until explicit retirement.
 >
 > Canonical architecture references:
 > - `docs/ONE_PATH_SIM_ARCHITECTURE.md`
