@@ -43,8 +43,82 @@ import {
   classifySimulationFailure,
   recordSimulationDataAlert,
 } from "@/modules/usageSimulator/simulationDataAlerts";
+import { isAdminLabTestHomeForUserSite } from "@/lib/usage/userSiteSimulationIsolation";
 import { monthsEndingAt } from "@/lib/time/chicago";
 import { buildDisplayMonthlyFromIntervalsUtc } from "@/modules/usageSimulator/dataset";
+
+export type GapfillManualLabSourceHouseCandidate = {
+  id?: unknown;
+  esiid?: unknown;
+  label?: unknown;
+  addressLine1?: unknown;
+  addressCity?: unknown;
+  addressState?: unknown;
+  addressZip5?: unknown;
+};
+
+export function isGapfillManualLabRuntimeHouse(args: {
+  houseId?: unknown;
+  label?: unknown;
+  addressLine1?: unknown;
+  testHomeHouseId?: string | null;
+}): boolean {
+  const id = String(args.houseId ?? "").trim();
+  const testHomeId = String(args.testHomeHouseId ?? "").trim();
+  if (testHomeId && id === testHomeId) return true;
+  return isAdminLabTestHomeForUserSite({
+    label: args.label == null ? null : String(args.label),
+    addressLine1: args.addressLine1 == null ? null : String(args.addressLine1),
+  });
+}
+
+export function sortGapfillManualLabSourceCandidates<T extends GapfillManualLabSourceHouseCandidate>(
+  houses: T[]
+): T[] {
+  return [...houses].sort((left, right) => {
+    const leftEsiid = String(left.esiid ?? "").trim();
+    const rightEsiid = String(right.esiid ?? "").trim();
+    if (leftEsiid && !rightEsiid) return -1;
+    if (!leftEsiid && rightEsiid) return 1;
+    return String(left.id ?? "").localeCompare(String(right.id ?? ""));
+  });
+}
+
+/** Manual GapFill source must be a real meter-backed home, not the lab runtime house. */
+export function pickGapfillManualLabSourceHouseId(args: {
+  candidates: GapfillManualLabSourceHouseCandidate[];
+  requestedSourceHouseId?: string | null;
+  linkedSourceHouseId?: string | null;
+  testHomeHouseId?: string | null;
+}): string {
+  const eligible = sortGapfillManualLabSourceCandidates(
+    args.candidates.filter(
+      (house) =>
+        !isGapfillManualLabRuntimeHouse({
+          houseId: house.id,
+          label: house.label,
+          addressLine1: house.addressLine1,
+          testHomeHouseId: args.testHomeHouseId,
+        })
+    )
+  );
+  const findEligible = (id?: string | null) => {
+    const key = String(id ?? "").trim();
+    if (!key) return null;
+    return eligible.find((house) => String(house.id ?? "").trim() === key) ?? null;
+  };
+  const hasEsiid = (house: GapfillManualLabSourceHouseCandidate | null) =>
+    Boolean(house && String(house.esiid ?? "").trim());
+  const requested = findEligible(args.requestedSourceHouseId);
+  const linked = findEligible(args.linkedSourceHouseId);
+  if (requested && hasEsiid(requested)) return String(requested.id).trim();
+  if (linked && hasEsiid(linked)) return String(linked.id).trim();
+  const firstWithEsiid = eligible.find((house) => String(house.esiid ?? "").trim());
+  if (firstWithEsiid?.id) return String(firstWithEsiid.id).trim();
+  if (requested?.id) return String(requested.id).trim();
+  if (linked?.id) return String(linked.id).trim();
+  return eligible[0]?.id ? String(eligible[0].id).trim() : "";
+}
 
 /** Shared compare/report timeouts (Gap-Fill compare_core + full report). */
 export const ROUTE_COMPARE_SHARED_TIMEOUT_MS = 90_000;

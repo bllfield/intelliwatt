@@ -164,6 +164,8 @@ import {
   buildFullReport,
   ROUTE_COMPARE_SHARED_TIMEOUT_MS,
   ROUTE_COMPARE_REPORT_TIMEOUT_MS,
+  isGapfillManualLabRuntimeHouse,
+  pickGapfillManualLabSourceHouseId,
 } from "./gapfillLabRouteHelpers";
 import { buildSourceHomePastSimSnapshot } from "./sourceHomePastSimSnapshot";
 
@@ -1303,7 +1305,7 @@ export async function POST(req: NextRequest) {
   const houses = await (prisma as any).houseAddress.findMany({
     where: { userId: user.id, archivedAt: null },
     orderBy: { updatedAt: "desc" },
-    select: { id: true, esiid: true, addressLine1: true, addressCity: true, addressState: true, addressZip5: true, createdAt: true },
+    select: { id: true, esiid: true, label: true, addressLine1: true, addressCity: true, addressState: true, addressZip5: true, createdAt: true },
   });
 
   if (!houses?.length) {
@@ -1390,25 +1392,28 @@ export async function POST(req: NextRequest) {
   if (rawAction === "lookup_source_houses") {
     const link = labOwnerUserId ? await getLabTestHomeLink(labOwnerUserId) : null;
     const testHomeHouseId = String(link?.testHomeHouseId ?? "").trim();
-    const sourceHouseOptions = buildCanonicalGapfillSourceHouseOptions(houses, testHomeHouseId);
+    const sourceHouseOptions = buildCanonicalGapfillSourceHouseOptions(houses, testHomeHouseId).filter(
+      (house: any) =>
+        !isGapfillManualLabRuntimeHouse({
+          houseId: house.id,
+          label: house.label,
+          addressLine1: house.addressLine1,
+          testHomeHouseId,
+        })
+    );
     const requestedSourceHouseId = String(sourceHouseIdParam ?? "").trim();
     const linkedSourceHouseId = String(
       resolveCanonicalGapfillSourceHouse(houses, String(link?.sourceHouseId ?? "").trim(), testHomeHouseId)?.id ??
         link?.sourceHouseId ??
         ""
     ).trim();
-    const selectedSourceHouseId =
-      (requestedSourceHouseId &&
-      requestedSourceHouseId !== testHomeHouseId &&
-      resolveCanonicalGapfillSourceHouse(houses, requestedSourceHouseId, testHomeHouseId)?.id
-        ? String(resolveCanonicalGapfillSourceHouse(houses, requestedSourceHouseId, testHomeHouseId)?.id ?? "")
-        : linkedSourceHouseId &&
-            linkedSourceHouseId !== testHomeHouseId &&
-            sourceHouseOptions.some((h: any) => String(h.id) === linkedSourceHouseId)
-          ? linkedSourceHouseId
-          : sourceHouseOptions[0]?.id
-            ? String(sourceHouseOptions[0].id)
-            : "");
+    const selectedSourceHouseId = pickGapfillManualLabSourceHouseId({
+      candidates: sourceHouseOptions,
+      requestedSourceHouseId:
+        requestedSourceHouseId && requestedSourceHouseId !== testHomeHouseId ? requestedSourceHouseId : null,
+      linkedSourceHouseId,
+      testHomeHouseId,
+    });
     const testHomeTravelRanges =
       labOwnerUserId && link?.testHomeHouseId
         ? await getTravelRangesFromDb(labOwnerUserId, String(link.testHomeHouseId))

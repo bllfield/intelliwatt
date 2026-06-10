@@ -624,29 +624,51 @@ export default function GapFillLabCanonicalClient() {
   const effectiveTestHomeId = String(testHomeLink?.testHomeHouseId ?? testHome?.id ?? "").trim();
   const resolvedSourceUserId = useMemo(() => {
     const linkUserId = String(testHomeLink?.sourceUserId ?? "").trim();
-    if (String(testHomeLink?.status ?? "") === "ready" && linkUserId) {
-      return linkUserId;
-    }
+    const linkHouseId = String(testHomeLink?.sourceHouseId ?? "").trim();
+    const linkSourceEsiid = String(
+      sourceHouses.find((house) => house.id === linkHouseId)?.esiid ?? ""
+    ).trim();
+    const linkSourceReady =
+      String(testHomeLink?.status ?? "") === "ready" &&
+      linkUserId &&
+      linkHouseId &&
+      Boolean(linkSourceEsiid);
+
+    if (linkSourceReady) return linkUserId;
     if (result?.ok) {
       const uid = result.sourceUser?.id ?? result.sourceUserId;
       if (uid) return String(uid).trim();
     }
     return linkUserId;
-  }, [result, testHomeLink]);
+  }, [result, testHomeLink, sourceHouses]);
   const resolvedSourceHouseId = useMemo(() => {
+    const uiSourceId = String(sourceHouse?.id ?? sourceHouseId ?? "").trim();
     const linkHouseId = String(testHomeLink?.sourceHouseId ?? "").trim();
-    if (String(testHomeLink?.status ?? "") === "ready" && linkHouseId) {
-      return linkHouseId;
-    }
+    const linkSourceEsiid = String(
+      sourceHouses.find((house) => house.id === linkHouseId)?.esiid ?? ""
+    ).trim();
+    const linkSourceReady =
+      String(testHomeLink?.status ?? "") === "ready" &&
+      linkHouseId &&
+      Boolean(linkSourceEsiid);
+
+    if (linkSourceReady) return linkHouseId;
+    if (uiSourceId) return uiSourceId;
     if (result?.ok && result.sourceHouseId) return String(result.sourceHouseId).trim();
-    return String(sourceHouse?.id ?? sourceHouseId ?? "").trim();
-  }, [result, sourceHouse, sourceHouseId, testHomeLink]);
+    return linkHouseId;
+  }, [result, sourceHouse, sourceHouseId, testHomeLink, sourceHouses]);
   const resolvedSourceEsiid =
     sourceHouse?.esiid ??
     sourceHouses.find((house) => house.id === resolvedSourceHouseId)?.esiid ??
     null;
+  const linkedSourceMissingSmt =
+    String(testHomeLink?.status ?? "") === "ready" &&
+    Boolean(String(testHomeLink?.sourceHouseId ?? "").trim()) &&
+    !Boolean(
+      String(sourceHouses.find((house) => house.id === testHomeLink?.sourceHouseId)?.esiid ?? "").trim()
+    );
   const manualLabReady =
-    Boolean(resolvedSourceUserId && resolvedSourceHouseId && effectiveTestHomeId) &&
+    Boolean(resolvedSourceUserId && resolvedSourceHouseId && effectiveTestHomeId && resolvedSourceEsiid) &&
     String(testHomeLink?.status ?? "") === "ready";
   const parsedHomeProfile = useMemo(() => parseJsonSafe(homeProfileJson), [homeProfileJson]);
   const parsedApplianceProfile = useMemo(() => parseJsonSafe(applianceProfileJson), [applianceProfileJson]);
@@ -1476,16 +1498,42 @@ export default function GapFillLabCanonicalClient() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         <input className="border rounded px-3 py-2 text-sm" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Source user email" />
         <input className="border rounded px-3 py-2 text-sm" value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="Timezone" />
-        <div className="border rounded px-3 py-2 text-sm text-brand-navy/70 flex items-center">
-          Source home is auto-selected from lookup
-        </div>
-        <div className="flex gap-2">
+        <label className="grid gap-1 text-sm">
+          <span className="text-xs font-semibold uppercase tracking-wide text-brand-navy/50">SMT source home</span>
+          <select
+            className="border rounded px-3 py-2 text-sm"
+            value={sourceHouseId}
+            onChange={(e) => setSourceHouseId(e.target.value)}
+            disabled={sourceHouses.length === 0}
+          >
+            {sourceHouses.length === 0 ? (
+              <option value="">Run Lookup first</option>
+            ) : (
+              sourceHouses.map((house) => (
+                <option key={house.id} value={house.id}>
+                  {house.label || house.id}
+                  {house.esiid ? ` · ESIID ${house.esiid}` : " · no ESIID"}
+                </option>
+              ))
+            )}
+          </select>
+        </label>
+        <div className="flex gap-2 items-end">
           <button className="px-3 py-2 rounded bg-brand-blue text-white text-sm" disabled={loading} onClick={onLookup}>Lookup</button>
           <button className="px-3 py-2 rounded bg-brand-navy text-white text-sm" disabled={loading} onClick={onReplace}>
             Load/Replace Test Home
           </button>
         </div>
       </div>
+
+      {linkedSourceMissingSmt ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          The linked source home <span className="font-mono">{String(testHomeLink?.sourceHouseId ?? "")}</span> has no
+          ESIID and cannot supply SMT meter intervals. Select the real SMT source home above (for example{" "}
+          <span className="font-mono">8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8</span>) and click Load/Replace Test Home
+          again before Step 1.
+        </div>
+      ) : null}
 
       {(sourceHouse || testHome || testHomeLink || sourceHouseId) && (
         <div className="border rounded p-4 bg-white">
@@ -1559,7 +1607,11 @@ export default function GapFillLabCanonicalClient() {
           disabledReason={
             manualLabReady
               ? null
-              : "Load/replace the lab test home and wait for ready status before running Manual GapFill Lab."
+              : linkedSourceMissingSmt
+                ? "Linked source home has no ESIID. Select the SMT source home and Load/Replace Test Home before Step 1."
+                : !resolvedSourceEsiid
+                  ? "Select an SMT source home with an ESIID, then Load/Replace Test Home before Step 1."
+                  : "Load/replace the lab test home and wait for ready status before running Manual GapFill Lab."
           }
         />
       </section>
