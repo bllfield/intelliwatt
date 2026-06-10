@@ -193,6 +193,14 @@
   - `scripts/audit/proof-gapfill-derived-monthly.json`
   - `scripts/audit/proof-gapfill-derived-annual.json`
 
+**Manual Monthly GREEN closeout (2026-06-08 — production accepted):**
+
+- **Doc:** `docs/MANUAL_MONTHLY_GREEN_CLOSEOUT.md` (authoritative keeper readback + policy)
+- **Bill Match:** Pass 12/12, entered 34,590.00 kWh, eligible sim ≈ 34,589.98 kWh, total delta ≈ −0.02 kWh, tolerance ±0.10 kWh absolute per eligible period
+- **Canonical Past display (keeper house):** 2025-06-08 → 2026-06-07, 365 daily rows, `SIMULATED` / `SIMULATED_MANUAL_CONSTRAINED`, estimated manual-bill Past weather copy
+- **Display copy fixes:** `lib/usage/manualPastDisplayPolicy.ts`, `lib/usage/usageSimulatorSourceStatusCopy.ts` — copy/source labeling only; no sim/reconciliation/scoring changes
+- **Overlay:** no general overlay behavior changed; manual Past skip in `pastSimStaleIncompleteMeter.ts` guards stale/actual display-truth contamination only
+
 **Future work (separate approval — not started):**
 
 - Phase 5: dispatch convergence / shared `runSharedSimulation` replacement

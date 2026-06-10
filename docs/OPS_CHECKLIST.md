@@ -315,3 +315,12 @@ and `SmtBillingRead` exists in `prisma/schema.prisma` with migration folder `pri
 npm install
 npm run db:apply-smt-billing
 ```
+
+## Manual Monthly · Production GREEN closeout
+
+Reference: `docs/MANUAL_MONTHLY_GREEN_CLOSEOUT.md`
+
+1. Confirm Vercel Production has `MANUAL_CANONICAL_ARTIFACT_WINDOW_PERSIST=1` (server-only, not `NEXT_PUBLIC`). Redeploy after any change.
+2. Keeper house readback (optional smoke): Bill Match Pass 12/12, statement window 2025-03-17 → 2026-03-15, canonical Past 2025-06-08 → 2026-06-07 (365 rows).
+3. Usage Simulator manual entry path must show **Manual totals (bill-period based)** source copy, not “Actual usage” with 0 intervals.
+4. Manual GapFill full overhaul and MG-1 are **not** started; do not remove `EXACT_INTERVALS` without explicit approval.

@@ -36,7 +36,7 @@
 | User-facing SMT backfill gate | `lib/usage/smtBackfillEligibility.ts` | SMT homes only (`isUserFacingSmtBackfillAllowed`) | Blocked (`isSmtBackfillBlockedForGreenButtonHome`) |
 | Manual Past validation backfill | `lib/usage/pastSimValidationReadBackfill.ts` | SMT baseline + non-MANUAL `baseKind` only | N/A |
 | Actual daily kWh (display) | `lib/usage/sageActualDailyTruth.ts` | Sage dataset daily | Same |
-| Baseload (15-min) | `lib/usage/computeHomeBaseloadKw.ts` | Actual intervals only | Actual intervals only |
+| Baseload (15-min) | `lib/usage/baseloadDerivedFields.ts` + `computeHomeBaseloadKw.ts` | Actual intervals; display as kWh/15 min | Manual Past: derived from `baseloadDailyKwh/96` when present (see `MANUAL_MONTHLY_GREEN_CLOSEOUT.md`) |
 | Past producer | `simulatePastUsageDataset` in **both** trees (see below) | + ledger prep | + `trustedActualDateKeys` from GB fetch |
 | Past engine | `buildPastSimulatedBaselineV1` in **both** `engine.ts` trees | Pending/incomplete/forced simulate | `intervalTrustedSource: GREEN_BUTTON` |
 | Validation compare | `compareProjection.ts` (keep admin + user copies aligned) | `forceSimulateDateKeysLocal` | Same |

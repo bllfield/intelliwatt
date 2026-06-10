@@ -234,6 +234,7 @@ Invoke-RestMethod -Headers $headers -Uri "https://intelliwatt.com/api/admin/env-
 - **[GOOGLE_MAPS_SETUP.md](./GOOGLE_MAPS_SETUP.md)** - Maps integration
 - **[ARCHITECTURE_STANDARDS.md](./ARCHITECTURE_STANDARDS.md)** - Core principles
 - **[PROJECT_PLAN.md](./PROJECT_PLAN.md)** - Project guardrails
+- **[MANUAL_MONTHLY_GREEN_CLOSEOUT.md](./MANUAL_MONTHLY_GREEN_CLOSEOUT.md)** - Accepted Manual Monthly GREEN state (Bill Match, canonical Past, copy owners)
 
 ---
 

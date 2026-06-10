@@ -36,6 +36,7 @@ import {
   shouldAutoPreparePastWorkspace,
   shouldRecalcPastWorkspaceWithoutEvents,
 } from "@/modules/usageSimulator/manualWorkspaceAutoBuild";
+import { resolveUsageSimulatorSourceStatusCopy } from "@/lib/usage/usageSimulatorSourceStatusCopy";
 
 /**
  * Client wait for GET `/api/user/usage/simulated/house` (Past/Future curve + compare).
@@ -512,6 +513,28 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
     if (!pastScenario?.id) return false;
     return Boolean(pastBuild?.lastBuiltAt) || workspacePrereqReady;
   }, [pastBuild?.lastBuiltAt, pastScenario?.id, workspacePrereqReady]);
+
+  const usageSourceStatus = useMemo(
+    () =>
+      resolveUsageSimulatorSourceStatusCopy({
+        mode,
+        normalizedIntent,
+        hasActualIntervals,
+        manualUsagePayload,
+        actualSource,
+        actualCoverage,
+        pastSimAvailable: Boolean(pastBuild?.lastBuiltAt),
+      }),
+    [
+      mode,
+      normalizedIntent,
+      hasActualIntervals,
+      manualUsagePayload,
+      actualSource,
+      actualCoverage,
+      pastBuild?.lastBuiltAt,
+    ]
+  );
 
   const futureReady = useMemo(() => {
     if (!futureScenario?.id) return false;
@@ -1169,9 +1192,9 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
               Manual totals
             </button>
 
-            {baselineViewable ? (
+            {usageSourceStatus.connectedBadge ? (
               <div className="rounded-full border border-brand-cyan/20 bg-brand-white/5 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-cyan/80">
-                Actual connected
+                {usageSourceStatus.connectedBadge}
               </div>
             ) : (
               <div className="text-xs text-brand-cyan/60">{actualDisabledReason}</div>
@@ -1183,26 +1206,13 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div>
               <div className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">Steps</div>
-              <div className="mt-2 text-sm text-brand-cyan/80">
-                {baselineViewable ? (
-                  <>
-                    Your <span className="font-semibold">Usage is Actual usage</span> (read-only). Complete the required
-                    details below to unlock Past/Future simulations.
-                  </>
-                ) : (
-                  <>
-                    No interval usage connected yet. Complete Home + Appliances, then use Past/Future workspaces to simulate.
-                  </>
-                )}
-              </div>
+              <div className="mt-2 text-sm text-brand-cyan/80">{usageSourceStatus.stepSummary}</div>
+              {usageSourceStatus.secondaryStatus ? (
+                <div className="mt-2 text-xs text-brand-cyan/65">{usageSourceStatus.secondaryStatus}</div>
+              ) : null}
             </div>
             <div className="text-xs text-brand-cyan/75">
-              <span className="font-semibold">Actual coverage:</span>{" "}
-              {baselineViewable
-                ? `${actualSource ?? "ACTUAL"} · ${actualCoverage?.start ?? "?"} → ${actualCoverage?.end ?? "?"} · ${
-                    actualCoverage?.intervalsCount ?? 0
-                  } intervals`
-                : "none"}
+              <span className="font-semibold">{usageSourceStatus.coverageLabel}</span> {usageSourceStatus.coverageLine}
             </div>
           </div>
 

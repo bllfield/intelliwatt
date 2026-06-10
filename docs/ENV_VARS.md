@@ -361,3 +361,11 @@ here must be kept in sync with deployment notes in docs/DEPLOY_SMT_INGEST.md.
 - SFTP remains preferred; Enrollment backfill always goes to SFTP per SMT.
 
 - Enrollment logic must cap requested backfill to 12 months for residential and 24 months for commercial ESIDs.
+
+## Manual Past canonical artifact persist
+
+- `MANUAL_CANONICAL_ARTIFACT_WINDOW_PERSIST`
+  - **Purpose:** When set to `1`, persist manual monthly/annual Past artifacts with canonical display-window stamp (`manual_canonical_artifact_v1`) at artifact write.
+  - **Scope:** Server-only. **Do not** expose as `NEXT_PUBLIC_*`.
+  - **Production:** Must be `1` in Vercel Production for canonical manual Past artifacts. Redeploy after add/change.
+  - **Detail:** `docs/MANUAL_MONTHLY_GREEN_CLOSEOUT.md`

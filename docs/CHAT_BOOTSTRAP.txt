@@ -154,6 +154,21 @@ USER MANUAL MONTHLY (AUTHORITATIVE)
 - Manual Usage Lab and GapFill stay separate pages; daily curve compare/tuning belongs on GapFill/admin tuning surfaces, not on the Manual Usage Lab flow/debug page.
 
 ========================================
+MANUAL MONTHLY GREEN CLOSEOUT (2026-06-08)
+========================================
+
+- **Status:** Accepted GREEN. Authoritative closeout doc: `docs/MANUAL_MONTHLY_GREEN_CLOSEOUT.md`
+- **Two truths:** (1) bill-period Stage 1 / Usage / Bill Match vs (2) canonical Past display window for Past/Future/plan comparison. Never sum canonical daily rows for Bill Match.
+- **Bill Match:** pre-projection bill-period sidecar, ±0.10 kWh absolute per eligible period, deltas visible, keeper house 12/12 at ≈ −0.02 kWh total delta.
+- **Simulation Confidence:** separate from Bill Match; manual-only interval shape is estimated; measured confidence requires SMT/GB interval truth.
+- **Canonical Past display (keeper):** 2025-06-08 → 2026-06-07, 365 rows, `SIMULATED` / `SIMULATED_MANUAL_CONSTRAINED`, estimated manual-bill Past weather copy.
+- **Baseload (15-min):** kWh per 15-minute interval from daily baseload / 96; must not render blank when baseload exists.
+- **Usage Simulator source state:** manual active source shows Manual totals / bill-period based copy; do not show Actual usage / 0-interval ACTUAL coverage when manual totals are active (`lib/usage/usageSimulatorSourceStatusCopy.ts`).
+- **Env:** `MANUAL_CANONICAL_ARTIFACT_WINDOW_PERSIST=1` in Vercel Production (server-only); redeploy after change.
+- **Manual GapFill:** full overhaul not started; MG-0 = planning only; MG-1 requires explicit approval; keep `EXACT_INTERVALS` and legacy GapFill until approved redesign.
+- **Overlay note:** no general overlay behavior changed; manual Past guarded from stale/actual display-truth contamination only.
+
+========================================
 CUSTOM PRISMA CLIENT PACKAGING (CURRENT)
 ========================================
 
