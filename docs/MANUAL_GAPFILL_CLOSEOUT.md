@@ -10,8 +10,9 @@
 
 ## Keeper houses (admin pipeline defaults)
 
-| Role | House ID |
-|------|----------|
+| Role | Value |
+|------|--------|
+| Source user email | `bllfield32@icloud.com` |
 | Source (source actual usage) | `4da5d9d3-f139-4d3a-a602-3250d933c71c` |
 | Lab (lab simulated usage) | `29a3d820-2593-4673-9dd6-cd161bbd7f6f` |
 

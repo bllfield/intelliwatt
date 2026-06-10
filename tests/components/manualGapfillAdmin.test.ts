@@ -7,11 +7,13 @@ import {
   extractArtifactInputHashFromRunResult,
   extractSeedHashFromPrepareResult,
   extractSourceIntervalFingerprint,
+  fetchAdminUserByEmail,
   fetchManualGapfillCompare,
   fetchManualGapfillPrepareSeed,
   fetchManualGapfillRunReadback,
   fetchManualGapfillSourceContext,
   fetchValidationDayPolicyPreview,
+  MANUAL_GAPFILL_DEFAULT_USER_EMAIL,
   sameHouseBlocked,
 } from "@/lib/admin/manualGapfillClient";
 
@@ -35,6 +37,27 @@ afterEach(() => {
 });
 
 describe("manualGapfillClient step wiring", () => {
+  it("resolves keeper user email via admin houses lookup", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        email: MANUAL_GAPFILL_DEFAULT_USER_EMAIL,
+        userId: "user-keeper-1",
+        houses: [{ id: MANUAL_GAPFILL_DEFAULT_SOURCE_HOUSE_ID, esiid: "esiid-1" }],
+      }),
+    });
+    const res = await fetchAdminUserByEmail(MANUAL_GAPFILL_DEFAULT_USER_EMAIL);
+    expect(res.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/admin/houses/by-email?email=${encodeURIComponent(MANUAL_GAPFILL_DEFAULT_USER_EMAIL)}`,
+      expect.objectContaining({ method: "GET", credentials: "include" })
+    );
+    if (res.ok) {
+      expect(res.data.userId).toBe("user-keeper-1");
+    }
+  });
+
   it("step 1 posts source-context with diagnostics flag", async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,

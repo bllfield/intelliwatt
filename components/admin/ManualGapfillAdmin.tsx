@@ -7,7 +7,9 @@ import {
   MANUAL_GAPFILL_DEFAULT_LAB_HOUSE_ID,
   MANUAL_GAPFILL_DEFAULT_MODE,
   MANUAL_GAPFILL_DEFAULT_SOURCE_HOUSE_ID,
+  MANUAL_GAPFILL_DEFAULT_USER_EMAIL,
   buildManualGapfillIdentityKey,
+  fetchAdminUserByEmail,
   extractArtifactInputHashFromRunResult,
   extractSeedHashFromPrepareResult,
   extractSourceIntervalFingerprint,
@@ -47,7 +49,9 @@ function asNumber(value: unknown): number | null {
 }
 
 export function ManualGapfillAdmin() {
+  const [userEmail, setUserEmail] = useState(MANUAL_GAPFILL_DEFAULT_USER_EMAIL);
   const [userId, setUserId] = useState("");
+  const [userLookupNote, setUserLookupNote] = useState<string | null>(null);
   const [sourceHouseId, setSourceHouseId] = useState(MANUAL_GAPFILL_DEFAULT_SOURCE_HOUSE_ID);
   const [labHouseId, setLabHouseId] = useState(MANUAL_GAPFILL_DEFAULT_LAB_HOUSE_ID);
   const [mode, setMode] = useState<ManualGapfillSeedMode>(MANUAL_GAPFILL_DEFAULT_MODE);
@@ -116,9 +120,41 @@ export function ManualGapfillAdmin() {
     })();
   }, []);
 
+  useEffect(() => {
+    const email = userEmail.trim();
+    if (!email) {
+      setUserId("");
+      setUserLookupNote(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const res = await fetchAdminUserByEmail(email);
+      if (cancelled) return;
+      if (!res.ok) {
+        setUserId("");
+        setUserLookupNote(res.error);
+        return;
+      }
+      setUserId(res.data.userId);
+      setUserLookupNote(`Resolved user ID for ${res.data.email}`);
+      const sourceHouse = res.data.houses?.find((house) => house.id === sourceHouseId.trim());
+      if (sourceHouse?.esiid) {
+        setEsiid((current) => current.trim() || sourceHouse.esiid || "");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userEmail, sourceHouseId]);
+
   const requireIdentity = useCallback(() => {
+    if (!userEmail.trim()) {
+      setError("User email is required for Manual GapFill admin calls.");
+      return false;
+    }
     if (!userId.trim()) {
-      setError("User ID is required for Manual GapFill admin calls.");
+      setError("Could not resolve user ID from email. Check the email or your admin session.");
       return false;
     }
     if (!sourceHouseId.trim() || !labHouseId.trim()) {
@@ -130,7 +166,7 @@ export function ManualGapfillAdmin() {
       return false;
     }
     return true;
-  }, [userId, sourceHouseId, labHouseId]);
+  }, [userEmail, userId, sourceHouseId, labHouseId]);
 
   const runStep1 = useCallback(async () => {
     if (!requireIdentity()) return;
@@ -489,9 +525,23 @@ export function ManualGapfillAdmin() {
       <section className="rounded-2xl border border-slate-200 bg-white p-4">
         <h2 className="text-lg font-semibold text-brand-navy">Pipeline identity</h2>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <label className="grid gap-1 text-sm">
-            <span className="font-semibold">User ID</span>
-            <input className="rounded border px-3 py-2" value={userId} onChange={(e) => setUserId(e.target.value)} />
+          <label className="grid gap-1 text-sm md:col-span-2">
+            <span className="font-semibold">User email (source house owner)</span>
+            <input
+              className="rounded border px-3 py-2"
+              value={userEmail}
+              onChange={(e) => setUserEmail(e.target.value)}
+              placeholder={MANUAL_GAPFILL_DEFAULT_USER_EMAIL}
+            />
+            {userId ? (
+              <span className="text-xs text-slate-500">
+                Resolved user ID: <span className="font-mono">{userId}</span>
+              </span>
+            ) : userLookupNote ? (
+              <span className="text-xs text-amber-700">{userLookupNote}</span>
+            ) : (
+              <span className="text-xs text-slate-500">Resolving user ID…</span>
+            )}
           </label>
           <label className="grid gap-1 text-sm">
             <span className="font-semibold">Source house ID</span>
