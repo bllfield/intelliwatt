@@ -11,6 +11,12 @@ import {
   readTravelRangesForHouse,
   replacePastCorrectedScenarioTravelRanges,
 } from "@/lib/usage/pastSimTravelRanges";
+import {
+  buildLabTestHomeCloneSummary,
+  type LabTestHomeCloneSummary,
+} from "@/modules/usageSimulator/labTestHomeCloneSummary";
+
+export type { LabTestHomeCloneSummary } from "@/modules/usageSimulator/labTestHomeCloneSummary";
 
 import {
   GAPFILL_LAB_TEST_HOME_LABEL,
@@ -739,6 +745,7 @@ export async function replaceGlobalLabTestHomeFromSource(args: {
   ok: boolean;
   testHomeHouseId?: string;
   sourceHouseId?: string;
+  cloneSummary?: LabTestHomeCloneSummary;
   error?: string;
   message?: string;
 }> {
@@ -802,14 +809,9 @@ export async function replaceGlobalLabTestHomeFromSource(args: {
         targetUserId: args.ownerUserId,
         targetHouseId: testHome!.id,
       });
-      await copyManualUsageInput({
-        tx,
-        sourceUserId: args.sourceUserId,
-        sourceHouseId: args.sourceHouseId,
-        targetUserId: args.ownerUserId,
-        targetHouseId: testHome!.id,
-      });
     });
+
+    await clearOnePathActualUsageState({ houseId: testHome!.id });
 
     // usage-module records are owned by usagePrisma, so clear them outside the main-db transaction.
     await (usagePrisma as any).pastSimulatedDatasetCache
@@ -844,6 +846,7 @@ export async function replaceGlobalLabTestHomeFromSource(args: {
     ]);
 
     const sourceHomeProfileForPersistence = normalizeHomeProfileForPersistence(sourceHomeProfile);
+    let copiedHomeProfile = false;
     if (sourceHomeProfileForPersistence) {
       await (homeDetailsPrisma as any).homeProfileSimulated.upsert({
         where: { userId_houseId: { userId: args.ownerUserId, houseId: testHome.id } },
@@ -856,7 +859,9 @@ export async function replaceGlobalLabTestHomeFromSource(args: {
           ...sourceHomeProfileForPersistence,
         },
       });
+      copiedHomeProfile = true;
     }
+    let copiedAppliances = false;
     if (sourceApplianceProfile?.appliancesJson) {
       await (appliancesPrisma as any).applianceProfileSimulated.upsert({
         where: { userId_houseId: { userId: args.ownerUserId, houseId: testHome.id } },
@@ -869,6 +874,7 @@ export async function replaceGlobalLabTestHomeFromSource(args: {
           appliancesJson: sourceApplianceProfile.appliancesJson,
         },
       });
+      copiedAppliances = true;
     }
 
     const sourceTravelRanges = await readTravelRangesForHouse({
@@ -879,6 +885,20 @@ export async function replaceGlobalLabTestHomeFromSource(args: {
       userId: args.ownerUserId,
       houseId: testHome!.id,
       travelRanges: sourceTravelRanges,
+    });
+    const labTravelRanges = await readTravelRangesForHouse({
+      userId: args.ownerUserId,
+      houseId: testHome!.id,
+    });
+    const cloneSummary = await buildLabTestHomeCloneSummary({
+      ownerUserId: args.ownerUserId,
+      labHouseId: testHome!.id,
+      sourceUserId: args.sourceUserId,
+      sourceHouseId: args.sourceHouseId,
+      sourceTravelRanges,
+      labTravelRanges,
+      copiedHomeProfile,
+      copiedAppliances,
     });
 
     await (prisma as any).houseDailyWeather
@@ -901,6 +921,7 @@ export async function replaceGlobalLabTestHomeFromSource(args: {
       ok: true,
       testHomeHouseId: testHome!.id,
       sourceHouseId: args.sourceHouseId,
+      cloneSummary,
     };
   } catch (error) {
     if (testHome?.id) {

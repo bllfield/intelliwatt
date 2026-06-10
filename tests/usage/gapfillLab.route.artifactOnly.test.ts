@@ -576,7 +576,33 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
       statusMessage: null,
       lastReplacedAt: null,
     });
-    replaceGlobalLabTestHomeFromSource.mockResolvedValue({ ok: true, testHomeHouseId: "test-home-1", sourceHouseId: "h1" });
+    replaceGlobalLabTestHomeFromSource.mockResolvedValue({
+      ok: true,
+      testHomeHouseId: "test-home-1",
+      sourceHouseId: "h1",
+      cloneSummary: {
+        copiedHomeProfile: true,
+        copiedAppliances: true,
+        copiedTravelRanges: 1,
+        copiedVacantRanges: 1,
+        copiedThermostatSettings: true,
+        copiedHvacs: 1,
+        copiedWaterHeaters: 0,
+        copiedPools: 0,
+        copiedEvs: 0,
+        copiedSolarBatteryConfig: false,
+        copiedActualUsage: false,
+        copiedSourceIntervals: false,
+        copiedSourceDailyRows: false,
+        labHasRequiredHomeDetails: true,
+        labHasRequiredAppliances: true,
+        missingRequiredProfileFields: [],
+        missingRequiredApplianceFields: [],
+        sourceTravelRangeCount: 1,
+        labTravelRangeCount: 1,
+        travelRangesPersistedToLab: true,
+      },
+    });
     ensureGlobalLabTestHomeHouse.mockResolvedValue({ id: "test-home-1", esiid: null, label: "LAB" });
     ensureGlobalManualMonthlyLabTestHomeHouse.mockResolvedValue({
       id: "manual-lab-home-1",
@@ -4342,6 +4368,7 @@ describe("gapfill-lab route canonical artifact-only flow", () => {
     expect(body.sourceTravelRangesFromDb).toEqual([{ startDate: "2025-08-13", endDate: "2025-08-17" }]);
     expect(body.effectiveTravelRangesForRecalc).toEqual([{ startDate: "2025-08-13", endDate: "2025-08-17" }]);
     expect(body.effectiveTravelRangesSource).toBe("test_home_saved");
+    expect(body.cloneSummary?.travelRangesPersistedToLab).toBe(true);
     expect(replaceGlobalLabTestHomeFromSource).toHaveBeenCalledWith({
       ownerUserId: "u1",
       sourceUserId: "u1",

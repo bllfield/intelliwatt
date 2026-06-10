@@ -1539,6 +1539,7 @@ export async function POST(req: NextRequest) {
         effectiveTravelRangesSource:
           testHomeTravelRanges.length > 0 ? "test_home_saved" : "source_house_fallback",
         manualPayloadReset: true,
+        cloneSummary: replaced.cloneSummary ?? null,
         travelRangesSource:
           testHomeTravelRanges.length > 0 ? "test_home" : "source_house_fallback",
         testHomeLink: refreshedLink,

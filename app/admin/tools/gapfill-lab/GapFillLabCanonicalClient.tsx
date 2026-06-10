@@ -40,6 +40,7 @@ import { buildGapfillFullTuningPayload } from "@/modules/usageSimulator/tuningPa
 import ManualGapfillLabWorkflow, {
   type ManualGapfillLabWorkflowHandle,
 } from "@/components/admin/ManualGapfillLabWorkflow";
+import type { LabTestHomeCloneSummary } from "@/modules/usageSimulator/labTestHomeCloneSummary";
 import { copyTextToClipboard } from "@/lib/admin/copyTextToClipboard";
 import { buildGapfillLabPageAllResponsesPayload } from "@/lib/admin/manualGapfillCopyResponses";
 import type { ManualGapfillSeedMode } from "@/lib/admin/manualGapfillClient";
@@ -145,6 +146,7 @@ type RunResult = {
   diagnosticsVerdict?: Record<string, unknown>;
   /** Optional standalone source-home Past Sim read payload (action: run_source_home_past_sim_snapshot). */
   pastSimSnapshot?: Record<string, unknown>;
+  cloneSummary?: LabTestHomeCloneSummary | null;
 } | {
   ok: false;
   error: string;
@@ -1606,6 +1608,63 @@ export default function GapFillLabCanonicalClient() {
           </div>
         </div>
       )}
+
+      {result?.ok && result.cloneSummary ? (
+        <div className="border rounded p-4 bg-white space-y-3">
+          <div className="font-semibold text-sm">Load/Replace clone summary</div>
+          <div className="grid gap-2 md:grid-cols-3 text-xs text-brand-navy/85">
+            <div>
+              <span className="font-semibold uppercase tracking-wide text-[10px] text-brand-navy/55">Source copied from</span>
+              <div className="font-mono mt-1">{String(result.sourceHouseId ?? sourceHouse?.id ?? sourceHouseId)}</div>
+              {sourceHouse?.label ? <div className="text-brand-navy/60">{sourceHouse.label}</div> : null}
+            </div>
+            <div>
+              <span className="font-semibold uppercase tracking-wide text-[10px] text-brand-navy/55">Test home id</span>
+              <div className="font-mono mt-1">{String(result.testHomeId ?? effectiveTestHomeId)}</div>
+            </div>
+            <div>
+              <span className="font-semibold uppercase tracking-wide text-[10px] text-brand-navy/55">Travel ranges copied</span>
+              <div className="mt-1">
+                {result.cloneSummary.copiedTravelRanges} source · {result.cloneSummary.labTravelRangeCount} persisted on lab
+              </div>
+            </div>
+            <div>
+              <span className="font-semibold uppercase tracking-wide text-[10px] text-brand-navy/55">Home details</span>
+              <div className="mt-1">{result.cloneSummary.copiedHomeProfile ? "Copied" : "Not copied"}</div>
+            </div>
+            <div>
+              <span className="font-semibold uppercase tracking-wide text-[10px] text-brand-navy/55">Appliances</span>
+              <div className="mt-1">{result.cloneSummary.copiedAppliances ? "Copied" : "Not copied"}</div>
+            </div>
+            <div>
+              <span className="font-semibold uppercase tracking-wide text-[10px] text-brand-navy/55">Sim profile ready</span>
+              <div className="mt-1">
+                {result.cloneSummary.labHasRequiredHomeDetails && result.cloneSummary.labHasRequiredAppliances
+                  ? "Ready"
+                  : "Incomplete"}
+              </div>
+            </div>
+          </div>
+          {!result.cloneSummary.travelRangesPersistedToLab && result.cloneSummary.sourceTravelRangeCount > 0 ? (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              Travel/vacant ranges were not persisted to the lab test home. Re-run Load/Replace Test Home or save travel
+              ranges manually before MG-4.
+            </div>
+          ) : null}
+          {(!result.cloneSummary.labHasRequiredHomeDetails || !result.cloneSummary.labHasRequiredAppliances) ? (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              Lab home is missing required profile/appliance fields for Past Sim:{" "}
+              {[...result.cloneSummary.missingRequiredProfileFields, ...result.cloneSummary.missingRequiredApplianceFields].join(", ") ||
+                "see clone summary"}
+            </div>
+          ) : null}
+          <div className="text-[11px] text-brand-navy/60">
+            Profile clone only — no source intervals, daily actual rows, or meter datasets copied (
+            copiedActualUsage={String(result.cloneSummary.copiedActualUsage)}, copiedSourceIntervals=
+            {String(result.cloneSummary.copiedSourceIntervals)}).
+          </div>
+        </div>
+      ) : null}
 
       <section className="rounded-2xl border border-brand-blue/20 bg-white p-4 space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
