@@ -239,8 +239,13 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
   /** Past: Validation / Test Day Compare starts collapsed; expand for full table. */
   const [pastCompareExpanded, setPastCompareExpanded] = useState(PAST_VALIDATION_COMPARE_DEFAULT_EXPANDED);
   const [scenarioLoading, setScenarioLoading] = useState(false);
+  const scenarioPastDatasetMeta = useMemo(
+    () => scenarioSimHouseOverride?.[0]?.dataset?.meta ?? null,
+    [scenarioSimHouseOverride]
+  );
   const pastCompareSectionMode = resolvePastCompareSectionMode({
     manualMonthlyReconciliation: scenarioManualMonthlyReconciliation,
+    datasetMeta: scenarioPastDatasetMeta,
   });
   const activeManualMonthlyReconciliation =
     pastCompareSectionMode === "statement_range_reconciliation" ? scenarioManualMonthlyReconciliation : null;

@@ -14,8 +14,13 @@ import {
   type SharedDiagnosticsCallerType,
 } from "@/modules/usageSimulator/sharedDiagnostics";
 import { getMemoryRssMb, logSimPipelineEvent } from "@/modules/usageSimulator/simObservability";
+import { isManualPastSimDisplayDataset } from "@/lib/usage/manualPastDisplayPolicy";
 import { resolveManualCompareActualDataset } from "@/lib/usage/manualCompareActualDataset";
 import { getSimulatedUsageForHouseScenario } from "@/modules/usageSimulator/service";
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
 
 export type ManualUsagePastSimReadResult =
   | {
@@ -488,11 +493,6 @@ export async function buildManualUsageReadDecorations(args: {
     displayDataset: args.displayDataset,
     buildInputs,
   });
-  const manualReadModel = buildManualUsageReadModel({
-    payload: manualUsageRecord.payload,
-    dataset: args.dataset,
-    actualDataset: args.actualDataset,
-  });
   const usageInputMode =
     args.usageInputMode ??
     (manualUsageRecord.payload?.mode === "ANNUAL"
@@ -500,12 +500,31 @@ export async function buildManualUsageReadDecorations(args: {
       : manualUsageRecord.payload?.mode === "MONTHLY"
         ? "MANUAL_MONTHLY"
         : null);
-  const manualMonthlyReconciliation =
-    manualReadModel?.billPeriodCompare ??
-    buildManualMonthlyReconciliation({
+  const manualPastCompareDecorations = isManualPastSimDisplayDataset(asRecord(args.dataset?.meta));
+  let manualReadModel: ManualUsageReadModel | null = null;
+  let manualMonthlyReconciliation: ReturnType<typeof buildManualMonthlyReconciliation> = null;
+  let manualValidationSummary: ManualValidationSummary | null = null;
+  if (manualPastCompareDecorations) {
+    manualReadModel = buildManualUsageReadModel({
       payload: manualUsageRecord.payload,
       dataset: args.dataset,
+      actualDataset: args.actualDataset,
     });
+    manualMonthlyReconciliation =
+      manualReadModel?.billPeriodCompare ??
+      buildManualMonthlyReconciliation({
+        payload: manualUsageRecord.payload,
+        dataset: args.dataset,
+      });
+    manualValidationSummary = buildManualValidationSummary({
+      manualReadModel,
+      dataset: args.dataset,
+      inputType: usageInputMode,
+      actualComparison: args.actualDataset,
+      compareProjection,
+      includeAdminMetrics: args.callerType !== "user_past",
+    });
+  }
   const sharedDiagnostics = buildSharedPastSimDiagnostics({
     callerType: args.callerType,
     dataset: args.dataset,
@@ -522,14 +541,6 @@ export async function buildManualUsageReadDecorations(args: {
     artifactInputHash: args.artifactInputHash ?? null,
     artifactEngineVersion: args.artifactEngineVersion ?? null,
     artifactPersistenceOutcome: args.artifactPersistenceOutcome ?? null,
-  });
-  const manualValidationSummary = buildManualValidationSummary({
-    manualReadModel,
-    dataset: args.dataset,
-    inputType: usageInputMode,
-    actualComparison: args.actualDataset,
-    compareProjection,
-    includeAdminMetrics: args.callerType !== "user_past",
   });
   return {
     compareProjection,

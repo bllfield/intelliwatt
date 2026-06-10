@@ -341,7 +341,9 @@ describe("user simulated house compare projection", () => {
       dataset: {
         summary: { source: "SIMULATED" },
         meta: {
+          datasetKind: "SIMULATED",
           mode: "MANUAL_TOTALS",
+          usageInputMode: "MANUAL_MONTHLY",
           manualMonthlyInputState: {
             enteredMonthKeys: ["2025-04"],
             missingMonthKeys: [
@@ -391,6 +393,59 @@ describe("user simulated house compare projection", () => {
       deltaKwh: 0,
       status: "reconciled",
     });
+  });
+
+  it("does not attach manual bill-period reconciliation to SMT_BASELINE Past reads even when manual input exists", async () => {
+    prisma.manualUsageInput.findUnique.mockResolvedValueOnce({
+      payload: {
+        mode: "MONTHLY",
+        anchorEndDate: "2025-04-30",
+        monthlyKwh: [{ month: "2025-04", kwh: 300 }],
+        travelRanges: [],
+      },
+      updatedAt: new Date("2025-05-01T00:00:00.000Z"),
+    });
+    readOnePathSimulatedUsageScenario.mockResolvedValueOnce({
+      ok: true,
+      houseId: "h1",
+      scenarioKey: "past-s1",
+      scenarioId: "past-s1",
+      dataset: {
+        summary: { source: "SIMULATED" },
+        meta: {
+          mode: "SMT_BASELINE",
+          preferredActualSource: "SMT",
+          manualBillPeriods: [],
+          validationOnlyDateKeysLocal: ["2025-04-10"],
+          validationCompareRows: [
+            {
+              localDate: "2025-04-10",
+              dayType: "weekday",
+              actualDayKwh: 10,
+              simulatedDayKwh: 9,
+              errorKwh: -1,
+              percentError: 10,
+            },
+          ],
+          validationCompareMetrics: { wape: 10, mae: 1, rmse: 1 },
+        },
+        daily: [{ date: "2025-04-10", kwh: 9, source: "SIMULATED", sourceDetail: "SIMULATED_TEST_DAY" }],
+        monthly: [{ month: "2025-04", kwh: 300 }],
+        series: { intervals15: [] },
+      },
+    });
+
+    const { GET } = await import("@/app/api/user/usage/simulated/house/route");
+    const req = new NextRequest("http://localhost/api/user/usage/simulated/house?houseId=h1&scenarioId=past-s1");
+    const res = await GET(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.manualMonthlyReconciliation).toBeNull();
+    expect(body.manualValidationSummary).toBeNull();
+    expect(body.manualReadModel).toBeNull();
+    expect(Array.isArray(body.compareProjection?.rows)).toBe(true);
+    expect(body.compareProjection.rows[0]?.localDate).toBe("2025-04-10");
   });
 
   it("shared compare display builder reuses sidecar rows for user and gapfill presentation", () => {
@@ -479,9 +534,17 @@ describe("user simulated house compare projection", () => {
   });
 
   it("switches monthly-manual Past display semantics to statement-range reconciliation only when reconciliation rows exist", () => {
-    expect(resolvePastCompareSectionMode({ manualMonthlyReconciliation: null })).toBe("validation_compare");
+    const manualDatasetMeta = {
+      datasetKind: "SIMULATED",
+      mode: "MANUAL_TOTALS",
+      usageInputMode: "MANUAL_MONTHLY",
+    };
+    expect(resolvePastCompareSectionMode({ manualMonthlyReconciliation: null, datasetMeta: manualDatasetMeta })).toBe(
+      "validation_compare"
+    );
     expect(
       resolvePastCompareSectionMode({
+        datasetMeta: manualDatasetMeta,
         manualMonthlyReconciliation: {
           anchorEndDate: "2025-04-30",
           eligibleRangeCount: 1,
@@ -505,6 +568,40 @@ describe("user simulated house compare projection", () => {
         },
       })
     ).toBe("statement_range_reconciliation");
+  });
+
+  it("keeps actual-interval Past runs on validation compare even when stale manual reconciliation rows exist", () => {
+    expect(
+      resolvePastCompareSectionMode({
+        datasetMeta: {
+          datasetKind: "SIMULATED",
+          mode: "SMT_BASELINE",
+          preferredActualSource: "SMT",
+          manualBillPeriods: [],
+        },
+        manualMonthlyReconciliation: {
+          anchorEndDate: "2025-04-30",
+          eligibleRangeCount: 1,
+          ineligibleRangeCount: 0,
+          reconciledRangeCount: 1,
+          deltaPresentRangeCount: 0,
+          rows: [
+            {
+              month: "2025-04",
+              startDate: "2025-04-01",
+              endDate: "2025-04-30",
+              inputKind: "entered_nonzero",
+              enteredStatementTotalKwh: 300,
+              simulatedStatementTotalKwh: 300,
+              deltaKwh: 0,
+              eligible: true,
+              status: "reconciled",
+              reason: null,
+            },
+          ],
+        },
+      })
+    ).toBe("validation_compare");
   });
 
   it("actual-house diagnostics header falls back to persisted shared read fields", () => {
