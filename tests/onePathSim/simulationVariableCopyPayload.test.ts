@@ -763,4 +763,77 @@ describe("one path simulation variable copy payload", () => {
       })
     );
   });
+
+  it("serializes MANUAL_MONTHLY past sim AI copy without base64url digest errors", () => {
+    const payload = buildSimulationVariableCopyPayload({
+      mode: "MANUAL_MONTHLY",
+      response: {
+        familyMeta: {},
+        defaults: {},
+        effectiveByMode: { MANUAL_MONTHLY: {} },
+        overrides: {},
+      },
+      sandboxSummary: {
+        runStatus: {
+          runType: "PAST_SIM",
+        },
+      },
+      loadedSourceContext: {
+        manualUsagePayload: { mode: "MONTHLY", monthlyKwh: [{ month: "2025-03", kwh: 2882.5 }] },
+        userUsagePageBaselineContract: {
+          dataset: {
+            summary: { source: "SMT", intervalsCount: 0, totalKwh: 0 },
+            monthly: [{ month: "2025-03", kwh: 2882.5 }],
+            daily: [{ date: "2025-03-17", kwh: 95, source: "MANUAL" }],
+            insights: {
+              fifteenMinuteAverages: [{ hhmm: "00:00", avgKw: 0.5 }],
+              weekdayVsWeekend: { weekday: 1400, weekend: 1482.5 },
+              timeOfDayBuckets: [{ key: "overnight", label: "Overnight", kwh: 900 }],
+            },
+            meta: { actualSource: "MANUAL", datasetKind: "MANUAL" },
+          },
+        },
+      } as any,
+      readModel: {
+        dataset: {
+          summary: { source: "SIMULATED", intervalsCount: 35040, totalKwh: 34590 },
+          monthly: [
+            { month: "2025-03", kwh: 2882.5 },
+            { month: "2025-04", kwh: 2882.5 },
+          ],
+          daily: [{ date: "2025-03-17", kwh: 95, source: "SIMULATED" }],
+          insights: {
+            fifteenMinuteAverages: [{ hhmm: "00:00", avgKw: 0.5 }],
+            weekdayVsWeekend: { weekday: 17000, weekend: 17590 },
+            timeOfDayBuckets: [{ key: "overnight", label: "Overnight", kwh: 11000 }],
+          },
+          meta: {
+            datasetKind: "SIMULATED",
+            baselinePassthrough: false,
+            coverageStart: "2025-06-08",
+            coverageEnd: "2026-06-07",
+            pastDisplayWeatherSensitivityScore: {
+              weatherEfficiencyScore0to100: 72,
+              scoringMode: "BILLING_PERIOD_BASED",
+            },
+          },
+        },
+      } as any,
+      includeSimRunAudit: true,
+    } as any);
+
+    expect(() => JSON.stringify(payload, null, 2)).not.toThrow();
+    expect((payload.aiPayloadMeta as any)).toEqual(
+      expect.objectContaining({
+        selectedMode: "MANUAL_MONTHLY",
+        runType: "PAST_SIM",
+        pastSim: true,
+      })
+    );
+    expect((payload.parityAudit as any)?.pastUserVsAdmin?.readModelAudit).toEqual(
+      expect.objectContaining({
+        sourceOwner: "auditUserAdminPastReadModelParity",
+      })
+    );
+  });
 });

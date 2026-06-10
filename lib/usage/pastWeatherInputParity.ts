@@ -1,5 +1,4 @@
-import { createHash } from "crypto";
-
+import { sha256DigestBase64Url } from "@/lib/crypto/sha256Base64Url";
 import {
   buildResolvedSimFingerprintCrossSurfaceAudit,
   type ResolvedSimFingerprintCrossSurfaceAudit,
@@ -32,7 +31,7 @@ function round2(value: number): number {
 }
 
 function stableHash(value: unknown): string {
-  return createHash("sha256").update(JSON.stringify(value), "utf8").digest("base64url").slice(0, 22);
+  return sha256DigestBase64Url(JSON.stringify(value), 22);
 }
 
 function readPastCoverageWindow(dataset: Record<string, unknown>): { start: string | null; end: string | null } {
@@ -95,7 +94,7 @@ function computePastDisplayTruthRevision(args: {
     dailyWeatherKeys,
   ].join("\n");
 
-  return createHash("sha256").update(canonical, "utf8").digest("base64url").slice(0, 22);
+  return sha256DigestBase64Url(canonical, 22);
 }
 
 function readArtifactInputHash(meta: Record<string, unknown>): string | null {
@@ -409,7 +408,7 @@ export function computeSimulatedProfileFingerprint(args: {
     home: args.homeProfile ?? null,
     appliancesJson: args.applianceProfileJson ?? null,
   });
-  return createHash("sha256").update(canonical, "utf8").digest("base64url").slice(0, 16);
+  return sha256DigestBase64Url(canonical, 16);
 }
 
 function bundleCValuesEqual(

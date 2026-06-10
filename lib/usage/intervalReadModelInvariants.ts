@@ -1,5 +1,4 @@
-import { createHash } from "crypto";
-
+import { sha256DigestBase64Url } from "@/lib/crypto/sha256Base64Url";
 import { buildDisplayedMonthlyRows } from "@/modules/usageSimulator/monthlyCompareRows";
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
 import { auditPastWeatherInputParity } from "@/lib/usage/pastWeatherInputParity";
@@ -41,18 +40,15 @@ function sumMonthlyKwh(rows: Array<{ kwh?: unknown }>): number {
 }
 
 function hashMonthlyRows(rows: Array<{ month?: unknown; kwh?: unknown }>): string {
-  return createHash("sha256")
-    .update(
-      JSON.stringify(
-        rows.map((row) => ({
-          month: String(row.month ?? "").slice(0, 7),
-          kwh: round2(Number(row.kwh) || 0),
-        }))
-      ),
-      "utf8"
-    )
-    .digest("base64url")
-    .slice(0, 22);
+  return sha256DigestBase64Url(
+    JSON.stringify(
+      rows.map((row) => ({
+        month: String(row.month ?? "").slice(0, 7),
+        kwh: round2(Number(row.kwh) || 0),
+      }))
+    ),
+    22
+  );
 }
 
 function readSourceDerivedMonthlyTotalsKwhByMonth(
