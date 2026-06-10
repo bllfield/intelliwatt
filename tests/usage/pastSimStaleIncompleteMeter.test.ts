@@ -127,4 +127,32 @@ describe("pastSimStaleIncompleteMeter", () => {
     });
     expect((dataset.totals as { netKwh: number }).netKwh).toBe(34.9);
   });
+
+  it("applyPastSimDisplayTruthToDataset skips manual-only Past sim datasets", () => {
+    const dataset: Record<string, unknown> = {
+      meta: {
+        datasetKind: "SIMULATED",
+        mode: "MANUAL_TOTALS",
+        usageInputMode: "MANUAL_MONTHLY",
+      },
+      summary: { totalKwh: 33.48 },
+      totals: { netKwh: 33.48, importKwh: 33.48, exportKwh: 0 },
+      daily: [
+        {
+          date: "2025-11-02",
+          kwh: 33.48,
+          source: "SIMULATED",
+          sourceDetail: "SIMULATED_MANUAL_CONSTRAINED",
+        },
+      ],
+    };
+    applyPastSimDisplayTruthToDataset(dataset, {
+      sageByDate: new Map([["2025-11-02", 34.9]]),
+      smtSlotCompleteDateKeys: new Set(["2025-11-02"]),
+    });
+    expect((dataset.daily as Array<{ source: string; kwh: number }>)[0]).toMatchObject({
+      source: "SIMULATED",
+      kwh: 33.48,
+    });
+  });
 });

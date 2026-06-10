@@ -6,6 +6,10 @@
 
 import { fillCanonicalDailyTotals, resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
 import {
+  isManualPastSimDisplayDataset,
+  labelManualPastZeroFillDailyRow,
+} from "@/lib/usage/manualPastDisplayPolicy";
+import {
   resolvePastSimDisplayFifteenMinuteCurve,
   type PastSimDisplayFifteenMinuteCurveResult,
 } from "@/lib/usage/pastSimDisplayFifteenMinuteCurve";
@@ -83,6 +87,7 @@ function buildDisplayDailyForPastSimFifteenMinuteCurve(args: {
   coverageStart: string | null;
   coverageEnd: string | null;
   greenButtonActual: boolean;
+  manualPastDisplay: boolean;
 }): PastSimDisplayDailyRow[] {
   const daily = args.dataset.daily ?? [];
   const fallbackDailyRaw = (daily.length ? daily : (args.dataset.series?.daily ?? [])).map((row) => {
@@ -120,12 +125,29 @@ function buildDisplayDailyForPastSimFifteenMinuteCurve(args: {
       { startDate: args.coverageStart, endDate: args.coverageEnd }
     ).map((row) => {
       const existing = dailyByDate.get(row.date);
+      if (args.manualPastDisplay) {
+        return dailyRowFieldsFromSourceRow(
+          labelManualPastZeroFillDailyRow(row, existing ?? null)
+        );
+      }
       return dailyRowFieldsFromSourceRow({
         date: row.date,
         kwh: row.kwh,
         source: existing?.source ?? "ACTUAL",
         sourceDetail: existing?.sourceDetail,
       });
+    });
+  }
+  if (args.manualPastDisplay && args.coverageStart && args.coverageEnd) {
+    const dailyByDate = new Map(fallbackDaily.map((row) => [row.date, row] as const));
+    return fillCanonicalDailyTotals(
+      fallbackDaily.map((row) => ({ date: row.date, kwh: row.kwh })),
+      { startDate: args.coverageStart, endDate: args.coverageEnd }
+    ).map((row) => {
+      const existing = dailyByDate.get(row.date);
+      return dailyRowFieldsFromSourceRow(
+        labelManualPastZeroFillDailyRow(row, existing ?? null)
+      );
     });
   }
   return fallbackDaily;
@@ -166,6 +188,7 @@ export function resolvePastSimFifteenMinuteCurveFromDataset(
     canonicalWindow,
   });
   const greenButtonActual = isGreenButtonActualDataset(datasetKind, dataset.summary?.source, meta);
+  const manualPastDisplay = isManualPastSimDisplayDataset(meta);
   const timezone = typeof meta.timezone === "string" ? meta.timezone : "America/Chicago";
   const hasSimulatedFill = readPastSimHasSimulatedFillFromDataset(dataset);
   const displayDaily = buildDisplayDailyForPastSimFifteenMinuteCurve({
@@ -173,6 +196,7 @@ export function resolvePastSimFifteenMinuteCurveFromDataset(
     coverageStart,
     coverageEnd,
     greenButtonActual,
+    manualPastDisplay,
   });
   const curve = resolvePastSimDisplayFifteenMinuteCurve({
     insightsFifteenMinuteAverages: dataset.insights?.fifteenMinuteAverages,
@@ -212,11 +236,13 @@ export function buildPastSimDisplayDailyRowsFromDataset(
     canonicalWindow,
   });
   const greenButtonActual = isGreenButtonActualDataset(datasetKind, dataset.summary?.source, meta);
+  const manualPastDisplay = isManualPastSimDisplayDataset(meta);
   const displayDaily = buildDisplayDailyForPastSimFifteenMinuteCurve({
     dataset,
     coverageStart,
     coverageEnd,
     greenButtonActual,
+    manualPastDisplay,
   });
   return { displayDaily, coverageStart, coverageEnd };
 }

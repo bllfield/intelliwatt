@@ -1,3 +1,4 @@
+import { applyManualPastWeatherExplanationCopy } from "@/lib/usage/manualPastDisplayPolicy";
 import { readPastSimDisplayWeatherSensitivityScore } from "@/lib/usage/pastSimDisplayWeather";
 import { WORKSPACE_PAST_SCENARIO_NAME } from "@/lib/usage/onePathPastUserSiteParityTypes";
 
@@ -33,10 +34,12 @@ export function resolveUserPastVisibleWeatherSensitivityScore(args: {
 
   const score = readPastSimDisplayWeatherSensitivityScore(dataset);
   if (score && Object.keys(score).length > 0 && typeof score.weatherEfficiencyScore0to100 === "number") {
+    const displayScore = applyManualPastWeatherExplanationCopy(score, meta);
     return {
-      score,
+      score: displayScore,
       sourceOwner:
-        String(score.sourceOwner ?? meta.displayWeatherCardsSourceOwner ?? "").trim() || "past_artifact_build",
+        String(displayScore?.sourceOwner ?? meta.displayWeatherCardsSourceOwner ?? "").trim() ||
+        "past_artifact_build",
     };
   }
 

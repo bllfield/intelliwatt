@@ -11,6 +11,11 @@ import {
 } from "@/lib/usage/canonicalMetadataWindow";
 import { CANONICAL_COVERAGE_TOTAL_DAYS } from "@/lib/usage/canonicalCoverageConfig";
 import { buildLoadCurveInsightsFromIntervalRows } from "@/lib/usage/fifteenMinuteLoadCurve";
+import {
+  isManualPastSimDisplayDataset,
+  labelManualPastZeroFillDailyRow,
+  normalizeManualPastDailySourceLabel,
+} from "@/lib/usage/manualPastDisplayPolicy";
 
 export const MANUAL_CANONICAL_ARTIFACT_WINDOW_VERSION = "manual_canonical_artifact_v1";
 
@@ -59,6 +64,10 @@ export type ManualPastDatasetDateRemapResult = {
 function asDateKey(value: unknown): string | null {
   const text = String(value ?? "").slice(0, 10);
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
 function addDays(dateKey: string, days: number): string {
@@ -228,12 +237,33 @@ export function normalizeCanonicalManualPastDatasetDailyCoverageForRead(dataset:
     const dateKey = asDateKey(row?.date);
     return dateKey != null && dateKey >= window.startDate && dateKey <= window.endDate;
   });
-  const filledDaily = fillCanonicalDailyTotals(filteredDaily, window);
+  const dailyByDate = new Map(
+    filteredDaily
+      .map((row: { date?: unknown }) => {
+        const dateKey = asDateKey(row?.date);
+        return dateKey ? ([dateKey, row] as const) : null;
+      })
+      .filter((entry): entry is readonly [string, { date?: unknown }] => entry != null)
+  );
+  const manualPastDisplay = isManualPastSimDisplayDataset(asRecord(dataset.meta));
+  const filledDaily = fillCanonicalDailyTotals(filteredDaily, window).map((row) => {
+    const existing = dailyByDate.get(row.date);
+    if (manualPastDisplay) {
+      return labelManualPastZeroFillDailyRow(row, existing ?? null);
+    }
+    if (existing && typeof existing === "object") {
+      return { ...existing, date: row.date, kwh: row.kwh };
+    }
+    return row;
+  });
+  const normalizedDaily = manualPastDisplay
+    ? filledDaily.map((row) => normalizeManualPastDailySourceLabel(row as Record<string, unknown>))
+    : filledDaily;
 
   if (!dataset.summary || typeof dataset.summary !== "object") dataset.summary = {};
   if (!dataset.meta || typeof dataset.meta !== "object") dataset.meta = {};
 
-  dataset.daily = filledDaily;
+  dataset.daily = normalizedDaily;
   dataset.summary.start = window.startDate;
   dataset.summary.end = window.endDate;
   dataset.summary.coverageStart = window.startDate;
@@ -241,12 +271,12 @@ export function normalizeCanonicalManualPastDatasetDailyCoverageForRead(dataset:
   dataset.summary.latest = `${window.endDate}T23:59:59.999Z`;
   dataset.meta.coverageStart = window.startDate;
   dataset.meta.coverageEnd = window.endDate;
-  dataset.meta.dailyRowCount = filledDaily.length;
+  dataset.meta.dailyRowCount = normalizedDaily.length;
 
   return {
     startDate: window.startDate,
     endDate: window.endDate,
-    dailyRowCount: filledDaily.length,
+    dailyRowCount: normalizedDaily.length,
   };
 }
 
@@ -671,6 +701,10 @@ export function resolveManualDisplayDatasetForRead(args: {
   const dataset = remapManualPastDatasetForDisplayWindow(args);
   if (isCanonicalManualPastArtifact(dataset)) {
     normalizeCanonicalManualPastDatasetDailyCoverageForRead(dataset);
+  } else if (isManualPastSimDisplayDataset(asRecord(dataset.meta)) && Array.isArray(dataset.daily)) {
+    dataset.daily = dataset.daily.map((row: Record<string, unknown>) =>
+      normalizeManualPastDailySourceLabel(row)
+    );
   }
   return dataset;
 }

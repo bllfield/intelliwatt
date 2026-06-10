@@ -11,6 +11,7 @@ import {
   resolveGreenButtonTrustedHomeDateKeysFromDecodedIntervals,
   resolvePastDatasetMetaActualSource,
 } from "@/lib/usage/greenButtonPastTrustedPool";
+import { isManualPastSimDisplayDataset } from "@/lib/usage/manualPastDisplayPolicy";
 import { reconcilePastDatasetDisplayTotals } from "@/lib/usage/reconcilePastDatasetDisplayTotals";
 import { loadSmtWindowDayStatus } from "@/lib/usage/smtWindowStatus";
 
@@ -139,6 +140,8 @@ export function applyPastSimDisplayTruthToDataset(
   }
 ): void {
   if (!dataset || typeof dataset !== "object") return;
+  const meta = (dataset.meta ?? {}) as Record<string, unknown>;
+  if (isManualPastSimDisplayDataset(meta)) return;
   const daily = Array.isArray(dataset.daily) ? (dataset.daily as DailyRowWithSource[]) : [];
   if (!daily.length) return;
   const greenButtonTrustedHomeDateKeys =

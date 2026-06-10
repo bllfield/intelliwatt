@@ -2,6 +2,7 @@ import {
   buildWeatherEfficiencyDerivedInput,
   type WeatherSensitivityEnvelope,
 } from "@/modules/weatherSensitivity/shared";
+import { applyManualPastWeatherExplanationCopy } from "@/lib/usage/manualPastDisplayPolicy";
 import {
   PAST_DISPLAY_WEATHER_META_FIELD,
   pastDisplayScoreMatchesPreSimDiagnostic,
@@ -62,13 +63,14 @@ export async function attachPastSimDisplayWeatherToDataset(args: {
     meta.displayWeatherRecomputeCount = 0;
     args.dataset.meta = meta;
     const score = readPastSimDisplayWeatherSensitivityScore(args.dataset);
+    const displayScore = applyManualPastWeatherExplanationCopy(score, meta);
     const derivedInput =
       (meta.pastDisplayWeatherEfficiencyDerivedInput as WeatherSensitivityEnvelope["derivedInput"] | undefined) ??
-      (score
-        ? buildWeatherEfficiencyDerivedInput(score as NonNullable<WeatherSensitivityEnvelope["score"]>)
+      (displayScore
+        ? buildWeatherEfficiencyDerivedInput(displayScore as NonNullable<WeatherSensitivityEnvelope["score"]>)
         : null);
     return {
-      score: score as WeatherSensitivityEnvelope["score"],
+      score: displayScore as WeatherSensitivityEnvelope["score"],
       derivedInput,
     };
   }
@@ -78,20 +80,30 @@ export async function attachPastSimDisplayWeatherToDataset(args: {
 
   const meta = asRecord(args.dataset.meta);
   if (scored.score) {
+    const displayScore = applyManualPastWeatherExplanationCopy(
+      scored.score as Record<string, unknown>,
+      meta
+    );
     meta.pastDisplayWeatherSensitivityScore = {
-      ...scored.score,
+      ...displayScore,
       sourceOwner: "past_artifact_build",
       displayOwner: "past_artifact_build",
       scoringContext: "PAST_DISPLAY",
     };
     meta.pastDisplayWeatherEfficiencyDerivedInput =
-      scored.derivedInput ?? buildWeatherEfficiencyDerivedInput(scored.score);
+      scored.derivedInput ?? buildWeatherEfficiencyDerivedInput(displayScore as never);
     meta.displayWeatherCardsSourceOwner = "past_artifact_build";
     meta.displayWeatherRecomputeCount = 1;
     persistPastDisplayWeatherScoringAudit(args.dataset, scored.audit);
     args.dataset.meta = meta;
   }
-  return scored;
+  return {
+    ...scored,
+    score: applyManualPastWeatherExplanationCopy(
+      scored.score as Record<string, unknown> | null,
+      meta
+    ) as typeof scored.score,
+  };
 }
 
 export function readPastSimDisplayWeatherSensitivityScore(

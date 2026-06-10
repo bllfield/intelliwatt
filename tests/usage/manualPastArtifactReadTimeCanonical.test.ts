@@ -177,9 +177,31 @@ describe("manualPastArtifactReadTimeCanonical", () => {
       endDate: "2026-06-07",
       dailyRowCount: CANONICAL_COVERAGE_TOTAL_DAYS,
     });
-    expect(resolveManualDisplayDatasetForRead({ dataset, usageInputMode: "MANUAL_MONTHLY" }).daily).toHaveLength(
-      CANONICAL_COVERAGE_TOTAL_DAYS
-    );
+    const displayDaily = resolveManualDisplayDatasetForRead({ dataset, usageInputMode: "MANUAL_MONTHLY" }).daily;
+    expect(displayDaily).toHaveLength(CANONICAL_COVERAGE_TOTAL_DAYS);
+    expect(displayDaily.every((row: { source?: string }) => row.source !== "ACTUAL")).toBe(true);
+    expect(
+      displayDaily.every(
+        (row: { sourceDetail?: string }) =>
+          row.sourceDetail === "SIMULATED_MANUAL_CONSTRAINED" ||
+          row.sourceDetail === "MANUAL_CONSTRAINED" ||
+          String(row.sourceDetail ?? "").includes("SIMULATED")
+      )
+    ).toBe(true);
+  });
+
+  it("relabels stale ACTUAL rows on manual monthly read", () => {
+    const dataset = projectManualPastDatasetToCanonicalWindow(buildBillWindowManualDataset("MONTHLY"), {
+      usageInputMode: "MANUAL_MONTHLY",
+      now: proofNow,
+    });
+    dataset.daily = [
+      { date: "2025-06-08", kwh: 1, source: "SIMULATED", sourceDetail: "MANUAL_CONSTRAINED" },
+      { date: "2025-06-09", kwh: 2, source: "ACTUAL", sourceDetail: "ACTUAL" },
+    ];
+
+    const displayDaily = resolveManualDisplayDatasetForRead({ dataset, usageInputMode: "MANUAL_MONTHLY" }).daily;
+    expect(displayDaily.some((row: { source?: string }) => row.source === "ACTUAL")).toBe(false);
   });
 
   it("labels legacy artifacts via readManualArtifactProofDiagnostics", () => {

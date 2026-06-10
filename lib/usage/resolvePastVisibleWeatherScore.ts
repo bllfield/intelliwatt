@@ -2,6 +2,7 @@ import {
   buildWeatherEfficiencyDerivedInput,
   type WeatherSensitivityEnvelope,
 } from "@/modules/weatherSensitivity/shared";
+import { applyManualPastWeatherExplanationCopy } from "@/lib/usage/manualPastDisplayPolicy";
 import { buildUsageDisplayTotalsAudit } from "@/modules/onePathSim/usageDisplayTotalsAudit";
 import { buildUserUsageDashboardViewModel } from "@/lib/usage/userUsageDashboardViewModel";
 import { PAST_DISPLAY_WEATHER_META_FIELD } from "@/lib/usage/pastSimDisplayWeather";
@@ -138,7 +139,10 @@ export function resolvePastVisibleWeatherScore(args: {
   const storedDerivedInput =
     meta.pastDisplayWeatherEfficiencyDerivedInput as WeatherSensitivityEnvelope["derivedInput"] | undefined;
   const weatherSensitivity: WeatherSensitivityEnvelope = {
-    score: visible.score as WeatherSensitivityEnvelope["score"],
+    score: applyManualPastWeatherExplanationCopy(
+      visible.score as Record<string, unknown> | null,
+      meta
+    ) as WeatherSensitivityEnvelope["score"],
     derivedInput:
       storedDerivedInput ??
       (visible.score &&

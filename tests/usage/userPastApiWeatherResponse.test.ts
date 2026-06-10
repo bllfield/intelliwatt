@@ -140,4 +140,30 @@ describe("userPastApiWeatherResponse", () => {
 
     expect(patched?.weatherScore).toEqual(pastDisplayScore);
   });
+
+  it("manual monthly Past Sim weather card uses estimated manual-bill wording", () => {
+    const measuredCopy =
+      "This home's usage has a moderate weather response. The score reflects measured usage movement after accounting for pool, HVAC, thermostat.";
+    const resolved = resolvePastWeatherScoreFromHouseApiBody({
+      weatherSensitivityScore: {
+        ...pastDisplayScore,
+        explanationSummary: measuredCopy,
+      },
+      weatherCardsSourceOwner: "past_artifact_build",
+      dataset: {
+        meta: {
+          datasetKind: "SIMULATED",
+          mode: "MANUAL_TOTALS",
+          usageInputMode: "MANUAL_MONTHLY",
+          pastDisplayWeatherSensitivityScore: {
+            ...pastDisplayScore,
+            explanationSummary: measuredCopy,
+          },
+        },
+      },
+    });
+
+    expect(resolved.score?.explanationSummary).toContain("manual bills");
+    expect(resolved.score?.explanationSummary).not.toContain("measured usage movement");
+  });
 });

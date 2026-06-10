@@ -6,6 +6,10 @@ import {
   type WeatherSensitivityEnvelope,
   type WeatherSensitivityScore,
 } from "@/modules/weatherSensitivity/shared";
+import {
+  isManualPastSimDisplayDataset,
+  normalizeManualPastDailySourceLabel,
+} from "@/lib/usage/manualPastDisplayPolicy";
 
 export const WEATHER_SCORER_MODULE = "resolveSharedWeatherSensitivityEnvelope" as const;
 
@@ -291,10 +295,15 @@ export function resolveUsageSourceTypeFromDataset(
 }
 
 export function buildPastDisplayScoringDataset(dataset: Record<string, unknown>): Record<string, unknown> {
+  const meta = asRecord(dataset.meta);
+  const manualPastDisplay = isManualPastSimDisplayDataset(meta);
   const daily = Array.isArray(dataset.daily) ? dataset.daily : [];
   return {
     daily: daily.map((row) => {
       const record = asRecord(row);
+      if (manualPastDisplay) {
+        return normalizeManualPastDailySourceLabel(record);
+      }
       return {
         ...record,
         source: "ACTUAL",

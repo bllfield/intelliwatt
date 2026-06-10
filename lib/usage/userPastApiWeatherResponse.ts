@@ -1,5 +1,6 @@
 import type { WeatherSensitivityEnvelope } from "@/modules/weatherSensitivity/shared";
 import type { PastDisplayWeatherFinalizeOutcome } from "@/lib/usage/pastDisplayWeatherFinalizeGuard";
+import { applyManualPastWeatherExplanationCopy } from "@/lib/usage/manualPastDisplayPolicy";
 import {
   resolvePastVisibleWeatherScore,
   type PastParityAuditDiagnostics,
@@ -61,6 +62,13 @@ function readDatasetMeta(dataset: unknown): Record<string, unknown> {
   return asRecord((dataset as { meta?: unknown }).meta);
 }
 
+function withManualPastWeatherDisplayCopy(
+  score: Record<string, unknown> | null,
+  meta: Record<string, unknown>
+): Record<string, unknown> | null {
+  return applyManualPastWeatherExplanationCopy(score, meta);
+}
+
 export function resolvePastWeatherScoreFromHouseApiBody(args: {
   weatherSensitivityScore: unknown;
   weatherCardsSourceOwner?: string | null;
@@ -96,7 +104,7 @@ export function resolvePastWeatherScoreFromHouseApiBody(args: {
         topValues.confidence !== pastDisplayValues.confidence);
 
     return {
-      score: pastDisplay,
+      score: withManualPastWeatherDisplayCopy(pastDisplay, meta),
       sourceField: PAST_DISPLAY_FIELD,
       sourceOwner: "past_artifact_build",
       rejectedPreSimFallback: topMatchesPreSim || topDiffersFromC,
@@ -125,7 +133,7 @@ export function resolvePastWeatherScoreFromHouseApiBody(args: {
     if (rejectedPreSimFallback) {
       if (pastDisplay && !pastDisplayMatchesPreSim) {
         return {
-          score: pastDisplay,
+          score: withManualPastWeatherDisplayCopy(pastDisplay, meta),
           sourceField: PAST_DISPLAY_FIELD,
           sourceOwner: "past_artifact_build",
           rejectedPreSimFallback: true,
@@ -142,7 +150,7 @@ export function resolvePastWeatherScoreFromHouseApiBody(args: {
     if (owner !== "past_artifact_build") {
       if (pastDisplay) {
         return {
-          score: pastDisplay,
+          score: withManualPastWeatherDisplayCopy(pastDisplay, meta),
           sourceField: PAST_DISPLAY_FIELD,
           sourceOwner: "past_artifact_build",
           rejectedPreSimFallback: false,
@@ -165,7 +173,7 @@ export function resolvePastWeatherScoreFromHouseApiBody(args: {
         topValues.confidence !== pastDisplayValues.confidence)
     ) {
       return {
-        score: pastDisplay,
+        score: withManualPastWeatherDisplayCopy(pastDisplay, meta),
         sourceField: PAST_DISPLAY_FIELD,
         sourceOwner: "past_artifact_build",
         rejectedPreSimFallback: false,
@@ -173,7 +181,7 @@ export function resolvePastWeatherScoreFromHouseApiBody(args: {
     }
 
     return {
-      score: topLevel,
+      score: withManualPastWeatherDisplayCopy(topLevel, meta),
       sourceField: PAST_DISPLAY_FIELD,
       sourceOwner: "past_artifact_build",
       rejectedPreSimFallback: false,
@@ -182,7 +190,7 @@ export function resolvePastWeatherScoreFromHouseApiBody(args: {
 
   if (pastDisplay) {
     return {
-      score: pastDisplay,
+      score: withManualPastWeatherDisplayCopy(pastDisplay, meta),
       sourceField: PAST_DISPLAY_FIELD,
       sourceOwner: "past_artifact_build",
       rejectedPreSimFallback: Boolean(preSim),
