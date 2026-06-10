@@ -1086,9 +1086,10 @@ export const UsageDashboard: React.FC<Props> = ({
               <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
                 <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Baseload (15-min)</div>
                 <div className="mt-2 text-2xl font-semibold text-neutral-900">
-                  {derived.baseload != null ? derived.baseload.toFixed(2) : "--"} <span className="text-base font-normal text-neutral-500">kWh</span>
+                  {derived.baseload != null ? derived.baseload.toFixed(2) : "--"}{" "}
+                  <span className="text-base font-normal text-neutral-500">kWh / 15 min</span>
                 </div>
-                <p className="mt-1 text-xs text-neutral-500">Estimated always-on interval energy.</p>
+                <p className="mt-1 text-xs text-neutral-500">Estimated always-on energy per 15-minute interval.</p>
               </div>
 
               <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">

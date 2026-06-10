@@ -929,6 +929,7 @@ async function buildGapfillManualUsageReadbackResponse(args: {
     compareProjection: readResultWithManualPayload.compareProjection,
     manualReadModel: readResultWithManualPayload.manualReadModel,
     manualMonthlyReconciliation: readResultWithManualPayload.manualMonthlyReconciliation,
+    manualValidationSummary: readResultWithManualPayload.manualValidationSummary,
     manualParitySummary: readResultWithManualPayload.manualParitySummary,
     buildId: buildRow?.id ?? null,
     buildLastBuiltAt: buildRow?.lastBuiltAt ? (buildRow.lastBuiltAt as Date).toISOString() : null,

@@ -7,6 +7,8 @@ import { AppliancesClient } from "@/components/appliances/AppliancesClient";
 import UsageDashboard, { type ScenarioVariable } from "@/components/usage/UsageDashboard";
 import { ValidationComparePanel } from "@/components/usage/ValidationComparePanel";
 import { ManualMonthlyReconciliationPanel } from "@/components/usage/ManualMonthlyReconciliationPanel";
+import { ManualValidationSummaryPanel } from "@/components/usage/ManualValidationSummaryPanel";
+import type { ManualValidationSummary } from "@/modules/manualUsage/manualValidationSummary";
 import { resolvePastCompareSectionMode } from "@/components/usage/pastCompareSectionMode";
 import { SimulationAccuracySummary } from "@/components/usage/SimulationAccuracySummary";
 import { buildSimulationAccuracyUserDisplay } from "@/components/usage/simulationAccuracyDisplay";
@@ -118,6 +120,7 @@ type ScenarioHouseResp =
         metrics?: Record<string, number | null>;
       };
       manualMonthlyReconciliation?: ManualMonthlyReconciliation | null;
+      manualValidationSummary?: ManualValidationSummary | null;
       weatherSensitivityScore?: WeatherSensitivityScore | null;
       weatherCardsSourceOwner?: string | null;
       weatherReadPath?: string | null;
@@ -229,6 +232,8 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
   } | null>(null);
   const [scenarioManualMonthlyReconciliation, setScenarioManualMonthlyReconciliation] =
     useState<ManualMonthlyReconciliation | null>(null);
+  const [scenarioManualValidationSummary, setScenarioManualValidationSummary] =
+    useState<ManualValidationSummary | null>(null);
   const [manualUsagePayload, setManualUsagePayload] = useState<ManualUsagePayload | null>(null);
   /** Past: Validation / Test Day Compare starts collapsed; expand for full table. */
   const [pastCompareExpanded, setPastCompareExpanded] = useState(PAST_VALIDATION_COMPARE_DEFAULT_EXPANDED);
@@ -578,6 +583,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         setScenarioLoading(false);
         setScenarioCompareProjection(null);
         setScenarioManualMonthlyReconciliation(null);
+        setScenarioManualValidationSummary(null);
         return;
       }
       setScenarioLoading(true);
@@ -604,6 +610,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
           setScenarioSimHouseOverride(null);
           setScenarioCompareProjection(null);
           setScenarioManualMonthlyReconciliation(null);
+        setScenarioManualValidationSummary(null);
           return;
         }
         if (!j || j.ok !== true) {
@@ -614,6 +621,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
           setScenarioSimHouseOverride(null);
           setScenarioCompareProjection(null);
           setScenarioManualMonthlyReconciliation(null);
+        setScenarioManualValidationSummary(null);
           return;
         }
         const okBody = j;
@@ -643,6 +651,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
           })
         );
         setScenarioManualMonthlyReconciliation(okBody.manualMonthlyReconciliation ?? null);
+        setScenarioManualValidationSummary(okBody.manualValidationSummary ?? null);
       } catch (e: any) {
         if (!cancelled) {
           const aborted = e?.name === "AbortError";
@@ -658,6 +667,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
           setScenarioSimHouseOverride(null);
           setScenarioCompareProjection(null);
           setScenarioManualMonthlyReconciliation(null);
+        setScenarioManualValidationSummary(null);
         }
       } finally {
         if (timeoutId != null) clearTimeout(timeoutId);
@@ -1555,9 +1565,20 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
               </div>
               {!scenarioLoading && activeManualMonthlyReconciliation ? (
                 <div className="mt-2 text-xs text-brand-navy/80" aria-live="polite">
-                  Eligible {activeManualMonthlyReconciliation.eligibleRangeCount} · Ineligible{" "}
-                  {activeManualMonthlyReconciliation.ineligibleRangeCount} · Reconciled{" "}
-                  {activeManualMonthlyReconciliation.reconciledRangeCount}
+                  {scenarioManualValidationSummary?.billMatchVerification ? (
+                    <>
+                      Bill match: {scenarioManualValidationSummary.billMatchVerification.exactMatchPeriodCount} of{" "}
+                      {scenarioManualValidationSummary.billMatchVerification.eligiblePeriodCount} bill periods matched ·
+                      Simulation confidence: {scenarioManualValidationSummary.manualSimulationConfidence.status} · Interval
+                      shape: {scenarioManualValidationSummary.intervalShape.accuracyClaim}
+                    </>
+                  ) : (
+                    <>
+                      Eligible {activeManualMonthlyReconciliation.eligibleRangeCount} · Ineligible{" "}
+                      {activeManualMonthlyReconciliation.ineligibleRangeCount} · Reconciled{" "}
+                      {activeManualMonthlyReconciliation.reconciledRangeCount}
+                    </>
+                  )}
                 </div>
               ) : null}
               {!scenarioLoading &&
@@ -1592,7 +1613,12 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
             </div>
           ) : scenarioCurveOutcome?.kind === "success" && activeManualMonthlyReconciliation ? (
             pastCompareExpanded ? (
-              <ManualMonthlyReconciliationPanel reconciliation={activeManualMonthlyReconciliation} />
+              <div className="mt-4 space-y-4">
+                {scenarioManualValidationSummary ? (
+                  <ManualValidationSummaryPanel summary={scenarioManualValidationSummary} />
+                ) : null}
+                <ManualMonthlyReconciliationPanel reconciliation={activeManualMonthlyReconciliation} />
+              </div>
             ) : null
           ) : scenarioCurveOutcome?.kind === "success" && scenarioCompareProjection?.rows?.length ? (
             pastCompareExpanded ? (

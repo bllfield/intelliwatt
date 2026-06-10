@@ -229,6 +229,7 @@ export async function GET(request: NextRequest) {
         compareProjection,
         manualReadModel,
         manualMonthlyReconciliation,
+        manualValidationSummary,
         sharedDiagnostics,
       } = await buildManualUsageReadDecorations({
         userId: u.user.id,
@@ -352,6 +353,7 @@ export async function GET(request: NextRequest) {
         compareProjection,
         manualReadModel,
         manualMonthlyReconciliation,
+        manualValidationSummary,
         sharedDiagnostics,
         weatherSensitivityScore: weatherSensitivity.score,
         weatherEfficiencyDerivedInput: weatherSensitivity.derivedInput,

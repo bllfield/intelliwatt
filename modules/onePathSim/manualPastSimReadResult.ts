@@ -2,6 +2,10 @@ import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
 import { resolveManualCompareActualDataset } from "@/lib/usage/manualCompareActualDataset";
 import { buildManualMonthlyReconciliation } from "@/modules/manualUsage/reconciliation";
 import { buildManualUsageReadModel, type ManualUsageReadModel } from "@/modules/manualUsage/readModel";
+import {
+  buildManualValidationSummary,
+  type ManualValidationSummary,
+} from "@/modules/manualUsage/manualValidationSummary";
 import { getManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
 import { loadPastSimBuildInputsForRead } from "@/lib/usage/loadPastSimBuildInputsForRead";
 import { resolveValidationCompareProjectionForRead } from "@/lib/usage/pastSimValidationCompareRead";
@@ -37,6 +41,7 @@ export type ManualUsagePastSimReadResult =
       }>;
       manualReadModel: ManualUsageReadModel | null;
       manualMonthlyReconciliation: ReturnType<typeof buildManualMonthlyReconciliation>;
+      manualValidationSummary: ManualValidationSummary | null;
       sharedDiagnostics: ReturnType<typeof buildSharedPastSimDiagnostics>;
       manualParitySummary: ReturnType<typeof buildManualParitySummary> | null;
     }
@@ -171,8 +176,14 @@ export async function buildOnePathManualUsagePastSimReadResult(args: {
       : 0,
     actualDayCount: Array.isArray((resolvedActualDataset as any)?.daily) ? (resolvedActualDataset as any).daily.length : 0,
   });
-  const { compareProjection, manualReadModel, manualMonthlyReconciliation, sharedDiagnostics, manualUsagePayload } =
-    await buildManualUsageReadDecorations({
+  const {
+    compareProjection,
+    manualReadModel,
+    manualMonthlyReconciliation,
+    manualValidationSummary,
+    sharedDiagnostics,
+    manualUsagePayload,
+  } = await buildManualUsageReadDecorations({
       userId: args.userId,
       houseId: args.houseId,
       scenarioId: args.scenarioId,
@@ -243,6 +254,7 @@ export async function buildOnePathManualUsagePastSimReadResult(args: {
     curveCompareSimulatedDailyRows: curveComparePayload?.simulatedDailyRows ?? [],
     manualReadModel,
     manualMonthlyReconciliation,
+    manualValidationSummary,
     sharedDiagnostics,
     manualParitySummary,
   };
@@ -471,10 +483,19 @@ async function buildManualUsageReadDecorations(args: {
     artifactEngineVersion: args.artifactEngineVersion ?? null,
     artifactPersistenceOutcome: args.artifactPersistenceOutcome ?? null,
   });
+  const manualValidationSummary = buildManualValidationSummary({
+    manualReadModel,
+    dataset: args.dataset,
+    inputType: usageInputMode,
+    actualComparison: args.actualDataset,
+    compareProjection,
+    includeAdminMetrics: args.callerType !== "user_past",
+  });
   return {
     compareProjection,
     manualReadModel,
     manualMonthlyReconciliation,
+    manualValidationSummary,
     sharedDiagnostics,
     manualUsagePayload: manualUsageRecord.payload,
   };

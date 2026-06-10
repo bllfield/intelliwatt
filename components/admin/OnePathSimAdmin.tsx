@@ -6,6 +6,7 @@ import { HomeDetailsClient } from "@/components/home/HomeDetailsClient";
 import { ManualUsageEntry } from "@/components/manual/ManualUsageEntry";
 import { OnePathBaselineReadOnlyView } from "@/components/admin/OnePathBaselineReadOnlyView";
 import { OnePathManualStageView } from "@/components/admin/OnePathManualStageView";
+import type { ManualValidationSummary } from "@/modules/manualUsage/manualValidationSummary";
 import { OnePathRunReadOnlyView } from "@/components/admin/OnePathRunReadOnlyView";
 import {
   buildSimulationVariableCopyPayload,
@@ -448,6 +449,18 @@ export function OnePathSimAdmin() {
         lookup?.sourceContext?.manualStageOneView ??
         null) as any,
     [lookup?.sourceContext?.manualStageOneView, runResult?.manualStageOneView, runResult?.readModel?.manualStageOneView]
+  );
+  const manualValidationSummary = useMemo(
+    () =>
+      (runResult?.manualValidationSummary ??
+        runResult?.readModel?.manualValidationSummary ??
+        lookup?.sourceContext?.manualValidationSummary ??
+        null) as ManualValidationSummary | null,
+    [
+      lookup?.sourceContext?.manualValidationSummary,
+      runResult?.manualValidationSummary,
+      runResult?.readModel?.manualValidationSummary,
+    ]
   );
   const shouldShowManualStageOneView = useMemo(() => {
     const activeInputType = String(runResult?.engineInput?.inputType ?? mode);
@@ -1981,7 +1994,9 @@ export function OnePathSimAdmin() {
           {error ? <div className="mt-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</div> : null}
         </div>
 
-        {shouldShowManualStageOneView ? <OnePathManualStageView view={shouldShowManualStageOneView} /> : null}
+        {shouldShowManualStageOneView ? (
+          <OnePathManualStageView view={shouldShowManualStageOneView} manualValidationSummary={manualValidationSummary} />
+        ) : null}
 
         {shouldRenderManualBaselinePhaseOneOnly ? (
           <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">

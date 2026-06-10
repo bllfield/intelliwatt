@@ -10,6 +10,7 @@ import { buildDisplayedMonthlyRows } from "@/modules/usageSimulator/monthlyCompa
 import { buildUsageDisplayTotalsAudit } from "@/modules/onePathSim/usageDisplayTotalsAudit";
 import { localDateKeyInHomeTimezone } from "@/lib/usage/fifteenMinuteLoadCurve";
 import type { UserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
+import { deriveBaseloadFieldsFromDaily } from "@/lib/usage/baseloadDerivedFields";
 import { derivePeakHourFromFifteenMinuteCurve } from "@/lib/usage/fifteenMinuteLoadCurve";
 
 type UserUsageDashboardHouseLike = Pick<UserUsageHouseContract, "dataset"> & {
@@ -416,12 +417,22 @@ export function buildUserUsageDashboardViewModel(house: UserUsageDashboardHouseL
       peakDay: peakDay ?? dataset?.insights?.peakDay ?? null,
       peakHour:
         derivePeakHourFromFifteenMinuteCurve(fifteenCurve) ?? dataset?.insights?.peakHour ?? null,
-      baseload: dataset?.insights?.baseload ?? null,
       baseloadDaily:
         dataset?.insights?.baseloadDaily ??
         (() => {
           const value = low10AverageKwh(recentDaily.map((row: DailyRow) => Number(row.kwh) || 0));
           return value != null ? Number(value.toFixed(2)) : null;
+        })(),
+      baseload:
+        dataset?.insights?.baseload ??
+        (() => {
+          const daily =
+            dataset?.insights?.baseloadDaily ??
+            (() => {
+              const value = low10AverageKwh(recentDaily.map((row: DailyRow) => Number(row.kwh) || 0));
+              return value != null ? Number(value.toFixed(2)) : null;
+            })();
+          return deriveBaseloadFieldsFromDaily(daily).baseload15MinKwh;
         })(),
       baseloadMonthly:
         dataset?.insights?.baseloadMonthly ??

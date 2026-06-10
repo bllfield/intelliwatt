@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 import { ManualMonthlyReconciliationPanel } from "@/components/usage/ManualMonthlyReconciliationPanel";
+import { ManualValidationSummaryPanel } from "@/components/usage/ManualValidationSummaryPanel";
+import type { ManualValidationSummary } from "@/modules/manualUsage/manualValidationSummary";
 import { type OnePathManualStageOneView } from "@/modules/onePathSim/manualStageView";
 
 function MetricCard(props: { label: string; value: string; note?: string }) {
@@ -20,7 +22,10 @@ function formatTravelRanges(ranges: Array<{ startDate: string; endDate: string }
   return ranges.map((range) => `${range.startDate} - ${range.endDate}`).join(", ");
 }
 
-export function OnePathManualStageView(props: { view?: OnePathManualStageOneView | null }) {
+export function OnePathManualStageView(props: {
+  view?: OnePathManualStageOneView | null;
+  manualValidationSummary?: ManualValidationSummary | null;
+}) {
   const [monthlyView, setMonthlyView] = useState<"chart" | "table">("chart");
   const view = props.view ?? null;
 
@@ -97,6 +102,10 @@ export function OnePathManualStageView(props: { view?: OnePathManualStageOneView
           manualAnnualStageOneSummary={view.stageOnePresentation.summary}
         />
       )}
+
+      {props.manualValidationSummary ? (
+        <ManualValidationSummaryPanel summary={props.manualValidationSummary} showAdminDiagnostics />
+      ) : null}
 
       {view.billPeriodCompare ? (
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">

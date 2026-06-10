@@ -8,6 +8,10 @@ import type { ManualUsagePayload } from "@/modules/onePathSim/simulatedUsage/typ
 import { loadPastSimBuildInputsForRead } from "@/lib/usage/loadPastSimBuildInputsForRead";
 import { resolveValidationCompareProjectionForRead } from "@/lib/usage/pastSimValidationCompareRead";
 import {
+  buildManualValidationSummary,
+  type ManualValidationSummary,
+} from "@/modules/manualUsage/manualValidationSummary";
+import {
   buildSharedPastSimDiagnostics,
   type SharedDiagnosticsCallerType,
 } from "@/modules/onePathSim/usageSimulator/sharedDiagnostics";
@@ -240,11 +244,20 @@ export async function buildOnePathManualArtifactDecorations(args: {
     manualReadModel,
     sharedDiagnostics,
   });
+  const manualValidationSummary = buildManualValidationSummary({
+    manualReadModel,
+    dataset: args.dataset,
+    inputType: usageInputMode,
+    actualComparison: args.actualDataset,
+    compareProjection,
+    includeAdminMetrics: true,
+  });
   return {
     compareProjection,
     manualReadModel,
     manualStageOneView,
     manualMonthlyReconciliation,
+    manualValidationSummary,
     sharedDiagnostics,
     manualUsagePayload: manualUsageRecord.payload,
     manualParitySummary,

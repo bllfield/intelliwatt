@@ -169,6 +169,7 @@ export type CanonicalSimulationArtifact = {
   sourceDerivedMonthlyTotalsKwhByMonth: Record<string, number>;
   compareProjection: ValidationCompareProjectionSidecar | null;
   manualMonthlyReconciliation: unknown;
+  manualValidationSummary: unknown;
   manualParitySummary: unknown;
   manualStageOneView: OnePathManualStageOneView | null;
   sharedDiagnostics: Record<string, unknown> | null;
@@ -180,6 +181,7 @@ export type CanonicalSimulationReadModel = {
   dataset: CanonicalSimulationArtifact["dataset"];
   compareProjection: ValidationCompareProjectionSidecar | null;
   manualMonthlyReconciliation: unknown;
+  manualValidationSummary: unknown;
   manualParitySummary: unknown;
   manualStageOneView: OnePathManualStageOneView | null;
   sharedDiagnostics: Record<string, unknown> | null;
@@ -1288,6 +1290,7 @@ async function buildBaselinePassthroughArtifactFromResolvedTruth(args: {
     sourceDerivedMonthlyTotalsKwhByMonth: buildMonthlyTotalsRecord((finalizedDataset as any)?.monthly),
     compareProjection,
     manualMonthlyReconciliation: manualReadResult?.manualMonthlyReconciliation ?? null,
+    manualValidationSummary: manualReadResult?.manualValidationSummary ?? null,
     manualParitySummary: manualReadResult?.manualParitySummary ?? null,
     manualStageOneView: manualReadResult?.manualStageOneView ?? null,
     sharedDiagnostics: (sharedDiagnostics as Record<string, unknown>) ?? null,
@@ -2083,6 +2086,7 @@ async function buildArtifactFromEngineInput(args: {
       (asRecord((datasetRead.dataset as any)?.meta?.sourceDerivedMonthlyTotalsKwhByMonth) as Record<string, number> | null) ?? {},
     compareProjection,
     manualMonthlyReconciliation: manualReadResult ? manualReadResult.manualMonthlyReconciliation : null,
+    manualValidationSummary: manualReadResult ? manualReadResult.manualValidationSummary : null,
     manualParitySummary: manualReadResult ? manualReadResult.manualParitySummary : null,
     manualStageOneView: manualReadResult ? manualReadResult.manualStageOneView : null,
     sharedDiagnostics: (sharedDiagnostics as Record<string, unknown>) ?? null,
@@ -2211,6 +2215,7 @@ export function buildSharedSimulationReadModel(
       runIdentity,
       compareProjection: artifact.compareProjection,
       manualMonthlyReconciliation: artifact.manualMonthlyReconciliation,
+      manualValidationSummary: artifact.manualValidationSummary,
       manualParitySummary: artifact.manualParitySummary,
       manualStageOneView: artifact.manualStageOneView,
       sharedDiagnostics: artifact.sharedDiagnostics,
@@ -2243,6 +2248,7 @@ export function buildSharedSimulationReadModel(
     dataset: artifact.dataset,
     compareProjection: artifact.compareProjection,
     manualMonthlyReconciliation: artifact.manualMonthlyReconciliation,
+    manualValidationSummary: artifact.manualValidationSummary,
     manualParitySummary: artifact.manualParitySummary,
     manualStageOneView: artifact.manualStageOneView,
     sharedDiagnostics: artifact.sharedDiagnostics,

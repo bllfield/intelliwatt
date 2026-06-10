@@ -114,8 +114,8 @@ export function OnePathBaselineReadOnlyView(props: {
         <MetricCard label="Average daily" value={`${view.summary.avgDailyKwh.toFixed(1)} kWh/day`} />
         <MetricCard
           label="Baseload (15-min)"
-          value={view.summary.baseload != null ? `${view.summary.baseload.toFixed(2)} kWh` : "--"}
-          note="Estimated always-on interval energy."
+          value={view.summary.baseload != null ? `${view.summary.baseload.toFixed(2)} kWh / 15 min` : "--"}
+          note="Estimated always-on energy per 15-minute interval."
         />
         <MetricCard
           label="Baseload (daily)"
