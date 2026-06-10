@@ -5,7 +5,7 @@ const findFirstBuild = vi.fn();
 const findFirstScenario = vi.fn();
 const findUniqueBuild = vi.fn();
 const findFirstArtifact = vi.fn();
-const getActualUsageDatasetForHouse = vi.fn();
+const resolveOnePathUpstreamUsageTruthForSimulation = vi.fn();
 const getIntervalDataFingerprint = vi.fn();
 const resolveHouseCommittedUsageSource = vi.fn();
 const computePastWeatherIdentity = vi.fn();
@@ -37,8 +37,12 @@ vi.mock("@/lib/db/usageClient", () => ({
 }));
 
 vi.mock("@/lib/usage/actualDatasetForHouse", () => ({
-  getActualUsageDatasetForHouse: (...args: unknown[]) => getActualUsageDatasetForHouse(...args),
   getIntervalDataFingerprint: (...args: unknown[]) => getIntervalDataFingerprint(...args),
+}));
+
+vi.mock("@/modules/onePathSim/runtime", () => ({
+  resolveOnePathUpstreamUsageTruthForSimulation: (...args: unknown[]) =>
+    resolveOnePathUpstreamUsageTruthForSimulation(...args),
 }));
 
 vi.mock("@/lib/usage/houseCommittedUsageSource", () => ({
@@ -147,9 +151,12 @@ const annualSeed = {
 function mockSufficientSourceContext() {
   findFirstHouse.mockResolvedValue({ id: SOURCE_HOUSE_ID, esiid: "E123" });
   resolveHouseCommittedUsageSource.mockResolvedValue("SMT");
-  getActualUsageDatasetForHouse.mockResolvedValue({
+  resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue({
     dataset: sourceActualDataset,
     alternatives: { smt: sourceActualDataset.summary, greenButton: null },
+    usageTruthSource: "persisted_usage_output",
+    actualContextHouse: { id: SOURCE_HOUSE_ID, esiid: "E123" },
+    selectedHouse: { id: SOURCE_HOUSE_ID, esiid: "E123" },
   });
 }
 
@@ -343,15 +350,16 @@ describe("compareManualGapfillSourceActualToLabSim", () => {
       mode: "MONTHLY_FROM_SOURCE_INTERVALS",
     });
 
-    expect(getActualUsageDatasetForHouse).toHaveBeenCalledWith(
-      SOURCE_HOUSE_ID,
-      expect.anything(),
-      expect.objectContaining({ userId: USER_ID })
+    expect(resolveOnePathUpstreamUsageTruthForSimulation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: USER_ID,
+        houseId: SOURCE_HOUSE_ID,
+        actualContextHouseId: SOURCE_HOUSE_ID,
+        seedIfMissing: false,
+      })
     );
-    expect(getActualUsageDatasetForHouse).not.toHaveBeenCalledWith(
-      LAB_HOUSE_ID,
-      expect.anything(),
-      expect.anything()
+    expect(resolveOnePathUpstreamUsageTruthForSimulation).not.toHaveBeenCalledWith(
+      expect.objectContaining({ houseId: LAB_HOUSE_ID })
     );
   });
 

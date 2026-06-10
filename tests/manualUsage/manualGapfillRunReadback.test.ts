@@ -5,7 +5,7 @@ const findFirstBuild = vi.fn();
 const findFirstScenario = vi.fn();
 const findUniqueBuild = vi.fn();
 const findFirstArtifact = vi.fn();
-const getActualUsageDatasetForHouse = vi.fn();
+const resolveOnePathUpstreamUsageTruthForSimulation = vi.fn();
 const getIntervalDataFingerprint = vi.fn();
 const resolveHouseCommittedUsageSource = vi.fn();
 const computePastWeatherIdentity = vi.fn();
@@ -42,8 +42,12 @@ vi.mock("@/lib/db/usageClient", () => ({
 }));
 
 vi.mock("@/lib/usage/actualDatasetForHouse", () => ({
-  getActualUsageDatasetForHouse: (...args: unknown[]) => getActualUsageDatasetForHouse(...args),
   getIntervalDataFingerprint: (...args: unknown[]) => getIntervalDataFingerprint(...args),
+}));
+
+vi.mock("@/modules/onePathSim/runtime", () => ({
+  resolveOnePathUpstreamUsageTruthForSimulation: (...args: unknown[]) =>
+    resolveOnePathUpstreamUsageTruthForSimulation(...args),
 }));
 
 vi.mock("@/lib/usage/houseCommittedUsageSource", () => ({
@@ -148,9 +152,12 @@ const simulatedDataset = {
 function mockSufficientSourceContext() {
   findFirstHouse.mockResolvedValue({ id: SOURCE_HOUSE_ID, esiid: "E123" });
   resolveHouseCommittedUsageSource.mockResolvedValue("SMT");
-  getActualUsageDatasetForHouse.mockResolvedValue({
+  resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue({
     dataset: sampleDataset,
     alternatives: { smt: sampleDataset.summary, greenButton: null },
+    usageTruthSource: "persisted_usage_output",
+    actualContextHouse: { id: SOURCE_HOUSE_ID, esiid: "E123" },
+    selectedHouse: { id: SOURCE_HOUSE_ID, esiid: "E123" },
   });
 }
 
@@ -338,7 +345,15 @@ describe("buildManualGapfillRunReadbackResult", () => {
     expect(out.run.simulatorMode).toBe("MANUAL_TOTALS");
     expect(out.run.inputType).toBe("MANUAL_MONTHLY");
     expect(buildOnePathManualUsagePastSimReadResult).toHaveBeenCalledWith(
-      expect.objectContaining({ usageInputMode: "MANUAL_MONTHLY" })
+      expect.objectContaining({
+        usageInputMode: "MANUAL_MONTHLY",
+        actualDataset: sampleDataset,
+        actualReference: {
+          userId: USER_ID,
+          houseId: SOURCE_HOUSE_ID,
+          scenarioId: null,
+        },
+      })
     );
   });
 

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const findFirstHouse = vi.fn();
 const findFirstBuild = vi.fn();
-const getActualUsageDatasetForHouse = vi.fn();
+const resolveOnePathUpstreamUsageTruthForSimulation = vi.fn();
 const getIntervalDataFingerprint = vi.fn();
 const resolveHouseCommittedUsageSource = vi.fn();
 const computePastWeatherIdentity = vi.fn();
@@ -24,8 +24,12 @@ vi.mock("@/lib/db", () => ({
 }));
 
 vi.mock("@/lib/usage/actualDatasetForHouse", () => ({
-  getActualUsageDatasetForHouse: (...args: unknown[]) => getActualUsageDatasetForHouse(...args),
   getIntervalDataFingerprint: (...args: unknown[]) => getIntervalDataFingerprint(...args),
+}));
+
+vi.mock("@/modules/onePathSim/runtime", () => ({
+  resolveOnePathUpstreamUsageTruthForSimulation: (...args: unknown[]) =>
+    resolveOnePathUpstreamUsageTruthForSimulation(...args),
 }));
 
 vi.mock("@/lib/usage/houseCommittedUsageSource", () => ({
@@ -94,9 +98,12 @@ const sampleDataset = {
 function mockSufficientSourceContext() {
   findFirstHouse.mockResolvedValue({ id: SOURCE_HOUSE_ID, esiid: "E123" });
   resolveHouseCommittedUsageSource.mockResolvedValue("SMT");
-  getActualUsageDatasetForHouse.mockResolvedValue({
+  resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue({
     dataset: sampleDataset,
     alternatives: { smt: sampleDataset.summary, greenButton: null },
+    usageTruthSource: "persisted_usage_output",
+    actualContextHouse: { id: SOURCE_HOUSE_ID, esiid: "E123" },
+    selectedHouse: { id: SOURCE_HOUSE_ID, esiid: "E123" },
   });
 }
 
@@ -270,9 +277,12 @@ describe("resolveManualGapfillSeedFromSourceContext", () => {
   it("insufficient MG-1 source coverage returns insufficient_source_truth and writes nothing", async () => {
     findFirstHouse.mockResolvedValueOnce({ id: SOURCE_HOUSE_ID, esiid: "E123" });
     resolveHouseCommittedUsageSource.mockResolvedValueOnce("SMT");
-    getActualUsageDatasetForHouse.mockResolvedValueOnce({
+    resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValueOnce({
       dataset: { ...sampleDataset, daily: [] },
       alternatives: { smt: sampleDataset.summary, greenButton: null },
+      usageTruthSource: "persisted_usage_output",
+      actualContextHouse: { id: SOURCE_HOUSE_ID, esiid: "E123" },
+      selectedHouse: { id: SOURCE_HOUSE_ID, esiid: "E123" },
     });
 
     const { resolveManualGapfillSeedFromSourceContext } = await import("@/modules/manualUsage/manualGapfillSeed");

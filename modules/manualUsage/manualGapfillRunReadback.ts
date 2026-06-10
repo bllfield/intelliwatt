@@ -11,6 +11,7 @@ import {
   type ManualGapfillSeedMode,
 } from "@/modules/manualUsage/manualGapfillSeed";
 import {
+  loadManualGapfillSourceActualDataset,
   resolveManualGapfillSmtSourceContext,
   type ManualGapfillSourceContext,
 } from "@/modules/manualUsage/manualGapfillSourceContext";
@@ -423,6 +424,10 @@ export async function readManualGapfillPastSimResult(args: {
   | { ok: false; error: string }
 > {
   const usageInputMode = resolveInputType(args.mode);
+  const sourceActual = await loadManualGapfillSourceActualDataset({
+    userId: args.userId,
+    sourceHouseId: args.sourceHouseId,
+  });
   const readResult = await buildOnePathManualUsagePastSimReadResult({
     userId: args.userId,
     houseId: args.labHouseId,
@@ -439,6 +444,12 @@ export async function readManualGapfillPastSimResult(args: {
     artifactEngineVersion: args.artifactEngineVersion ?? null,
     artifactPersistenceOutcome: "persisted_artifact_exact_read",
     manualUsagePayload: args.manualPayload,
+    actualDataset: sourceActual.dataset,
+    actualReference: {
+      userId: args.userId,
+      houseId: sourceActual.actualContextHouseId,
+      scenarioId: null,
+    },
   });
 
   if (!readResult.ok) {

@@ -1,6 +1,5 @@
 import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
-import { getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
 import {
   computeValidationDayPolicyHash,
   resolveActiveValidationDayPolicy,
@@ -11,6 +10,7 @@ import {
   type ManualGapfillSeedMode,
 } from "@/modules/manualUsage/manualGapfillSeed";
 import {
+  loadManualGapfillSourceActualDataset,
   resolveManualGapfillSmtSourceContext,
   type ManualGapfillSourceContext,
 } from "@/modules/manualUsage/manualGapfillSourceContext";
@@ -826,17 +826,36 @@ export async function compareManualGapfillSourceActualToLabSim(
     })
     .catch(() => null);
 
-  const sourceActualResult = await getActualUsageDatasetForHouse(
+  const sourceActualResult = await loadManualGapfillSourceActualDataset({
+    userId,
     sourceHouseId,
-    args.esiid ?? sourceContext.esiid,
-    {
-      userId,
-      skipFullYearIntervalFetch: true,
-      skipLightweightInsightRecompute: true,
-    }
-  ).catch(() => ({ dataset: null }));
+    esiid: args.esiid ?? sourceContext.esiid,
+    preferredActualSource: sourceContext.actualSource ?? sourceContext.committedUsageSource ?? null,
+  });
 
-  if (!sourceActualResult?.dataset) {
+  if (
+    sourceActualResult.actualContextHouseId !== sourceHouseId ||
+    sourceActualResult.onePathUpstreamOwner !== "resolveOnePathUpstreamUsageTruthForSimulation"
+  ) {
+    return buildFailureEnvelope({
+      status: "compare_failed",
+      mode,
+      sourceHouseId,
+      labHouseId,
+      policyHash,
+      sourceContext,
+      seedHash,
+      scenarioId,
+      artifactInputHash: resolvedArtifactInputHash,
+      warnings: [
+        ...warnings,
+        "Source actual dataset owner did not resolve through One Path upstream usage truth.",
+      ],
+      usedLabSimulatedReadback: true,
+    });
+  }
+
+  if (!sourceActualResult.dataset) {
     return buildFailureEnvelope({
       status: "source_context_missing",
       mode,
@@ -856,7 +875,7 @@ export async function compareManualGapfillSourceActualToLabSim(
     mode,
     sourceContext,
     labHouseId,
-    sourceActualDataset: sourceActualResult.dataset,
+    sourceActualDataset: sourceActualResult.dataset!,
     labDataset,
     labManualPayload,
     policyHash,

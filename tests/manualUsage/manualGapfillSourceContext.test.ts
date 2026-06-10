@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const findFirstHouse = vi.fn();
 const findFirstBuild = vi.fn();
-const getActualUsageDatasetForHouse = vi.fn();
+const resolveOnePathUpstreamUsageTruthForSimulation = vi.fn();
 const getIntervalDataFingerprint = vi.fn();
 const resolveHouseCommittedUsageSource = vi.fn();
 const computePastWeatherIdentity = vi.fn();
@@ -11,6 +11,7 @@ const ensureSmtCoverageForHouse = vi.fn();
 const saveManualUsageInputForUserHouse = vi.fn();
 const dispatchPastSimRecalc = vi.fn();
 const selectValidationDayKeys = vi.fn();
+const previewGlobalValidationDaySelection = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -24,9 +25,30 @@ vi.mock("@/lib/db", () => ({
 }));
 
 vi.mock("@/lib/usage/actualDatasetForHouse", () => ({
-  getActualUsageDatasetForHouse: (...args: unknown[]) => getActualUsageDatasetForHouse(...args),
   getIntervalDataFingerprint: (...args: unknown[]) => getIntervalDataFingerprint(...args),
 }));
+
+vi.mock("@/modules/onePathSim/runtime", () => ({
+  resolveOnePathUpstreamUsageTruthForSimulation: (...args: unknown[]) =>
+    resolveOnePathUpstreamUsageTruthForSimulation(...args),
+}));
+
+function mockOnePathUpstreamTruth(args: {
+  sourceHouseId: string;
+  esiid?: string | null;
+  dataset: typeof sampleDataset | null;
+}) {
+  resolveOnePathUpstreamUsageTruthForSimulation.mockResolvedValue({
+    dataset: args.dataset,
+    alternatives: {
+      smt: args.dataset?.summary ?? null,
+      greenButton: null,
+    },
+    usageTruthSource: args.dataset ? "persisted_usage_output" : "missing_usage_truth",
+    actualContextHouse: { id: args.sourceHouseId, esiid: args.esiid ?? null },
+    selectedHouse: { id: args.sourceHouseId, esiid: args.esiid ?? null },
+  });
+}
 
 vi.mock("@/lib/usage/houseCommittedUsageSource", () => ({
   resolveHouseCommittedUsageSource: (...args: unknown[]) => resolveHouseCommittedUsageSource(...args),
@@ -57,6 +79,15 @@ vi.mock("@/modules/usageSimulator/validationSelection", async (importOriginal) =
   return {
     ...actual,
     selectValidationDayKeys: (...args: unknown[]) => selectValidationDayKeys(...args),
+  };
+});
+
+vi.mock("@/lib/usage/validationDayPolicy", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/usage/validationDayPolicy")>();
+  return {
+    ...actual,
+    previewGlobalValidationDaySelection: (...args: unknown[]) =>
+      previewGlobalValidationDaySelection(...args),
   };
 });
 
@@ -101,6 +132,11 @@ describe("resolveManualGapfillSmtSourceContext", () => {
         shortfallReason: null,
       },
     });
+    previewGlobalValidationDaySelection.mockResolvedValue({
+      selectedValidationDateKeys: ["2025-07-04", "2025-08-12"],
+      selectionMode: "stratified_weather_balanced",
+      policyHash: "policy-hash-test",
+    });
   });
 
   it("returns missing status with warnings when the source house is not found", async () => {
@@ -116,16 +152,13 @@ describe("resolveManualGapfillSmtSourceContext", () => {
     expect(out.diagnostics.warnings.length).toBeGreaterThan(0);
     expect(out.diagnostics.healAttempted).toBe(false);
     expect(out.diagnostics.healSkippedReason).toBe("read_only_resolver");
-    expect(getActualUsageDatasetForHouse).not.toHaveBeenCalled();
+    expect(resolveOnePathUpstreamUsageTruthForSimulation).not.toHaveBeenCalled();
   });
 
   it("returns coverage, totals, and source identity for a source house with actual usage", async () => {
     findFirstHouse.mockResolvedValueOnce({ id: "source-house-1", esiid: "E123" });
     resolveHouseCommittedUsageSource.mockResolvedValueOnce("SMT");
-    getActualUsageDatasetForHouse.mockResolvedValueOnce({
-      dataset: sampleDataset,
-      alternatives: { smt: sampleDataset.summary, greenButton: null },
-    });
+    mockOnePathUpstreamTruth({ sourceHouseId: "source-house-1", esiid: "E123", dataset: sampleDataset });
 
     const { resolveManualGapfillSmtSourceContext } = await import("@/modules/manualUsage/manualGapfillSourceContext");
     const out = await resolveManualGapfillSmtSourceContext({
@@ -142,7 +175,9 @@ describe("resolveManualGapfillSmtSourceContext", () => {
     expect(out.committedUsageSource).toBe("SMT");
     expect(out.actualSource).toBe("SMT");
     expect(out.actualSourceKind).toBe("SMT");
-    expect(out.sourceOwner).toBe("persisted_actual_usage");
+    expect(out.sourceOwner).toBe("resolveOnePathUpstreamUsageTruthForSimulation");
+    expect(out.onePathUpstream.actualContextHouseId).toBe("source-house-1");
+    expect(out.onePathUpstream.usageTruthSource).toBe("persisted_usage_output");
     expect(out.coverage.intervalCount).toBe(35040);
     expect(out.actualData.monthlyTotals).toEqual([{ month: "2025-06", kwh: 2800 }]);
     expect(out.actualData.annualTotal).toBe(34590);
@@ -153,7 +188,9 @@ describe("resolveManualGapfillSmtSourceContext", () => {
   it("keeps fingerprints stable for the same source and window", async () => {
     findFirstHouse.mockResolvedValue({ id: "source-house-1", esiid: "E123" });
     resolveHouseCommittedUsageSource.mockResolvedValue("SMT");
-    getActualUsageDatasetForHouse.mockResolvedValue({
+    mockOnePathUpstreamTruth({
+      sourceHouseId: "source-house-1",
+      esiid: "E123",
       dataset: {
         ...sampleDataset,
         daily: Array.from({ length: 365 }, (_, index) => ({
@@ -161,7 +198,6 @@ describe("resolveManualGapfillSmtSourceContext", () => {
           kwh: 95,
         })),
       },
-      alternatives: { smt: sampleDataset.summary, greenButton: null },
     });
 
     const { resolveManualGapfillSmtSourceContext } = await import("@/modules/manualUsage/manualGapfillSourceContext");
@@ -185,10 +221,7 @@ describe("resolveManualGapfillSmtSourceContext", () => {
   it("never writes manual payloads or dispatches Past Sim recalc", async () => {
     findFirstHouse.mockResolvedValueOnce({ id: "source-house-1", esiid: "E123" });
     resolveHouseCommittedUsageSource.mockResolvedValueOnce("SMT");
-    getActualUsageDatasetForHouse.mockResolvedValueOnce({
-      dataset: sampleDataset,
-      alternatives: { smt: sampleDataset.summary, greenButton: null },
-    });
+    mockOnePathUpstreamTruth({ sourceHouseId: "source-house-1", esiid: "E123", dataset: sampleDataset });
 
     const { resolveManualGapfillSmtSourceContext } = await import("@/modules/manualUsage/manualGapfillSourceContext");
     await resolveManualGapfillSmtSourceContext({
@@ -205,10 +238,7 @@ describe("resolveManualGapfillSmtSourceContext", () => {
   it("loads actual truth from the source house id, not a lab test home", async () => {
     findFirstHouse.mockResolvedValueOnce({ id: "source-house-1", esiid: "E123" });
     resolveHouseCommittedUsageSource.mockResolvedValueOnce("SMT");
-    getActualUsageDatasetForHouse.mockResolvedValueOnce({
-      dataset: sampleDataset,
-      alternatives: { smt: sampleDataset.summary, greenButton: null },
-    });
+    mockOnePathUpstreamTruth({ sourceHouseId: "source-house-1", esiid: "E123", dataset: sampleDataset });
 
     const { resolveManualGapfillSmtSourceContext } = await import("@/modules/manualUsage/manualGapfillSourceContext");
     await resolveManualGapfillSmtSourceContext({
@@ -217,29 +247,24 @@ describe("resolveManualGapfillSmtSourceContext", () => {
       window: WINDOW,
     });
 
-    expect(getActualUsageDatasetForHouse).toHaveBeenCalledWith(
-      "source-house-1",
-      "E123",
+    expect(resolveOnePathUpstreamUsageTruthForSimulation).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "user-1",
-        skipFullYearIntervalFetch: true,
+        houseId: "source-house-1",
+        actualContextHouseId: "source-house-1",
+        seedIfMissing: false,
         skipLightweightInsightRecompute: true,
       })
     );
-    expect(getActualUsageDatasetForHouse).not.toHaveBeenCalledWith(
-      "lab-test-home-1",
-      expect.anything(),
-      expect.anything()
+    expect(resolveOnePathUpstreamUsageTruthForSimulation).not.toHaveBeenCalledWith(
+      expect.objectContaining({ houseId: "lab-test-home-1" })
     );
   });
 
   it("reports missing actual usage without faking SMT truth", async () => {
     findFirstHouse.mockResolvedValueOnce({ id: "source-house-1", esiid: null });
     resolveHouseCommittedUsageSource.mockResolvedValueOnce(null);
-    getActualUsageDatasetForHouse.mockResolvedValueOnce({
-      dataset: null,
-      alternatives: { smt: null, greenButton: null },
-    });
+    mockOnePathUpstreamTruth({ sourceHouseId: "source-house-1", dataset: null });
 
     const { resolveManualGapfillSmtSourceContext } = await import("@/modules/manualUsage/manualGapfillSourceContext");
     const out = await resolveManualGapfillSmtSourceContext({
@@ -259,10 +284,7 @@ describe("resolveManualGapfillSmtSourceContext", () => {
   it("reads global validation-day policy context without a GapFill-local selector", async () => {
     findFirstHouse.mockResolvedValueOnce({ id: "source-house-1", esiid: "E123" });
     resolveHouseCommittedUsageSource.mockResolvedValueOnce("SMT");
-    getActualUsageDatasetForHouse.mockResolvedValueOnce({
-      dataset: sampleDataset,
-      alternatives: { smt: sampleDataset.summary, greenButton: null },
-    });
+    mockOnePathUpstreamTruth({ sourceHouseId: "source-house-1", esiid: "E123", dataset: sampleDataset });
     findFirstBuild.mockResolvedValueOnce({
       buildInputs: {
         pastValidationPolicyRevision: "unified_past_validation_stratified_14_v4",
@@ -284,18 +306,16 @@ describe("resolveManualGapfillSmtSourceContext", () => {
     expect(out.validation.canonicalPastValidationPolicyRevision).toBe("unified_past_validation_stratified_14_v4");
     expect(out.validation.stampedValidationDateKeys).toEqual(["2025-07-04", "2025-08-12"]);
     expect(out.validation.selectedValidationDateKeys).toEqual(["2025-07-04", "2025-08-12"]);
-    expect(selectValidationDayKeys).toHaveBeenCalled();
+    expect(previewGlobalValidationDaySelection).toHaveBeenCalled();
   });
 
   it("reports insufficient status when intervals exist but daily coverage is empty", async () => {
     findFirstHouse.mockResolvedValueOnce({ id: "source-house-1", esiid: "E123" });
     resolveHouseCommittedUsageSource.mockResolvedValueOnce("SMT");
-    getActualUsageDatasetForHouse.mockResolvedValueOnce({
-      dataset: {
-        ...sampleDataset,
-        daily: [],
-      },
-      alternatives: { smt: sampleDataset.summary, greenButton: null },
+    mockOnePathUpstreamTruth({
+      sourceHouseId: "source-house-1",
+      esiid: "E123",
+      dataset: { ...sampleDataset, daily: [] },
     });
 
     const { resolveManualGapfillSmtSourceContext } = await import("@/modules/manualUsage/manualGapfillSourceContext");
@@ -313,7 +333,9 @@ describe("resolveManualGapfillSmtSourceContext", () => {
   it("marks available status when source coverage is sufficient", async () => {
     findFirstHouse.mockResolvedValueOnce({ id: "source-house-1", esiid: "E123" });
     resolveHouseCommittedUsageSource.mockResolvedValueOnce("SMT");
-    getActualUsageDatasetForHouse.mockResolvedValueOnce({
+    mockOnePathUpstreamTruth({
+      sourceHouseId: "source-house-1",
+      esiid: "E123",
       dataset: {
         ...sampleDataset,
         daily: Array.from({ length: 365 }, (_, index) => ({
@@ -321,7 +343,6 @@ describe("resolveManualGapfillSmtSourceContext", () => {
           kwh: 95,
         })),
       },
-      alternatives: { smt: sampleDataset.summary, greenButton: null },
     });
 
     const { resolveManualGapfillSmtSourceContext } = await import("@/modules/manualUsage/manualGapfillSourceContext");
@@ -332,7 +353,7 @@ describe("resolveManualGapfillSmtSourceContext", () => {
     });
 
     expect(out.status).toBe("available");
-    expect(out.sourceOwner).toBe("persisted_actual_usage");
+    expect(out.sourceOwner).toBe("resolveOnePathUpstreamUsageTruthForSimulation");
     expect(out.diagnostics.sourceCoverageSufficient).toBe(true);
     expect(out.fingerprints.intervalFingerprint).toBe("35040:1719792000000:abc123");
   });

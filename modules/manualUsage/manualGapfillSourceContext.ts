@@ -1,6 +1,5 @@
 import { prisma } from "@/lib/db";
 import {
-  getActualUsageDatasetForHouse,
   getIntervalDataFingerprint,
   type ActualHouseDataset,
   type UsageSummary,
@@ -22,7 +21,48 @@ import type { ActualUsageSource } from "@/modules/realUsageAdapter/actual";
 import { getLatestUsageFingerprintByHouseId } from "@/modules/usageSimulator/fingerprintArtifactsRepo";
 import { sha256HexUtf8, stableStringify } from "@/modules/usageSimulator/fingerprintHash";
 import { computeUsageFingerprintSourceHash } from "@/modules/usageSimulator/usageFingerprintBuilder";
+import { resolveOnePathUpstreamUsageTruthForSimulation } from "@/modules/onePathSim/runtime";
+import type { UpstreamUsageTruthSource } from "@/modules/onePathSim/upstreamUsageTruth";
 import { computePastWeatherIdentity } from "@/modules/weather/identity";
+
+export const MANUAL_GAPFILL_SOURCE_ACTUAL_OWNER =
+  "resolveOnePathUpstreamUsageTruthForSimulation" as const;
+
+export async function loadManualGapfillSourceActualDataset(args: {
+  userId: string;
+  sourceHouseId: string;
+  esiid?: string | null;
+  preferredActualSource?: ActualUsageSource | null;
+}): Promise<{
+  dataset: ActualHouseDataset | null;
+  alternatives: { smt: UsageSummary | null; greenButton: UsageSummary | null };
+  usageTruthSource: UpstreamUsageTruthSource | null;
+  actualContextHouseId: string;
+  onePathUpstreamOwner: typeof MANUAL_GAPFILL_SOURCE_ACTUAL_OWNER;
+}> {
+  const sourceHouseId = String(args.sourceHouseId ?? "").trim();
+  const userId = String(args.userId ?? "").trim();
+  const upstream = await resolveOnePathUpstreamUsageTruthForSimulation({
+    userId,
+    houseId: sourceHouseId,
+    actualContextHouseId: sourceHouseId,
+    smtSourceEsiid: args.esiid ?? null,
+    seedIfMissing: false,
+    preferredActualSource: args.preferredActualSource ?? null,
+    skipLightweightInsightRecompute: true,
+  }).catch(() => null);
+
+  return {
+    dataset: (upstream?.dataset as ActualHouseDataset | null) ?? null,
+    alternatives: {
+      smt: (upstream?.alternatives?.smt as UsageSummary | null) ?? null,
+      greenButton: (upstream?.alternatives?.greenButton as UsageSummary | null) ?? null,
+    },
+    usageTruthSource: upstream?.usageTruthSource ?? null,
+    actualContextHouseId: upstream?.actualContextHouse?.id ?? sourceHouseId,
+    onePathUpstreamOwner: MANUAL_GAPFILL_SOURCE_ACTUAL_OWNER,
+  };
+}
 
 export type ManualGapfillSourceContextStatus = "available" | "missing" | "insufficient" | "ambiguous";
 
@@ -93,7 +133,12 @@ export type ManualGapfillSourceContext = {
   esiid: string | null;
   committedUsageSource: ActualUsageSource | null;
   actualSource: ActualUsageSource | null;
-  sourceOwner: "persisted_actual_usage" | "none";
+  sourceOwner: typeof MANUAL_GAPFILL_SOURCE_ACTUAL_OWNER | "none";
+  onePathUpstream: {
+    owner: typeof MANUAL_GAPFILL_SOURCE_ACTUAL_OWNER;
+    usageTruthSource: UpstreamUsageTruthSource | null;
+    actualContextHouseId: string;
+  };
   actualSourceKind: ManualGapfillActualSourceKind;
   coverage: ManualGapfillSourceContextCoverage;
   fingerprints: ManualGapfillSourceContextFingerprints;
@@ -111,7 +156,7 @@ export type ResolveManualGapfillSmtSourceContextArgs = {
   includeDiagnostics?: boolean;
 };
 
-const SOURCE_OWNER = "persisted_actual_usage" as const;
+const SOURCE_OWNER = MANUAL_GAPFILL_SOURCE_ACTUAL_OWNER;
 
 function normalizeDateKey(value: unknown): string | null {
   const key = String(value ?? "").slice(0, 10);
@@ -234,6 +279,11 @@ function buildEmptyContext(args: {
     committedUsageSource: null,
     actualSource: null,
     sourceOwner: "none",
+    onePathUpstream: {
+      owner: MANUAL_GAPFILL_SOURCE_ACTUAL_OWNER,
+      usageTruthSource: null,
+      actualContextHouseId: args.sourceHouseId,
+    },
     actualSourceKind: "missing",
     coverage: {
       coverageStart: null,
@@ -326,14 +376,15 @@ export async function resolveManualGapfillSmtSourceContext(
     esiid: effectiveEsiid,
   }).catch(() => null);
 
-  const actualLoad = await getActualUsageDatasetForHouse(sourceHouseId, effectiveEsiid, {
+  const actualLoad = await loadManualGapfillSourceActualDataset({
     userId,
-    skipFullYearIntervalFetch: true,
-    skipLightweightInsightRecompute: true,
-  }).catch(() => ({ dataset: null, alternatives: { smt: null, greenButton: null } }));
+    sourceHouseId,
+    esiid: effectiveEsiid,
+    preferredActualSource: committedUsageSource ?? null,
+  });
 
-  const dataset = actualLoad?.dataset ?? null;
-  const alternatives = actualLoad?.alternatives ?? { smt: null, greenButton: null };
+  const dataset = actualLoad.dataset;
+  const alternatives = actualLoad.alternatives;
   const actualDatasetSummary = summarizeActualDataset(dataset);
   const actualSource = actualDatasetSummary?.source ?? committedUsageSource ?? null;
   const actualSourceKind = resolveActualSourceKind({
@@ -432,6 +483,11 @@ export async function resolveManualGapfillSmtSourceContext(
     committedUsageSource,
     actualSource,
     sourceOwner: sourceCoverageSufficient ? SOURCE_OWNER : "none",
+    onePathUpstream: {
+      owner: MANUAL_GAPFILL_SOURCE_ACTUAL_OWNER,
+      usageTruthSource: actualLoad.usageTruthSource,
+      actualContextHouseId: actualLoad.actualContextHouseId,
+    },
     actualSourceKind,
     coverage: {
       coverageStart,
