@@ -66,6 +66,13 @@ export async function enqueueDeferredPostIngestTasks(args: {
     if (!task.esiid) continue;
     const storagePath = encodeDeferredTaskPath(task);
     const sha = crypto.createHash('sha256').update(storagePath).digest('hex');
+    const existing = await prisma.rawSmtFile.findUnique({
+      where: { sha256: sha },
+      select: { id: true },
+    });
+    if (existing) {
+      continue;
+    }
     try {
       await prisma.rawSmtFile.create({
         data: {
@@ -80,9 +87,10 @@ export async function enqueueDeferredPostIngestTasks(args: {
       });
       enqueued += 1;
     } catch (e: any) {
-      if (!(e instanceof Prisma.PrismaClientKnownRequestError) || e.code !== 'P2002') {
-        console.error(`${logPrefix} failed to enqueue deferred post-ingest task`, { esiid: task.esiid, err: e });
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        continue;
       }
+      console.error(`${logPrefix} failed to enqueue deferred post-ingest task`, { esiid: task.esiid, err: e });
     }
   }
   return enqueued;

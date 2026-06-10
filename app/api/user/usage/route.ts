@@ -12,6 +12,7 @@ import {
   loadSmtTailCoverage,
   reconcileUsageIngestionWithDataset,
 } from "@/lib/usage/smtTailCoverage";
+import { loadSmtWindowDayStatus } from "@/lib/usage/smtWindowStatus";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/usageSimulator/metadataWindow";
 import { IntervalSeriesKind } from '@/modules/usageSimulator/kinds';
 import { toPublicHouseLabel } from "@/modules/usageSimulator/houseLabel";
@@ -169,8 +170,14 @@ export async function GET(request: NextRequest) {
             esiid,
             targetEndDate: canonicalCoverage.endDate,
           }).catch(() => null);
+          const canonicalEndWindow = await loadSmtWindowDayStatus({
+            esiid,
+            dateKeys: [canonicalCoverage.endDate],
+          }).catch(() => null);
+          const canonicalEndDayComplete =
+            canonicalEndWindow?.byDate?.[canonicalCoverage.endDate]?.isComplete === true;
           usageIngestion = {
-            tailReady: Boolean(tailCoverage?.tailReady),
+            tailReady: Boolean(tailCoverage?.tailReady) || canonicalEndDayComplete,
             targetEndDate: canonicalCoverage.endDate,
             tailRefreshAttempted: false,
             tailRefreshReason: "refresh_requested",

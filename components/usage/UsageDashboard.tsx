@@ -504,7 +504,7 @@ export const UsageDashboard: React.FC<Props> = ({
     let attempts = 0;
     let reloadsSinceHeal = 0;
 
-    async function reloadUsageOnce() {
+    async function reloadUsageOnce(confirmedTailReady = false) {
       const res = await fetch(`/api/user/usage?ts=${Date.now()}`, { cache: "no-store" });
       let json: UsageApiResponse;
       try {
@@ -515,9 +515,24 @@ export const UsageDashboard: React.FC<Props> = ({
       }
       if (!res.ok || (json as any).ok === false) return null;
       if (cancelled) return null;
-      writeSessionCache("REAL", json);
-      setHouses((json as any).houses || []);
-      const nextHouses = (json as any).houses || [];
+      let nextHouses: HouseUsage[] = (json as any).houses || [];
+      if (confirmedTailReady && selectedHouseId) {
+        nextHouses = nextHouses.map((house) =>
+          house.houseId !== selectedHouseId || !house.usageIngestion
+            ? house
+            : {
+                ...house,
+                usageIngestion: {
+                  ...house.usageIngestion,
+                  tailReady: true,
+                  tailTimedOut: false,
+                  incompleteTailDateKeys: [],
+                },
+              }
+        );
+      }
+      writeSessionCache("REAL", { ...(json as any), houses: nextHouses });
+      setHouses(nextHouses);
       setSelectedHouseId(pickSelectedHouseId(nextHouses));
       return nextHouses.find((h: HouseUsage) => h.houseId === selectedHouseId) ?? null;
     }
@@ -574,17 +589,19 @@ export const UsageDashboard: React.FC<Props> = ({
       if (attempts > 60) return;
 
       try {
+        let healTailReady = false;
         if (reloadsSinceHeal === 0 || reloadsSinceHeal >= 4) {
           const retryHeal = reloadsSinceHeal >= 4;
           reloadsSinceHeal = 0;
-          await requestTailGapHeal(retryHeal);
+          const healResult = await requestTailGapHeal(retryHeal);
+          healTailReady = Boolean(healResult?.tail?.tailReady);
         }
 
-        const updatedHouse = await reloadUsageOnce();
+        const updatedHouse = await reloadUsageOnce(healTailReady);
         reloadsSinceHeal += 1;
         const activeAfterReload =
           updatedHouse ?? houses.find((h) => h.houseId === selectedHouseId) ?? null;
-        if (!houseShowsSmtTailFinishingState(activeAfterReload)) {
+        if (healTailReady || !houseShowsSmtTailFinishingState(activeAfterReload)) {
           return;
         }
 
