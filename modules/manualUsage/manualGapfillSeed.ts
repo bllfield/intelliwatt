@@ -158,11 +158,13 @@ function buildSeedView(args: {
   }
 
   const annual = args.payload as AnnualManualUsagePayload;
+  const annualKwh =
+    typeof annual.annualKwh === "number" && Number.isFinite(annual.annualKwh) ? annual.annualKwh : null;
   return {
     manualUsageMode: "manual_annual",
     anchorEndDate: annual.anchorEndDate ?? null,
-    annualTotalKwh: annual.annualKwh ?? null,
-    totalKwh: annual.annualKwh ?? null,
+    annualTotalKwh: annualKwh,
+    totalKwh: annualKwh,
     billPeriodCount: null,
     normalizedPayloadHash,
     billPeriodHash: null,
