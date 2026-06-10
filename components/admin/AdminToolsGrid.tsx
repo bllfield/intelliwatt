@@ -27,6 +27,11 @@ const TOOL_CARDS = [
     description: "Browser-based harness for the customer manual-monthly flow with diagnostics.",
   },
   {
+    href: "/admin/tools/manual-gapfill",
+    title: "Manual GapFill",
+    description: "Wire MG-1 through MG-5: source context, validation policy, seed, run/readback, and compare.",
+  },
+  {
     href: "/admin/tools/one-path-sim",
     title: "One Path Sim Admin",
     description: "Canonical admin harness for shared interval, manual, annual, and new-build simulation runs.",

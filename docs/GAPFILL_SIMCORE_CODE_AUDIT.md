@@ -4,7 +4,7 @@
 >
 > This file records a point-in-time code audit and must not be treated as the canonical product/architecture contract for One Path Sim, usage-upstream ownership, cutover status, or reader/producer rules.
 >
-> **Manual GapFill phases:** MG-1–MG-4 shipped (`814e0839`–`be2ff2cf`). MG-5 (local) = source actual vs lab simulated compare via `modules/manualUsage/manualGapfillCompare.ts` + `/api/admin/tools/manual-gapfill/compare` — admin diagnostic only; no Past Sim, seed prep/writes, or production WAPE/scoring changes. MG-6 = UI simplification/wiring (not legacy deletion). `EXACT_INTERVALS` remains untouched.
+> **Manual GapFill phases:** MG-1–MG-5 shipped (`814e0839`–`8205fa1e`). MG-6 (local) = admin UI at `/admin/tools/manual-gapfill` (`components/admin/ManualGapfillAdmin.tsx`) wiring MG-1–MG-5 endpoints client-side; not legacy GapFill deletion; `EXACT_INTERVALS` remains untouched; no production WAPE/scoring changes. MG-7 = proof/docs closeout.
 >
 > Canonical architecture references:
 > - `docs/ONE_PATH_SIM_ARCHITECTURE.md`
