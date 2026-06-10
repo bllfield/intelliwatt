@@ -54,12 +54,31 @@ describe("usageSimulatorSourceStatusCopy", () => {
     expect(copy.kind).toBe("MANUAL_TOTALS");
     expect(copy.stepSummary).toContain("Manual totals (bill-period based)");
     expect(copy.stepSummary).not.toContain("Actual usage");
-    expect(copy.coverageLine).toContain("Manual bills:");
+    expect(copy.coverageLabel).toBe("Manual bills:");
+    expect(copy.coverageLine).not.toContain("Manual bills:");
     expect(copy.coverageLine).toContain("03/17/2025");
     expect(copy.coverageLine).toContain("03/15/2026");
     expect(copy.coverageLine).toContain("12 statements");
+    const renderedCoverage = `${copy.coverageLabel} ${copy.coverageLine}`;
+    expect(renderedCoverage.startsWith("Manual bills: ")).toBe(true);
+    expect(renderedCoverage.indexOf("Manual bills:", 1)).toBe(-1);
     expect(copy.secondaryStatus).toContain("Actual interval data: not connected");
     expect(copy.secondaryStatus).toContain("Past simulated usage is available");
+  });
+
+  it("manual monthly coverage copy does not duplicate Manual bills label", () => {
+    const copy = resolveUsageSimulatorSourceStatusCopy({
+      mode: "MANUAL_TOTALS",
+      normalizedIntent: "MANUAL",
+      hasActualIntervals: false,
+      manualUsagePayload: monthlyPayload,
+    });
+
+    const renderedCoverage = `${copy.coverageLabel} ${copy.coverageLine}`;
+    expect(renderedCoverage).toMatch(
+      /^Manual bills: \d{2}\/\d{2}\/\d{4} → \d{2}\/\d{2}\/\d{4} · \d+ statements · [\d,]+ kWh$/
+    );
+    expect(renderedCoverage.match(/Manual bills:/g)?.length).toBe(1);
   });
 
   it("manual monthly does not display actual read-only status when actual interval count is 0", () => {

@@ -76,8 +76,8 @@ export function resolveUsageSimulatorSourceStatusCopy(args: {
   if (kind === "MANUAL_TOTALS") {
     const statement = resolveManualStatementSummary(args.manualUsagePayload);
     const coverageLine = statement
-      ? `Manual bills: ${formatUsDate(statement.startDate)} → ${formatUsDate(statement.endDate)} · ${statement.statementCount} statements · ${formatKwhWhole(statement.totalKwh)}`
-      : "Manual bills: saved monthly statement totals (bill-period based).";
+      ? `${formatUsDate(statement.startDate)} → ${formatUsDate(statement.endDate)} · ${statement.statementCount} statements · ${formatKwhWhole(statement.totalKwh)}`
+      : "saved monthly statement totals (bill-period based).";
     const secondaryParts: string[] = [];
     if (!args.hasActualIntervals) {
       secondaryParts.push("Actual interval data: not connected");
