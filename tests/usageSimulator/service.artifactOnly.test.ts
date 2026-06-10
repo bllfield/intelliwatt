@@ -292,7 +292,7 @@ describe("pastSimPolicy split helpers", () => {
     });
   });
 
-  it("honors explicit user-site validation overrides", () => {
+  it("ignores explicit user-site validation overrides (global MG-2 policy owner)", () => {
     expect(
       resolveUserValidationPolicy({
         validationSelectionMode: "random_simple",
@@ -300,12 +300,12 @@ describe("pastSimPolicy split helpers", () => {
       })
     ).toEqual({
       owner: "userValidationPolicy",
-      selectionMode: "random_simple",
-      validationDayCount: 21,
+      selectionMode: "stratified_weather_balanced",
+      validationDayCount: 14,
     });
   });
 
-  it("keeps GapFill Test Home on adminValidationPolicy", () => {
+  it("keeps GapFill Test Home on adminValidationPolicy with canonical defaults", () => {
     expect(
       resolveAdminValidationPolicy({
         selectionMode: "stratified_weather_balanced",
@@ -314,7 +314,7 @@ describe("pastSimPolicy split helpers", () => {
     ).toEqual({
       owner: "adminValidationPolicy",
       selectionMode: "stratified_weather_balanced",
-      validationDayCount: 13,
+      validationDayCount: 14,
     });
   });
 

@@ -71,6 +71,7 @@ import {
   isAdminLabTreatmentMode,
 } from "@/modules/usageSimulator/adminLabTreatment";
 import { resolvePastValidationPolicy } from "@/lib/usage/pastValidationPolicy";
+import { resolveGlobalValidationDayKeysForPastSim } from "@/lib/usage/validationDayPolicy";
 import {
   resolveAdminValidationPolicy,
   resolveTestHomeUsageInputMode,
@@ -1913,37 +1914,32 @@ export async function POST(req: NextRequest) {
         selectedDateKeys: sourceValidationKeys,
       });
     } else {
-      const coverageSelection = await getCandidateDateCoverageForSelection({
+      const globalValidation = await resolveGlobalValidationDayKeysForPastSim({
+        userId: String(sourceHouse.userId ?? link.sourceUserId),
         houseId: sourceHouse.id,
-        scenarioIdentity: `shared_past:${canonicalMonths.join(",")}`,
-        windowStart: canonicalWindow.startDate,
-        windowEnd: canonicalWindow.endDate,
-        timezone,
-        minDayCoveragePct,
-        stratifyByMonth,
-        stratifyByWeekend,
-        loadIntervalsForWindow: async () =>
-          await getActualIntervalsForRange({
-            houseId: sourceHouse.id,
-            esiid: sourceEsiid,
-            startDate: canonicalWindow.startDate,
-            endDate: canonicalWindow.endDate,
-          }),
+        esiid: sourceEsiid,
+        sourceHouseId: sourceHouse.id,
+        surface: "admin_lab",
+        window: canonicalWindow,
       });
-      const selectedValidation = selectValidationDayKeys({
-        mode: validationPolicy.selectionMode,
-        targetCount: validationPolicy.validationDayCount,
-        candidateDateKeys: coverageSelection.candidateDateKeys,
-        travelDateKeysSet: travelDateKeysLocal,
-        timezone,
-        seed: seedUsed,
-        manualDateKeys,
-      });
-      testDateKeysLocal = new Set(selectedValidation.selectedDateKeys);
-      testRangesUsed = mergeDateKeysToRanges(selectedValidation.selectedDateKeys);
-      testSelectionMode = validationPolicy.selectionMode;
-      testDaysSelected = selectedValidation.selectedDateKeys.length;
-      selectionDiagnostics = selectedValidation.diagnostics;
+      validationPolicy = {
+        owner: "adminValidationPolicy",
+        selectionMode: globalValidation.selectionMode,
+        validationDayCount: globalValidation.validationDayCount,
+      };
+      testDateKeysLocal = new Set(globalValidation.validationOnlyDateKeysLocal);
+      testRangesUsed = mergeDateKeysToRanges(globalValidation.validationOnlyDateKeysLocal);
+      testSelectionMode = globalValidation.selectionMode;
+      testDaysSelected = globalValidation.validationOnlyDateKeysLocal.length;
+      selectionDiagnostics = {
+        ...globalValidation.selectionDiagnostics,
+        globalValidationPolicyHash: globalValidation.policyHash,
+        globalValidationWarnings: globalValidation.warnings,
+        localGapFillSelectorUsed: false,
+        sharedPolicySelectorOwner: "resolveGlobalValidationDayKeysForPastSim",
+      };
+      void seedUsed;
+      void manualDateKeys;
     }
     if (testDateKeysLocal.size === 0) {
       return NextResponse.json(

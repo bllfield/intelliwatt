@@ -12,7 +12,7 @@ import { resolveHouseCommittedUsageSource } from "@/lib/usage/houseCommittedUsag
 import {
   computeValidationDayPolicyHash,
   previewGlobalValidationDaySelection,
-  resolveActiveValidationDayPolicy,
+  resolveActiveValidationDayPolicyLive,
   VALIDATION_DAY_POLICY_LAYER,
 } from "@/lib/usage/validationDayPolicy";
 import { PAST_VALIDATION_POLICY_REVISION } from "@/lib/usage/pastValidationPolicy";
@@ -242,11 +242,11 @@ async function readStampedValidationContext(args: {
   };
 }
 
-function buildGlobalValidationContext(args: {
+async function buildGlobalValidationContext(args: {
   stampedValidation: Awaited<ReturnType<typeof readStampedValidationContext>>;
   policyPreview: Awaited<ReturnType<typeof previewGlobalValidationDaySelection>> | null;
-}): ManualGapfillSourceContextValidation {
-  const activePolicy = resolveActiveValidationDayPolicy({ surface: "admin_lab" });
+}): Promise<ManualGapfillSourceContextValidation> {
+  const activePolicy = await resolveActiveValidationDayPolicyLive({ surface: "admin_lab" });
   return {
     canonicalPastValidationPolicyRevision: PAST_VALIDATION_POLICY_REVISION,
     activeValidationDayPolicyRevision: PAST_VALIDATION_POLICY_REVISION,
@@ -262,7 +262,7 @@ function buildGlobalValidationContext(args: {
   };
 }
 
-function buildEmptyContext(args: {
+async function buildEmptyContext(args: {
   sourceHouseId: string;
   userId: string;
   esiid?: string | null;
@@ -270,7 +270,7 @@ function buildEmptyContext(args: {
   status: ManualGapfillSourceContextStatus;
   warnings: string[];
   diagnostics?: Partial<ManualGapfillSourceContextDiagnostics>;
-}): ManualGapfillSourceContext {
+}): Promise<ManualGapfillSourceContext> {
   return {
     status: args.status,
     sourceHouseId: args.sourceHouseId,
@@ -309,7 +309,7 @@ function buildEmptyContext(args: {
       monthlyTotals: null,
       annualTotal: null,
     },
-    validation: buildGlobalValidationContext({
+    validation: await buildGlobalValidationContext({
       stampedValidation: {
         stampedPastValidationPolicyRevision: null,
         stampedValidationDateKeys: null,
@@ -341,7 +341,7 @@ export async function resolveManualGapfillSmtSourceContext(
   const warnings: string[] = [];
 
   if (!sourceHouseId || !userId) {
-    return buildEmptyContext({
+    return await buildEmptyContext({
       sourceHouseId: sourceHouseId || "missing",
       userId: userId || "missing",
       esiid: args.esiid ?? null,
@@ -359,7 +359,7 @@ export async function resolveManualGapfillSmtSourceContext(
     .catch(() => null);
 
   if (!house?.id) {
-    return buildEmptyContext({
+    return await buildEmptyContext({
       sourceHouseId,
       userId,
       esiid: args.esiid ?? null,
@@ -513,7 +513,7 @@ export async function resolveManualGapfillSmtSourceContext(
       monthlyTotals: args.includeDiagnostics ? monthlyTotals : null,
       annualTotal,
     },
-    validation: buildGlobalValidationContext({ stampedValidation, policyPreview }),
+    validation: await buildGlobalValidationContext({ stampedValidation, policyPreview }),
     alternatives,
     diagnostics: {
       lookedForActualDataset: true,

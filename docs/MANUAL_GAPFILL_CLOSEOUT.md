@@ -25,7 +25,7 @@ Default mode: `MONTHLY_FROM_SOURCE_INTERVALS`.
 | Phase | Commit | What shipped |
 |-------|--------|--------------|
 | **MG-1** | `814e0839` | Read-only source context resolver + `POST /api/admin/tools/manual-gapfill/source-context` |
-| **MG-2** | `d9542e06` | Global validation-day policy + `GET\|POST /api/admin/tools/validation-day-policy` + `/admin/tools/validation-day-policy` |
+| **MG-2** | `d9542e06`+ | Global compare-day policy control: FeatureFlag persist (`validation_day_policy.v1`), email-based preview, wired to One Path / Manual GapFill / GapFill Lab |
 | **MG-3** | `f1159ef5` | Seed preparation + `POST /api/admin/tools/manual-gapfill/prepare-seed` (dry-run default; optional lab persist) |
 | **MG-4** | `be2ff2cf` | Run/readback + `POST /api/admin/tools/manual-gapfill/run-readback` (canonical Past Sim on lab home) |
 | **MG-5** | `8205fa1e` | Compare envelope + `POST /api/admin/tools/manual-gapfill/compare` (+ build hotfixes `5b90d4e5`, `41f5c1ea`) |

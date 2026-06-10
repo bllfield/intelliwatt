@@ -45,6 +45,7 @@ const buildOnePathManualUsagePastSimReadResult = vi.fn();
 const readOnePathSimulatedUsageScenario = vi.fn();
 const listOnePathScenarioEvents = vi.fn();
 const dispatchPastSimRecalc = vi.fn();
+const resolveGlobalValidationDayKeysForPastSim = vi.fn();
 const ensureGlobalOnePathLabTestHomeHouse = vi.fn();
 const getOnePathLabTestHomeLink = vi.fn();
 const replaceGlobalOnePathLabTestHomeFromSource = vi.fn();
@@ -192,6 +193,15 @@ const ensureSmtCoverageForHouse = vi.fn();
 vi.mock("@/lib/usage/ensureSmtCoverage", () => ({
   ensureSmtCoverageForHouse: (...args: any[]) => ensureSmtCoverageForHouse(...args),
 }));
+
+vi.mock("@/lib/usage/validationDayPolicy", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/usage/validationDayPolicy")>();
+  return {
+    ...actual,
+    resolveGlobalValidationDayKeysForPastSim: (...args: any[]) =>
+      resolveGlobalValidationDayKeysForPastSim(...args),
+  };
+});
 
 vi.mock("@/lib/usage/userUsageRefresh", () => ({
   requestUsageRefreshForUserHouse: (...args: any[]) => requestUsageRefreshForUserHouse(...args),
@@ -352,6 +362,16 @@ describe("admin one path sim route", () => {
     readOnePathSimulatedUsageScenario.mockReset();
     listOnePathScenarioEvents.mockReset();
     dispatchPastSimRecalc.mockReset();
+    resolveGlobalValidationDayKeysForPastSim.mockReset();
+    resolveGlobalValidationDayKeysForPastSim.mockResolvedValue({
+      policy: { selectionMode: "stratified_weather_balanced", validationDayCount: 14 },
+      policyHash: "policy-hash-test",
+      selectionMode: "stratified_weather_balanced",
+      validationDayCount: 14,
+      validationOnlyDateKeysLocal: ["2026-03-10", "2026-03-11"],
+      window: { startDate: "2025-04-16", endDate: "2026-04-14" },
+      warnings: [],
+    });
     ensureGlobalOnePathLabTestHomeHouse.mockReset();
     getOnePathLabTestHomeLink.mockReset();
     replaceGlobalOnePathLabTestHomeFromSource.mockReset();
@@ -2047,7 +2067,7 @@ describe("admin one path sim route", () => {
     expect(readOnePathSimulatedUsageScenario).not.toHaveBeenCalled();
   });
 
-  it("passes actual context house and manual validation date keys through the shared adapter", async () => {
+  it("uses global validation-day policy keys bounded to coverage window through the shared adapter", async () => {
     const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
     const pending = POST(
       buildRequest({
@@ -2057,16 +2077,18 @@ describe("admin one path sim route", () => {
         mode: "INTERVAL",
         actualContextHouseId: "house-2",
         validationSelectionMode: "manual",
-        validationOnlyDateKeysLocal: ["2026-03-10", "2026-03-11"],
+        validationOnlyDateKeysLocal: ["2099-01-01"],
       })
     );
     await vi.advanceTimersByTimeAsync(25_000);
     await pending;
 
+    expect(resolveGlobalValidationDayKeysForPastSim).toHaveBeenCalled();
     expect(adaptIntervalRawInput).toHaveBeenCalledWith(
       expect.objectContaining({
         actualContextHouseId: "house-1",
-        validationSelectionMode: "manual",
+        validationSelectionMode: "stratified_weather_balanced",
+        validationDayCount: 14,
         validationOnlyDateKeysLocal: ["2026-03-10", "2026-03-11"],
       })
     );

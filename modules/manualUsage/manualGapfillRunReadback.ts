@@ -1,9 +1,10 @@
 import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
+import { PAST_VALIDATION_POLICY_REVISION } from "@/lib/usage/pastValidationPolicy";
 import {
   computeValidationDayPolicyHash,
-  previewGlobalValidationDaySelection,
-  resolveActiveValidationDayPolicy,
+  resolveActiveValidationDayPolicyLive,
+  resolveGlobalValidationDayKeysForPastSim,
 } from "@/lib/usage/validationDayPolicy";
 import { buildOnePathManualUsagePastSimReadResult } from "@/modules/onePathSim/manualPastSimReadResult";
 import {
@@ -134,7 +135,6 @@ function emptySourceContextBlock(args: {
   sourceHouseId: string;
   policyHash: string;
 }): ManualGapfillRunReadbackResult["sourceContext"] {
-  const activePolicy = resolveActiveValidationDayPolicy({ surface: "admin_lab" });
   return {
     sourceHouseId: args.sourceHouseId,
     actualSourceKind: "missing",
@@ -144,7 +144,7 @@ function emptySourceContextBlock(args: {
     dailyFingerprint: null,
     monthlyFingerprint: null,
     annualTotalKwh: null,
-    validationDayPolicyRevision: activePolicy.policyRevision,
+    validationDayPolicyRevision: PAST_VALIDATION_POLICY_REVISION,
     validationDayPolicyHash: args.policyHash,
   };
 }
@@ -306,20 +306,15 @@ export async function runManualGapfillSeededPastSim(args: {
     }
   | { ok: false; error: string; warnings: string[] }
 > {
-  const activePolicy = resolveActiveValidationDayPolicy({ surface: "admin_lab" });
-  const selectionMode = (args.validationSelectionMode ??
-    activePolicy.selectionMode) as ValidationDaySelectionMode;
-  const validationDayCount = args.validationDayCount ?? activePolicy.validationDayCount;
-
-  const policyPreview = await previewGlobalValidationDaySelection({
+  const globalValidation = await resolveGlobalValidationDayKeysForPastSim({
     houseId: args.labHouseId,
     userId: args.userId,
     esiid: args.esiid ?? null,
     sourceHouseId: args.sourceHouseId,
-    validationDayCount,
-    mode: selectionMode,
     surface: "admin_lab",
   });
+  const selectionMode = globalValidation.selectionMode as ValidationDaySelectionMode;
+  const validationDayCount = globalValidation.validationDayCount;
 
   const persistPastSimBaseline = args.persistRequested !== false;
   const travelRanges = normalizeTravelRanges(args.manualPayload);
@@ -334,7 +329,7 @@ export async function runManualGapfillSeededPastSim(args: {
     weatherPreference: args.weatherPreference ?? "LAST_YEAR_WEATHER",
     persistPastSimBaseline,
     preLockboxTravelRanges: travelRanges,
-    validationOnlyDateKeysLocal: policyPreview.selectedValidationDateKeys,
+    validationOnlyDateKeysLocal: globalValidation.validationOnlyDateKeysLocal,
     validationDaySelectionMode: selectionMode,
     validationDayCount,
     correlationId: args.correlationId,
@@ -480,7 +475,7 @@ export async function buildManualGapfillRunReadbackResult(
   const labHouseId = String(args.labHouseId ?? "").trim();
   const mode = args.mode;
   const warnings: string[] = [];
-  const activePolicy = resolveActiveValidationDayPolicy({ surface: "admin_lab" });
+  const activePolicy = await resolveActiveValidationDayPolicyLive({ surface: "admin_lab" });
   const policyHash = computeValidationDayPolicyHash(activePolicy);
 
   if (!userId || !sourceHouseId || !labHouseId) {

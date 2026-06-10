@@ -1,6 +1,6 @@
 # Admin Tools Contract
 
-_Last updated: 2026-03-05_
+_Last updated: 2026-06-06_
 
 This document defines requirements for admin tooling that configures simulation outputs, costs, catalogs, and operations. It does **not** refactor or re-specify existing tools; it establishes the contract that new and existing admin capabilities should satisfy.
 
@@ -64,6 +64,29 @@ Admin-driven changes to config, catalogs, or assumptions **must** be versioned a
 
 ---
 
+## 7) Admin home lookup by email (required)
+
+When an admin tool needs a user home for preview, compare, or simulation:
+
+- **Always** resolve identity with **user email** via `lookupAdminHousesByEmail` / `GET /api/admin/houses/by-email`.
+- **Do not** require operators to paste raw `houseId` or `userId` in the UI for primary flows.
+- House selection after lookup may use a dropdown of houses returned for that email (primary house default).
+- Shared helper: `lib/admin/adminHouseLookup.ts`.
+
+This rule applies to Compare Day Policy preview, Manual GapFill, One Path Sim, and new admin tools.
+
+---
+
+## 8) Global compare-day policy (MG-2)
+
+- **Owner:** `lib/usage/validationDayPolicy.ts` + admin page `/admin/tools/validation-day-policy`.
+- **Persist:** admin saves to FeatureFlag key `validation_day_policy.v1` (confirmation keyword `APPLY`).
+- **Precedence:** deploy env `VALIDATION_DAY_POLICY_OVERRIDE_JSON` > admin-saved policy > code defaults in `pastValidationPolicy.ts`.
+- **Wired surfaces:** One Path, Manual GapFill, GapFill Lab compare (non source-copy parity), user-site Past Sim reconciliation.
+- **Guardrails:** canonical 365-day window bounding, travel exclusion, shared `selectValidationDayKeys` selector.
+
+---
+
 ## Existing Admin Tools (Detected)
 
 Inventory derived from the admin dashboard and codebase scan. Purpose is one-line only; no guarantee of completeness.
@@ -109,7 +132,8 @@ Inventory derived from the admin dashboard and codebase scan. Purpose is one-lin
 - `/api/admin/tools/manual-gapfill/run-readback` — Manual GapFill run/readback from prepared lab seed (MG-4; canonical Past Sim on lab home; no source-vs-sim compare; no inline seed derivation)
 - `/api/admin/tools/manual-gapfill/compare` — Manual GapFill source actual vs lab simulated compare (MG-5; admin diagnostic only; no Past Sim/seed writes; no production WAPE/scoring changes)
 - `/admin/tools/manual-gapfill` — Manual GapFill admin UI (MG-6 shipped `ae380115`; wires MG-1–MG-5 endpoints client-side; see `docs/MANUAL_GAPFILL_CLOSEOUT.md`)
-- `/api/admin/tools/validation-day-policy` — Global validation-day policy snapshot + preview (MG-2)
+- `/api/admin/tools/validation-day-policy` — Global compare-day policy control (MG-2): snapshot, save, reset, email-based preview
+- `/admin/tools/validation-day-policy` — Compare Day Policy admin UI (global policy + guardrails + preview by email)
 - `/api/admin/usage/normalize` — Usage normalization
 - `/api/admin/smt/*` — SMT agreements, pull, normalize, billing, etc.
 - `/api/admin/efl-review/*` — EFL review queue, process, stats

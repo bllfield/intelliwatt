@@ -37,7 +37,7 @@ describe("pastValidationPolicy", () => {
     });
   });
 
-  it("preserves explicit mode and count overrides", () => {
+  it("ignores per-request mode and count overrides (global MG-2 policy owner)", () => {
     expect(
       resolveAdminValidationPolicy({
         selectionMode: "customer_style_seasonal_mix",
@@ -45,15 +45,19 @@ describe("pastValidationPolicy", () => {
       })
     ).toEqual({
       owner: "adminValidationPolicy",
-      selectionMode: "customer_style_seasonal_mix",
-      validationDayCount: 9,
+      selectionMode: CANONICAL_PAST_VALIDATION_SELECTION_MODE,
+      validationDayCount: CANONICAL_PAST_VALIDATION_DAY_COUNT,
     });
     expect(
       resolveUserValidationPolicy({
         validationSelectionMode: "random_simple",
         validationDayCount: 21,
-      }).selectionMode
-    ).toBe("random_simple");
+      })
+    ).toEqual({
+      owner: "userValidationPolicy",
+      selectionMode: CANONICAL_PAST_VALIDATION_SELECTION_MODE,
+      validationDayCount: CANONICAL_PAST_VALIDATION_DAY_COUNT,
+    });
   });
 
   it("reconciles legacy random_simple and count drift but preserves manual picks", () => {

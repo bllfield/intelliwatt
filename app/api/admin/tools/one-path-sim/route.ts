@@ -39,7 +39,7 @@ import {
 } from "@/modules/onePathSim/onePathSim";
 import { listOnePathScenarioEvents, readOnePathSimulatedUsageScenario } from "@/modules/onePathSim/serviceBridge";
 import { dispatchPastSimRecalc } from "@/modules/usageSimulator/pastSimRecalcDispatch";
-import { resolvePastValidationPolicy } from "@/lib/usage/pastValidationPolicy";
+import { resolveGlobalValidationDayKeysForPastSim } from "@/lib/usage/validationDayPolicy";
 import { resolveOnePathGbPastCachedArtifactInputHash } from "@/lib/usage/onePathGbPastArtifactRun";
 import { findPastScenarioId } from "@/lib/usage/onePathPastUserSiteParity";
 import {
@@ -2094,17 +2094,6 @@ export async function POST(request: NextRequest) {
         body?.weatherPreference === "NONE" || body?.weatherPreference === "LONG_TERM_AVERAGE"
           ? body.weatherPreference
           : "LAST_YEAR_WEATHER",
-      validationSelectionMode:
-        typeof body?.validationSelectionMode === "string" && body.validationSelectionMode.trim()
-          ? body.validationSelectionMode.trim()
-          : null,
-      validationDayCount:
-        typeof body?.validationDayCount === "number" && Number.isFinite(body.validationDayCount)
-          ? body.validationDayCount
-          : null,
-      validationOnlyDateKeysLocal: Array.isArray(body?.validationOnlyDateKeysLocal)
-        ? body.validationOnlyDateKeysLocal.map((value: unknown) => String(value ?? "").slice(0, 10))
-        : [],
       travelRanges: Array.isArray(body?.travelRanges) ? body.travelRanges : undefined,
       persistRequested: body?.persistRequested !== false,
     } as const;
@@ -2116,6 +2105,19 @@ export async function POST(request: NextRequest) {
           : mode === "GREEN_BUTTON"
             ? "GREEN_BUTTON"
             : rawInputBase.preferredActualSource,
+    } as const;
+    const globalValidationDayKeys = await resolveGlobalValidationDayKeysForPastSim({
+      userId: effectiveUserId,
+      houseId: effectiveRawInputBase.actualContextHouseId,
+      esiid: smtSourceEsiid,
+      sourceHouseId: effectiveRawInputBase.actualContextHouseId,
+      surface: "admin_lab",
+    });
+    const runInputWithValidation = {
+      ...effectiveRawInputBase,
+      validationSelectionMode: globalValidationDayKeys.selectionMode,
+      validationDayCount: globalValidationDayKeys.validationDayCount,
+      validationOnlyDateKeysLocal: globalValidationDayKeys.validationOnlyDateKeysLocal,
     } as const;
     if (
       mode === "GREEN_BUTTON" &&
@@ -2198,12 +2200,7 @@ export async function POST(request: NextRequest) {
               );
             }
           }
-          const validationPolicy = resolvePastValidationPolicy({
-            surface: "admin_lab",
-            validationSelectionMode: effectiveRawInputBase.validationSelectionMode,
-            validationDayCount: effectiveRawInputBase.validationDayCount,
-          });
-          const preLockboxTravelRanges = Array.isArray(effectiveRawInputBase.travelRanges)
+          const preLockboxTravelRanges = Array.isArray(runInputWithValidation.travelRanges)
             ? (effectiveRawInputBase.travelRanges as TravelRange[])
             : [];
           const preferredActualSource = mode === "INTERVAL" ? ("SMT" as const) : ("GREEN_BUTTON" as const);
@@ -2226,9 +2223,9 @@ export async function POST(request: NextRequest) {
               weatherPreference: effectiveRawInputBase.weatherPreference,
               persistPastSimBaseline: true,
               preLockboxTravelRanges,
-              validationDaySelectionMode: validationPolicy.selectionMode,
-              validationDayCount: validationPolicy.validationDayCount,
-              validationOnlyDateKeysLocal: effectiveRawInputBase.validationOnlyDateKeysLocal,
+              validationDaySelectionMode: globalValidationDayKeys.selectionMode,
+              validationDayCount: globalValidationDayKeys.validationDayCount,
+              validationOnlyDateKeysLocal: globalValidationDayKeys.validationOnlyDateKeysLocal,
               correlationId,
               runContext: {
                 callerLabel:
@@ -2373,7 +2370,7 @@ export async function POST(request: NextRequest) {
       }
       let engineInput =
         mode === "INTERVAL"
-          ? await adaptIntervalRawInput(effectiveRawInputBase)
+          ? await adaptIntervalRawInput(runInputWithValidation)
           : mode === "GREEN_BUTTON"
             ? await withAdminRouteStageTimeout({
                 stage: "adapt_green_button_raw_input",
@@ -2382,17 +2379,17 @@ export async function POST(request: NextRequest) {
                 mode,
                 houseId: effectiveHouseId,
                 stageTimingsMs,
-                promise: adaptGreenButtonRawInput(effectiveRawInputBase),
+                promise: adaptGreenButtonRawInput(runInputWithValidation),
               })
             : mode === "MANUAL_ANNUAL"
               ? await adaptManualAnnualRawInput({
-                  ...effectiveRawInputBase,
+                  ...runInputWithValidation,
                   manualUsagePayload: effectiveManualUsagePayload,
                 })
               : mode === "NEW_BUILD"
-                ? await adaptNewBuildRawInput(effectiveRawInputBase)
+                ? await adaptNewBuildRawInput(runInputWithValidation)
                 : await adaptManualMonthlyRawInput({
-                    ...effectiveRawInputBase,
+                    ...runInputWithValidation,
                     manualUsagePayload: effectiveManualUsagePayload,
                   });
       const slimEngineInput = buildSlimAdminEngineInput(engineInput);

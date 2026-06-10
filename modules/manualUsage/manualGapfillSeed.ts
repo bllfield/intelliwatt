@@ -1,7 +1,8 @@
 import { sha256DigestBase64Url } from "@/lib/crypto/sha256Base64Url";
+import { PAST_VALIDATION_POLICY_REVISION } from "@/lib/usage/pastValidationPolicy";
 import {
   computeValidationDayPolicyHash,
-  resolveActiveValidationDayPolicy,
+  resolveActiveValidationDayPolicyLive,
 } from "@/lib/usage/validationDayPolicy";
 import { resolveGapfillSyntheticAnchorEndDate } from "@/modules/manualUsage/prefill";
 import {
@@ -191,7 +192,6 @@ function buildFailureResult(args: {
   warnings: string[];
   sourceCoverageSufficient?: boolean;
 }): ManualGapfillSeedResult {
-  const activePolicy = resolveActiveValidationDayPolicy({ surface: "admin_lab" });
   return {
     ok: false,
     status: args.status,
@@ -207,7 +207,7 @@ function buildFailureResult(args: {
           dailyFingerprint: null,
           monthlyFingerprint: null,
           annualTotalKwh: null,
-          validationDayPolicyRevision: activePolicy.policyRevision,
+          validationDayPolicyRevision: PAST_VALIDATION_POLICY_REVISION,
           validationDayPolicyHash: args.policyHash,
         },
     labContext: {
@@ -275,7 +275,7 @@ export async function resolveManualGapfillSeedFromSourceContext(
   const mode = args.mode;
   const persistRequested = args.persistToLabHome === true;
   const warnings: string[] = [];
-  const activePolicy = resolveActiveValidationDayPolicy({ surface: "admin_lab" });
+  const activePolicy = await resolveActiveValidationDayPolicyLive({ surface: "admin_lab" });
   const policyHash = computeValidationDayPolicyHash(activePolicy);
 
   if (!userId || !sourceHouseId || !labHouseId) {

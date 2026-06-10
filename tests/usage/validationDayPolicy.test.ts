@@ -3,6 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const findFirstHouse = vi.fn();
 const findFirstBuild = vi.fn();
 const getActualUsageDatasetForHouse = vi.fn();
+const getFlag = vi.fn();
+
+vi.mock("@/lib/flags", () => ({
+  getFlag: (...args: unknown[]) => getFlag(...args),
+  setFlag: vi.fn(),
+}));
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -24,6 +30,7 @@ describe("validationDayPolicy", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    getFlag.mockResolvedValue("");
     delete process.env.VALIDATION_DAY_POLICY_OVERRIDE_JSON;
     findFirstBuild.mockResolvedValue(null);
     findFirstHouse.mockResolvedValue({ id: "house-1", esiid: "E1" });
@@ -42,13 +49,14 @@ describe("validationDayPolicy", () => {
   });
 
   it("returns stable policy revision and hash for code defaults", async () => {
-    const { getValidationDayPolicySnapshot, computeValidationDayPolicyHash, resolveActiveValidationDayPolicy } =
+    const { getValidationDayPolicySnapshotLive, computeValidationDayPolicyHash, resolveActiveValidationDayPolicy } =
       await import("@/lib/usage/validationDayPolicy");
-    const snapshot = getValidationDayPolicySnapshot();
+    const snapshot = await getValidationDayPolicySnapshotLive();
     const policy = resolveActiveValidationDayPolicy({ overrideSource: "code_defaults" });
     expect(snapshot.policyRevision).toBe("unified_past_validation_stratified_14_v4");
     expect(snapshot.policyHash).toBe(computeValidationDayPolicyHash(policy));
-    expect(snapshot.policyHash).toBe(getValidationDayPolicySnapshot().policyHash);
+    expect(snapshot.modeCatalog.length).toBeGreaterThan(0);
+    expect(snapshot.guardrails.length).toBeGreaterThan(0);
   });
 
   it("produces the same selected keys for the same inputs", async () => {
@@ -79,6 +87,26 @@ describe("validationDayPolicy", () => {
       })
     );
     expect(changed).not.toBe(baseline);
+  });
+
+  it("resolveGlobalValidationDayKeysForPastSim bounds selected keys to canonical window", async () => {
+    const validationSelection = await import("@/modules/usageSimulator/validationSelection");
+    const spy = vi.spyOn(validationSelection, "selectValidationDayKeys").mockReturnValue({
+      selectedDateKeys: ["2025-06-10", "2099-12-31"],
+      diagnostics: { mode: "stratified_weather_balanced" } as any,
+    });
+    try {
+      const { resolveGlobalValidationDayKeysForPastSim } = await import("@/lib/usage/validationDayPolicy");
+      const out = await resolveGlobalValidationDayKeysForPastSim({
+        houseId: "house-1",
+        userId: "user-1",
+        window: { startDate: "2025-06-08", endDate: "2026-06-07" },
+      });
+      expect(out.validationOnlyDateKeysLocal).toEqual(["2025-06-10"]);
+      expect(out.warnings.some((warning) => warning.includes("outside canonical coverage window"))).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("preview uses shared selectValidationDayKeys and never marks local GapFill selector", async () => {

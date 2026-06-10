@@ -39,16 +39,17 @@ export function resolveCanonicalPastValidationDayCount(value?: number | null): n
 /** Shared Past validation policy (interval SMT and Green Button Past — not SMT-only). */
 export function resolvePastValidationPolicy(args: {
   surface: PastValidationPolicySurface;
+  /** @deprecated Per-run overrides ignored — use resolveActiveValidationDayPolicy (MG-2). */
   validationSelectionMode?: string | null;
+  /** @deprecated Per-run overrides ignored — use resolveActiveValidationDayPolicy (MG-2). */
   validationDayCount?: number | null;
 }): ResolvedPastValidationPolicy {
   const owner: ValidationPolicyOwner =
     args.surface === "admin_lab" ? "adminValidationPolicy" : "userValidationPolicy";
-  const explicitMode = normalizeValidationSelectionMode(args.validationSelectionMode);
   return {
     owner,
-    selectionMode: explicitMode ?? resolveCanonicalPastValidationSelectionMode(),
-    validationDayCount: resolveCanonicalPastValidationDayCount(args.validationDayCount),
+    selectionMode: resolveCanonicalPastValidationSelectionMode(),
+    validationDayCount: resolveCanonicalPastValidationDayCount(null),
   };
 }
 

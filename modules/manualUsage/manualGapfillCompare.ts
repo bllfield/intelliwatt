@@ -1,8 +1,9 @@
 import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
+import { PAST_VALIDATION_POLICY_REVISION } from "@/lib/usage/pastValidationPolicy";
 import {
   computeValidationDayPolicyHash,
-  resolveActiveValidationDayPolicy,
+  resolveActiveValidationDayPolicyLive,
 } from "@/lib/usage/validationDayPolicy";
 import { buildOnePathManualUsagePastSimReadResult } from "@/modules/onePathSim/manualPastSimReadResult";
 import {
@@ -222,7 +223,6 @@ function buildFailureEnvelope(args: {
   warnings: string[];
   usedLabSimulatedReadback?: boolean;
 }): ManualGapfillCompareEnvelope {
-  const activePolicy = resolveActiveValidationDayPolicy({ surface: "admin_lab" });
   return {
     ok: false,
     status: args.status,
@@ -237,7 +237,7 @@ function buildFailureEnvelope(args: {
       sourceDailyFingerprint: args.sourceContext?.fingerprints.dailyFingerprint ?? null,
       sourceMonthlyFingerprint: args.sourceContext?.fingerprints.monthlyFingerprint ?? null,
       validationDayPolicyRevision:
-        args.sourceContext?.validation.activeValidationDayPolicyRevision ?? activePolicy.policyRevision,
+        args.sourceContext?.validation.activeValidationDayPolicyRevision ?? PAST_VALIDATION_POLICY_REVISION,
       validationDayPolicyHash: args.policyHash,
       artifactInputHash: args.artifactInputHash ?? null,
       buildInputsHash: null,
@@ -600,7 +600,7 @@ export async function compareManualGapfillSourceActualToLabSim(
   const mode = args.mode;
   const includeDailyRows = args.includeDailyRows === true;
   const warnings: string[] = [];
-  const activePolicy = resolveActiveValidationDayPolicy({ surface: "admin_lab" });
+  const activePolicy = await resolveActiveValidationDayPolicyLive({ surface: "admin_lab" });
   const policyHash = computeValidationDayPolicyHash(activePolicy);
 
   if (!userId || !sourceHouseId || !labHouseId) {

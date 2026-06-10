@@ -2,16 +2,31 @@ import { prisma } from "@/lib/db";
 import { localDateKeysInRange } from "@/lib/admin/gapfillLab";
 import { sha256DigestBase64Url } from "@/lib/crypto/sha256Base64Url";
 import { getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
-import { resolveCanonicalUsage365CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
+import {
+  boundDateKeysToCoverageWindow,
+  resolveCanonicalUsage365CoverageWindow,
+  type CoverageWindow,
+} from "@/lib/usage/canonicalMetadataWindow";
 import {
   CANONICAL_PAST_VALIDATION_DAY_COUNT,
   CANONICAL_PAST_VALIDATION_SELECTION_MODE,
   PAST_VALIDATION_POLICY_REVISION,
+  resolveCanonicalPastValidationDayCount,
   resolvePastValidationPolicy,
   type PastValidationPolicySurface,
   type ResolvedPastValidationPolicy,
 } from "@/lib/usage/pastValidationPolicy";
 import { travelRangesToExcludeDateKeys } from "@/modules/usageSimulator/build";
+import {
+  VALIDATION_DAY_POLICY_GUARDRAILS,
+  VALIDATION_DAY_POLICY_WIRED_SURFACES,
+  VALIDATION_DAY_SELECTION_MODE_CATALOG,
+} from "@/lib/usage/validationDayPolicyCatalog";
+import {
+  VALIDATION_DAY_POLICY_SAVE_CONFIRMATION,
+  readStoredValidationDayPolicyOverride,
+  type StoredValidationDayPolicy,
+} from "@/lib/usage/validationDayPolicyStore";
 import {
   normalizeValidationSelectionMode,
   selectValidationDayKeys,
@@ -19,10 +34,28 @@ import {
   type ValidationDaySelectionMode,
 } from "@/modules/usageSimulator/validationSelection";
 
-/** MG-2 global validation-day policy admin/preview layer (read-only; does not replace artifact stamps). */
+export {
+  VALIDATION_DAY_POLICY_GUARDRAILS,
+  VALIDATION_DAY_POLICY_WIRED_SURFACES,
+  VALIDATION_DAY_SELECTION_MODE_CATALOG,
+} from "@/lib/usage/validationDayPolicyCatalog";
+export {
+  VALIDATION_DAY_POLICY_FLAG_KEY,
+  VALIDATION_DAY_POLICY_SAVE_CONFIRMATION,
+  clearStoredValidationDayPolicy,
+  readStoredValidationDayPolicyOverride,
+  saveStoredValidationDayPolicy,
+  type StoredValidationDayPolicy,
+} from "@/lib/usage/validationDayPolicyStore";
+
+/** MG-2 global validation-day policy admin/preview layer (does not replace artifact stamps). */
 export const VALIDATION_DAY_POLICY_LAYER = "global_validation_day_policy_v1";
 
-export type ValidationDayPolicyOverrideSource = "code_defaults" | "env_override" | "request_preview";
+export type ValidationDayPolicyOverrideSource =
+  | "code_defaults"
+  | "admin_persisted"
+  | "env_override"
+  | "request_preview";
 
 export type ValidationDayPolicyConfig = {
   layer: typeof VALIDATION_DAY_POLICY_LAYER;
@@ -112,6 +145,65 @@ export function computeValidationDayPolicyHash(config: ValidationDayPolicyConfig
   );
 }
 
+function resolveActiveValidationDayPolicyFromSources(args: {
+  surface?: PastValidationPolicySurface;
+  validationSelectionMode?: string | null;
+  validationDayCount?: number | null;
+  overrideSource?: ValidationDayPolicyOverrideSource;
+  envOverride?: ReturnType<typeof readEnvValidationDayPolicyOverride>;
+  storedOverride?: StoredValidationDayPolicy | null;
+}): ValidationDayPolicyConfig {
+  const envOverride = args.overrideSource === "code_defaults" ? null : args.envOverride ?? null;
+  const storedOverride = args.overrideSource === "code_defaults" ? null : args.storedOverride ?? null;
+  const surface =
+    args.surface ?? envOverride?.surface ?? storedOverride?.surface ?? "admin_lab";
+  const resolved = resolvePastValidationPolicy({ surface });
+  const allowRequestPreview = args.overrideSource === "request_preview";
+  const previewMode =
+    allowRequestPreview && args.validationSelectionMode
+      ? normalizeValidationSelectionMode(args.validationSelectionMode)
+      : null;
+  const previewCount =
+    allowRequestPreview &&
+    args.validationDayCount != null &&
+    Number.isFinite(Number(args.validationDayCount))
+      ? Math.floor(Number(args.validationDayCount))
+      : null;
+  const selectionMode =
+    previewMode ??
+    envOverride?.selectionMode ??
+    storedOverride?.selectionMode ??
+    resolved.selectionMode;
+  const validationDayCount = resolveCanonicalPastValidationDayCount(
+    previewCount ??
+      envOverride?.validationDayCount ??
+      storedOverride?.validationDayCount ??
+      resolved.validationDayCount
+  );
+  const overrideSource =
+    args.overrideSource ??
+    (envOverride &&
+    (envOverride.selectionMode != null ||
+      envOverride.validationDayCount != null ||
+      envOverride.surface != null)
+      ? "env_override"
+      : storedOverride
+        ? "admin_persisted"
+        : "code_defaults");
+
+  return {
+    layer: VALIDATION_DAY_POLICY_LAYER,
+    policyRevision: PAST_VALIDATION_POLICY_REVISION,
+    surface,
+    owner: resolved.owner,
+    selectionMode,
+    validationDayCount,
+    overrideSource,
+    envOverrideApplied: Boolean(envOverride),
+  };
+}
+
+/** Sync resolver — code defaults and deploy env only (no DB read). */
 export function resolveActiveValidationDayPolicy(args?: {
   surface?: PastValidationPolicySurface;
   validationSelectionMode?: string | null;
@@ -120,56 +212,107 @@ export function resolveActiveValidationDayPolicy(args?: {
 }): ValidationDayPolicyConfig {
   const envOverride =
     args?.overrideSource === "code_defaults" ? null : readEnvValidationDayPolicyOverride();
-  const surface = args?.surface ?? envOverride?.surface ?? "admin_lab";
-  const resolved = resolvePastValidationPolicy({
-    surface,
-    validationSelectionMode:
-      args?.validationSelectionMode ?? envOverride?.selectionMode ?? null,
-    validationDayCount: args?.validationDayCount ?? envOverride?.validationDayCount ?? null,
+  return resolveActiveValidationDayPolicyFromSources({
+    surface: args?.surface,
+    validationSelectionMode: args?.validationSelectionMode,
+    validationDayCount: args?.validationDayCount,
+    overrideSource: args?.overrideSource,
+    envOverride,
+    storedOverride: null,
   });
-  const overrideSource =
-    args?.overrideSource ??
-    (envOverride &&
-    (envOverride.selectionMode != null ||
-      envOverride.validationDayCount != null ||
-      envOverride.surface != null)
-      ? "env_override"
-      : "code_defaults");
+}
 
+/** Live resolver — includes admin-saved FeatureFlag policy. */
+export async function resolveActiveValidationDayPolicyLive(args?: {
+  surface?: PastValidationPolicySurface;
+  validationSelectionMode?: string | null;
+  validationDayCount?: number | null;
+  overrideSource?: ValidationDayPolicyOverrideSource;
+}): Promise<ValidationDayPolicyConfig> {
+  const envOverride =
+    args?.overrideSource === "code_defaults" ? null : readEnvValidationDayPolicyOverride();
+  const storedOverride =
+    args?.overrideSource === "code_defaults" || args?.overrideSource === "request_preview"
+      ? null
+      : await readStoredValidationDayPolicyOverride();
+  return resolveActiveValidationDayPolicyFromSources({
+    surface: args?.surface,
+    validationSelectionMode: args?.validationSelectionMode,
+    validationDayCount: args?.validationDayCount,
+    overrideSource: args?.overrideSource,
+    envOverride,
+    storedOverride,
+  });
+}
+
+export type GlobalValidationDayKeysForPastSim = {
+  policy: ValidationDayPolicyConfig;
+  policyHash: string;
+  selectionMode: ValidationDaySelectionMode;
+  validationDayCount: number;
+  validationOnlyDateKeysLocal: string[];
+  window: CoverageWindow;
+  warnings: string[];
+  selectionDiagnostics: ValidationDaySelectionDiagnostics;
+};
+
+/**
+ * Single owner for Past Sim / One Path compare-day keys: global validation-day policy
+ * (stratified_weather_balanced by default) + canonical window bounding (One Path safety guard).
+ */
+export async function resolveGlobalValidationDayKeysForPastSim(args: {
+  houseId: string;
+  userId: string;
+  esiid?: string | null;
+  sourceHouseId?: string | null;
+  surface?: PastValidationPolicySurface;
+  window?: CoverageWindow | null;
+}): Promise<GlobalValidationDayKeysForPastSim> {
+  const window = args.window ?? resolveCanonicalUsage365CoverageWindow();
+  const preview = await previewGlobalValidationDaySelection({
+    houseId: args.houseId,
+    userId: args.userId,
+    esiid: args.esiid ?? null,
+    sourceHouseId: args.sourceHouseId ?? args.houseId,
+    window,
+    surface: args.surface ?? "admin_lab",
+  });
+  const bounded = boundDateKeysToCoverageWindow(preview.selectedValidationDateKeys, window);
+  const validationOnlyDateKeysLocal = Array.from(bounded).sort();
+  const warnings = [...preview.warnings];
+  const droppedOutsideWindow =
+    preview.selectedValidationDateKeys.length - validationOnlyDateKeysLocal.length;
+  if (droppedOutsideWindow > 0) {
+    warnings.push(
+      `Dropped ${droppedOutsideWindow} validation day(s) outside canonical coverage window ${window.startDate}..${window.endDate}.`
+    );
+  }
   return {
-    layer: VALIDATION_DAY_POLICY_LAYER,
-    policyRevision: PAST_VALIDATION_POLICY_REVISION,
-    surface,
-    owner: resolved.owner,
-    selectionMode: resolved.selectionMode,
-    validationDayCount: resolved.validationDayCount,
-    overrideSource,
-    envOverrideApplied: Boolean(envOverride),
+    policy: preview.policy,
+    policyHash: preview.policyHash,
+    selectionMode: preview.selectionMode,
+    validationDayCount: preview.validationDayCount,
+    validationOnlyDateKeysLocal,
+    window,
+    warnings,
+    selectionDiagnostics: preview.diagnostics.selectionDiagnostics,
   };
 }
 
 export function getValidationDayPolicySnapshot(args?: {
   surface?: PastValidationPolicySurface;
-}): {
-  ok: true;
-  policyRevision: string;
-  policyLayer: typeof VALIDATION_DAY_POLICY_LAYER;
-  policyHash: string;
-  defaults: {
-    selectionMode: ValidationDaySelectionMode;
-    validationDayCount: number;
-    surface: PastValidationPolicySurface;
-  };
-  activePolicy: ValidationDayPolicyConfig;
-  envOverride: ReturnType<typeof readEnvValidationDayPolicyOverride>;
-} {
+}) {
+  return getValidationDayPolicySnapshotSync(args);
+}
+
+function getValidationDayPolicySnapshotSync(args?: { surface?: PastValidationPolicySurface }) {
   const defaultsPolicy = resolveActiveValidationDayPolicy({
     surface: args?.surface ?? "admin_lab",
     overrideSource: "code_defaults",
   });
   const activePolicy = resolveActiveValidationDayPolicy({ surface: args?.surface ?? "admin_lab" });
   return {
-    ok: true,
+    ok: true as const,
     policyRevision: PAST_VALIDATION_POLICY_REVISION,
     policyLayer: VALIDATION_DAY_POLICY_LAYER,
     policyHash: computeValidationDayPolicyHash(activePolicy),
@@ -178,8 +321,45 @@ export function getValidationDayPolicySnapshot(args?: {
       validationDayCount: CANONICAL_PAST_VALIDATION_DAY_COUNT,
       surface: args?.surface ?? "admin_lab",
     },
+    defaultsPolicy,
     activePolicy,
     envOverride: readEnvValidationDayPolicyOverride(),
+    storedPolicy: null as StoredValidationDayPolicy | null,
+    modeCatalog: VALIDATION_DAY_SELECTION_MODE_CATALOG,
+    guardrails: VALIDATION_DAY_POLICY_GUARDRAILS,
+    wiredSurfaces: VALIDATION_DAY_POLICY_WIRED_SURFACES,
+    confirmationKeyword: VALIDATION_DAY_POLICY_SAVE_CONFIRMATION,
+  };
+}
+
+export async function getValidationDayPolicySnapshotLive(args?: {
+  surface?: PastValidationPolicySurface;
+}) {
+  const surface = args?.surface ?? "admin_lab";
+  const defaultsPolicy = resolveActiveValidationDayPolicy({
+    surface,
+    overrideSource: "code_defaults",
+  });
+  const activePolicy = await resolveActiveValidationDayPolicyLive({ surface });
+  const storedPolicy = await readStoredValidationDayPolicyOverride();
+  return {
+    ok: true as const,
+    policyRevision: PAST_VALIDATION_POLICY_REVISION,
+    policyLayer: VALIDATION_DAY_POLICY_LAYER,
+    policyHash: computeValidationDayPolicyHash(activePolicy),
+    defaults: {
+      selectionMode: CANONICAL_PAST_VALIDATION_SELECTION_MODE,
+      validationDayCount: CANONICAL_PAST_VALIDATION_DAY_COUNT,
+      surface,
+    },
+    defaultsPolicy,
+    activePolicy,
+    envOverride: readEnvValidationDayPolicyOverride(),
+    storedPolicy,
+    modeCatalog: VALIDATION_DAY_SELECTION_MODE_CATALOG,
+    guardrails: VALIDATION_DAY_POLICY_GUARDRAILS,
+    wiredSurfaces: VALIDATION_DAY_POLICY_WIRED_SURFACES,
+    confirmationKeyword: VALIDATION_DAY_POLICY_SAVE_CONFIRMATION,
   };
 }
 
@@ -268,11 +448,12 @@ export async function previewGlobalValidationDaySelection(args: {
   }
 
   const effectiveEsiid = args.esiid ?? house?.esiid ?? null;
-  const policy = resolveActiveValidationDayPolicy({
+  const policy = await resolveActiveValidationDayPolicyLive({
     surface: args.surface ?? "admin_lab",
     validationSelectionMode: args.mode ?? null,
     validationDayCount: args.validationDayCount ?? null,
-    overrideSource: args.mode != null || args.validationDayCount != null ? "request_preview" : undefined,
+    overrideSource:
+      args.mode != null || args.validationDayCount != null ? "request_preview" : undefined,
   });
 
   const explicitMode = normalizeValidationSelectionMode(args.mode);

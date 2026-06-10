@@ -14,7 +14,13 @@ const getManualUsageInputForUserHouse = vi.fn();
 const saveManualUsageInputForUserHouse = vi.fn();
 const dispatchPastSimRecalc = vi.fn();
 const buildOnePathManualUsagePastSimReadResult = vi.fn();
-const previewGlobalValidationDaySelection = vi.fn();
+const resolveGlobalValidationDayKeysForPastSim = vi.fn();
+const getFlag = vi.fn();
+
+vi.mock("@/lib/flags", () => ({
+  getFlag: (...args: unknown[]) => getFlag(...args),
+  setFlag: vi.fn(),
+}));
 const buildGapfillCompareSimShared = vi.fn();
 const selectValidationDayKeys = vi.fn();
 
@@ -80,7 +86,8 @@ vi.mock("@/lib/usage/validationDayPolicy", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/usage/validationDayPolicy")>();
   return {
     ...actual,
-    previewGlobalValidationDaySelection: (...args: unknown[]) => previewGlobalValidationDaySelection(...args),
+    resolveGlobalValidationDayKeysForPastSim: (...args: unknown[]) =>
+      resolveGlobalValidationDayKeysForPastSim(...args),
   };
 });
 
@@ -169,10 +176,14 @@ function mockSuccessfulRunReadback() {
     inputHash: "artifact-hash-1",
     engineVersion: "engine-v1",
   });
-  previewGlobalValidationDaySelection.mockResolvedValue({
-    ok: true,
-    selectedValidationDateKeys: ["2025-07-04"],
+  resolveGlobalValidationDayKeysForPastSim.mockResolvedValue({
+    policy: { selectionMode: "stratified_weather_balanced", validationDayCount: 14 },
     policyHash: "policy-hash-1",
+    selectionMode: "stratified_weather_balanced",
+    validationDayCount: 14,
+    validationOnlyDateKeysLocal: ["2025-07-04"],
+    window: WINDOW,
+    warnings: [],
   });
   dispatchPastSimRecalc.mockResolvedValue({
     executionMode: "inline",
@@ -205,6 +216,7 @@ function mockSuccessfulRunReadback() {
 describe("buildManualGapfillRunReadbackResult", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getFlag.mockResolvedValue("");
     findFirstBuild.mockResolvedValue(null);
     getLatestUsageFingerprintByHouseId.mockResolvedValue(null);
     computePastWeatherIdentity.mockResolvedValue("weather:test");

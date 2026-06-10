@@ -54,13 +54,6 @@ type VariablePolicyResponse = {
   overrides: Record<string, unknown>;
 };
 
-const VALIDATION_SELECTION_OPTIONS = [
-  { value: "manual", label: "manual" },
-  { value: "random_simple", label: "random_simple" },
-  { value: "customer_style_seasonal_mix", label: "customer_style_seasonal_mix" },
-  { value: "stratified_weather_balanced", label: "stratified_weather_balanced" },
-] as const;
-
 const VALIDATION_SELECTION_MODE_DETAILS = [
   {
     value: "manual",
@@ -143,13 +136,6 @@ async function writeClipboardText(text: string): Promise<void> {
   const ok = document.execCommand("copy");
   document.body.removeChild(el);
   if (!ok) throw new Error("Clipboard copy failed.");
-}
-
-function parseManualValidationDateKeys(value: string): string[] {
-  return value
-    .split(/[\s,]+/)
-    .map((entry) => entry.trim().slice(0, 10))
-    .filter((entry, index, all) => /^\d{4}-\d{2}-\d{2}$/.test(entry) && all.indexOf(entry) === index);
 }
 
 function formatTruthValue(value: unknown): string {
@@ -236,9 +222,10 @@ export function OnePathSimAdmin() {
   const [weatherPreference, setWeatherPreference] = useState<"NONE" | "LAST_YEAR_WEATHER" | "LONG_TERM_AVERAGE">(
     "LAST_YEAR_WEATHER"
   );
-  const [validationSelectionMode, setValidationSelectionMode] = useState("stratified_weather_balanced");
-  const [validationDayCount, setValidationDayCount] = useState("14");
-  const [validationOnlyDateKeysText, setValidationOnlyDateKeysText] = useState("");
+  const [validationDayPolicySnapshot, setValidationDayPolicySnapshot] = useState<{
+    activePolicy?: { selectionMode?: string; validationDayCount?: number };
+    policyHash?: string;
+  } | null>(null);
   const [persistRequested, setPersistRequested] = useState(true);
   const [runReason, setRunReason] = useState("one_path_admin_harness");
   const [travelRanges, setTravelRanges] = useState<Array<{ startDate: string; endDate: string }>>([]);
@@ -280,6 +267,20 @@ export function OnePathSimAdmin() {
   useEffect(() => {
     void loadVariablePolicy();
   }, [loadVariablePolicy]);
+
+  useEffect(() => {
+    void (async () => {
+      const res = await fetch("/api/admin/tools/validation-day-policy");
+      const json = await res.json().catch(() => null);
+      if (res.ok && json?.ok) {
+        setValidationDayPolicySnapshot(json);
+      }
+    })();
+  }, []);
+
+  const validationSelectionMode =
+    validationDayPolicySnapshot?.activePolicy?.selectionMode ?? "stratified_weather_balanced";
+  const validationDayCount = String(validationDayPolicySnapshot?.activePolicy?.validationDayCount ?? 14);
 
   const openVariableFamily = useCallback(
     (familyKey: string) => {
@@ -323,10 +324,7 @@ export function OnePathSimAdmin() {
     setGreenButtonUploadStatus(null);
     setGreenButtonUploadError(null);
   }, [lookup?.userId, effectiveActualContextHouseId]);
-  const validationOnlyDateKeysLocal = useMemo(
-    () => parseManualValidationDateKeys(validationOnlyDateKeysText),
-    [validationOnlyDateKeysText]
-  );
+  const validationOnlyDateKeysLocal: string[] = [];
   const selectedKnownScenario = useMemo(
     () => getKnownHouseScenarioByKey(selectedKnownScenarioKey),
     [selectedKnownScenarioKey]
@@ -795,9 +793,6 @@ export function OnePathSimAdmin() {
     ) => {
       setMode(controls.mode);
       setWeatherPreference(controls.weatherPreference);
-      setValidationSelectionMode(controls.validationSelectionMode);
-      setValidationDayCount(String(controls.validationDayCount ?? 14));
-      setValidationOnlyDateKeysText(controls.validationOnlyDateKeysText);
       setPersistRequested(controls.persistRequested);
       setRunReason(controls.runReason);
       setSelectedScenarioId(controls.selectedScenarioId);
@@ -1388,11 +1383,6 @@ export function OnePathSimAdmin() {
     const effectiveScenarioId = presetRunControls?.selectedScenarioId ?? selectedScenarioId;
     const effectiveRunReason = presetRunControls?.runReason ?? runReason;
     const effectiveWeatherPreference = presetRunControls?.weatherPreference ?? weatherPreference;
-    const effectiveValidationSelectionMode = presetRunControls?.validationSelectionMode ?? validationSelectionMode;
-    const effectiveValidationDayCount =
-      presetRunControls?.validationDayCount ?? (Number(validationDayCount) || null);
-    const effectiveValidationOnlyDateKeysLocal =
-      presetRunControls?.validationOnlyDateKeysLocal ?? validationOnlyDateKeysLocal;
     const effectiveTravelRanges = presetRunControls?.travelRanges ?? travelRanges;
     const effectivePersistRequested = presetRunControls?.persistRequested ?? persistRequested;
     const shouldApplyIntervalPastBlocker = effectiveMode === "INTERVAL";
@@ -1438,9 +1428,6 @@ export function OnePathSimAdmin() {
           preferredActualSource:
             effectiveMode === "INTERVAL" ? "SMT" : effectiveMode === "GREEN_BUTTON" ? "GREEN_BUTTON" : null,
           weatherPreference: effectiveWeatherPreference,
-          validationSelectionMode: effectiveValidationSelectionMode,
-          validationDayCount: effectiveValidationDayCount,
-          validationOnlyDateKeysLocal: effectiveValidationOnlyDateKeysLocal,
           travelRanges: effectiveTravelRanges,
           persistRequested: effectivePersistRequested,
           runReason: effectiveRunReason,
@@ -1842,14 +1829,19 @@ export function OnePathSimAdmin() {
                 <option value="NONE">NONE</option>
               </select>
             </label>
-            <label className="text-sm text-slate-700">
-              <div className="font-semibold text-brand-navy">Validation day count</div>
-              <input
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
-                value={validationDayCount}
-                onChange={(event) => setValidationDayCount(event.target.value)}
-              />
-            </label>
+            <div className="text-sm text-slate-700">
+              <div className="font-semibold text-brand-navy">Compare-day policy (global)</div>
+              <div className="mt-1 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2">
+                {validationSelectionMode} · {validationDayCount} days
+              </div>
+              <div className="mt-2 text-xs text-slate-500">
+                Selected at run time from{" "}
+                <a href="/admin/tools/validation-day-policy" className="font-semibold text-brand-navy underline">
+                  Compare Day Policy
+                </a>
+                , bounded to the canonical coverage window.
+              </div>
+            </div>
             <label className="text-sm text-slate-700">
               <div className="font-semibold text-brand-navy">Actual context house</div>
               {onePathTestHomePinned ? (
@@ -1883,29 +1875,21 @@ export function OnePathSimAdmin() {
               />
               Debug diagnostics
             </label>
-            <label className="text-sm text-slate-700">
+            <div className="text-sm text-slate-700">
               <div className="flex items-center justify-between gap-3">
-                <div className="font-semibold text-brand-navy">Validation selection mode</div>
+                <div className="font-semibold text-brand-navy">Validation selection modes</div>
                 <button
                   type="button"
                   onClick={() => setValidationInfoOpen(true)}
                   className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-brand-navy"
                 >
-                  Validation mode popup
+                  Mode reference
                 </button>
               </div>
-              <select
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
-                value={validationSelectionMode}
-                onChange={(event) => setValidationSelectionMode(event.target.value)}
-              >
-                {VALIDATION_SELECTION_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+              <div className="mt-1 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                Per-run overrides removed. Runs use the active global policy only.
+              </div>
+            </div>
             <label className="text-sm text-slate-700">
               <div className="font-semibold text-brand-navy">Run reason</div>
               <input
@@ -1937,18 +1921,13 @@ export function OnePathSimAdmin() {
             </span>
           </label>
 
-          <label className="mt-4 block text-sm text-slate-700">
-            <div className="font-semibold text-brand-navy">Manual validation date keys</div>
-            <textarea
-              className="mt-1 min-h-[88px] w-full rounded-lg border border-slate-300 px-3 py-2"
-              value={validationOnlyDateKeysText}
-              onChange={(event) => setValidationOnlyDateKeysText(event.target.value)}
-              placeholder="YYYY-MM-DD, one per line or comma-separated"
-            />
-            <div className="mt-2 text-xs text-slate-500">
-              One Path manual validation keys sent through the canonical adapter path. Current parsed count: {validationOnlyDateKeysLocal.length}
-            </div>
-          </label>
+          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+            <div className="font-semibold text-brand-navy">Validation compare days</div>
+            <p className="mt-1 text-xs text-slate-600">
+              Date keys are chosen at run time by the global Compare Day Policy and clipped to the canonical 365-day
+              coverage window (One Path safety guard). Preview or adjust policy on the Compare Day Policy admin page.
+            </p>
+          </div>
 
           <div className="mt-6 flex flex-wrap gap-3">
             <button
@@ -2421,35 +2400,21 @@ export function OnePathSimAdmin() {
       >
         <div className="space-y-4">
           <div className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
-            These are the shared validation selection modes used by the One Path selector path. This popup explains how each
-            option works and gives the admin a thin control surface for mode and day-count adjustments only.
+            Compare-day selection is owned by the global validation-day policy. One Path runs use the active policy and
+            bound selected keys to the canonical coverage window. Change defaults on{" "}
+            <a href="/admin/tools/validation-day-policy" className="font-semibold text-brand-navy underline">
+              Compare Day Policy
+            </a>
+            .
           </div>
           <SectionJson
-            title="Current admin adjustments"
+            title="Active global policy"
             value={{
-              selectedMode: validationSelectionMode,
+              selectionMode: validationSelectionMode,
               validationDayCount,
-              validationOnlyDateKeysLocal,
-              adminDefaultValidationSelectionMode: "stratified_weather_balanced",
+              policyHash: validationDayPolicySnapshot?.policyHash ?? null,
             }}
           />
-          <label className="block text-sm text-slate-700">
-            <div className="font-semibold text-brand-navy">Adjust validation day count</div>
-            <input
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
-              value={validationDayCount}
-              onChange={(event) => setValidationDayCount(event.target.value)}
-            />
-          </label>
-          <label className="block text-sm text-slate-700">
-            <div className="font-semibold text-brand-navy">Manual validation date keys</div>
-            <textarea
-              className="mt-1 min-h-[88px] w-full rounded-lg border border-slate-300 px-3 py-2"
-              value={validationOnlyDateKeysText}
-              onChange={(event) => setValidationOnlyDateKeysText(event.target.value)}
-              placeholder="YYYY-MM-DD, one per line or comma-separated"
-            />
-          </label>
           <div className="grid gap-3">
             {VALIDATION_SELECTION_MODE_DETAILS.map((detail) => (
               <div key={detail.value} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -2458,16 +2423,9 @@ export function OnePathSimAdmin() {
                     <div className="text-sm font-semibold text-brand-navy">{detail.title}</div>
                     <div className="mt-1 text-xs text-slate-600">{detail.howItWorks}</div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setValidationSelectionMode(detail.value);
-                      setValidationInfoOpen(false);
-                    }}
-                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-brand-navy"
-                  >
-                    Use this mode
-                  </button>
+                  <span className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                    Reference only
+                  </span>
                 </div>
                 <div className="mt-3 rounded-lg bg-slate-50 p-3 text-xs text-slate-700">{detail.adminAdjustments}</div>
               </div>
