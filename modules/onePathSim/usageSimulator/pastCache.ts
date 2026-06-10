@@ -96,6 +96,40 @@ function getCacheModel(): {
   }
 }
 
+export function uniquePastArtifactInputHashCandidates(
+  ...candidates: Array<string | null | undefined>
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of candidates) {
+    const inputHash = String(raw ?? "").trim();
+    if (!inputHash || seen.has(inputHash)) continue;
+    seen.add(inputHash);
+    out.push(inputHash);
+  }
+  return out;
+}
+
+export async function getUsablePastArtifactCacheRow(args: {
+  houseId: string;
+  scenarioId: string;
+  inputHashCandidates: string[];
+  intervalsCodec: string;
+  rejectDatasetJson?: (datasetJson: unknown) => boolean;
+}): Promise<(CachedPastDataset & { inputHash: string }) | null> {
+  for (const inputHash of uniquePastArtifactInputHashCandidates(...args.inputHashCandidates)) {
+    const cached = await getCachedPastDataset({
+      houseId: args.houseId,
+      scenarioId: args.scenarioId,
+      inputHash,
+    });
+    if (!cached || cached.intervalsCodec !== args.intervalsCodec) continue;
+    if (args.rejectDatasetJson?.(cached.datasetJson)) continue;
+    return { ...cached, inputHash };
+  }
+  return null;
+}
+
 export async function getCachedPastDataset(args: {
   houseId: string;
   scenarioId: string;

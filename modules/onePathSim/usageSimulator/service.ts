@@ -94,7 +94,9 @@ import {
   computePastInputHash,
   deleteCachedPastDatasetsForScenario,
   getCachedPastDataset,
+  getUsablePastArtifactCacheRow,
   saveCachedPastDataset,
+  uniquePastArtifactInputHashCandidates,
   PAST_ENGINE_VERSION,
   type CachedPastDataset,
   type CanonicalArtifactSimulatedDayTotalsByDate,
@@ -7557,6 +7559,8 @@ export async function getSimulatedUsageForHouseScenario(args: {
   requireExactArtifactMatch?: boolean;
   forceRebuildArtifact?: boolean;
   projectionMode?: "baseline" | "raw";
+  /** Skip validation-day backfill recalc (e.g. same HTTP request already ran it on artifact_only). */
+  skipValidationBackfill?: boolean;
   /** Observability: plan §6 (Slice 2). */
   correlationId?: string;
   readContext?: Partial<PastSimReadContext>;
@@ -7778,91 +7782,6 @@ export async function getSimulatedUsageForHouseScenario(args: {
           correlationId,
         });
       }
-      const artifactOnlyValidationKeys = Array.isArray((buildInputs as any)?.validationOnlyDateKeysLocal)
-        ? ((buildInputs as any).validationOnlyDateKeysLocal as unknown[])
-            .map((v) => String(v ?? "").slice(0, 10))
-            .filter((dk) => /^\d{4}-\d{2}-\d{2}$/.test(dk))
-        : [];
-      const artifactOnlyValidationMode =
-        (buildInputs as any)?.effectiveValidationSelectionMode ??
-        (buildInputs as any)?.validationSelectionMode ??
-        null;
-      let pastValidationBackfillRotatedArtifact = false;
-      if (
-        isPastScenarioValidationBackfillEligible({
-          scenarioId,
-          buildInputs: buildInputs as Record<string, unknown>,
-          storedValidationKeyCount: artifactOnlyValidationKeys.length,
-          storedSelectionMode: artifactOnlyValidationMode,
-        })
-      ) {
-        const weatherPreferenceRaw = String((buildInputs as any)?.weatherPreference ?? "NONE");
-        const weatherPreference: WeatherPreference =
-          weatherPreferenceRaw === "NONE" ||
-          weatherPreferenceRaw === "LAST_YEAR_WEATHER" ||
-          weatherPreferenceRaw === "LONG_TERM_AVERAGE"
-            ? (weatherPreferenceRaw as WeatherPreference)
-            : "NONE";
-        const validationBackfillPolicy = resolvePastValidationPolicy({ surface: "user_site" });
-        const backfillPreferredActualSource = preferredActualSourceFromPastBuildInputs(
-          buildInputs as Record<string, unknown>
-        );
-        pastSimEsiid =
-          (await resolvePastSimEsiidForHouse({
-            userId: args.userId,
-            houseId: args.houseId,
-            houseEsiid: pastSimEsiid,
-            buildInputs: buildInputs as Record<string, unknown>,
-          })) ?? pastSimEsiid;
-        const backfillRecalc = await recalcSimulatorBuild({
-          userId: args.userId,
-          houseId: args.houseId,
-          esiid: pastSimEsiid,
-          mode: "SMT_BASELINE",
-          scenarioId,
-          weatherPreference,
-          persistPastSimBaseline: true,
-          validationDaySelectionMode: validationBackfillPolicy.selectionMode,
-          validationDayCount: validationBackfillPolicy.validationDayCount,
-          runContext: {
-            callerLabel:
-              artifactOnlyValidationKeys.length === 0
-                ? "validation_backfill_artifact_only"
-                : "validation_policy_reconcile_artifact_only",
-            buildPathKind: "recalc",
-            persistRequested: true,
-            preferredActualSource: backfillPreferredActualSource ?? undefined,
-          },
-        });
-        if (!backfillRecalc.ok) {
-          return {
-            ok: false,
-            code: "INTERNAL_ERROR",
-            message: backfillRecalc.error ?? "Failed to backfill validation-day compare for Past scenario.",
-          };
-        }
-        pastValidationBackfillRotatedArtifact = true;
-        const buildRecAfterBackfill = await (prisma as any).usageSimulatorBuild
-          .findUnique({
-            where: { userId_houseId_scenarioKey: { userId: args.userId, houseId: args.houseId, scenarioKey } },
-            select: { buildInputs: true },
-          })
-          .catch(() => null);
-        if (buildRecAfterBackfill?.buildInputs) {
-          buildInputs = normalizeLegacyWeatherEfficiencyBuildInputs(
-            buildRecAfterBackfill.buildInputs as Record<string, unknown>
-          );
-          const parityAfterBackfill = readOnePathUserSiteParityLock(buildInputs as Record<string, unknown>);
-          buildInputs = await applyUserSiteBuildInputsIsolationIfNeeded({
-            userSiteIsolation: parityAfterBackfill ? true : userSiteIsolation,
-            userId: args.userId,
-            houseId: args.houseId,
-            esiid: pastSimEsiid,
-            buildInputs: buildInputs as SimulatorBuildInputsV1,
-            correlationId,
-          });
-        }
-      }
       const sharedCoverageWindow = resolveCanonicalUsage365CoverageWindow();
       const pastArtifactIdentity = await resolvePastArtifactIdentity({
         userId: args.userId,
@@ -7883,11 +7802,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
         typeof args.exactArtifactInputHash === "string" && args.exactArtifactInputHash.trim()
           ? args.exactArtifactInputHash.trim()
           : null;
-      if (pastValidationBackfillRotatedArtifact) {
-        requestedExactArtifactInputHash = null;
-      }
-      const requireExactArtifactMatch =
-        args.requireExactArtifactMatch === true && !pastValidationBackfillRotatedArtifact;
+      const requireExactArtifactMatch = args.requireExactArtifactMatch === true;
       const resolvedInputHash =
         requestedExactArtifactInputHash ?? pastArtifactIdentity.inputHash;
 
@@ -8146,7 +8061,8 @@ export async function getSimulatedUsageForHouseScenario(args: {
       storedValidationKeyCount: buildValidationKeys.length,
       storedSelectionMode: storedValidationSelectionMode,
     });
-    if (isPastScenarioForValidationBackfill) {
+    let validationBackfillArtifactHash: string | null = null;
+    if (!args.skipValidationBackfill && isPastScenarioForValidationBackfill) {
       const weatherPreferenceRaw = String((buildInputs as any)?.weatherPreference ?? "NONE");
       const weatherPreference: WeatherPreference =
         weatherPreferenceRaw === "NONE" ||
@@ -8190,6 +8106,11 @@ export async function getSimulatedUsageForHouseScenario(args: {
           message: backfillRecalc.error ?? "Failed to backfill validation-day compare for Past scenario.",
         };
       }
+      validationBackfillArtifactHash =
+        typeof backfillRecalc.canonicalArtifactInputHash === "string" &&
+        backfillRecalc.canonicalArtifactInputHash.trim()
+          ? backfillRecalc.canonicalArtifactInputHash.trim()
+          : null;
       buildRec = await (prisma as any).usageSimulatorBuild
         .findUnique({
           where: { userId_houseId_scenarioKey: { userId: args.userId, houseId: args.houseId, scenarioKey } },
@@ -8448,70 +8369,108 @@ export async function getSimulatedUsageForHouseScenario(args: {
             usageShapeProfileVersion: pastArtifactIdentity.usageShapeProfileVersion,
             scenarioId: scenarioIdForCache,
           };
-          let cached = forceRebuildArtifact
-            ? null
-            : await getCachedPastDataset({
-                houseId: args.houseId,
-                scenarioId: scenarioIdForCache,
-                inputHash,
-              });
-          let usableCached =
-            cached && !hasLegacyWeatherEfficiencySimulationActivation(cached.datasetJson) ? cached : null;
-          if (usableCached && usableCached.intervalsCodec === INTERVAL_CODEC_V1) {
+          const restoreDatasetFromUsableCache = async (
+            usableCached: CachedPastDataset & { inputHash: string },
+            hashUsed: string,
+          ) => {
+            inputHash = hashUsed;
+            cacheKeyDiag.inputHash = hashUsed;
             const decoded = decodeIntervalsV1(usableCached.intervalsCompressed);
             const restored = {
               ...usableCached.datasetJson,
               series: {
-                ...(typeof (usableCached.datasetJson as any).series === "object" && (usableCached.datasetJson as any).series !== null
+                ...(typeof (usableCached.datasetJson as any).series === "object" &&
+                (usableCached.datasetJson as any).series !== null
                   ? (usableCached.datasetJson as any).series
                   : {}),
                 intervals15: decoded,
               },
             };
-            dataset = restored;
             const smtSlotCompleteDateKeysCache = await resolveStaleIncompleteMeterSlotCompleteDateKeys({
               esiid: pastSimEsiid,
               meta: usableCached.datasetJson,
             });
             reconcileRestoredPastDatasetFromDecodedIntervals({
-              dataset,
+              dataset: restored,
               decodedIntervals: decoded,
               fallbackEndDate: endDate,
               smtSlotCompleteDateKeys: smtSlotCompleteDateKeysCache,
             });
-            // Keep cache restore on the saved stitched artifact only; no second overlay pass.
-            if (!dataset.meta || typeof dataset.meta !== "object") (dataset as any).meta = {};
-            (dataset.meta as any).pastWindowDiag = pastWindowDiag;
-            (dataset.meta as any).pastBuildIntervalsFetchCount = 0;
-            (dataset.meta as any).cacheKeyDiag = cacheKeyDiag;
-            stampSharedPastSimulationCoreMeta(dataset.meta as Record<string, unknown>);
-            (dataset.meta as any).buildPathKind = "cache_restore";
-            (dataset.meta as any).artifactReadMode = "allow_rebuild";
-            (dataset.meta as any).artifactSource = "past_cache";
-            (dataset.meta as any).artifactInputHash = inputHash;
-            (dataset.meta as any).artifactInputHashUsed = inputHash;
-            (dataset.meta as any).requestedInputHash = inputHash;
-            (dataset.meta as any).artifactHashMatch = true;
-            (dataset.meta as any).artifactScenarioId = scenarioIdForCache;
-            (dataset.meta as any).artifactSourceMode = "exact_hash_match";
-            (dataset.meta as any).artifactSourceNote = "Artifact source: exact identity match on Past input hash.";
-            (dataset.meta as any).artifactRecomputed = false;
-            if ((dataset.meta as any).weatherSourceSummary == null || (dataset.meta as any).weatherSourceSummary === "") {
-              (dataset.meta as any).weatherSourceSummary = "unknown";
+            const restoredAny = restored as any;
+            if (!restoredAny.meta || typeof restoredAny.meta !== "object") restoredAny.meta = {};
+            restoredAny.meta.pastWindowDiag = pastWindowDiag;
+            restoredAny.meta.pastBuildIntervalsFetchCount = 0;
+            restoredAny.meta.cacheKeyDiag = cacheKeyDiag;
+            stampSharedPastSimulationCoreMeta(restoredAny.meta as Record<string, unknown>);
+            restoredAny.meta.buildPathKind = "cache_restore";
+            restoredAny.meta.artifactReadMode = "allow_rebuild";
+            restoredAny.meta.artifactSource = "past_cache";
+            restoredAny.meta.artifactInputHash = hashUsed;
+            restoredAny.meta.artifactInputHashUsed = hashUsed;
+            restoredAny.meta.requestedInputHash = hashUsed;
+            restoredAny.meta.artifactHashMatch = true;
+            restoredAny.meta.artifactScenarioId = scenarioIdForCache;
+            restoredAny.meta.artifactSourceMode = "exact_hash_match";
+            restoredAny.meta.artifactSourceNote = "Artifact source: exact identity match on Past input hash.";
+            restoredAny.meta.artifactRecomputed = false;
+            if (restoredAny.meta.weatherSourceSummary == null || restoredAny.meta.weatherSourceSummary === "") {
+              restoredAny.meta.weatherSourceSummary = "unknown";
             }
-            if ((dataset.meta as any).weatherFallbackReason == null || (dataset.meta as any).weatherFallbackReason === "") {
-              (dataset.meta as any).weatherFallbackReason =
-                (dataset.meta as any).weatherSourceSummary === "actual_only" ? null : "unknown";
+            if (restoredAny.meta.weatherFallbackReason == null || restoredAny.meta.weatherFallbackReason === "") {
+              restoredAny.meta.weatherFallbackReason =
+                restoredAny.meta.weatherSourceSummary === "actual_only" ? null : "unknown";
             }
-            (dataset.meta as any).dailyRowCount = Array.isArray(dataset.daily) ? dataset.daily.length : 0;
-            (dataset.meta as any).intervalCount = Array.isArray(dataset?.series?.intervals15) ? dataset.series.intervals15.length : 0;
+            restoredAny.meta.dailyRowCount = Array.isArray(restoredAny.daily) ? restoredAny.daily.length : 0;
+            restoredAny.meta.intervalCount = Array.isArray(restoredAny?.series?.intervals15)
+              ? restoredAny.series.intervals15.length
+              : 0;
             if (scenarioKey !== "BASELINE") {
-              applyCanonicalCoverageMetadataForNonBaseline(dataset, scenarioKey, { buildInputs });
+              applyCanonicalCoverageMetadataForNonBaseline(restoredAny, scenarioKey, { buildInputs });
             } else {
-              (dataset.meta as any).coverageStart = dataset?.summary?.start ?? startDate;
-              (dataset.meta as any).coverageEnd = dataset?.summary?.end ?? endDate;
+              restoredAny.meta.coverageStart = restoredAny?.summary?.start ?? startDate;
+              restoredAny.meta.coverageEnd = restoredAny?.summary?.end ?? endDate;
             }
+            return restoredAny;
+          };
+          let usableCached = forceRebuildArtifact
+            ? null
+            : await getUsablePastArtifactCacheRow({
+                houseId: args.houseId,
+                scenarioId: scenarioIdForCache,
+                inputHashCandidates: uniquePastArtifactInputHashCandidates(
+                  pastArtifactIdentity.inputHash,
+                  validationBackfillArtifactHash,
+                ),
+                intervalsCodec: INTERVAL_CODEC_V1,
+                rejectDatasetJson: hasLegacyWeatherEfficiencySimulationActivation,
+              });
+          if (usableCached) {
+            dataset = await restoreDatasetFromUsableCache(usableCached, usableCached.inputHash);
           } else {
+            const refreshedIdentity = await resolvePastArtifactIdentity({
+              userId: args.userId,
+              requestHouseId: args.houseId,
+              requestHouseEsiid: pastSimEsiid,
+              buildInputs: artifactIdentityBuildInputs,
+            });
+            if (!forceRebuildArtifact && refreshedIdentity) {
+              usableCached = await getUsablePastArtifactCacheRow({
+                houseId: args.houseId,
+                scenarioId: scenarioIdForCache,
+                inputHashCandidates: uniquePastArtifactInputHashCandidates(
+                  refreshedIdentity.inputHash,
+                  validationBackfillArtifactHash,
+                  inputHash,
+                ),
+                intervalsCodec: INTERVAL_CODEC_V1,
+                rejectDatasetJson: hasLegacyWeatherEfficiencySimulationActivation,
+              });
+            }
+            if (usableCached) {
+              dataset = await restoreDatasetFromUsableCache(usableCached, usableCached.inputHash);
+            }
+          }
+          if (!dataset) {
             const validationHoldoutDateKeysLocal =
               resolveProducerValidationHoldoutDateKeysFromBuildInputs({
                 buildInputs,
@@ -8556,6 +8515,16 @@ export async function getSimulatedUsageForHouseScenario(args: {
               };
             }
             dataset = pastResult.dataset;
+            const persistIdentity = await resolvePastArtifactIdentity({
+              userId: args.userId,
+              requestHouseId: args.houseId,
+              requestHouseEsiid: pastSimEsiid,
+              buildInputs: artifactIdentityBuildInputs,
+            });
+            if (persistIdentity?.inputHash) {
+              inputHash = persistIdentity.inputHash;
+              cacheKeyDiag.inputHash = inputHash;
+            }
             let persistPrep = {
               dataset,
               projected: false,

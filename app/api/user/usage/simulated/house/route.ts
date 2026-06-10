@@ -32,6 +32,10 @@ import {
 } from "@/lib/usage/pastVisibleWeatherReadDiagnostics";
 import { shouldUsePastDisplayWeatherCards } from "@/lib/usage/userPastVisibleWeather";
 import { resolveUserPastApiWeatherResponse } from "@/lib/usage/userPastApiWeatherResponse";
+import {
+  pastSimUserReadInflightKey,
+  runPastSimUserReadInflight,
+} from "@/lib/usage/pastSimUserReadInflight";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -137,6 +141,9 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    return runPastSimUserReadInflight(
+      pastSimUserReadInflightKey({ userId: u.user.id, houseId, scenarioId }),
+      async () => {
     const scenarioRow = await prisma.usageSimulatorScenario.findFirst({
       where: { id: scenarioId, userId: u.user.id, houseId, archivedAt: null },
       select: { name: true },
@@ -384,6 +391,8 @@ export async function GET(request: NextRequest) {
     if (out.code === "COMPARE_TRUTH_INCOMPLETE")
       return NextResponse.json(failureBody, { status: 409, headers: correlationHeaders(correlationId) });
     return NextResponse.json(failureBody, { status: 500, headers: correlationHeaders(correlationId) });
+      },
+    );
   } catch (e) {
     console.error("[user/usage/simulated/house] failed", e);
     return NextResponse.json(
