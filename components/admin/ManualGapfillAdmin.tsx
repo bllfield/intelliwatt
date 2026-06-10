@@ -258,7 +258,7 @@ export function ManualGapfillAdmin() {
       });
       if (!res.ok) {
         setError(res.error);
-        const failed = asRecord(res.raw)?.result;
+        const failed = asRecord(asRecord(res.raw)?.result);
         if (failed) setStep4({ identityKey, data: failed });
         return;
       }
@@ -303,7 +303,7 @@ export function ManualGapfillAdmin() {
       });
       if (!res.ok) {
         setError(res.error);
-        const failed = asRecord(res.raw)?.result;
+        const failed = asRecord(asRecord(res.raw)?.result);
         if (failed) setStep5({ identityKey, data: failed });
         return;
       }
@@ -394,7 +394,7 @@ export function ManualGapfillAdmin() {
       });
       if (!s4.ok) {
         setError(s4.error);
-        const failed = asRecord(s4.raw)?.result;
+        const failed = asRecord(asRecord(s4.raw)?.result);
         if (failed) setStep4({ identityKey, data: failed });
         return;
       }
@@ -416,7 +416,7 @@ export function ManualGapfillAdmin() {
       });
       if (!s5.ok) {
         setError(s5.error);
-        const failed = asRecord(s5.raw)?.result;
+        const failed = asRecord(asRecord(s5.raw)?.result);
         if (failed) setStep5({ identityKey, data: failed });
         return;
       }
