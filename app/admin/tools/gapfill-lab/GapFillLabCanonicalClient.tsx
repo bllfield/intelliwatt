@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useMemo, useRef, useState } from "react";
 import UsageDashboard, { type HouseUsage } from "@/components/usage/UsageDashboard";
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 import { ValidationComparePanel } from "@/components/usage/ValidationComparePanel";
@@ -37,7 +37,11 @@ import {
   formatIdentityReadout,
 } from "./readoutTruth";
 import { buildGapfillFullTuningPayload } from "@/modules/usageSimulator/tuningPayload";
-import ManualGapfillLabWorkflow from "@/components/admin/ManualGapfillLabWorkflow";
+import ManualGapfillLabWorkflow, {
+  type ManualGapfillLabWorkflowHandle,
+} from "@/components/admin/ManualGapfillLabWorkflow";
+import { copyTextToClipboard } from "@/lib/admin/copyTextToClipboard";
+import { buildGapfillLabPageAllResponsesPayload } from "@/lib/admin/manualGapfillCopyResponses";
 import type { ManualGapfillSeedMode } from "@/lib/admin/manualGapfillClient";
 
 type HouseOption = { id: string; label: string; esiid?: string | null };
@@ -616,6 +620,7 @@ export default function GapFillLabCanonicalClient() {
   const [openFullApplianceEditor, setOpenFullApplianceEditor] = useState(false);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
   const [pastSimSnapshot, setPastSimSnapshot] = useState<Record<string, unknown> | null>(null);
+  const manualGapfillWorkflowRef = useRef<ManualGapfillLabWorkflowHandle>(null);
   const [actualEngineDiagnosticsLoading, setActualEngineDiagnosticsLoading] = useState(false);
   const [actualEngineDiagnosticsError, setActualEngineDiagnosticsError] = useState<string | null>(null);
   const [openCalculationLogic, setOpenCalculationLogic] = useState(false);
@@ -1469,6 +1474,25 @@ export default function GapFillLabCanonicalClient() {
     }
   }
 
+  async function onCopyAllPageResponses() {
+    const payload = buildGapfillLabPageAllResponsesPayload({
+      manualGapfillLab: manualGapfillWorkflowRef.current?.buildAllResponsesPayload() ?? null,
+      requestDebug,
+      result,
+      pastSimSnapshot,
+      pageUi: {
+        error,
+        loading,
+        lastHttpStatus,
+        lastFailureFields,
+      },
+    });
+    const copied = await copyTextToClipboard(JSON.stringify(payload, null, 2));
+    setExportNotice(
+      copied ? "Copied all page responses to clipboard." : "Copy failed. Use Save all to file."
+    );
+  }
+
   function onSaveAllToFile() {
     const payloadText = JSON.stringify(buildExportPayload(), null, 2);
     const nowIso = new Date().toISOString().replace(/[:.]/g, "-");
@@ -1584,16 +1608,27 @@ export default function GapFillLabCanonicalClient() {
       )}
 
       <section className="rounded-2xl border border-brand-blue/20 bg-white p-4 space-y-4">
-        <div>
-          <h2 className="text-lg font-semibold text-brand-navy">Manual GapFill Lab (One Path)</h2>
-          <p className="mt-1 text-sm text-brand-navy/70">
-            Uses MG-1 source context, MG-2 global validation-day policy, MG-3 seed, MG-4 run/readback, and MG-5 compare.
-            No legacy gapfill-lab recalc or compare_core on this path.
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-brand-navy">Manual GapFill Lab (One Path)</h2>
+            <p className="mt-1 text-sm text-brand-navy/70">
+              Uses MG-1 source context, MG-2 global validation-day policy, MG-3 seed, MG-4 run/readback, and MG-5 compare.
+              No legacy gapfill-lab recalc or compare_core on this path.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="rounded-lg border border-brand-navy px-4 py-2 text-sm font-semibold text-brand-navy disabled:opacity-50"
+            onClick={() => void onCopyAllPageResponses()}
+          >
+            Copy all responses
+          </button>
         </div>
         <ManualGapfillLabWorkflow
+          ref={manualGapfillWorkflowRef}
           showHeader={false}
           showIdentityForm={false}
+          hideCopyResponsesButton
           identity={{
             userId: resolvedSourceUserId,
             userEmail: email,

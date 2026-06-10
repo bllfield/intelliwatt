@@ -70,6 +70,11 @@ describe("Manual GapFill admin UI contract (MG-6)", () => {
     expect(workflowSource).toContain("Diagnostic WAPE (admin-only)");
     expect(workflowSource).toContain("Does not change production Simulation");
     expect(workflowSource).toContain("Accuracy or WAPE labels");
+    expect(workflowSource).toContain("Copy all responses");
+    expect(gapfillLabSource).toContain("Copy all responses");
+    expect(readRepoFile("lib/admin/manualGapfillCopyResponses.ts")).toContain(
+      "buildManualGapfillAllResponsesPayload"
+    );
   });
 
   it("defaults keeper email, house ids, and monthly mode", () => {

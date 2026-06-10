@@ -151,8 +151,18 @@ export type ManualGapfillCompareEnvelope = {
     compareRun: true;
     productionScoringChanged: false;
     wapeChanged: false;
+    compareOnlyNoSimulationMutation: true;
+    sourceActualLoadedOnlyForCompare: true;
+    labSimulatedLoadedFromArtifact: boolean;
+    labRowsMutatedByCompare: false;
     warnings: string[];
   };
+};
+
+const MANUAL_GAPFILL_COMPARE_ISOLATION_DIAGNOSTICS = {
+  compareOnlyNoSimulationMutation: true as const,
+  sourceActualLoadedOnlyForCompare: true as const,
+  labRowsMutatedByCompare: false as const,
 };
 
 function round2(value: number): number {
@@ -285,6 +295,8 @@ function buildFailureEnvelope(args: {
       compareRun: true,
       productionScoringChanged: false,
       wapeChanged: false,
+      ...MANUAL_GAPFILL_COMPARE_ISOLATION_DIAGNOSTICS,
+      labSimulatedLoadedFromArtifact: args.usedLabSimulatedReadback ?? false,
       warnings: args.warnings,
     },
   };
@@ -586,6 +598,8 @@ export function buildManualGapfillCompareEnvelope(args: {
       compareRun: true,
       productionScoringChanged: false,
       wapeChanged: false,
+      ...MANUAL_GAPFILL_COMPARE_ISOLATION_DIAGNOSTICS,
+      labSimulatedLoadedFromArtifact: true,
       warnings,
     },
   };
@@ -796,7 +810,7 @@ export async function compareManualGapfillSourceActualToLabSim(
     });
   }
 
-  const labDataset = labReadResult.displayDataset ?? labReadResult.dataset;
+  const labDataset = labReadResult.dataset;
   if (!labDataset) {
     return buildFailureEnvelope({
       status: "lab_readback_missing",

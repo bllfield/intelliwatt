@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { copyTextToClipboard } from "@/lib/admin/copyTextToClipboard";
+import { buildManualGapfillAllResponsesPayload } from "@/lib/admin/manualGapfillCopyResponses";
 import { formatAdminToolErrorMessage } from "@/lib/admin/formatAdminToolError";
 import {
   MANUAL_GAPFILL_DEFAULT_LAB_HOUSE_ID,
@@ -45,6 +47,10 @@ type StepState<T> = {
   data: T;
 } | null;
 
+export type ManualGapfillLabWorkflowHandle = {
+  buildAllResponsesPayload: () => Record<string, unknown>;
+};
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
 }
@@ -71,6 +77,7 @@ export type ManualGapfillLabWorkflowProps = {
   disabledReason?: string | null;
   showIdentityForm?: boolean;
   showHeader?: boolean;
+  hideCopyResponsesButton?: boolean;
 };
 
 function ValidationDayCompareScoringPanel(args: {
@@ -173,7 +180,10 @@ function round2(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-export function ManualGapfillLabWorkflow(props: ManualGapfillLabWorkflowProps = {}) {
+export const ManualGapfillLabWorkflow = forwardRef<
+  ManualGapfillLabWorkflowHandle,
+  ManualGapfillLabWorkflowProps
+>(function ManualGapfillLabWorkflow(props, ref) {
   const controlled = Boolean(props.identity);
   const [userEmail, setUserEmail] = useState(
     props.identity?.userEmail ?? MANUAL_GAPFILL_DEFAULT_USER_EMAIL
@@ -198,6 +208,7 @@ export function ManualGapfillLabWorkflow(props: ManualGapfillLabWorkflowProps = 
   const [busyStep, setBusyStep] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const [identityNotice, setIdentityNotice] = useState<string | null>(null);
 
   const [policySnapshot, setPolicySnapshot] = useState<Record<string, unknown> | null>(null);
@@ -687,15 +698,106 @@ export function ManualGapfillLabWorkflow(props: ManualGapfillLabWorkflowProps = 
     props.onModeChange?.(next);
   }
 
+  const buildAllResponsesPayload = useCallback(
+    () =>
+      buildManualGapfillAllResponsesPayload({
+        identityKey,
+        userEmail,
+        userId,
+        sourceHouseId,
+        labHouseId,
+        mode,
+        esiid,
+        includeDiagnostics,
+        anchorEndDate,
+        includeDailyRows,
+        persistSeedToggle,
+        persistedSeedInSession,
+        status,
+        error,
+        identityNotice,
+        policySnapshot,
+        step1,
+        step2Preview,
+        step3,
+        step4,
+        step5,
+        isStepStale: isStale,
+      }),
+    [
+      identityKey,
+      userEmail,
+      userId,
+      sourceHouseId,
+      labHouseId,
+      mode,
+      esiid,
+      includeDiagnostics,
+      anchorEndDate,
+      includeDailyRows,
+      persistSeedToggle,
+      persistedSeedInSession,
+      status,
+      error,
+      identityNotice,
+      policySnapshot,
+      step1,
+      step2Preview,
+      step3,
+      step4,
+      step5,
+      isStale,
+    ]
+  );
+
+  useImperativeHandle(ref, () => ({ buildAllResponsesPayload }), [buildAllResponsesPayload]);
+
+  const copyAllResponses = useCallback(async () => {
+    const payloadText = JSON.stringify(buildAllResponsesPayload(), null, 2);
+    const copied = await copyTextToClipboard(payloadText);
+    setCopyNotice(
+      copied ? "Copied all Manual GapFill step responses to clipboard." : "Copy failed — check browser permissions."
+    );
+  }, [buildAllResponsesPayload]);
+
+  const hasAnyStepResponse = Boolean(step1 || step2Preview || step3 || step4 || step5);
+
   return (
     <div className="space-y-6">
       {props.showHeader !== false ? (
-        <div>
-          <h2 className="text-xl font-semibold text-brand-navy">Manual GapFill Lab workflow</h2>
-          <p className="mt-2 text-sm text-slate-600">
-            One Path SMT source truth → manual seed → lab Past Sim run/readback → source actual vs lab simulated compare.
-            Uses MG-1 through MG-5 routes only (no legacy gapfill-lab recalc or legacy compare module).
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-semibold text-brand-navy">Manual GapFill Lab workflow</h2>
+            <p className="mt-2 text-sm text-slate-600">
+              One Path SMT source truth → manual seed → lab Past Sim run/readback → source actual vs lab simulated compare.
+              Uses MG-1 through MG-5 routes only (no legacy gapfill-lab recalc or legacy compare module).
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={!hasAnyStepResponse}
+            onClick={() => void copyAllResponses()}
+            className="rounded-lg border border-brand-navy px-4 py-2 text-sm font-semibold text-brand-navy disabled:opacity-50"
+          >
+            Copy all responses
+          </button>
+        </div>
+      ) : props.hideCopyResponsesButton ? null : (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <button
+            type="button"
+            disabled={!hasAnyStepResponse}
+            onClick={() => void copyAllResponses()}
+            className="rounded-lg border border-brand-navy px-4 py-2 text-sm font-semibold text-brand-navy disabled:opacity-50"
+          >
+            Copy all responses
+          </button>
+        </div>
+      )}
+
+      {copyNotice ? (
+        <div className="rounded-lg border border-brand-blue/20 bg-brand-blue/5 px-4 py-3 text-sm text-brand-navy">
+          {copyNotice}
         </div>
       ) : null}
 
@@ -1160,6 +1262,6 @@ export function ManualGapfillLabWorkflow(props: ManualGapfillLabWorkflowProps = 
       </StepSection>
     </div>
   );
-}
+});
 
 export default ManualGapfillLabWorkflow;

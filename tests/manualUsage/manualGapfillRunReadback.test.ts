@@ -325,7 +325,7 @@ describe("buildManualGapfillRunReadbackResult", () => {
     expect(out.run.inputType).toBe("MANUAL_ANNUAL");
   });
 
-  it("passes actualContextHouseId = sourceHouseId to dispatch", async () => {
+  it("passes actualContextHouseId = labHouseId to dispatch (manual run isolation)", async () => {
     mockSufficientSourceContext();
     getManualUsageInputForUserHouse.mockResolvedValue({ payload: monthlySeed, updatedAt: new Date().toISOString() });
     mockSuccessfulRunReadback();
@@ -338,7 +338,7 @@ describe("buildManualGapfillRunReadbackResult", () => {
     });
 
     expect(dispatchPastSimRecalc).toHaveBeenCalledWith(
-      expect.objectContaining({ actualContextHouseId: SOURCE_HOUSE_ID })
+      expect.objectContaining({ actualContextHouseId: LAB_HOUSE_ID })
     );
   });
 
@@ -359,12 +359,13 @@ describe("buildManualGapfillRunReadbackResult", () => {
     expect(buildOnePathManualUsagePastSimReadResult).toHaveBeenCalledWith(
       expect.objectContaining({
         usageInputMode: "MANUAL_MONTHLY",
-        actualDataset: sampleDataset,
-        actualReference: {
-          userId: USER_ID,
-          houseId: SOURCE_HOUSE_ID,
-          scenarioId: null,
-        },
+        callerType: "gapfill_test",
+      })
+    );
+    expect(buildOnePathManualUsagePastSimReadResult).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        actualDataset: expect.anything(),
+        actualReference: expect.anything(),
       })
     );
   });
@@ -528,5 +529,25 @@ describe("buildManualGapfillRunReadbackResult", () => {
 
     expect(out.diagnostics.compareRun).toBe(false);
     expect(out.diagnostics.pastSimRecalcDispatched).toBe(true);
+  });
+
+  it("returns manual run isolation diagnostics", async () => {
+    mockSufficientSourceContext();
+    getManualUsageInputForUserHouse.mockResolvedValue({ payload: monthlySeed, updatedAt: new Date().toISOString() });
+    mockSuccessfulRunReadback();
+    const { buildManualGapfillRunReadbackResult } = await import("@/modules/manualUsage/manualGapfillRunReadback");
+    const out = await buildManualGapfillRunReadbackResult({
+      userId: USER_ID,
+      sourceHouseId: SOURCE_HOUSE_ID,
+      labHouseId: LAB_HOUSE_ID,
+      mode: "MONTHLY_FROM_SOURCE_INTERVALS",
+    });
+
+    expect(out.diagnostics.manualRunIsolation).toBe("manual_totals_only");
+    expect(out.diagnostics.sourceActualIntervalsPassedToSimulator).toBe(false);
+    expect(out.diagnostics.sourceActualDailyRowsPassedToSimulator).toBe(false);
+    expect(out.diagnostics.validationDayActualsPassedToSimulator).toBe(false);
+    expect(out.diagnostics.validationDaysCopiedFromActual).toBe(false);
+    expect(out.labContext.actualContextHouseId).toBe(LAB_HOUSE_ID);
   });
 });

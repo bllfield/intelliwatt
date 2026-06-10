@@ -112,6 +112,8 @@ export async function buildOnePathManualUsagePastSimReadResult(args: {
   emit("manual_readback_start", {
     requireExactArtifactMatch: args.requireExactArtifactMatch === true,
   });
+  const isGapfillLabIsolatedRead = args.callerType === "gapfill_test";
+  const projectionMode = isGapfillLabIsolatedRead ? "raw" : "baseline";
   const manualUsageRecord =
     args.manualUsagePayload !== undefined
       ? { payload: args.manualUsagePayload }
@@ -130,12 +132,12 @@ export async function buildOnePathManualUsagePastSimReadResult(args: {
     readMode: args.readMode,
     exactArtifactInputHash: args.exactArtifactInputHash ?? undefined,
     requireExactArtifactMatch: args.requireExactArtifactMatch === true,
-    projectionMode: "baseline",
+    projectionMode,
     correlationId: args.correlationId ?? undefined,
     readContext: {
       artifactReadMode: args.readMode,
-      projectionMode: "baseline",
-      compareSidecarRequest: true,
+      projectionMode,
+      compareSidecarRequest: !isGapfillLabIsolatedRead,
     },
   });
   if (!out.ok) {
@@ -153,22 +155,27 @@ export async function buildOnePathManualUsagePastSimReadResult(args: {
   }
 
   const displayDatasetRaw = out.dataset;
-  const displayDataset = isCanonicalManualPastArtifact(displayDatasetRaw)
-    ? displayDatasetRaw
-    : resolveManualDisplayDatasetForRead({
-        dataset: displayDatasetRaw,
-        usageInputMode: effectiveUsageInputMode,
-      });
+  const displayDataset = isGapfillLabIsolatedRead
+    ? out.dataset
+    : isCanonicalManualPastArtifact(displayDatasetRaw)
+      ? displayDatasetRaw
+      : resolveManualDisplayDatasetForRead({
+          dataset: displayDatasetRaw,
+          usageInputMode: effectiveUsageInputMode,
+        });
 
   emit("manual_readback_dataset_ready", {
     intervalCount: Array.isArray((out.dataset as any)?.series?.intervals15) ? (out.dataset as any).series.intervals15.length : 0,
     dayCount: Array.isArray((out.dataset as any)?.daily) ? (out.dataset as any).daily.length : 0,
     monthCount: Array.isArray((out.dataset as any)?.monthly) ? (out.dataset as any).monthly.length : 0,
   });
-  const resolvedActualDataset = await resolveManualCompareActualDataset({
-    actualDataset: args.actualDataset,
-    actualReference: args.actualReference ?? null,
-  });
+  const resolvedActualDataset =
+    isGapfillLabIsolatedRead && args.actualDataset === undefined && args.actualReference == null
+      ? null
+      : await resolveManualCompareActualDataset({
+          actualDataset: args.actualDataset,
+          actualReference: args.actualReference ?? null,
+        });
   emit("manual_readback_actual_dataset_ready", {
     stepDurationMs: Date.now() - stepStartedAt,
     actualIntervalCount: Array.isArray((resolvedActualDataset as any)?.series?.intervals15)
@@ -201,6 +208,7 @@ export async function buildOnePathManualUsagePastSimReadResult(args: {
       manualUsagePayload: manualUsageRecord.payload,
       actualDataset: resolvedActualDataset,
       displayDataset,
+      projectionMode,
     });
   emit("manual_readback_decorations_ready", {
     stepDurationMs: Date.now() - stepStartedAt,
@@ -429,6 +437,7 @@ async function buildManualUsageReadDecorations(args: {
   manualUsagePayload?: ManualUsagePayload | null;
   actualDataset?: any;
   displayDataset?: any;
+  projectionMode?: "baseline" | "raw";
 }) {
   const manualUsageRecord =
     args.manualUsagePayload !== undefined
@@ -477,7 +486,7 @@ async function buildManualUsageReadDecorations(args: {
     compareProjection,
     manualMonthlyReconciliation,
     readMode: args.readMode,
-    projectionMode: "baseline",
+    projectionMode: args.projectionMode ?? "baseline",
     artifactId: args.artifactId ?? null,
     artifactInputHash: args.artifactInputHash ?? null,
     artifactEngineVersion: args.artifactEngineVersion ?? null,

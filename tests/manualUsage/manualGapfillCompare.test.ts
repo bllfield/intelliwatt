@@ -543,4 +543,28 @@ describe("compareManualGapfillSourceActualToLabSim", () => {
     expect(out.diagnostics.productionScoringChanged).toBe(false);
     expect(out.diagnostics.wapeChanged).toBe(false);
   });
+
+  it("loads lab artifact read without passing source actual into readback builder", async () => {
+    mockSufficientSourceContext();
+    getManualUsageInputForUserHouse.mockResolvedValue({ payload: monthlySeed, updatedAt: new Date().toISOString() });
+    mockSuccessfulLabReadback();
+    const { compareManualGapfillSourceActualToLabSim } = await import("@/modules/manualUsage/manualGapfillCompare");
+    const out = await compareManualGapfillSourceActualToLabSim({
+      userId: USER_ID,
+      sourceHouseId: SOURCE_HOUSE_ID,
+      labHouseId: LAB_HOUSE_ID,
+      mode: "MONTHLY_FROM_SOURCE_INTERVALS",
+    });
+
+    expect(buildOnePathManualUsagePastSimReadResult).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        actualDataset: expect.anything(),
+        actualReference: expect.anything(),
+      })
+    );
+    expect(out.diagnostics.compareOnlyNoSimulationMutation).toBe(true);
+    expect(out.diagnostics.sourceActualLoadedOnlyForCompare).toBe(true);
+    expect(out.diagnostics.labSimulatedLoadedFromArtifact).toBe(true);
+    expect(out.diagnostics.labRowsMutatedByCompare).toBe(false);
+  });
 });

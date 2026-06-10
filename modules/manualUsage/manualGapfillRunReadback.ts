@@ -12,7 +12,6 @@ import {
   type ManualGapfillSeedMode,
 } from "@/modules/manualUsage/manualGapfillSeed";
 import {
-  loadManualGapfillSourceActualDataset,
   resolveManualGapfillSmtSourceContext,
   type ManualGapfillSourceContext,
 } from "@/modules/manualUsage/manualGapfillSourceContext";
@@ -109,8 +108,21 @@ export type ManualGapfillRunReadbackResult = {
     compareRun: false;
     sourceHouseWritten: false;
     labManualPayloadWritten: false;
+    manualRunIsolation: "manual_totals_only";
+    sourceActualIntervalsPassedToSimulator: false;
+    sourceActualDailyRowsPassedToSimulator: false;
+    validationDayActualsPassedToSimulator: false;
+    validationDaysCopiedFromActual: false;
     warnings: string[];
   };
+};
+
+const MANUAL_GAPFILL_RUN_ISOLATION_DIAGNOSTICS = {
+  manualRunIsolation: "manual_totals_only" as const,
+  sourceActualIntervalsPassedToSimulator: false,
+  sourceActualDailyRowsPassedToSimulator: false,
+  validationDayActualsPassedToSimulator: false,
+  validationDaysCopiedFromActual: false,
 };
 
 function mapSourceContextBlock(
@@ -178,7 +190,7 @@ function buildFailureResult(args: {
       labHouseId: args.labHouseId,
       manualSeedFound: args.manualSeedFound ?? false,
       manualSeedHash: args.manualSeedHash ?? null,
-      actualContextHouseId: args.sourceHouseId,
+      actualContextHouseId: args.labHouseId,
     },
     run: {
       dispatched: args.run?.dispatched ?? false,
@@ -210,6 +222,7 @@ function buildFailureResult(args: {
       compareRun: false,
       sourceHouseWritten: false,
       labManualPayloadWritten: false,
+      ...MANUAL_GAPFILL_RUN_ISOLATION_DIAGNOSTICS,
       warnings: args.warnings,
     },
   };
@@ -323,7 +336,7 @@ export async function runManualGapfillSeededPastSim(args: {
     userId: args.userId,
     houseId: args.labHouseId,
     esiid: args.esiid ?? null,
-    actualContextHouseId: args.sourceHouseId,
+    actualContextHouseId: args.labHouseId,
     mode: "MANUAL_TOTALS",
     scenarioId: args.scenarioId,
     weatherPreference: args.weatherPreference ?? "LAST_YEAR_WEATHER",
@@ -419,10 +432,6 @@ export async function readManualGapfillPastSimResult(args: {
   | { ok: false; error: string }
 > {
   const usageInputMode = resolveInputType(args.mode);
-  const sourceActual = await loadManualGapfillSourceActualDataset({
-    userId: args.userId,
-    sourceHouseId: args.sourceHouseId,
-  });
   const readResult = await buildOnePathManualUsagePastSimReadResult({
     userId: args.userId,
     houseId: args.labHouseId,
@@ -439,12 +448,6 @@ export async function readManualGapfillPastSimResult(args: {
     artifactEngineVersion: args.artifactEngineVersion ?? null,
     artifactPersistenceOutcome: "persisted_artifact_exact_read",
     manualUsagePayload: args.manualPayload,
-    actualDataset: sourceActual.dataset,
-    actualReference: {
-      userId: args.userId,
-      houseId: sourceActual.actualContextHouseId,
-      scenarioId: null,
-    },
   });
 
   if (!readResult.ok) {
@@ -454,7 +457,7 @@ export async function readManualGapfillPastSimResult(args: {
   return {
     ok: true,
     readback: buildReadbackView({
-      dataset: readResult.displayDataset ?? readResult.dataset,
+      dataset: readResult.dataset,
       manualValidationSummary: readResult.manualValidationSummary,
     }),
     artifactInputHash:
@@ -681,7 +684,7 @@ export async function buildManualGapfillRunReadbackResult(
       labHouseId,
       manualSeedFound: true,
       manualSeedHash,
-      actualContextHouseId: sourceHouseId,
+      actualContextHouseId: labHouseId,
     },
     run: {
       dispatched: true,
@@ -705,6 +708,7 @@ export async function buildManualGapfillRunReadbackResult(
       compareRun: false,
       sourceHouseWritten: false,
       labManualPayloadWritten: false,
+      ...MANUAL_GAPFILL_RUN_ISOLATION_DIAGNOSTICS,
       warnings,
     },
   };
