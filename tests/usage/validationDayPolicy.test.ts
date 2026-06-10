@@ -183,5 +183,10 @@ describe("validationDayPolicy", () => {
         expect(gate.stale.sourcePolicyRevision).toBeNull();
       }
     });
+
+    it("maps source-copy policy refresh caller to user_site stamp surface", async () => {
+      const { resolveValidationDayPolicySurfaceForRecalc } = await import("@/lib/usage/validationDayPolicy");
+      expect(resolveValidationDayPolicySurfaceForRecalc("gapfill_source_copy_policy_refresh")).toBe("user_site");
+    });
   });
 });

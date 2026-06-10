@@ -76,6 +76,10 @@ import {
   resolveGlobalValidationDayKeysForPastSim,
 } from "@/lib/usage/validationDayPolicy";
 import {
+  ensureSourceCopyValidationPolicyFresh,
+  type SourceCopyPolicyRefreshDiagnostics,
+} from "@/lib/usage/sourceCopyValidationPolicyRefresh";
+import {
   resolveAdminValidationPolicy,
   resolveTestHomeUsageInputMode,
   resolveTestHomeUsageModeRecalcConfig,
@@ -1742,6 +1746,7 @@ export async function POST(req: NextRequest) {
         { status: 404 }
       );
     }
+    const labCorrelationId = createSimCorrelationId();
 
     const { homeProfile, applianceProfile } = await loadDisplayProfilesForHouse({
       userId: labOwnerUser.id,
@@ -1857,59 +1862,47 @@ export async function POST(req: NextRequest) {
       testRanges: selectedTestRanges,
       testDaysRequested,
     });
+    let sourcePolicyRefreshDiagnostics: SourceCopyPolicyRefreshDiagnostics | null = null;
     if (usingSourceTravelRangesForRecalc) {
-      const sourcePastScenario = await (prisma as any).usageSimulatorScenario
-        .findFirst({
-          where: {
-            userId: String(sourceHouse.userId ?? link.sourceUserId),
-            houseId: sourceHouse.id,
-            name: "Past (Corrected)",
-            archivedAt: null,
-          },
-          select: { id: true },
-        })
-        .catch(() => null);
-      const sourceBuildForPolicy = sourcePastScenario?.id
-        ? await (prisma as any).usageSimulatorBuild
-            .findUnique({
-              where: {
-                userId_houseId_scenarioKey: {
-                  userId: String(sourceHouse.userId ?? link.sourceUserId),
-                  houseId: sourceHouse.id,
-                  scenarioKey: String(sourcePastScenario.id),
-                },
-              },
-              select: { buildInputs: true },
-            })
-            .catch(() => null)
-        : null;
-      const sourceBuildInputs = (sourceBuildForPolicy as any)?.buildInputs as Record<string, unknown> | null | undefined;
+      const sourcePolicyFresh = await ensureSourceCopyValidationPolicyFresh({
+        sourceUserId: String(sourceHouse.userId ?? link.sourceUserId),
+        sourceHouseId: sourceHouse.id,
+        sourceEsiid: sourceEsiid ?? null,
+        sourceTravelRanges: sourceTravelRangesFromDb,
+        window: canonicalWindow,
+        correlationId: labCorrelationId,
+      });
+      if (!sourcePolicyFresh.ok) {
+        return NextResponse.json(
+          attachFailureContract({ ok: false, ...sourcePolicyFresh.body }),
+          {
+            status: sourcePolicyFresh.status,
+          }
+        );
+      }
+      sourcePolicyRefreshDiagnostics = sourcePolicyFresh.refreshDiagnostics;
+      const sourceBuildInputs = sourcePolicyFresh.buildInputs;
       const sourceValidationKeys = Array.isArray(sourceBuildInputs?.validationOnlyDateKeysLocal)
         ? (sourceBuildInputs.validationOnlyDateKeysLocal as unknown[])
             .map((value) => String(value ?? "").slice(0, 10))
             .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value))
         : [];
-      if (!sourcePastScenario?.id || sourceValidationKeys.length === 0) {
-        return NextResponse.json(
-          attachFailureContract({
-            ok: false,
-            error: "canonical_parity_inputs_missing",
-            message:
-              "Canonical source-copy parity requires persisted source-house validation keys from the normal Past Sim run.",
-          }),
-          { status: 409 }
-        );
-      }
       const sourcePolicyGate = await gateSourceCopyValidationPolicyMatch({
         sourceHouseId: sourceHouse.id,
-        sourceBuildInputs: sourceBuildInputs ?? null,
+        sourceBuildInputs,
         surface: "user_site",
       });
-      if (!sourcePolicyGate.ok) {
+      if (!sourcePolicyGate.ok || sourceValidationKeys.length === 0) {
         return NextResponse.json(
           attachFailureContract({
             ok: false,
-            ...sourcePolicyGate.stale,
+            error: "source_validation_policy_refresh_failed",
+            message:
+              "Source Past Sim validation-day policy could not be refreshed to the active global compare-day policy.",
+            sourceHouseId: sourceHouse.id,
+            ...(sourcePolicyGate.ok ? {} : sourcePolicyGate.stale),
+            sourcePolicyRefreshAttempted: true,
+            sourcePolicyRefreshSucceeded: false,
           }),
           { status: 409 }
         );
@@ -1929,10 +1922,13 @@ export async function POST(req: NextRequest) {
       testDateKeysLocal = new Set(boundedSourceValidationKeys);
       testRangesUsed = mergeDateKeysToRanges(boundedSourceValidationKeys);
       testDaysSelected = boundedSourceValidationKeys.length;
-      selectionDiagnostics = buildSourceCopySelectionDiagnostics({
-        selectionMode: sourceSelectionMode,
-        selectedDateKeys: boundedSourceValidationKeys,
-      });
+      selectionDiagnostics = {
+        ...buildSourceCopySelectionDiagnostics({
+          selectionMode: sourceSelectionMode,
+          selectedDateKeys: boundedSourceValidationKeys,
+        }),
+        ...(sourcePolicyRefreshDiagnostics ?? {}),
+      };
     } else {
       const globalValidation = await resolveGlobalValidationDayKeysForPastSim({
         userId: String(sourceHouse.userId ?? link.sourceUserId),
@@ -2010,7 +2006,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const labCorrelationId = createSimCorrelationId();
     logSimPipelineEvent("admin_lab_run_test_home_canonical_recalc", {
       correlationId: labCorrelationId,
       source: "gapfill_lab",
@@ -2875,6 +2870,7 @@ export async function POST(req: NextRequest) {
       seedUsed,
       selectionDiagnostics,
       validationSelectionDiagnostics: selectionDiagnostics,
+      ...(sourcePolicyRefreshDiagnostics ?? {}),
       usage365,
       baselineDatasetProjection: baselineDataset,
       displayDatasetProjection,

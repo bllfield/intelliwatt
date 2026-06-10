@@ -228,15 +228,16 @@ These paths call `resolveGlobalValidationDayKeysForPastSim()` or `resolveActiveV
 
 When GapFill Lab runs **`EXACT_INTERVALS`** with **no** manual test ranges, **no** `testDays` override, and **no** explicit admin validation mode, it enters **source-copy parity**:
 
-- Copies `validationOnlyDateKeysLocal` (and travel ranges) from the **source house Past (Corrected) build inputs**
-- Does **not** re-run global policy selection
-- **Requires** persisted validation keys on the source build; otherwise `409 canonical_parity_inputs_missing`
-- **Hard gate:** source build must carry `validationDayPolicyRevision` + `validationDayPolicyHash` matching the **current active global policy** (`user_site` surface for source-house artifacts). Missing or stale stamps → `409 source_validation_policy_stale` with current/source hashes and refresh instruction. **No silent stale key copy.**
-- After gate passes, copied keys are still bounded to the canonical coverage window (`boundDateKeysToCoverageWindow`).
+- Copies `validationOnlyDateKeysLocal` (and travel ranges) from the **source house Past (Corrected) build inputs** after ensuring those inputs reflect the active global policy
+- Does **not** re-run global policy selection for the **test home** — it copies refreshed source keys
+- **Refresh-then-continue:** when source `validationDayPolicyRevision` + `validationDayPolicyHash` are missing or stale relative to active global policy (`user_site` surface), GapFill Lab **re-runs source Past Sim** via `ensureSourceCopyValidationPolicyFresh()` → `dispatchPastSimRecalc` with `resolveGlobalValidationDayKeysForPastSim({ surface: "user_site" })`. No per-run overrides, no local GapFill selector, no `compare_core`.
+- **No stale key copy:** if refresh fails → `409 source_validation_policy_refresh_failed`; if async refresh started → `409 source_validation_policy_refreshing` + `jobId`; if refresh completes without keys → `409 source_validation_policy_refresh_missing_keys`.
+- After refresh (or when stamps already match), copied keys are bounded to the canonical coverage window (`boundDateKeysToCoverageWindow`).
+- Success diagnostics may include `sourcePolicyRefreshAttempted`, `sourcePolicyRefreshSucceeded`, previous/refreshed policy hashes.
 
 **Intent:** Prove lab matches the source’s **current-policy** Past Sim artifact — not a historical build under an old compare-day policy.
 
-**Operational rule:** Refresh/re-run **source** Past Sim under the active global compare-day policy before source-copy parity. Old artifacts without policy stamps are historical only and must not feed active compare/recalc.
+**Operational rule:** Active compare-day policy is authoritative. Stale source artifacts are refreshed under that policy before source-copy parity continues; the run stops rather than silently using stale keys if refresh cannot complete.
 
 All other GapFill Lab compare paths use **fresh global policy** via `resolveGlobalValidationDayKeysForPastSim`.
 
@@ -244,11 +245,11 @@ All other GapFill Lab compare paths use **fresh global policy** via `resolveGlob
 
 | Rule | Behavior |
 |------|----------|
-| Active compare/recalc | Must use current active global policy via `resolveGlobalValidationDayKeysForPastSim` (or source-copy only after policy gate passes) |
+| Active compare/recalc | Must use current active global policy via `resolveGlobalValidationDayKeysForPastSim` (non source-copy) or refreshed source build keys (source-copy) |
 | Historical artifacts | May exist in DB without policy stamps; treated as **stale** for source-copy input |
-| Source-copy | `gateSourceCopyValidationPolicyMatch()` in `validationDayPolicy.ts` — both revision and hash must match |
+| Source-copy | `ensureSourceCopyValidationPolicyFresh()` in `lib/usage/sourceCopyValidationPolicyRefresh.ts` — refresh source Past Sim when stamps/keys stale, then `gateSourceCopyValidationPolicyMatch()` |
 | Past recalc stamp | `usageSimulatorBuild.buildInputs` receives `validationDayPolicyRevision` + `validationDayPolicyHash` on recalc (MG-2 metadata only) |
-| Auto-refresh | **Not implemented** — hard gate only; admin must explicitly refresh source Past Sim |
+| Source refresh owner | `dispatchPastSimRecalc` on **source house** with caller `gapfill_source_copy_policy_refresh`; stamps `user_site` policy (not lab policy) |
 
 ---
 

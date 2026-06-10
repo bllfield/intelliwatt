@@ -88,7 +88,7 @@ This rule applies to Compare Day Policy preview, Manual GapFill, One Path Sim, a
 - **Wired surfaces:** One Path, Manual GapFill, GapFill Lab (non source-copy parity), user-site Past reconciliation.
 - **Guardrails:** canonical 365-day window bounding, travel exclusion, shared `selectValidationDayKeys` selector.
 - **Separate contract:** day *selection* (this policy) vs holdout *scoring* (`docs/PAST_VALIDATION_HOLDOUT.md`).
-- **Stale policy gate:** source-copy parity (`EXACT_INTERVALS` + no manual selectors) requires source `usageSimulatorBuild.buildInputs.validationDayPolicyHash` + `validationDayPolicyRevision` to match active global policy; else `409 source_validation_policy_stale`. See `docs/GLOBAL_COMPARE_DAY_POLICY.md`.
+- **Source-copy refresh:** `EXACT_INTERVALS` source-copy parity refreshes stale/missing source policy stamps via `ensureSourceCopyValidationPolicyFresh()` before copying keys; failures return `source_validation_policy_refresh_failed` / `source_validation_policy_refreshing` / `source_validation_policy_refresh_missing_keys` (not stale key copy). See `docs/GLOBAL_COMPARE_DAY_POLICY.md`.
 
 ---
 

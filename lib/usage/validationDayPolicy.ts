@@ -474,6 +474,9 @@ export function resolveValidationDayPolicySurfaceForRecalc(
   callerLabel?: string | null
 ): PastValidationPolicySurface {
   const label = String(callerLabel ?? "").toLowerCase();
+  if (label.includes("source_copy_policy_refresh")) {
+    return "user_site";
+  }
   if (
     label.includes("manual_gapfill") ||
     label.includes("one_path") ||

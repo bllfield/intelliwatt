@@ -97,7 +97,7 @@ MG-5 compare scope is always `source_actual_vs_lab_simulated`. Bill Match (MG-4)
 
 ## Hard boundaries (unchanged by MG-1–MG-7)
 
-- **No** legacy GapFill route deletion. GapFill Lab **compare-day selection** uses global MG-2 policy on the main compare path; **`EXACT_INTERVALS` source-copy parity** copies source build validation keys only when source `validationDayPolicyHash` + `validationDayPolicyRevision` match the active global policy (else `409 source_validation_policy_stale`). See `docs/GLOBAL_COMPARE_DAY_POLICY.md`.
+- **No** legacy GapFill route deletion. GapFill Lab **compare-day selection** uses global MG-2 policy on the main compare path; **`EXACT_INTERVALS` source-copy parity** refreshes stale source Past Sim under active global policy, then copies refreshed validation keys (never stale stamps). See `docs/GLOBAL_COMPARE_DAY_POLICY.md`.
 - **No** `EXACT_INTERVALS` scoring/keep-ref behavior changes beyond global compare-day wiring.
 - **No** Manual Monthly GREEN production changes (`docs/MANUAL_MONTHLY_GREEN_CLOSEOUT.md` authoritative).
 - **No** source-house writes from Manual GapFill admin pipeline.
