@@ -10,13 +10,17 @@
 
 ## Keeper houses (admin pipeline defaults)
 
+**Production admin defaults** (Manual GapFill Lab / MG-6 UI — verified on `intelliwatt.com`):
+
 | Role | Value |
 |------|--------|
-| Source user email | `bllfield32@icloud.com` |
-| Source (source actual usage) | `4da5d9d3-f139-4d3a-a602-3250d933c71c` |
+| Source user email | `brian@intellipath-solutions.com` |
+| Source (SMT source actual usage) | `8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8` |
 | Lab (lab simulated usage) | `29a3d820-2593-4673-9dd6-cd161bbd7f6f` |
 
 Default mode: `MONTHLY_FROM_SOURCE_INTERVALS`.
+
+**Local/dev fixture (not production admin default):** `bllfield32@icloud.com` + source `4da5d9d3-f139-4d3a-a602-3250d933c71c` remains in unit/route tests and `docs/MANUAL_MONTHLY_GREEN_CLOSEOUT.md` keeper context. That source house is **not linked** to either production user (`bllfield32@icloud.com` owns `0bbd25b6-…` only; `brian@intellipath-solutions.com` does not own `4da5…`). MG-1 correctly rejects orphan source IDs.
 
 ---
 

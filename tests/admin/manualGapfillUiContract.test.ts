@@ -75,8 +75,8 @@ describe("Manual GapFill admin UI contract (MG-6)", () => {
   it("defaults keeper email, house ids, and monthly mode", () => {
     const clientSource = readRepoFile("lib/admin/manualGapfillClient.ts");
     const workflowSource = readRepoFile("components/admin/ManualGapfillLabWorkflow.tsx");
-    expect(clientSource).toContain("bllfield32@icloud.com");
-    expect(clientSource).toContain("4da5d9d3-f139-4d3a-a602-3250d933c71c");
+    expect(clientSource).toContain("brian@intellipath-solutions.com");
+    expect(clientSource).toContain("8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8");
     expect(clientSource).toContain("29a3d820-2593-4673-9dd6-cd161bbd7f6f");
     expect(clientSource).toContain("MONTHLY_FROM_SOURCE_INTERVALS");
     expect(clientSource).toContain("fetchAdminUserByEmail");
