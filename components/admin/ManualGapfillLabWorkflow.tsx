@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { copyTextToClipboard } from "@/lib/admin/copyTextToClipboard";
-import { buildManualGapfillAllResponsesPayload } from "@/lib/admin/manualGapfillCopyResponses";
+import { buildManualGapfillAllResponsesPayload, buildManualGapfillAllResponsesPayloadWithDeployment } from "@/lib/admin/manualGapfillCopyResponses";
 import { fetchExportDeploymentMetadata } from "@/lib/admin/fetchExportDeploymentMetadata";
 import type { ExportDeploymentMetadata } from "@/lib/admin/aiTuningBundleHelpers";
 import { formatAdminToolErrorMessage } from "@/lib/admin/formatAdminToolError";
@@ -53,6 +53,7 @@ type StepState<T> = {
 
 export type ManualGapfillLabWorkflowHandle = {
   buildAllResponsesPayload: (deployment?: ExportDeploymentMetadata | null) => Record<string, unknown>;
+  buildAllResponsesPayloadWithDeployment: () => Promise<Record<string, unknown>>;
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -755,18 +756,26 @@ export const ManualGapfillLabWorkflow = forwardRef<
     ]
   );
 
-  useImperativeHandle(ref, () => ({ buildAllResponsesPayload }), [buildAllResponsesPayload]);
+  const buildAllResponsesPayloadWithDeployment = useCallback(async () => {
+    const deployment = await fetchExportDeploymentMetadata();
+    return buildAllResponsesPayload(deployment);
+  }, [buildAllResponsesPayload]);
+
+  useImperativeHandle(
+    ref,
+    () => ({ buildAllResponsesPayload, buildAllResponsesPayloadWithDeployment }),
+    [buildAllResponsesPayload, buildAllResponsesPayloadWithDeployment]
+  );
 
   const copyAllResponses = useCallback(async () => {
-    const deployment = await fetchExportDeploymentMetadata();
-    const payloadText = JSON.stringify(buildAllResponsesPayload(deployment), null, 2);
+    const payloadText = JSON.stringify(await buildAllResponsesPayloadWithDeployment(), null, 2);
     const copied = await copyTextToClipboard(payloadText);
     setCopyNotice(
       copied
         ? "Full Manual GapFill AI tuning bundle copied for ChatGPT review."
         : "Copy failed — check browser permissions."
     );
-  }, [buildAllResponsesPayload]);
+  }, [buildAllResponsesPayloadWithDeployment]);
 
   const hasAnyStepResponse = Boolean(step1 || step2Preview || step3 || step4 || step5);
 

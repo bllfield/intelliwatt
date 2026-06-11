@@ -237,6 +237,26 @@ export function extractValidationDayIntervalSeries(args: {
   };
 }
 
+export function resolveManualGapfillStoredTravelRangesForExport(args: {
+  step1TravelRanges?: unknown;
+  step4ReadbackTravelRanges?: unknown;
+  travelContext?: unknown;
+}): Array<{ startDate: string; endDate: string }> {
+  const fromStep1 = normalizeTravelRangesForExport(asArray(args.step1TravelRanges));
+  if (fromStep1.length > 0) return fromStep1;
+
+  const travelContext = asRecord(args.travelContext);
+  const fromContext = normalizeTravelRangesForExport([
+    ...asArray(travelContext.labDbRanges),
+    ...asArray(travelContext.seedPayloadRanges),
+    ...asArray(travelContext.sourceFallbackRanges),
+    ...asArray(travelContext.effectiveRanges),
+  ]);
+  if (fromContext.length > 0) return fromContext;
+
+  return normalizeTravelRangesForExport(asArray(args.step4ReadbackTravelRanges));
+}
+
 export function buildTravelRangeExportClassification(args: {
   storedTravelRanges: unknown;
   coverageWindow: { startDate: string; endDate: string } | null;

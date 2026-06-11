@@ -1477,8 +1477,10 @@ export default function GapFillLabCanonicalClient() {
   }
 
   async function onCopyAllPageResponses() {
+    const manualGapfillLab =
+      (await manualGapfillWorkflowRef.current?.buildAllResponsesPayloadWithDeployment()) ?? null;
     const payload = buildGapfillLabPageAllResponsesPayload({
-      manualGapfillLab: manualGapfillWorkflowRef.current?.buildAllResponsesPayload() ?? null,
+      manualGapfillLab,
       requestDebug,
       result,
       pastSimSnapshot,

@@ -1,6 +1,7 @@
 import type { ManualGapfillSeedMode } from "@/lib/admin/manualGapfillClient";
 import { buildManualGapfillAiTuningBundle } from "@/lib/admin/manualGapfillAiTuningBundle";
 import type { ExportDeploymentMetadata } from "@/lib/admin/aiTuningBundleHelpers";
+import { fetchExportDeploymentMetadata } from "@/lib/admin/fetchExportDeploymentMetadata";
 import { buildSimulationCodeMap } from "@/lib/admin/simulationCodeMap";
 
 type StepState<T> = {
@@ -115,6 +116,13 @@ export function buildManualGapfillAllResponsesPayload(args: {
       ),
     },
   };
+}
+
+export async function buildManualGapfillAllResponsesPayloadWithDeployment(
+  args: Parameters<typeof buildManualGapfillAllResponsesPayload>[0]
+): Promise<Record<string, unknown>> {
+  const deployment = args.deployment ?? (await fetchExportDeploymentMetadata());
+  return buildManualGapfillAllResponsesPayload({ ...args, deployment });
 }
 
 export function buildGapfillLabPageAllResponsesPayload(args: {

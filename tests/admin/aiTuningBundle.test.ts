@@ -253,6 +253,61 @@ describe("buildManualGapfillAiTuningBundle", () => {
     expect((bundle.validationDayIntervalSeries as any).sourceActualByDate["2025-07-01"]).toHaveLength(1);
     expect((bundle.simulationCodeMap as any).surface).toBe("manual_gapfill_lab");
   });
+
+  it("classifies travel ranges from step5 travelContext when step1 travelRanges are empty", () => {
+    const bundle = buildManualGapfillAiTuningBundle({
+      identityKey: "user:source:lab:MONTHLY_FROM_SOURCE_INTERVALS",
+      userEmail: "test@example.com",
+      userId: "user-1",
+      sourceHouseId: "source-1",
+      labHouseId: "lab-1",
+      mode: "MONTHLY_FROM_SOURCE_INTERVALS",
+      esiid: "E123",
+      includeDiagnostics: true,
+      anchorEndDate: "",
+      includeDailyRows: true,
+      policySnapshot: { selectedDateKeys: ["2025-08-14"] },
+      step1: {
+        identityKey: "user:source:lab:MONTHLY_FROM_SOURCE_INTERVALS",
+        data: {
+          coverage: { coverageStart: "2025-04-15", coverageEnd: "2026-04-14" },
+          travelRanges: [],
+        },
+      },
+      step2Preview: null,
+      step3: null,
+      step4: null,
+      step5: {
+        identityKey: "user:source:lab:MONTHLY_FROM_SOURCE_INTERVALS",
+        data: {
+          compare: { dailyRows: [] },
+          travelContext: {
+            effectiveRanges: [{ startDate: "2025-08-13", endDate: "2025-08-17" }],
+            labDbRanges: [],
+            seedPayloadRanges: [{ startDate: "2025-08-13", endDate: "2025-08-17" }],
+            sourceFallbackRanges: [
+              { startDate: "2024-01-01", endDate: "2024-01-07" },
+              { startDate: "2024-06-01", endDate: "2024-06-05" },
+              { startDate: "2025-08-13", endDate: "2025-08-17" },
+            ],
+          },
+        },
+      },
+      isStepStale: () => false,
+      deployment,
+    });
+
+    const travel = bundle.travelClassification as any;
+    expect(travel.counts.storedCount).toBe(3);
+    expect(travel.counts.activeCurrentWindowCount).toBe(1);
+    expect(travel.counts.archivedHistoricalCount).toBe(2);
+    expect(travel.counts.futureOutsideCurrentWindowCount).toBe(0);
+    expect(travel.effectiveTravelRangesForRecalc).toEqual([{ startDate: "2025-08-13", endDate: "2025-08-17" }]);
+    expect(travel.travelShouldReduceManualSim).toBe(false);
+    expect(travel.manualSimExpectedToEstimateNormalCounterfactualUsage).toBe(true);
+    expect(travel.travelActualMarkedNonRepresentative).toBe(true);
+    expect((bundle.simulationCodeMap as any).deployment.gitCommitSha).toBe(deployment.gitCommitSha);
+  });
 });
 
 describe("buildSimulationCodeMap", () => {

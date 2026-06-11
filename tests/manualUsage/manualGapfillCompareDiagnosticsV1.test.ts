@@ -249,6 +249,49 @@ describe("manualGapfillCompareDiagnosticsV1", () => {
     expect(day?.normalizedShapeError).toBeLessThan(0.01);
   });
 
+  it("derives simulated interval curves from daily totals when lab artifact has no intervals15", () => {
+    const date = "2025-07-01";
+    const actualPattern = Array.from({ length: 96 }, (_, slot) => (slot < 48 ? 0.5 : 2));
+
+    const out = buildManualGapfillCompareDiagnosticsV1({
+      dailyRows: [makeDailyRow(date, 100, 80)],
+      validationDayKeys: [date],
+      sourceActualDataset: makeIntervalDataset([date], actualPattern),
+      labDataset: { daily: [{ date, kwh: 80 }] },
+    });
+
+    const curve = out.validationIntervalCurveDiagnostics;
+    expect(curve.available).toBe(true);
+    expect(curve.unavailableReason).toBeNull();
+    expect(curve.actualIntervalRowsFound).toBeGreaterThan(0);
+    expect(curve.simulatedIntervalRowsFound).toBe(0);
+    expect(curve.selectedValidationDayKeysUsed).toEqual([date]);
+    const day = curve.days.find((entry) => entry.date === date);
+    expect(day?.simulatedIntervalsDerivedFromDailyTotal).toBe(true);
+    expect(day?.rawIntervalWape).toBeGreaterThan(0);
+    expect(day?.peakActualLocalTime).toMatch(/^\d{2}:\d{2}$/);
+    expect(day?.actual96SlotShape).toHaveLength(96);
+    expect(day?.todBuckets.afternoon.shareActual).not.toBeNull();
+    expect(out.dashboardSummary.validationIntervalCurveWape).not.toBeNull();
+  });
+
+  it("marks interval curve diagnostics unavailable when actual intervals are missing", () => {
+    const date = "2025-07-01";
+    const out = buildManualGapfillCompareDiagnosticsV1({
+      dailyRows: [makeDailyRow(date, 100, 80)],
+      validationDayKeys: [date],
+      sourceActualDataset: { daily: [{ date, kwh: 100 }] },
+      labDataset: { daily: [{ date, kwh: 80 }] },
+    });
+
+    const curve = out.validationIntervalCurveDiagnostics;
+    expect(curve.available).toBe(false);
+    expect(curve.unavailableReason).toBe("no_actual_interval_rows_for_selected_validation_days");
+    expect(curve.actualIntervalRowsFound).toBe(0);
+    expect(curve.days).toEqual([]);
+    expect(out.dashboardSummary.validationIntervalCurveWape).toBeNull();
+  });
+
   it("calculates TOD bucket summary for validation days", () => {
     const date = "2025-07-01";
     const actualPattern = Array.from({ length: 96 }, (_, slot) => {

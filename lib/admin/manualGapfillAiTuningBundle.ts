@@ -7,6 +7,7 @@ import {
   buildTravelRangeExportClassification,
   extractValidationDayIntervalSeries,
   extractValidationDayKeysFromPolicySnapshot,
+  resolveManualGapfillStoredTravelRangesForExport,
   type ExportDeploymentMetadata,
 } from "@/lib/admin/aiTuningBundleHelpers";
 import { buildSimulationCodeMap } from "@/lib/admin/simulationCodeMap";
@@ -65,12 +66,12 @@ export function buildManualGapfillAiTuningBundle(args: {
           endDate: asString(coverageWindowRaw.coverageEnd)!,
         }
       : null;
-  const storedTravelRanges =
-    asArray(asRecord(step1).travelRanges).length > 0
-      ? asArray(asRecord(step1).travelRanges)
-      : asArray(asRecord(asRecord(step4).readback).travelRanges).length > 0
-        ? asArray(asRecord(asRecord(step4).readback).travelRanges)
-        : asArray(asRecord(step5Record.travelContext).labDbRanges);
+  const travelContext = step5Record.travelContext ?? asRecord(compare).travelContext ?? null;
+  const storedTravelRanges = resolveManualGapfillStoredTravelRangesForExport({
+    step1TravelRanges: asRecord(step1).travelRanges,
+    step4ReadbackTravelRanges: asRecord(asRecord(step4).readback).travelRanges,
+    travelContext,
+  });
 
   const dailyRows = asArray(compare.dailyRows);
   const validationIntervalCurveDiagnostics =

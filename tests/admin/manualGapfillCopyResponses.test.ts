@@ -88,4 +88,41 @@ describe("buildManualGapfillAllResponsesPayload", () => {
     expect((payload.compareExport as any).fullResponse.status).toBe("ready");
     expect((payload.steps as any).step5_compare.response.diagnosticsV1).toBeTruthy();
   });
+
+  it("includes deployment metadata in simulationCodeMap when provided", () => {
+    const payload = buildManualGapfillAllResponsesPayload({
+      identityKey: "user:source:lab:MONTHLY_FROM_SOURCE_INTERVALS",
+      userEmail: "test@example.com",
+      userId: "user-1",
+      sourceHouseId: "source-1",
+      labHouseId: "lab-1",
+      mode: "MONTHLY_FROM_SOURCE_INTERVALS",
+      esiid: "E123",
+      includeDiagnostics: true,
+      anchorEndDate: "",
+      includeDailyRows: true,
+      persistSeedToggle: false,
+      persistedSeedInSession: false,
+      status: "ready",
+      error: null,
+      identityNotice: null,
+      policySnapshot: null,
+      step1: null,
+      step2Preview: null,
+      step3: null,
+      step4: null,
+      step5: null,
+      isStepStale: () => false,
+      deployment: {
+        gitCommitSha: "abc123def456",
+        gitCommitRef: "main",
+        deployedAt: "2026-06-06T12:00:00.000Z",
+        workingTreeDirty: false,
+        metadataSource: "local_git",
+      },
+    });
+
+    expect((payload.simulationCodeMap as any).deployment.gitCommitSha).toBe("abc123def456");
+    expect((payload.aiTuningBundle as any).simulationCodeMap.deployment.metadataSource).toBe("local_git");
+  });
 });
