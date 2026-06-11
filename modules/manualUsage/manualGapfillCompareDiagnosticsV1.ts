@@ -1,7 +1,6 @@
 import type { ManualGapfillCompareMonthlyRow } from "@/modules/manualUsage/manualGapfillCompare";
 import type { ManualUsageReadModel } from "@/modules/manualUsage/readModel";
 import type { ManualUsagePayload, TravelRange } from "@/modules/simulatedUsage/types";
-import { filterTravelRangesToCoverageWindow } from "@/lib/usage/pastSimTravelRanges";
 import { resolveReportedCoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
 
 function dateKeyInTimezone(tsIso: string, tz: string): string {
@@ -368,6 +367,27 @@ function normalizeTravelRanges(ranges: TravelRange[] | undefined | null): Travel
       endDate: String(range.endDate ?? "").slice(0, 10),
     }))
     .filter((range) => /^\d{4}-\d{2}-\d{2}$/.test(range.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(range.endDate));
+}
+
+function filterTravelRangesToCoverageWindow(
+  ranges: TravelRange[] | undefined | null,
+  window: { startDate: string; endDate: string } | null | undefined
+): TravelRange[] {
+  const normalized = normalizeTravelRanges(ranges);
+  const windowStart = String(window?.startDate ?? "").slice(0, 10);
+  const windowEnd = String(window?.endDate ?? "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(windowStart) || !/^\d{4}-\d{2}-\d{2}$/.test(windowEnd) || windowStart > windowEnd) {
+    return normalized;
+  }
+  const clipped: TravelRange[] = [];
+  for (const range of normalized) {
+    if (range.endDate < windowStart || range.startDate > windowEnd) continue;
+    clipped.push({
+      startDate: range.startDate < windowStart ? windowStart : range.startDate,
+      endDate: range.endDate > windowEnd ? windowEnd : range.endDate,
+    });
+  }
+  return clipped;
 }
 
 function rangesEqual(left: TravelRange, right: TravelRange): boolean {

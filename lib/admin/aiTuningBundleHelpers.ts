@@ -6,11 +6,12 @@ function asDateKey(value: unknown): string | null {
 }
 
 function normalizeTravelRangesForExport(
-  ranges: ReadonlyArray<TravelRangeLike> | null | undefined
+  ranges: ReadonlyArray<unknown> | null | undefined
 ): Array<{ startDate: string; endDate: string }> {
   const out: Array<{ startDate: string; endDate: string }> = [];
   const seen = new Set<string>();
-  for (const range of ranges ?? []) {
+  for (const raw of ranges ?? []) {
+    const range = raw as TravelRangeLike;
     const startDate = asDateKey(range?.startDate);
     const endDate = asDateKey(range?.endDate);
     if (!startDate || !endDate) continue;
