@@ -31,6 +31,15 @@ export async function resolveOrchestrationPastScenarioId(args: {
   return ensured.pastScenarioId ? String(ensured.pastScenarioId) : null;
 }
 
+export type PrepareModelIntelligenceDispatchStepResult =
+  | {
+      ok: true;
+      stepId: string;
+      runMode: ModelIntelligenceRunMode;
+      onePathRunRequest: Record<string, unknown>;
+    }
+  | { ok: false; error: string; message: string };
+
 export async function prepareModelIntelligenceDispatchStep(args: {
   context: ModelIntelligenceLabContext;
   preview: ModelIntelligenceSequencePreview;
@@ -38,14 +47,7 @@ export async function prepareModelIntelligenceDispatchStep(args: {
   onePathOptions: ModelIntelligenceOnePathOptions;
   manualGapfillOptions: ModelIntelligenceManualGapfillOptions;
   ownerUserId: string | null;
-}):
-  | {
-      ok: true;
-      stepId: string;
-      runMode: ModelIntelligenceRunMode;
-      onePathRunRequest: Record<string, unknown>;
-    }
-  | { ok: false; error: string; message: string } {
+}): Promise<PrepareModelIntelligenceDispatchStepResult> {
   const step = listOrchestrationDispatchSteps(args.preview).find((entry) => entry.runMode === args.runMode);
   if (!step) {
     return {
