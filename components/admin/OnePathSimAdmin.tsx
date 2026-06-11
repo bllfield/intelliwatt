@@ -659,6 +659,15 @@ export function OnePathSimAdmin() {
 
   const refreshIntervalDiagnosticsReadback = useCallback(async () => {
     if (!lookup?.email || !selectedScenarioId || (mode !== "INTERVAL" && mode !== "GREEN_BUTTON")) return;
+    const readModel = asRecord(runResult?.readModel);
+    const compactArtifactSummary = asRecord(readModel?.compactArtifactSummary);
+    const datasetMeta = asRecord(asRecord(readModel?.dataset)?.meta);
+    const exactArtifactInputHash =
+      (typeof compactArtifactSummary?.artifactInputHash === "string" && compactArtifactSummary.artifactInputHash.trim()) ||
+      (typeof datasetMeta?.artifactInputHash === "string" && datasetMeta.artifactInputHash.trim()) ||
+      (typeof asRecord(runResult?.artifact)?.artifactInputHash === "string" &&
+        String(asRecord(runResult?.artifact)?.artifactInputHash).trim()) ||
+      null;
     setBusy(true);
     setError(null);
     try {
@@ -674,6 +683,7 @@ export function OnePathSimAdmin() {
           mode,
           actualContextHouseId: effectiveActualContextHouseId || null,
           includePosthocTopMissIntervalCurves,
+          exactArtifactInputHash,
         }),
       });
       const json = await res.json().catch(() => null);
@@ -702,6 +712,7 @@ export function OnePathSimAdmin() {
     includePosthocTopMissIntervalCurves,
     lookup?.email,
     mode,
+    runResult,
     selectedScenarioId,
   ]);
 

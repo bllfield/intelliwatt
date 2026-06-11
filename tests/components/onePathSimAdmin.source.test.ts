@@ -362,4 +362,14 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(serviceSource).toContain("validationActualDailyKwhByDateLocal");
     expect(datasetSource).toContain("validationActualDailyKwhByDateLocal?: Record<string, number>;");
   });
+
+  it("keeps posthoc interval diagnostics readback artifact-only without lab rebuild", () => {
+    const source = readRepoFile("components/admin/OnePathSimAdmin.tsx");
+    const routeSource = readRepoFile("app/api/admin/tools/one-path-sim/route.ts");
+
+    expect(source).toContain('action: "read_past_interval_diagnostics"');
+    expect(source).toContain("exactArtifactInputHash");
+    expect(routeSource).toContain("disableArtifactRebuildFallback: true");
+    expect(routeSource).toContain("disableArtifactRebuildFallback !== true");
+  });
 });

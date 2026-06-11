@@ -813,6 +813,7 @@ async function buildPastSimRunReadbackResponse(args: {
   linkedSourceHouseId?: string | null;
   linkedSourceScenarioId?: string | null;
   includePosthocTopMissIntervalCurves?: boolean;
+  disableArtifactRebuildFallback?: boolean;
 }) {
   const startedAt = Date.now();
   const readScenarioDataset = (
@@ -847,7 +848,12 @@ async function buildPastSimRunReadbackResponse(args: {
   });
 
   let readback = await readScenarioDataset(readModeUsed);
-  if (!readback.ok && readback.code === "ARTIFACT_MISSING" && readModeUsed === "artifact_only") {
+  if (
+    !readback.ok &&
+    readback.code === "ARTIFACT_MISSING" &&
+    readModeUsed === "artifact_only" &&
+    args.disableArtifactRebuildFallback !== true
+  ) {
     readModeUsed = "allow_rebuild";
     readback = await readScenarioDataset("allow_rebuild");
   }
@@ -2027,6 +2033,10 @@ export async function POST(request: NextRequest) {
       );
     }
     const includePosthocTopMissIntervalCurves = body?.includePosthocTopMissIntervalCurves === true;
+    const exactArtifactInputHash =
+      typeof body?.exactArtifactInputHash === "string" && body.exactArtifactInputHash.trim()
+        ? body.exactArtifactInputHash.trim()
+        : null;
     const preferredActualSource = mode === "INTERVAL" ? ("SMT" as const) : ("GREEN_BUTTON" as const);
     const linkedSourceScenarioId =
       onePathTestHomeState.linkedSourceUserId && onePathTestHomeState.linkedSourceHouseId
@@ -2046,10 +2056,12 @@ export async function POST(request: NextRequest) {
       preferredActualSource,
       smtSourceEsiid,
       readMode: "artifact_only",
+      exactArtifactInputHash,
       linkedSourceUserId: onePathTestHomeState.linkedSourceUserId,
       linkedSourceHouseId: onePathTestHomeState.linkedSourceHouseId,
       linkedSourceScenarioId,
       includePosthocTopMissIntervalCurves,
+      disableArtifactRebuildFallback: true,
     });
     if (!readback.ok) {
       const status =
