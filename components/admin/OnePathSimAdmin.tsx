@@ -681,7 +681,7 @@ export function OnePathSimAdmin() {
         setError(formatAdminToolErrorMessage(json?.message) || formatAdminToolErrorMessage(json?.error) || "Diagnostics readback failed.");
         return;
       }
-      setRunResult((current) =>
+      setRunResult((current: Record<string, unknown> | null) =>
         current
           ? {
               ...current,

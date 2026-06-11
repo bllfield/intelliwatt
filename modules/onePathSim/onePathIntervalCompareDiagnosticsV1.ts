@@ -579,7 +579,7 @@ export function isOnePathIntervalDiagnosticsInputType(inputType: string | null |
 export function extractValidationDayKeysFromCompareProjection(compareProjection: unknown): string[] {
   const rows = Array.isArray((compareProjection as any)?.rows) ? (compareProjection as any).rows : [];
   return Array.from(
-    new Set(
+    new Set<string>(
       rows
         .map((row: any) => String(row?.localDate ?? row?.date ?? "").slice(0, 10))
         .filter((date: string) => /^\d{4}-\d{2}-\d{2}$/.test(date))
@@ -647,7 +647,9 @@ export function buildOnePathIntervalCompareDiagnosticsV1(
   const travelDaySet = buildTravelDaySet(args.travelRanges);
   const actualByDate = readDailyRows(args.actualDataset);
   const simulatedByDate = readDailyRows(args.simulatedDataset);
-  const dates = Array.from(new Set([...actualByDate.keys(), ...simulatedByDate.keys()])).sort();
+  const dates = Array.from(
+    new Set([...Array.from(actualByDate.keys()), ...Array.from(simulatedByDate.keys())])
+  ).sort();
   const weatherByDate = buildWeatherMap(args.actualDataset);
   if (weatherByDate.size === 0) {
     const simWeather = buildWeatherMap(args.simulatedDataset);
