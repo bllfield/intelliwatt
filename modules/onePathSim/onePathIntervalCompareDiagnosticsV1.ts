@@ -1,8 +1,50 @@
 import type { TravelRange } from "@/modules/simulatedUsage/types";
-import {
-  filterTravelRangesToCoverageWindow,
-} from "@/lib/usage/pastSimTravelRanges";
 import { resolveReportedCoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
+
+function asTravelDateKey(value: unknown): string | null {
+  const text = String(value ?? "").slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
+}
+
+function normalizeTravelRangesForDiagnostics(
+  ranges: ReadonlyArray<{ startDate?: unknown; endDate?: unknown }> | null | undefined
+): TravelRange[] {
+  const out: TravelRange[] = [];
+  const seen = new Set<string>();
+  for (const range of ranges ?? []) {
+    const startDate = asTravelDateKey(range?.startDate);
+    const endDate = asTravelDateKey(range?.endDate);
+    if (!startDate || !endDate) continue;
+    const key = `${startDate}|${endDate}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ startDate, endDate });
+  }
+  return out.sort((left, right) =>
+    left.startDate === right.startDate ? left.endDate.localeCompare(right.endDate) : left.startDate.localeCompare(right.startDate)
+  );
+}
+
+function filterTravelRangesToCoverageWindow(
+  ranges: ReadonlyArray<{ startDate?: unknown; endDate?: unknown }> | null | undefined,
+  window: { startDate?: unknown; endDate?: unknown } | null | undefined
+): TravelRange[] {
+  const normalized = normalizeTravelRangesForDiagnostics(ranges);
+  const windowStart = asTravelDateKey(window?.startDate);
+  const windowEnd = asTravelDateKey(window?.endDate);
+  if (!windowStart || !windowEnd || windowStart > windowEnd) {
+    return normalized;
+  }
+  const clipped: TravelRange[] = [];
+  for (const range of normalized) {
+    if (range.endDate < windowStart || range.startDate > windowEnd) continue;
+    clipped.push({
+      startDate: range.startDate < windowStart ? windowStart : range.startDate,
+      endDate: range.endDate > windowEnd ? windowEnd : range.endDate,
+    });
+  }
+  return normalizeTravelRangesForDiagnostics(clipped);
+}
 
 export type OnePathIntervalSourceType = "SMT" | "GREEN_BUTTON";
 
