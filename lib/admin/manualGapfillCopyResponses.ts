@@ -39,6 +39,9 @@ export function buildManualGapfillAllResponsesPayload(args: {
     };
   };
 
+  const step5Response = args.step5?.data ?? null;
+  const step5Record = step5Response && typeof step5Response === "object" ? step5Response : null;
+
   return {
     exportedAt: new Date().toISOString(),
     workflow: "manual_gapfill_lab_mg1_mg5",
@@ -70,6 +73,31 @@ export function buildManualGapfillAllResponsesPayload(args: {
       step3_prepareSeed: serializeStep(args.step3, "step3_prepareSeed"),
       step4_runReadback: serializeStep(args.step4, "step4_runReadback"),
       step5_compare: serializeStep(args.step5, "step5_compare"),
+    },
+    compareExport: step5Record
+      ? {
+          fullResponse: step5Record,
+          diagnosticsV1: step5Record.diagnosticsV1 ?? null,
+          weatherDiagnostics: step5Record.weatherDiagnostics ?? null,
+          travelDiagnostics: step5Record.travelDiagnostics ?? null,
+          billPeriodAllocationDiagnostics: step5Record.billPeriodAllocationDiagnostics ?? null,
+          validationIntervalCurveDiagnostics: step5Record.validationIntervalCurveDiagnostics ?? null,
+          worstDayDiagnostics: step5Record.worstDayDiagnostics ?? null,
+          dashboardSummary: step5Record.dashboardSummary ?? null,
+          compareDiagnostics: step5Record.diagnostics ?? null,
+        }
+      : null,
+    copyMeta: {
+      includesAllStepResponses: Boolean(
+        args.step1 || args.step2Preview || args.step3 || args.step4 || args.step5
+      ),
+      includesCompareDiagnosticsV1: Boolean(step5Record?.diagnosticsV1),
+      includesCompareTopLevelDiagnostics: Boolean(
+        step5Record?.weatherDiagnostics ||
+          step5Record?.travelDiagnostics ||
+          step5Record?.validationIntervalCurveDiagnostics ||
+          step5Record?.worstDayDiagnostics
+      ),
     },
   };
 }

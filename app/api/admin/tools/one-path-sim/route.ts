@@ -101,6 +101,7 @@ import {
 import { buildOnePathManualUsagePastSimReadResult } from "@/modules/onePathSim/manualPastSimReadResult";
 import { buildOnePathManualStageOnePreview, buildOnePathManualStageOneView } from "@/modules/onePathSim/manualStageView";
 import { buildOnePathRunReadOnlyView } from "@/modules/onePathSim/runReadOnlyView";
+import { buildOnePathIntervalDiagnosticsForPastResponse } from "@/modules/onePathSim/onePathIntervalCompareDiagnosticsV1";
 import type { ManualUsagePayload } from "@/modules/onePathSim/simulatedUsage/types";
 import { loadPastSimBuildInputsForRead } from "@/lib/usage/loadPastSimBuildInputsForRead";
 import {
@@ -811,6 +812,7 @@ async function buildPastSimRunReadbackResponse(args: {
   linkedSourceUserId?: string | null;
   linkedSourceHouseId?: string | null;
   linkedSourceScenarioId?: string | null;
+  includePosthocTopMissIntervalCurves?: boolean;
 }) {
   const startedAt = Date.now();
   const readScenarioDataset = (
@@ -1034,6 +1036,15 @@ async function buildPastSimRunReadbackResponse(args: {
     ...pastWeatherApiFields,
     pastWeatherCrossSurfaceParity,
     artifact: null,
+    onePathIntervalDiagnosticsV1: buildOnePathIntervalDiagnosticsForPastResponse({
+      mode: preferredActualSourceForCompare === "GREEN_BUTTON" ? "GREEN_BUTTON" : "INTERVAL",
+      preferredActualSource: preferredActualSourceForCompare,
+      actualDataset: sageTruthForCompare?.dataset ?? null,
+      simulatedDataset: artifactDataset,
+      compareProjection,
+      pastVariables,
+      includePosthocTopMissIntervalCurves: args.includePosthocTopMissIntervalCurves === true,
+    }),
     readModel: {
       ...buildCompactSimulationReadModel({
         artifact: null,
@@ -1995,6 +2006,70 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  if (action === "read_past_interval_diagnostics") {
+    const mode = normalizeMode(body?.mode);
+    if (mode !== "INTERVAL" && mode !== "GREEN_BUTTON") {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "interval_diagnostics_unavailable",
+          message: "Interval diagnostics readback is only available for SMT and Green Button Past runs.",
+        },
+        { status: 400 }
+      );
+    }
+    const scenarioId =
+      typeof body?.scenarioId === "string" && body.scenarioId.trim() ? body.scenarioId.trim() : null;
+    if (!scenarioId) {
+      return NextResponse.json(
+        { ok: false, error: "scenario_required", message: "Past scenarioId is required for interval diagnostics readback." },
+        { status: 400 }
+      );
+    }
+    const includePosthocTopMissIntervalCurves = body?.includePosthocTopMissIntervalCurves === true;
+    const preferredActualSource = mode === "INTERVAL" ? ("SMT" as const) : ("GREEN_BUTTON" as const);
+    const linkedSourceScenarioId =
+      onePathTestHomeState.linkedSourceUserId && onePathTestHomeState.linkedSourceHouseId
+        ? await findPastScenarioId({
+            userId: onePathTestHomeState.linkedSourceUserId,
+            houseId: onePathTestHomeState.linkedSourceHouseId,
+          })
+        : null;
+    const readback = await buildPastSimRunReadbackResponse({
+      userId: effectiveUserId,
+      houseId: effectiveHouseId,
+      scenarioId,
+      actualContextHouseId:
+        typeof body?.actualContextHouseId === "string" && body.actualContextHouseId.trim()
+          ? body.actualContextHouseId.trim()
+          : defaultActualContextHouseId,
+      preferredActualSource,
+      smtSourceEsiid,
+      readMode: "artifact_only",
+      linkedSourceUserId: onePathTestHomeState.linkedSourceUserId,
+      linkedSourceHouseId: onePathTestHomeState.linkedSourceHouseId,
+      linkedSourceScenarioId,
+      includePosthocTopMissIntervalCurves,
+    });
+    if (!readback.ok) {
+      const status =
+        readback.code === "NO_BUILD" || readback.code === "ARTIFACT_MISSING" || readback.code === "SCENARIO_NOT_FOUND"
+          ? 404
+          : readback.code === "COMPARE_TRUTH_INCOMPLETE"
+            ? 409
+            : 500;
+      return NextResponse.json(
+        { ok: false, error: readback.code, message: readback.message },
+        { status }
+      );
+    }
+    return NextResponse.json({
+      ok: true,
+      diagnosticOnly: true,
+      onePathIntervalDiagnosticsV1: readback.onePathIntervalDiagnosticsV1,
+    });
+  }
+
   if (action === "run") {
     const mode = normalizeMode(body?.mode);
     const correlationId = createSimCorrelationId();
@@ -2021,6 +2096,7 @@ export async function POST(request: NextRequest) {
       }
     }
     const isManualMode = mode === "MANUAL_MONTHLY" || mode === "MANUAL_ANNUAL";
+    const includePosthocTopMissIntervalCurves = body?.includePosthocTopMissIntervalCurves === true;
     const manualUsage =
       isManualMode
         ? await getOnePathManualUsageInput({ userId: effectiveUserId, houseId: effectiveHouseId }).catch(() => ({
@@ -2288,6 +2364,7 @@ export async function POST(request: NextRequest) {
           linkedSourceUserId: onePathTestHomeState.linkedSourceUserId,
           linkedSourceHouseId: onePathTestHomeState.linkedSourceHouseId,
           linkedSourceScenarioId,
+          includePosthocTopMissIntervalCurves,
         });
         if (!readback.ok) {
           const status =
@@ -2549,6 +2626,17 @@ export async function POST(request: NextRequest) {
           runDisplayView: compactRunDisplayView,
           ...(compactPastWeatherApiFields ?? {}),
           artifact: null,
+          onePathIntervalDiagnosticsV1: buildOnePathIntervalDiagnosticsForPastResponse({
+            mode,
+            preferredActualSource: preferredActualSourceForPast,
+            actualDataset: sageTruthForPastDisplay?.dataset ?? null,
+            simulatedDataset: artifactDataset,
+            compareProjection: compareProjectionForPast,
+            travelRanges: Array.isArray(effectiveRawInputBase.travelRanges)
+              ? (effectiveRawInputBase.travelRanges as TravelRange[])
+              : undefined,
+            includePosthocTopMissIntervalCurves,
+          }),
           readModel: compactReadModel,
         });
       }
@@ -2655,6 +2743,21 @@ export async function POST(request: NextRequest) {
         runPastWeather ?? { weatherSensitivity: { score: null, derivedInput: null } }
       );
       const runPastWeatherApiFields = runPastWeather ? buildAdminPastWeatherApiFields(runPastWeather) : null;
+      const compareProjectionForDiagnostics = manualPastReadResult?.ok
+        ? manualPastReadResult.compareProjection
+        : readModel.compareProjection;
+      const onePathIntervalDiagnosticsV1 = buildOnePathIntervalDiagnosticsForPastResponse({
+        mode,
+        preferredActualSource: preferredActualSourceForPast,
+        actualDataset:
+          (isManualMode ? actualDatasetForManualRun : sageTruthForPastDisplay?.dataset) ?? null,
+        simulatedDataset: runDisplayDataset,
+        compareProjection: compareProjectionForDiagnostics,
+        travelRanges: Array.isArray(effectiveRawInputBase.travelRanges)
+          ? (effectiveRawInputBase.travelRanges as TravelRange[])
+          : undefined,
+        includePosthocTopMissIntervalCurves,
+      });
       if (!includeDebugDiagnostics) {
         const compactReadModel = buildCompactSimulationReadModel({
           artifact: asRecord(artifact),
@@ -2683,6 +2786,7 @@ export async function POST(request: NextRequest) {
           runDisplayView,
           ...(runPastWeatherApiFields ?? {}),
           artifact: null,
+          onePathIntervalDiagnosticsV1,
           readModel: compactReadModelWithPerf,
           performanceAudit: compactReadModelWithPerf?.performanceAudit ?? null,
           greenButtonRehydrateFromRaw,
@@ -2708,6 +2812,7 @@ export async function POST(request: NextRequest) {
         manualStageOneView: readModel.manualStageOneView ?? null,
         runDisplayView,
         ...(runPastWeatherApiFields ?? {}),
+        onePathIntervalDiagnosticsV1,
         performanceAudit: readModelWithPerf?.performanceAudit ?? null,
         greenButtonRehydrateFromRaw,
       });

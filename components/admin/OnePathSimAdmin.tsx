@@ -9,6 +9,7 @@ import { OnePathManualStageView } from "@/components/admin/OnePathManualStageVie
 import type { ManualValidationSummary } from "@/modules/manualUsage/manualValidationSummary";
 import { OnePathRunReadOnlyView } from "@/components/admin/OnePathRunReadOnlyView";
 import {
+  buildOnePathAdminFullCopyPayload,
   buildSimulationVariableCopyPayload,
   buildSimulationVariableFamilyAdminView,
 } from "@/modules/onePathSim/simulationVariablePresentation";
@@ -252,6 +253,7 @@ export function OnePathSimAdmin() {
   const [greenButtonUploadStatus, setGreenButtonUploadStatus] = useState<string | null>(null);
   const [greenButtonUploadError, setGreenButtonUploadError] = useState<string | null>(null);
   const [rehydrateGreenButtonFromRaw, setRehydrateGreenButtonFromRaw] = useState(false);
+  const [includePosthocTopMissIntervalCurves, setIncludePosthocTopMissIntervalCurves] = useState(false);
 
   const loadVariablePolicy = useCallback(async () => {
     const res = await fetch("/api/admin/tools/one-path-sim/variables");
@@ -563,7 +565,7 @@ export function OnePathSimAdmin() {
       return;
     }
     try {
-      const payload = buildSimulationVariableCopyPayload({
+      const simulationVariablesPayload = buildSimulationVariableCopyPayload({
         mode,
         response: variablePolicy,
         runSnapshot: (runResult?.readModel?.effectiveSimulationVariablesUsed as any) ?? null,
@@ -584,6 +586,7 @@ export function OnePathSimAdmin() {
           null,
         smtIncompleteMeterRetry: asRecord(runResult?.smtIncompleteMeterRetry) ?? null,
         smtRefreshCheck: asRecord(runResult?.smtRefreshCheck) ?? null,
+        onePathIntervalDiagnosticsV1: asRecord(runResult?.onePathIntervalDiagnosticsV1) ?? null,
         currentControls: {
           mode,
           actualContextHouseId: effectiveActualContextHouseId || null,
@@ -594,9 +597,28 @@ export function OnePathSimAdmin() {
           persistRequested,
           runReason,
           includeSimRunAudit: includeSimRunAuditEnabled,
+          includePosthocTopMissIntervalCurves,
         },
         knownScenario: lastRunKnownScenario ?? selectedKnownScenario,
         sandboxSummary: sandboxHarnessSummary,
+      });
+      const payload = buildOnePathAdminFullCopyPayload({
+        simulationVariablesPayload,
+        runResult: asRecord(runResult),
+        lookup: lookup ? (lookup as Record<string, unknown>) : null,
+        uiControls: {
+          mode,
+          debugDiagnosticsEnabled,
+          includeSimRunAuditEnabled,
+          includePosthocTopMissIntervalCurves,
+          validationSelectionMode,
+          validationDayCount,
+          validationOnlyDateKeysLocal,
+          weatherPreference,
+          persistRequested,
+          runReason,
+          actualContextHouseId: effectiveActualContextHouseId || null,
+        },
       });
       await writeClipboardText(JSON.stringify(payload, null, 2));
       setStatus("All simulation variables copied for AI.");
@@ -619,6 +641,7 @@ export function OnePathSimAdmin() {
     runResult?.runDisplayView,
     runResult?.smtIncompleteMeterRetry,
     runResult?.smtRefreshCheck,
+    runResult?.onePathIntervalDiagnosticsV1,
     runtimeEnvParityTrace,
     sandboxHarnessSummary,
     selectedKnownScenario,
@@ -629,6 +652,57 @@ export function OnePathSimAdmin() {
     weatherPreference,
     intervalPastReadinessTrace,
     includeSimRunAuditEnabled,
+    debugDiagnosticsEnabled,
+    includePosthocTopMissIntervalCurves,
+    lookup,
+  ]);
+
+  const refreshIntervalDiagnosticsReadback = useCallback(async () => {
+    if (!lookup?.email || !selectedScenarioId || (mode !== "INTERVAL" && mode !== "GREEN_BUTTON")) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/tools/one-path-sim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "read_past_interval_diagnostics",
+          email: lookup.email,
+          sourceHouseId: effectiveHouseId,
+          houseId: effectiveMutableHouseId,
+          scenarioId: selectedScenarioId,
+          mode,
+          actualContextHouseId: effectiveActualContextHouseId || null,
+          includePosthocTopMissIntervalCurves,
+        }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok) {
+        setError(formatAdminToolErrorMessage(json?.message) || formatAdminToolErrorMessage(json?.error) || "Diagnostics readback failed.");
+        return;
+      }
+      setRunResult((current) =>
+        current
+          ? {
+              ...current,
+              onePathIntervalDiagnosticsV1: json.onePathIntervalDiagnosticsV1 ?? current.onePathIntervalDiagnosticsV1,
+            }
+          : current
+      );
+      setStatus("Interval diagnostics refreshed from completed artifact readback (no simulation rerun).");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Interval diagnostics readback failed.");
+    } finally {
+      setBusy(false);
+    }
+  }, [
+    effectiveActualContextHouseId,
+    effectiveHouseId,
+    effectiveMutableHouseId,
+    includePosthocTopMissIntervalCurves,
+    lookup?.email,
+    mode,
+    selectedScenarioId,
   ]);
 
   const copyCurrentFamilyForAi = useCallback(async () => {
@@ -655,12 +729,14 @@ export function OnePathSimAdmin() {
           null,
         smtIncompleteMeterRetry: asRecord(runResult?.smtIncompleteMeterRetry) ?? null,
         smtRefreshCheck: asRecord(runResult?.smtRefreshCheck) ?? null,
+        onePathIntervalDiagnosticsV1: asRecord(runResult?.onePathIntervalDiagnosticsV1) ?? null,
         currentControls: {
           mode,
           actualContextHouseId: effectiveActualContextHouseId || null,
           validationOnlyDateKeysLocal,
           selectedFamily: variableFamilyOpen,
           includeSimRunAudit: includeSimRunAuditEnabled,
+          includePosthocTopMissIntervalCurves,
         },
         knownScenario: lastRunKnownScenario ?? selectedKnownScenario,
         sandboxSummary: sandboxHarnessSummary,
@@ -1434,6 +1510,10 @@ export function OnePathSimAdmin() {
           includeDebugDiagnostics: effectiveIncludeDebugDiagnostics,
           rehydrateGreenButtonFromRaw:
             effectiveMode === "GREEN_BUTTON" && rehydrateGreenButtonFromRaw ? true : undefined,
+          includePosthocTopMissIntervalCurves:
+            effectiveMode === "INTERVAL" || effectiveMode === "GREEN_BUTTON"
+              ? includePosthocTopMissIntervalCurves
+              : undefined,
         }),
       });
       json = await res.json().catch(() => null);
@@ -1496,6 +1576,7 @@ export function OnePathSimAdmin() {
     weatherPreference,
     includeSimRunAuditEnabled,
     rehydrateGreenButtonFromRaw,
+    includePosthocTopMissIntervalCurves,
   ]);
 
   const manualTransport = useMemo(
@@ -2042,6 +2123,11 @@ export function OnePathSimAdmin() {
               runType={displayRunType}
               pastWeatherDiagnostics={asRecord(runResult?.pastWeatherDiagnostics)}
               topLevelWeatherScore={(runResult?.weatherSensitivityScore as WeatherSensitivityScore | null) ?? null}
+              onePathIntervalDiagnosticsV1={asRecord(runResult?.onePathIntervalDiagnosticsV1)}
+              includePosthocTopMissIntervalCurves={includePosthocTopMissIntervalCurves}
+              onIncludePosthocTopMissIntervalCurvesChange={setIncludePosthocTopMissIntervalCurves}
+              onRerunWithPosthocToggle={() => void refreshIntervalDiagnosticsReadback()}
+              showIntervalDiagnostics={mode === "INTERVAL" || mode === "GREEN_BUTTON"}
             />
           </div>
         ) : shouldRenderLookupBaselineView ? (

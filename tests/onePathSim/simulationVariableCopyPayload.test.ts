@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSimulationVariableCopyPayload } from "@/modules/onePathSim/simulationVariablePresentation";
+import { buildOnePathAdminFullCopyPayload, buildSimulationVariableCopyPayload } from "@/modules/onePathSim/simulationVariablePresentation";
 
 describe("one path simulation variable copy payload", () => {
   it("adds explicit top-level page truth sections for AI review", () => {
@@ -835,5 +835,28 @@ describe("one path simulation variable copy payload", () => {
         sourceOwner: "auditUserAdminPastReadModelParity",
       })
     );
+  });
+
+  it("wraps simulation variables with the full admin run and interval diagnostics export", () => {
+    const simulationVariablesPayload = { selectedMode: "INTERVAL", onePathIntervalDiagnosticsV1: null };
+    const payload = buildOnePathAdminFullCopyPayload({
+      simulationVariablesPayload,
+      runResult: {
+        ok: true,
+        runType: "PAST_SIM",
+        onePathIntervalDiagnosticsV1: { available: true, version: "v1" },
+        readModel: { compareProjection: { rows: [{ localDate: "2025-07-01" }] } },
+        pastWeatherDiagnostics: { score: 0.8 },
+      },
+      lookup: { email: "test@example.com", sourceContext: { committedUsageSource: "SMT" } },
+      uiControls: { includePosthocTopMissIntervalCurves: true },
+    });
+
+    expect((payload.copyMeta as any).includesFullRunResponse).toBe(true);
+    expect((payload.copyMeta as any).includesIntervalDiagnosticsV1).toBe(true);
+    expect((payload.fullAdminRunResponse as any).pastWeatherDiagnostics).toEqual({ score: 0.8 });
+    expect((payload.onePathIntervalDiagnosticsV1 as any).available).toBe(true);
+    expect((payload.simulationVariables as any).selectedMode).toBe("INTERVAL");
+    expect((payload.uiControls as any).includePosthocTopMissIntervalCurves).toBe(true);
   });
 });

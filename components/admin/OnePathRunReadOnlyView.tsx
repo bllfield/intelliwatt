@@ -14,6 +14,7 @@ import { resolvePastWeatherScoreFromHouseApiBody } from "@/lib/usage/userPastApi
 import { buildOnePathRunReadOnlyView, type OnePathRunReadOnlyView as OnePathRunReadOnlyModel } from "@/modules/onePathSim/runReadOnlyView";
 import type { WeatherSensitivityScore } from "@/modules/weatherSensitivity/shared";
 import { PAST_VALIDATION_COMPARE_DEFAULT_EXPANDED } from "@/modules/onePathSim/usageSimulator/pastCompareUiDefaults";
+import { OnePathIntervalDiagnosticsV1Panel } from "@/components/admin/one-path-sim/OnePathIntervalDiagnosticsV1Panel";
 
 function formatScenarioVariable(value: {
   kind: string;
@@ -66,6 +67,11 @@ export function OnePathRunReadOnlyView(props: {
   runType?: string | null;
   pastWeatherDiagnostics?: Record<string, unknown> | null;
   topLevelWeatherScore?: WeatherSensitivityScore | null;
+  onePathIntervalDiagnosticsV1?: Record<string, unknown> | null;
+  includePosthocTopMissIntervalCurves?: boolean;
+  onIncludePosthocTopMissIntervalCurvesChange?: (value: boolean) => void;
+  onRerunWithPosthocToggle?: () => void;
+  showIntervalDiagnostics?: boolean;
 }) {
   const [monthlyView, setMonthlyView] = useState<"chart" | "table">("chart");
   const [dailyView, setDailyView] = useState<"chart" | "table">("chart");
@@ -294,6 +300,15 @@ export function OnePathRunReadOnlyView(props: {
           <div className="mt-2 text-xs text-brand-navy/70">No validation/test-day compare rows are available for this Past scenario yet.</div>
         )}
       </div>
+
+      {props.showIntervalDiagnostics !== false && props.onePathIntervalDiagnosticsV1 ? (
+        <OnePathIntervalDiagnosticsV1Panel
+          diagnostics={props.onePathIntervalDiagnosticsV1}
+          includePosthocTopMissIntervalCurves={props.includePosthocTopMissIntervalCurves === true}
+          onIncludePosthocTopMissIntervalCurvesChange={props.onIncludePosthocTopMissIntervalCurvesChange ?? (() => {})}
+          onRerunWithPosthocToggle={props.onRerunWithPosthocToggle}
+        />
+      ) : null}
     </div>
   );
 }

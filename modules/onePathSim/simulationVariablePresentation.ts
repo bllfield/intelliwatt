@@ -316,6 +316,33 @@ export function buildSimulationVariableFamilyAdminView(args: {
   };
 }
 
+export function buildOnePathAdminFullCopyPayload(args: {
+  simulationVariablesPayload: Record<string, unknown>;
+  runResult?: Record<string, unknown> | null;
+  lookup?: Record<string, unknown> | null;
+  uiControls?: Record<string, unknown> | null;
+}): Record<string, unknown> {
+  const runResult = asRecord(args.runResult);
+  const lookup = asRecord(args.lookup);
+  return {
+    purpose:
+      "Full One Path admin copy payload: simulation-variable AI bundle plus complete last run/lookup responses and diagnostics.",
+    exportedAt: new Date().toISOString(),
+    copyMeta: {
+      payloadVersion: "one-path-admin-full-copy-v1",
+      includesSimulationVariables: true,
+      includesFullRunResponse: Object.keys(runResult).length > 0,
+      includesFullLookup: Object.keys(lookup).length > 0,
+      includesIntervalDiagnosticsV1: runResult.onePathIntervalDiagnosticsV1 != null,
+    },
+    uiControls: args.uiControls ?? {},
+    simulationVariables: args.simulationVariablesPayload,
+    onePathIntervalDiagnosticsV1: runResult.onePathIntervalDiagnosticsV1 ?? null,
+    fullAdminRunResponse: Object.keys(runResult).length > 0 ? runResult : null,
+    fullAdminLookup: Object.keys(lookup).length > 0 ? lookup : null,
+  };
+}
+
 export function buildSimulationVariableCopyPayload(args: {
   mode: string;
   response: SimulationVariablePolicyResponseShape;
@@ -337,6 +364,7 @@ export function buildSimulationVariableCopyPayload(args: {
   performanceAudit?: Record<string, unknown> | null;
   smtIncompleteMeterRetry?: Record<string, unknown> | null;
   smtRefreshCheck?: Record<string, unknown> | null;
+  onePathIntervalDiagnosticsV1?: Record<string, unknown> | null;
 }): Record<string, unknown> {
   const inputType = modeToInputType(args.mode);
   const loadedSourceContext = asRecord(args.loadedSourceContext);
@@ -906,6 +934,7 @@ export function buildSimulationVariableCopyPayload(args: {
     ...(includeSimRunAudit ? { simRunAudit } : {}),
     smtRefreshCheck: args.smtRefreshCheck ?? null,
     smtIncompleteMeterRetry: args.smtIncompleteMeterRetry ?? null,
+    onePathIntervalDiagnosticsV1: args.onePathIntervalDiagnosticsV1 ?? null,
     rawEffectiveSimulationVariablesUsed: activeRunSnapshot ?? null,
     rawReadModel: args.readModel ?? null,
     rawArtifact: args.artifact ?? null,
