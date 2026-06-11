@@ -80,7 +80,7 @@ describe("resolveModelIntelligenceModeAvailability", () => {
 });
 
 describe("buildModelIntelligenceSequencePreview", () => {
-  it("returns preview-only guardrails and no simulation execution", () => {
+  it("returns phase 2 orchestration preview with runnable One Path dispatch steps only", () => {
     const preview = buildModelIntelligenceSequencePreview({
       context: baseContext(),
       selectedRuns: {
@@ -95,13 +95,26 @@ describe("buildModelIntelligenceSequencePreview", () => {
       flags: defaultModelIntelligenceOrchestrationFlags(),
     });
 
-    expect(preview.executionEnabled).toBe(false);
-    expect(preview.summary.simulationWillRun).toBe(false);
+    expect(preview.phase).toBe("phase_2_client_orchestration");
+    expect(preview.executionEnabled).toBe(true);
+    expect(preview.summary.simulationWillRun).toBe(true);
+    expect(preview.summary.runnableDispatchStepCount).toBe(2);
+    expect(preview.summary.compareDiagnosticsPlanned).toBe(false);
     expect(preview.guardrails.onePathOnlySimulation).toBe(true);
     expect(preview.steps.some((step) => step.kind === "resolve_context")).toBe(true);
     expect(preview.steps.some((step) => step.runMode === "NEW_BUILD" && step.status === "unavailable")).toBe(true);
     expect(preview.steps.some((step) => step.runMode === "GREEN_BUTTON_TRUTH" && step.status === "unavailable")).toBe(
       true
     );
+    expect(
+      preview.steps.some(
+        (step) => step.kind === "compare_diagnostics" && step.unavailableReason?.includes("compare adapter not enabled")
+      )
+    ).toBe(true);
+    expect(
+      preview.steps.some(
+        (step) => step.kind === "dispatch_one_path_sim" && step.runMode === "SMT_INTERVAL_TRUTH" && step.clientRunnable
+      )
+    ).toBe(true);
   });
 });

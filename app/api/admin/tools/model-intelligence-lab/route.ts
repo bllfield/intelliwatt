@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { resolveOnePathSimOwnerUserId } from "@/app/api/admin/tools/one-path-sim/_helpers";
 import { gateManualGapfillAdmin } from "@/app/api/admin/tools/manual-gapfill/_helpers";
 import {
   loadModelIntelligenceHousesByEmail,
   resolveModelIntelligenceLabContext,
 } from "@/modules/modelIntelligence/labContextResolver";
 import { resolveModelIntelligenceModeAvailability } from "@/modules/modelIntelligence/modeAvailability";
+import { prepareModelIntelligenceDispatchStep } from "@/modules/modelIntelligence/orchestrationPrepare";
 import { buildModelIntelligenceSequencePreview } from "@/modules/modelIntelligence/runPlanBuilder";
 import type {
   ModelIntelligenceManualGapfillOptions,
@@ -13,6 +15,7 @@ import type {
   ModelIntelligenceRunMode,
   ModelIntelligenceSelectedRuns,
 } from "@/modules/modelIntelligence/types";
+import { MODEL_INTELLIGENCE_RUN_MODES } from "@/modules/modelIntelligence/types";
 
 export const dynamic = "force-dynamic";
 
@@ -199,12 +202,73 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  if (action === "prepare_dispatch_step") {
+    const email = asString(body.email);
+    const houseId = asString(body.houseId);
+    const runModeRaw = asString(body.runMode);
+    if (!email || !houseId || !runModeRaw) {
+      return NextResponse.json(
+        { ok: false, error: "identity_required", message: "Email, houseId, and runMode are required." },
+        { status: 400 }
+      );
+    }
+    if (!MODEL_INTELLIGENCE_RUN_MODES.includes(runModeRaw as ModelIntelligenceRunMode)) {
+      return NextResponse.json(
+        { ok: false, error: "unsupported_run_mode", message: `Unsupported run mode: ${runModeRaw}` },
+        { status: 400 }
+      );
+    }
+    const runMode = runModeRaw as ModelIntelligenceRunMode;
+    const resolved = await resolveModelIntelligenceLabContext({
+      email,
+      houseId,
+      esiid: asString(body.esiid),
+    });
+    if (!resolved.ok) {
+      return NextResponse.json(resolved, { status: resolved.error === "user_not_found" ? 404 : 400 });
+    }
+
+    const context = resolved.context;
+    const onePathOptions = parseOnePathOptions(body);
+    if (onePathOptions.actualContextHouseIdOverride) {
+      context.actualContextHouseId = onePathOptions.actualContextHouseIdOverride;
+    }
+    const manualGapfillOptions = parseManualGapfillOptions(body);
+    const flags = parseFlags(body);
+    const preview = buildModelIntelligenceSequencePreview({
+      context,
+      selectedRuns: parseSelectedRuns(body),
+      onePathOptions,
+      manualGapfillOptions,
+      flags,
+    });
+    const ownerUserId = await resolveOnePathSimOwnerUserId(request);
+    const prepared = await prepareModelIntelligenceDispatchStep({
+      context,
+      preview,
+      runMode,
+      onePathOptions,
+      manualGapfillOptions,
+      ownerUserId,
+    });
+    if (!prepared.ok) {
+      return NextResponse.json(prepared, { status: 400 });
+    }
+    return NextResponse.json({
+      ok: true,
+      action,
+      stepId: prepared.stepId,
+      runMode: prepared.runMode,
+      onePathRunRequest: prepared.onePathRunRequest,
+    });
+  }
+
   return NextResponse.json(
     {
       ok: false,
       error: "unsupported_action",
       message: `Unsupported action: ${action}`,
-      supportedActions: ["load_houses", "load_context", "preview_sequence"],
+      supportedActions: ["load_houses", "load_context", "preview_sequence", "prepare_dispatch_step"],
     },
     { status: 400 }
   );

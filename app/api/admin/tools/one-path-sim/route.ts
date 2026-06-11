@@ -103,6 +103,7 @@ import { buildOnePathManualStageOnePreview, buildOnePathManualStageOneView } fro
 import { buildOnePathRunReadOnlyView } from "@/modules/onePathSim/runReadOnlyView";
 import { buildOnePathIntervalDiagnosticsForPastResponse } from "@/modules/onePathSim/onePathIntervalCompareDiagnosticsV1";
 import type { ManualUsagePayload } from "@/modules/onePathSim/simulatedUsage/types";
+import { hashManualGapfillSavedSeedPayload } from "@/modules/manualUsage/manualGapfillSeed";
 import { loadPastSimBuildInputsForRead } from "@/lib/usage/loadPastSimBuildInputsForRead";
 import {
   resolvePastSimPreferredActualSource,
@@ -526,6 +527,7 @@ async function buildOnePathAdminManualSeeds(args: {
   payload: ManualUsagePayload | null;
   overrideTravelRanges?: unknown;
   dbTravelRanges?: unknown;
+  forceActualDerivedManualPayload?: boolean;
 }) {
   const usageTruth = await resolveOnePathUpstreamUsageTruthForSimulation({
     userId: args.userId,
@@ -558,12 +560,14 @@ async function buildOnePathAdminManualSeeds(args: {
           travelRanges: activeTravelRanges.length > 0 ? activeTravelRanges : actualDerivedMonthlyPayload.travelRanges,
         }
       : null;
-  const preferredSourcePayload = shouldPreferActualDerivedAdminMonthlyPayload({
-    savedPayload: args.payload,
-    actualDerivedPayload: actualDerivedMonthlyPayload,
-  })
-    ? refreshedAutoDateMonthlyPayload
-    : args.payload;
+  const preferredSourcePayload = args.forceActualDerivedManualPayload
+    ? null
+    : shouldPreferActualDerivedAdminMonthlyPayload({
+        savedPayload: args.payload,
+        actualDerivedPayload: actualDerivedMonthlyPayload,
+      })
+      ? refreshedAutoDateMonthlyPayload
+      : args.payload;
   const monthlyResolved = resolveSharedManualStageOneContract({
     mode: "MONTHLY",
     sourcePayload: preferredSourcePayload,
@@ -603,6 +607,17 @@ async function buildOnePathAdminManualSeeds(args: {
           })
         : annualResolved.payload
       : null;
+  const derivedMonthlyTotalKwh =
+    monthlySeed?.monthlyKwh?.reduce((sum, row) => {
+      const kwh = typeof row?.kwh === "number" && Number.isFinite(row.kwh) ? row.kwh : 0;
+      return sum + kwh;
+    }, 0) ?? null;
+  const derivedAnnualTotalKwh =
+    typeof annualSeed?.annualKwh === "number" && Number.isFinite(annualSeed.annualKwh)
+      ? annualSeed.annualKwh
+      : null;
+  const effectiveMonthlyPayload = monthlySeed;
+  const effectiveAnnualPayload = annualSeed;
   return {
     usageTruth,
     activeTravelRanges,
@@ -615,6 +630,25 @@ async function buildOnePathAdminManualSeeds(args: {
       MANUAL_MONTHLY: monthlySeed,
       MANUAL_ANNUAL: annualSeed,
     } as const,
+    provenance: {
+      actualContextHouseId: args.actualContextHouseId,
+      forceActualDerivedManualPayload: Boolean(args.forceActualDerivedManualPayload),
+      savedLabPayloadPresent: Boolean(args.payload),
+      savedLabPayloadIgnored: Boolean(args.forceActualDerivedManualPayload && args.payload),
+      monthlyPayloadSource: monthlyResolved.payloadSource,
+      annualPayloadSource: annualResolved.payloadSource,
+      payloadFreshlyDerived:
+        monthlyResolved.payloadSource === "actual_derived_seed" ||
+        annualResolved.payloadSource === "actual_derived_seed",
+      manualPayloadHashMonthly: effectiveMonthlyPayload
+        ? hashManualGapfillSavedSeedPayload(effectiveMonthlyPayload)
+        : null,
+      manualPayloadHashAnnual: effectiveAnnualPayload
+        ? hashManualGapfillSavedSeedPayload(effectiveAnnualPayload)
+        : null,
+      derivedMonthlyTotalKwh,
+      derivedAnnualTotalKwh,
+    },
   };
 }
 
@@ -2090,6 +2124,14 @@ export async function POST(request: NextRequest) {
     let runScenarioId =
       typeof body?.scenarioId === "string" && body.scenarioId.trim() ? body.scenarioId.trim() : null;
     const runReasonText = String(body?.runReason ?? "").trim().toLowerCase();
+    const orchestrationRecord =
+      body?.orchestration && typeof body.orchestration === "object" && !Array.isArray(body.orchestration)
+        ? (body.orchestration as Record<string, unknown>)
+        : {};
+    const forceActualDerivedManualPayload =
+      runReasonText.includes("model_intelligence_monthly_masked") ||
+      runReasonText.includes("model_intelligence_annual_masked") ||
+      orchestrationRecord.forceActualDerivedManualPayload === true;
     if (!runScenarioId && mode === "GREEN_BUTTON" && onePathTestHomeState.isPinned && effectiveHouseId) {
       const ensured = await ensureWorkspaceScenariosForHouse({
         userId: effectiveUserId,
@@ -2173,7 +2215,10 @@ export async function POST(request: NextRequest) {
     const rawInputBase = {
       userId: effectiveUserId,
       houseId: effectiveHouseId,
-      actualContextHouseId: greenButtonRunActualContext?.houseId ?? defaultActualContextHouseId,
+      actualContextHouseId:
+        typeof body?.actualContextHouseId === "string" && body.actualContextHouseId.trim()
+          ? body.actualContextHouseId.trim()
+          : greenButtonRunActualContext?.houseId ?? defaultActualContextHouseId,
       actualContextUserId: greenButtonRunActualContext?.userId ?? defaultActualContextUserId,
       smtSourceEsiid,
       preferredActualSource: null,
@@ -2229,9 +2274,10 @@ export async function POST(request: NextRequest) {
             houseId: effectiveHouseId,
             actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
             smtSourceEsiid,
-            payload: manualUsage.payload ?? null,
+            payload: forceActualDerivedManualPayload ? null : manualUsage.payload ?? null,
             overrideTravelRanges: effectiveRawInputBase.travelRanges,
             dbTravelRanges: await getOnePathTravelRangesFromDb(effectiveUserId, effectiveHouseId).catch(() => []),
+            forceActualDerivedManualPayload,
           })
         : null;
     const effectiveManualUsagePayload =
@@ -2798,6 +2844,7 @@ export async function POST(request: NextRequest) {
           runDisplayView,
           ...(runPastWeatherApiFields ?? {}),
           artifact: null,
+          adminManualPayloadProvenance: adminManualSeeds?.provenance ?? null,
           onePathIntervalDiagnosticsV1,
           readModel: compactReadModelWithPerf,
           performanceAudit: compactReadModelWithPerf?.performanceAudit ?? null,

@@ -10,7 +10,14 @@ import type {
   ModelIntelligenceSequencePreview,
   ModelIntelligenceSequenceStep,
 } from "@/modules/modelIntelligence/types";
-import { MODEL_INTELLIGENCE_RUN_MODES } from "@/modules/modelIntelligence/types";
+import {
+  MODEL_INTELLIGENCE_RUN_MODES,
+  PHASE_2_COHORT_UNAVAILABLE_REASON,
+  PHASE_2_COMPARE_UNAVAILABLE_REASON,
+  PHASE_2_EXPORT_UNAVAILABLE_REASON,
+  PHASE_2_RESULTS_MATRIX_UNAVAILABLE_REASON,
+  PHASE_2_TUNING_QUEUE_UNAVAILABLE_REASON,
+} from "@/modules/modelIntelligence/types";
 
 function defaultSelectedRuns(): ModelIntelligenceSelectedRuns {
   return {
@@ -91,21 +98,26 @@ export function buildModelIntelligenceSequencePreview(args: {
       kind: "build_masked_input",
       label: `Build masked input variant for ${mode}`,
       runMode: mode,
-      status: unavailable ? "unavailable" : "planned",
-      unavailableReason: unavailable ? availability.unavailableReason : null,
-      clientRunnable: !unavailable,
+      status: unavailable ? "unavailable" : "skipped",
+      unavailableReason: unavailable
+        ? availability.unavailableReason
+        : "Phase 2 — masked input seeding occurs inside the One Path dispatch step.",
+      clientRunnable: false,
       notes: availability.writesToLabHomeOnly
         ? ["Writes/runs against lab test home only; source actual truth remains read-only."]
         : ["Reads source actual truth from actualContextHouseId; no source usage mutation."],
     });
     pushStep(steps, {
       kind: "dispatch_one_path_sim",
-      label: `Dispatch ${mode} through One Path only (Phase 2+)`,
+      label: `Dispatch ${mode} through One Path only`,
       runMode: mode,
       status: unavailable ? "unavailable" : "not_started",
-      unavailableReason: unavailable ? availability.unavailableReason : "Phase 1 preview only — simulation not executed.",
-      clientRunnable: false,
-      notes: ["One Path is the only simulation producer."],
+      unavailableReason: unavailable ? availability.unavailableReason : null,
+      clientRunnable: !unavailable,
+      notes: [
+        "One Path is the only simulation producer.",
+        "Phase 2 runs this step sequentially from the client; no parallel simulation.",
+      ],
     });
   }
 
@@ -120,20 +132,14 @@ export function buildModelIntelligenceSequencePreview(args: {
       });
     } else {
       for (const mode of selectedModes) {
-        const availability = availabilityByMode.get(mode)!;
-        const unavailable = !availability.available;
         pushStep(steps, {
           kind: "compare_diagnostics",
           label: `Compare source actual vs simulated artifact for ${mode}`,
           runMode: mode,
-          status: unavailable ? "unavailable" : "planned",
-          unavailableReason: unavailable ? availability.unavailableReason : null,
-          clientRunnable: !unavailable,
-          notes: [
-            mode === "SMT_INTERVAL_TRUTH" || mode === "GREEN_BUTTON_TRUTH"
-              ? "Uses One Path interval diagnostics owner for truth modes."
-              : "Uses Manual GapFill compare/diagnostics layer for masked manual modes.",
-          ],
+          status: "unavailable",
+          unavailableReason: PHASE_2_COMPARE_UNAVAILABLE_REASON,
+          clientRunnable: false,
+          notes: ["Manual GapFill compare adapter starts in a later phase."],
         });
       }
     }
@@ -142,9 +148,9 @@ export function buildModelIntelligenceSequencePreview(args: {
   if (selectedModes.length > 0) {
     pushStep(steps, {
       kind: "aggregate_results_matrix",
-      label: "Aggregate Results Matrix from completed run + compare outputs (Phase 3+)",
-      status: "not_started",
-      unavailableReason: "Phase 1 preview only — matrix not populated.",
+      label: "Aggregate Results Matrix from completed run + compare outputs",
+      status: "unavailable",
+      unavailableReason: PHASE_2_RESULTS_MATRIX_UNAVAILABLE_REASON,
       clientRunnable: false,
     });
   }
@@ -152,9 +158,9 @@ export function buildModelIntelligenceSequencePreview(args: {
   if (args.flags.buildCohortSnapshot) {
     pushStep(steps, {
       kind: "cohort_snapshot",
-      label: "Build cohort intelligence snapshot (analytics only, Phase 5+)",
-      status: "not_started",
-      unavailableReason: "Phase 1 placeholder — cohort analytics not executed.",
+      label: "Build cohort intelligence snapshot (analytics only)",
+      status: "unavailable",
+      unavailableReason: PHASE_2_COHORT_UNAVAILABLE_REASON,
       clientRunnable: false,
       notes: ["Aggregate learning only; does not simulate customer results."],
     });
@@ -163,9 +169,9 @@ export function buildModelIntelligenceSequencePreview(args: {
   if (args.flags.updateTuningQueue) {
     pushStep(steps, {
       kind: "tuning_queue_update",
-      label: "Update tuning queue recommendations (Phase 6+)",
-      status: "not_started",
-      unavailableReason: "Phase 1 placeholder — tuning queue persistence starts in Phase 6.",
+      label: "Update tuning queue recommendations",
+      status: "unavailable",
+      unavailableReason: PHASE_2_TUNING_QUEUE_UNAVAILABLE_REASON,
       clientRunnable: false,
     });
   }
@@ -173,31 +179,35 @@ export function buildModelIntelligenceSequencePreview(args: {
   if (args.flags.includeAiExportBundle) {
     pushStep(steps, {
       kind: "export_ai_bundle",
-      label: "Export AI review bundle (Phase 4+)",
-      status: "not_started",
-      unavailableReason: "Phase 1 preview only — export bundle not generated until runs exist.",
+      label: "Export AI review bundle",
+      status: "unavailable",
+      unavailableReason: PHASE_2_EXPORT_UNAVAILABLE_REASON,
       clientRunnable: false,
     });
   }
 
   const unavailableStepCount = steps.filter((step) => step.status === "unavailable").length;
   const selectedModeCount = selectedModes.length;
+  const runnableDispatchStepCount = steps.filter(
+    (step) => step.kind === "dispatch_one_path_sim" && step.clientRunnable
+  ).length;
 
   return {
     previewVersion: "model_intelligence_sequence_preview_v1",
     generatedAt: new Date().toISOString(),
-    phase: "phase_1_preview_only",
-    executionEnabled: false,
+    phase: "phase_2_client_orchestration",
+    executionEnabled: true,
     selectedRuns,
     flags: args.flags,
     modeAvailability,
     steps,
     summary: {
-      plannedStepCount: steps.filter((step) => step.status === "planned").length,
+      plannedStepCount: steps.filter((step) => step.status === "planned" || step.status === "not_started").length,
       unavailableStepCount,
       selectedModeCount,
-      compareDiagnosticsPlanned: args.flags.runCompareDiagnostics && selectedModeCount > 0,
-      simulationWillRun: false,
+      runnableDispatchStepCount,
+      compareDiagnosticsPlanned: false,
+      simulationWillRun: runnableDispatchStepCount > 0,
     },
     guardrails: {
       onePathOnlySimulation: true,

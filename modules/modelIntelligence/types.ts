@@ -114,8 +114,8 @@ export type ModelIntelligenceSequenceStep = {
 export type ModelIntelligenceSequencePreview = {
   previewVersion: "model_intelligence_sequence_preview_v1";
   generatedAt: string;
-  phase: "phase_1_preview_only";
-  executionEnabled: false;
+  phase: "phase_1_preview_only" | "phase_2_client_orchestration";
+  executionEnabled: boolean;
   selectedRuns: ModelIntelligenceSelectedRuns;
   flags: ModelIntelligenceOrchestrationFlags;
   modeAvailability: ModelIntelligenceModeAvailability[];
@@ -124,8 +124,9 @@ export type ModelIntelligenceSequencePreview = {
     plannedStepCount: number;
     unavailableStepCount: number;
     selectedModeCount: number;
+    runnableDispatchStepCount: number;
     compareDiagnosticsPlanned: boolean;
-    simulationWillRun: false;
+    simulationWillRun: boolean;
   };
   guardrails: {
     onePathOnlySimulation: true;
@@ -135,6 +136,64 @@ export type ModelIntelligenceSequencePreview = {
     maskedRunsWriteToLabHomeOnly: true;
   };
 };
+
+export type ModelIntelligenceOnePathRunReadback = {
+  scenarioId: string | null;
+  artifactId: string | null;
+  artifactInputHash: string | null;
+  buildInputsHash: string | null;
+  engineVersion: string | null;
+  runType: string | null;
+  coverageStart: string | null;
+  coverageEnd: string | null;
+  totalKwh: number | null;
+  onePathMode: string | null;
+  dispatchHouseId: string | null;
+  sourceHouseId: string | null;
+  actualContextHouseId: string | null;
+  manualPayloadHash: string | null;
+  manualPayloadSource: string | null;
+  payloadFreshlyDerived: boolean | null;
+  derivedMonthlyTotalKwh: number | null;
+  derivedAnnualTotalKwh: number | null;
+  savedLabPayloadIgnored: boolean | null;
+  unavailableReason: string | null;
+};
+
+export type ModelIntelligenceOrchestrationStepResult = {
+  stepId: string;
+  runMode: ModelIntelligenceRunMode;
+  kind: "dispatch_one_path_sim";
+  status: "completed" | "failed" | "skipped" | "unavailable" | "cancelled";
+  unavailableReason: string | null;
+  error: string | null;
+  message: string | null;
+  onePathRunRequest: Record<string, unknown> | null;
+  readback: ModelIntelligenceOnePathRunReadback | null;
+  startedAt: string;
+  finishedAt: string | null;
+};
+
+export type ModelIntelligenceOrchestrationRun = {
+  runVersion: "model_intelligence_orchestration_v1";
+  phase: "phase_2_client_orchestration";
+  startedAt: string;
+  finishedAt: string | null;
+  status: "running" | "completed" | "failed" | "cancelled";
+  stepResults: ModelIntelligenceOrchestrationStepResult[];
+  guardrails: {
+    onePathOnlySimulation: true;
+    clientDrivenSequentialSteps: true;
+    noParallelSimulation: true;
+    maskedRunsLabHomeOnly: true;
+  };
+};
+
+export const PHASE_2_COMPARE_UNAVAILABLE_REASON = "Phase 2 — compare adapter not enabled.";
+export const PHASE_2_COHORT_UNAVAILABLE_REASON = "Phase 2 — cohort intelligence not enabled.";
+export const PHASE_2_TUNING_QUEUE_UNAVAILABLE_REASON = "Phase 2 — tuning queue not enabled.";
+export const PHASE_2_EXPORT_UNAVAILABLE_REASON = "Phase 2 — export bundle not enabled.";
+export const PHASE_2_RESULTS_MATRIX_UNAVAILABLE_REASON = "Phase 3 — results matrix not enabled.";
 
 export const NEW_BUILD_ORCHESTRATION_UNAVAILABLE_REASON =
   "One Path NEW_BUILD/no-usage dispatch path not implemented yet";

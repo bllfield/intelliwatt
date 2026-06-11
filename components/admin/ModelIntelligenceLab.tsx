@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   defaultModelIntelligenceManualGapfillOptions,
   defaultModelIntelligenceOnePathOptions,
@@ -11,10 +11,12 @@ import {
   fetchModelIntelligenceSequencePreview,
   MODEL_INTELLIGENCE_RUN_MODE_LABELS,
 } from "@/lib/admin/modelIntelligenceClient";
+import { runModelIntelligenceOrchestration } from "@/lib/admin/modelIntelligenceOrchestrationClient";
 import type { AdminHouseLookupRow } from "@/lib/admin/adminHouseLookup";
 import type {
   ModelIntelligenceLabContext,
   ModelIntelligenceModeAvailability,
+  ModelIntelligenceOrchestrationRun,
   ModelIntelligenceRunMode,
   ModelIntelligenceSequencePreview,
 } from "@/modules/modelIntelligence/types";
@@ -79,6 +81,9 @@ export function ModelIntelligenceLab() {
   const [context, setContext] = useState<ModelIntelligenceLabContext | null>(null);
   const [modeAvailability, setModeAvailability] = useState<ModelIntelligenceModeAvailability[]>([]);
   const [preview, setPreview] = useState<ModelIntelligenceSequencePreview | null>(null);
+  const [orchestrationRun, setOrchestrationRun] = useState<ModelIntelligenceOrchestrationRun | null>(null);
+  const [orchestrating, setOrchestrating] = useState(false);
+  const orchestrationAbortRef = useRef<AbortController | null>(null);
   const [selectedRuns, setSelectedRuns] = useState(defaultModelIntelligenceSelectedRuns);
   const [onePathOptions, setOnePathOptions] = useState(defaultModelIntelligenceOnePathOptions);
   const [manualGapfillOptions, setManualGapfillOptions] = useState(defaultModelIntelligenceManualGapfillOptions);
@@ -162,12 +167,68 @@ export function ModelIntelligenceLab() {
     setContext(result.data.context);
     setPreview(result.data.preview);
     setModeAvailability(result.data.preview.modeAvailability);
-    setStatus("Sequence preview ready. Phase 1 does not execute simulations.");
+    setStatus("Sequence preview ready. Use Run Orchestrate to dispatch One Path steps sequentially.");
     setActiveTab("Orchestrate Runs");
   }, [email, flags, houses, manualGapfillOptions, onePathOptions, selectedHouseId, selectedRuns]);
 
+  const runOrchestrate = useCallback(async () => {
+    if (!email.trim() || !selectedHouseId) {
+      setError("Load houses and select a house first.");
+      return;
+    }
+    setOrchestrating(true);
+    setError(null);
+    setOrchestrationRun(null);
+    const controller = new AbortController();
+    orchestrationAbortRef.current = controller;
+    const house = houses.find((row) => row.id === selectedHouseId);
+    const result = await runModelIntelligenceOrchestration({
+      email: email.trim(),
+      houseId: selectedHouseId,
+      esiid: house?.esiid,
+      preview,
+      selectedRuns,
+      onePathOptions,
+      manualGapfillOptions,
+      flags,
+      signal: controller.signal,
+      onUpdate: (run) => setOrchestrationRun({ ...run, stepResults: [...run.stepResults] }),
+    });
+    orchestrationAbortRef.current = null;
+    setOrchestrating(false);
+    if (result.preview) {
+      setPreview(result.preview);
+      setModeAvailability(result.preview.modeAvailability);
+    }
+    if (result.run) {
+      setOrchestrationRun(result.run);
+    }
+    if (!result.ok) {
+      setError(result.error || "Orchestration did not complete.");
+      setStatus(result.run?.status === "cancelled" ? "Orchestration cancelled." : "Orchestration failed.");
+      return;
+    }
+    setStatus(`Orchestration completed ${result.run?.stepResults.length ?? 0} One Path dispatch step(s).`);
+    setActiveTab("Orchestrate Runs");
+  }, [
+    email,
+    flags,
+    houses,
+    manualGapfillOptions,
+    onePathOptions,
+    preview,
+    selectedHouseId,
+    selectedRuns,
+  ]);
+
+  const cancelOrchestration = useCallback(() => {
+    orchestrationAbortRef.current?.abort();
+    setStatus("Cancelling orchestration…");
+  }, []);
+
   const clearResults = useCallback(() => {
     setPreview(null);
+    setOrchestrationRun(null);
     setStatus("Cleared preview/results.");
     setError(null);
   }, []);
@@ -177,8 +238,8 @@ export function ModelIntelligenceLab() {
       <div>
         <h1 className="text-2xl font-bold text-brand-navy">Model Intelligence Lab</h1>
         <p className="mt-2 max-w-4xl text-sm text-slate-600">
-          Orchestrate One Path masked simulations, compare results using shared diagnostics, analyze cohorts, and manage
-          tuning recommendations. Phase 1: context load, options, and sequence preview only.
+          Orchestrate One Path masked simulations through a client-driven step runner. Phase 2 dispatches one selected mode
+          per step through existing One Path only — no compare adapter, cohort logic, tuning queue, or export bundle yet.
         </p>
       </div>
 
@@ -475,17 +536,17 @@ export function ModelIntelligenceLab() {
           </button>
           <button
             type="button"
-            disabled
-            title="Phase 2 — client-driven step runner"
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-400"
+            onClick={() => void runOrchestrate()}
+            disabled={loading || orchestrating || !selectedHouseId}
+            className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
           >
-            Run Orchestrate
+            {orchestrating ? "Running Orchestrate…" : "Run Orchestrate"}
           </button>
           <button
             type="button"
-            disabled
-            title="Phase 2"
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-400"
+            onClick={cancelOrchestration}
+            disabled={!orchestrating}
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50"
           >
             Cancel Running Sequence
           </button>
@@ -537,10 +598,46 @@ export function ModelIntelligenceLab() {
                   <div>Selected modes: {preview.summary.selectedModeCount}</div>
                   <div>Planned steps: {preview.summary.plannedStepCount}</div>
                   <div>Unavailable steps: {preview.summary.unavailableStepCount}</div>
+                  <div>Runnable dispatch steps: {preview.summary.runnableDispatchStepCount}</div>
                   <div>Simulation will run: {preview.summary.simulationWillRun ? "yes" : "no"}</div>
                   <div>Compare planned: {preview.summary.compareDiagnosticsPlanned ? "yes" : "no"}</div>
                 </div>
               </div>
+              {orchestrationRun ? (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm">
+                  <div className="font-semibold text-brand-navy">Orchestration run ({orchestrationRun.status})</div>
+                  <div className="mt-2 overflow-x-auto">
+                    <table className="min-w-full text-left text-sm">
+                      <thead className="text-xs uppercase text-slate-500">
+                        <tr>
+                          <th className="px-3 py-2">Mode</th>
+                          <th className="px-3 py-2">Status</th>
+                          <th className="px-3 py-2">Scenario</th>
+                          <th className="px-3 py-2">Artifact</th>
+                          <th className="px-3 py-2">Input hash</th>
+                          <th className="px-3 py-2">Build hash</th>
+                          <th className="px-3 py-2">Engine</th>
+                          <th className="px-3 py-2">Run type</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {orchestrationRun.stepResults.map((step) => (
+                          <tr key={step.stepId} className="border-t border-emerald-100">
+                            <td className="px-3 py-2 font-mono text-xs">{step.runMode}</td>
+                            <td className="px-3 py-2">{step.status}</td>
+                            <td className="px-3 py-2 font-mono text-xs">{step.readback?.scenarioId ?? "—"}</td>
+                            <td className="px-3 py-2 font-mono text-xs">{step.readback?.artifactId ?? "—"}</td>
+                            <td className="px-3 py-2 font-mono text-xs">{step.readback?.artifactInputHash ?? "—"}</td>
+                            <td className="px-3 py-2 font-mono text-xs">{step.readback?.buildInputsHash ?? "—"}</td>
+                            <td className="px-3 py-2 font-mono text-xs">{step.readback?.engineVersion ?? "—"}</td>
+                            <td className="px-3 py-2">{step.readback?.runType ?? step.message ?? step.error ?? "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
               <div className="overflow-x-auto rounded-lg border border-slate-200">
                 <table className="min-w-full text-left text-sm">
                   <thead className="bg-slate-50 text-xs uppercase text-slate-500">
@@ -575,7 +672,7 @@ export function ModelIntelligenceLab() {
           ) : (
             <PlaceholderTab
               title="No sequence preview yet"
-              detail="Load context, select run modes, then click Preview Sequence. Phase 1 does not execute One Path simulations."
+              detail="Load context, select run modes, preview the sequence, then Run Orchestrate to dispatch One Path steps sequentially."
             />
           )}
         </div>
