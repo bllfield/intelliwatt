@@ -7,6 +7,10 @@ import {
   type EflAvgPriceValidation,
 } from "@/lib/efl/eflValidator";
 import { planRulesToRateStructure, validatePlanRules } from "@/lib/efl/planEngine";
+import {
+  applyEnergyChargeBreakdownTouToTemplateShapes,
+  extractEnergyChargeBreakdownTou,
+} from "@/lib/efl/energyChargeBreakdownTou";
 
 export interface EflAiParseResult {
   planRules: any | null;
@@ -717,9 +721,23 @@ OUTPUT CONTRACT:
     );
   }
 
-  const singleEnergy =
-    deterministicSingleEnergy ??
-    fallbackExtractSingleEnergyChargeCents(fallbackSourceText);
+  const breakdownTou = extractEnergyChargeBreakdownTou(fallbackSourceText);
+  const hasBreakdownTou = breakdownTou != null;
+
+  const singleEnergy = hasBreakdownTou
+    ? null
+    : deterministicSingleEnergy ?? fallbackExtractSingleEnergyChargeCents(fallbackSourceText);
+
+  if (breakdownTou) {
+    applyEnergyChargeBreakdownTouToTemplateShapes({
+      planRules: planRules as any,
+      rateStructure: rs as any,
+      breakdown: breakdownTou,
+    });
+    warnings.push(
+      "Deterministic extract mapped Energy Charge Breakdown table to TIME_OF_USE periods (not fixed-rate).",
+    );
+  }
 
   // Seasonal percentage discount off Energy Charge (month-scoped).
   // Represent as deterministic all-day TOU periods split by months so the plan engine can price it
@@ -768,6 +786,7 @@ OUTPUT CONTRACT:
   // Last-resort inference: if we have strong evidence of a single/tiered energy
   // charge but the Disclosure Chart didn't provide a rate type, treat as FIXED.
   if (
+    !breakdownTou &&
     !planRules.rateType &&
     (singleEnergy != null ||
       (Array.isArray(planRules.usageTiers) && planRules.usageTiers.length > 0))
@@ -778,6 +797,7 @@ OUTPUT CONTRACT:
 
   if (
     singleEnergy != null &&
+    !breakdownTou &&
     (planRules.currentBillEnergyRateCents == null ||
       typeof planRules.currentBillEnergyRateCents !== "number")
   ) {
@@ -789,6 +809,7 @@ OUTPUT CONTRACT:
 
   if (
     singleEnergy != null &&
+    !breakdownTou &&
     planRules.rateType === "FIXED" &&
     (planRules.defaultRateCentsPerKwh == null ||
       typeof planRules.defaultRateCentsPerKwh !== "number")
@@ -808,6 +829,7 @@ OUTPUT CONTRACT:
   }
   if (
     singleEnergy != null &&
+    !breakdownTou &&
     typeof rs.energyRateCents !== "number" &&
     (!Array.isArray(planRules.usageTiers) ||
       planRules.usageTiers.length === 0)

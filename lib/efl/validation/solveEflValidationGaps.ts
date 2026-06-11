@@ -1,6 +1,10 @@
 import type { PlanRules, RateStructure } from "@/lib/efl/planEngine";
 import type { EflAvgPriceValidation } from "@/lib/efl/eflValidator";
 import { extractEflTdspCharges, validateEflAvgPriceTable } from "@/lib/efl/eflValidator";
+import {
+  applyEnergyChargeBreakdownTouToTemplateShapes,
+  extractEnergyChargeBreakdownTou,
+} from "@/lib/efl/energyChargeBreakdownTou";
 
 export type EflValidationGapSolveMode = "NONE" | "PASS_WITH_ASSUMPTIONS" | "FAIL";
 
@@ -615,6 +619,15 @@ export async function solveEflValidationGaps(args: {
         solverApplied.push("TOU_UPGRADE_FROM_EXISTING_PERIODS");
       }
     } else {
+      const breakdown = extractEnergyChargeBreakdownTou(rawText);
+      if (breakdown) {
+        applyEnergyChargeBreakdownTouToTemplateShapes({
+          planRules: derivedPlanRules,
+          rateStructure: derivedRateStructure ?? (derivedRateStructure = {}),
+          breakdown,
+        });
+        solverApplied.push("TOU_ENERGY_CHARGE_BREAKDOWN_FROM_EFL_TEXT");
+      } else {
       const tou = extractPeakOffPeakTouFromEflText(rawText);
       if (tou) {
         const allDays = [0, 1, 2, 3, 4, 5, 6];
@@ -652,19 +665,12 @@ export async function solveEflValidationGaps(args: {
         if (!derivedRateStructure || typeof derivedRateStructure !== "object") {
           derivedRateStructure = {};
         }
-        if (typeof (derivedRateStructure as any).type !== "string") {
-          (derivedRateStructure as any).type = "TIME_OF_USE";
-        } else {
-          (derivedRateStructure as any).type = "TIME_OF_USE";
-        }
-        if (
-          !Array.isArray((derivedRateStructure as any).timeOfUsePeriods) ||
-          (derivedRateStructure as any).timeOfUsePeriods.length === 0
-        ) {
-          (derivedRateStructure as any).timeOfUsePeriods = (derivedPlanRules as any).timeOfUsePeriods;
-        }
+        (derivedRateStructure as any).type = "TIME_OF_USE";
+        (derivedRateStructure as any).timeOfUsePeriods = (derivedPlanRules as any).timeOfUsePeriods;
+        delete (derivedRateStructure as any).energyRateCents;
 
         solverApplied.push("TOU_PEAK_OFFPEAK_FROM_EFL_TEXT");
+      }
       }
     }
   }
@@ -1277,6 +1283,48 @@ function extractMonthlyCreditMaxUsage(rawText: string): { creditDollars: number;
   return { creditDollars: dollars, maxUsageKwh: Math.round(maxKwh) };
 }
 
+function parseClockTokenTo24EndExclusive(hh: string, mm: string, ap: string): number | null {
+  let h = Number(hh);
+  const minute = Number(mm);
+  if (!Number.isFinite(h) || !Number.isFinite(minute)) return null;
+  const isPm = ap.toUpperCase() === "PM";
+  if (h === 12) h = isPm ? 12 : 0;
+  else h = isPm ? h + 12 : h;
+  if (minute > 0) return (h + 1) % 24;
+  return h;
+}
+
+function parseClockTokenTo24(hh: string, mm: string, ap: string): number | null {
+  let h = Number(hh);
+  const minute = Number(mm);
+  if (!Number.isFinite(h) || !Number.isFinite(minute)) return null;
+  const isPm = ap.toUpperCase() === "PM";
+  if (h === 12) h = isPm ? 12 : 0;
+  else h = isPm ? h + 12 : h;
+  return h;
+}
+
+function extractOffPeakUsagePercentFromEflText(t: string): number | null {
+  const pct =
+    t.match(/([0-9]{1,3}(?:\.[0-9]+)?)%\s+of\s+Off-?Peak\s+consumption/i) ??
+    t.match(/([0-9]{1,3}(?:\.[0-9]+)?)%\s+of\s+Off-?Peak\b/i) ??
+    (/Energy\s*Charge\s*Breakdown/i.test(t)
+      ? t.match(
+          /Off-?\s*peak[\s\S]{0,700}?[0-9]+(?:\.[0-9]+)?\s*¢[\s\S]{0,160}?([0-9]+(?:\.[0-9]+)?)\s*%/i,
+        )
+      : null);
+  if (!pct?.[1]) return null;
+  const offPeakUsagePercent = Number(pct[1]) / 100;
+  if (
+    !Number.isFinite(offPeakUsagePercent) ||
+    offPeakUsagePercent <= 0 ||
+    offPeakUsagePercent >= 1
+  ) {
+    return null;
+  }
+  return offPeakUsagePercent;
+}
+
 function extractPeakOffPeakTouFromEflText(rawText: string): {
   peakRateCents: number;
   offPeakRateCents: number;
@@ -1302,21 +1350,8 @@ function extractPeakOffPeakTouFromEflText(rawText: string): {
   const offPeakRateCents = Number(offRate[1]);
   if (!Number.isFinite(peakRateCents) || !Number.isFinite(offPeakRateCents)) return null;
 
-  // Usage split assumption (required to match avg-table and to safely upgrade templates).
-  // Some EFLs use decimals (e.g. 37.5%).
-  const pct =
-    t.match(/([0-9]{1,3}(?:\.[0-9]+)?)%\s+of\s+Off-?Peak\s+consumption/i) ??
-    t.match(/([0-9]{1,3}(?:\.[0-9]+)?)%\s+of\s+Off-?Peak\b/i) ??
-    null;
-  if (!pct?.[1]) return null;
-  const offPeakUsagePercent = Number(pct[1]) / 100;
-  if (
-    !Number.isFinite(offPeakUsagePercent) ||
-    offPeakUsagePercent <= 0 ||
-    offPeakUsagePercent >= 1
-  ) {
-    return null;
-  }
+  const offPeakUsagePercent = extractOffPeakUsagePercentFromEflText(t);
+  if (offPeakUsagePercent == null) return null;
 
   // Hours parsing: prefer explicit Off-Peak hours, then Peak hours.
   const offHours =

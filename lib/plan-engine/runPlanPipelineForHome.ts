@@ -3,7 +3,9 @@ import { usagePrisma } from "@/lib/db/usageClient";
 import { wattbuyOffersPrisma } from "@/lib/db/wattbuyOffersClient";
 import { wattbuy } from "@/lib/wattbuy";
 import { normalizeOffers } from "@/lib/wattbuy/normalize";
-import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
+import { acquireEflContentFromUrl } from "@/lib/efl/fetchEflPdf";
+import { deterministicEflExtract } from "@/lib/efl/eflExtractor";
+import { runEflPipelineFromRawTextNoStore } from "@/lib/efl/runEflPipelineFromRawTextNoStore";
 import { runEflPipelineNoStore } from "@/lib/efl/runEflPipelineNoStore";
 import { validatePlanRules } from "@/lib/efl/planEngine";
 import { upsertRatePlanFromEfl } from "@/lib/efl/planPersistence";
@@ -402,8 +404,8 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
       continue;
     }
 
-    const pdf = await fetchEflPdfFromUrl(eflUrl, { timeoutMs: 20_000 });
-    if (!pdf.ok) {
+    const acquired = await acquireEflContentFromUrl(eflUrl, { timeoutMs: 20_000 });
+    if (!acquired.ok) {
       templatesQueued++;
       await enqueueTemplateFailureForAdminReview({
         offerId,
@@ -412,24 +414,45 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
         planName: o?.plan_name ?? null,
         termMonths: typeof o?.term_months === "number" ? o.term_months : null,
         tdspName: o?.distributor_name ?? null,
-        queueReason: `EFL PDF fetch failed: ${String((pdf as any)?.error ?? "unknown")}`,
+        queueReason: `EFL fetch failed: ${String(acquired.error ?? "unknown")}`,
       });
       continue;
     }
 
+    const offerMeta = {
+      supplier: o?.supplier_name ?? null,
+      planName: o?.plan_name ?? null,
+      termMonths: typeof o?.term_months === "number" ? o.term_months : null,
+      tdspName: o?.distributor_name ?? null,
+      offerId,
+    };
+
     let pipeline: any = null;
     try {
-      pipeline = await runEflPipelineNoStore({
-        pdfBytes: pdf.pdfBytes,
-        source: "wattbuy",
-        offerMeta: {
-          supplier: o?.supplier_name ?? null,
-          planName: o?.plan_name ?? null,
-          termMonths: typeof o?.term_months === "number" ? o.term_months : null,
-          tdspName: o?.distributor_name ?? null,
-          offerId,
-        },
-      });
+      if (acquired.kind === "raw_text") {
+        const det = await deterministicEflExtract(
+          Buffer.from(acquired.rawText, "utf8"),
+          async () => acquired.rawText,
+        );
+        const eflPdfSha256 = det.eflPdfSha256;
+        if (!eflPdfSha256) {
+          throw new Error("Could not fingerprint inline HTML EFL text.");
+        }
+        pipeline = await runEflPipelineFromRawTextNoStore({
+          rawText: acquired.rawText,
+          eflPdfSha256,
+          repPuctCertificate: det.repPuctCertificate ?? null,
+          eflVersionCode: det.eflVersionCode ?? null,
+          source: "wattbuy",
+          offerMeta,
+        });
+      } else {
+        pipeline = await runEflPipelineNoStore({
+          pdfBytes: acquired.pdfBytes,
+          source: "wattbuy",
+          offerMeta,
+        });
+      }
     } catch (e: any) {
       // Fail-soft: one bad/unparseable EFL should not crash the whole plan pipeline run.
       templatesQueued++;
@@ -508,7 +531,7 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
     try {
       saved = await upsertRatePlanFromEfl({
         mode: "live",
-        eflUrl: pdf.pdfUrl,
+        eflUrl: acquired.kind === "pdf" ? acquired.pdfUrl : eflUrl,
         eflSourceUrl: eflUrl,
         repPuctCertificate: det.repPuctCertificate ?? null,
         eflVersionCode: det.eflVersionCode ?? null,

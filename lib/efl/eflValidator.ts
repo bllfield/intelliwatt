@@ -1169,8 +1169,12 @@ function computeValidatorModeledBreakdown(
 
     if (rated.length >= 2) {
       const crossesMidnight = (x: any) => x.start > x.end;
-      const offLabel = (x: any) => /off\s*-?\s*peak|night/i.test(x.label.toLowerCase());
-      const peakLabel = (x: any) => /\bpeak\b|on\s*-?\s*peak|day/i.test(x.label.toLowerCase());
+      const offLabel = (x: any) => /off\s*-?\s*peak|night/i.test(String(x.label ?? "").toLowerCase());
+      const peakLabel = (x: any) => {
+        const label = String(x.label ?? "").toLowerCase();
+        if (/off\s*-?\s*peak|night/i.test(label)) return false;
+        return /\bon\s*-?\s*peak\b/i.test(label) || label.trim() === "peak";
+      };
 
       let off = rated.find((x) => offLabel(x) || crossesMidnight(x));
       let peak = rated.find((x) => peakLabel(x) && x !== off);
@@ -1655,6 +1659,12 @@ export function parseEflNightHoursAssumption(rawText: string): {
     rawText.match(/(\d{1,3}(?:\.[0-9]+)?)%\s+of\s+Off-?Peak\s+consumption/i) ??
     // Fallback: "32% of Off-Peak" without the word consumption
     rawText.match(/(\d{1,3}(?:\.[0-9]+)?)%\s+of\s+Off-?Peak\b/i) ??
+    // Energy Charge Breakdown table: Off-peak row with ¢/kWh then disclosed usage %.
+    (/Energy\s*Charge\s*Breakdown/i.test(rawText)
+      ? rawText.match(
+          /Off-?\s*peak[\s\S]{0,700}?[0-9]+(?:\.[0-9]+)?\s*¢[\s\S]{0,160}?(\d{1,3}(?:\.[0-9]+)?)\s*%/i,
+        )
+      : null) ??
     null;
   const nightUsagePercent =
     percentMatch && percentMatch[1]
@@ -2168,6 +2178,18 @@ export async function validateEflAvgPriceTable(args: {
         (p: any) => Array.isArray(p?.months) && p.months.length > 0,
       );
     if (hasMonthScopedTou) {
+      components = null;
+    }
+
+    // Peak/Off-Peak TOU with disclosed off-peak usage % but no parseable hour window:
+    // use blended validator math (matches EFL avg-price tables driven by usage profile).
+    if (
+      planRulesForValidation?.rateType === "TIME_OF_USE" &&
+      nightAssumption?.nightUsagePercent != null &&
+      Array.isArray((planRulesForValidation as any).timeOfUsePeriods) &&
+      (planRulesForValidation as any).timeOfUsePeriods.length >= 2 &&
+      (nightAssumption?.nightStartHour == null || nightAssumption?.nightEndHour == null)
+    ) {
       components = null;
     }
 

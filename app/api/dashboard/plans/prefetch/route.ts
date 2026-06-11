@@ -6,7 +6,7 @@ import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { wattbuy } from "@/lib/wattbuy";
 import { normalizeOffers } from "@/lib/wattbuy/normalize";
-import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
+import { acquireEflContentFromUrl } from "@/lib/efl/fetchEflPdf";
 import { runEflPipeline } from "@/lib/plan-engine-next/efl/runEflPipeline";
 import { upsertReviewQueueRowRespectingOpenUrl } from "@/lib/efl/reviewQueueWrite";
 import { Prisma } from "@prisma/client";
@@ -269,9 +269,9 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      // Fetch PDF bytes (handles landing pages).
-      const pdf = await fetchEflPdfFromUrl(eflUrl, { timeoutMs: 20_000 });
-      if (!pdf.ok) {
+      // Fetch PDF bytes or inline HTML EFL text (e.g. api.gotrhythm.com snapshots).
+      const acquired = await acquireEflContentFromUrl(eflUrl, { timeoutMs: 20_000 });
+      if (!acquired.ok) {
         try {
           const identity = eflUrl || "MISSING_EFL_URL";
           const syntheticSha = sha256Hex(["dashboard_prefetch", "EFL_PARSE", offerId, identity].join("|"));
@@ -290,7 +290,7 @@ export async function POST(req: NextRequest) {
               tdspName,
               termMonths,
               finalStatus: "FAIL",
-              queueReason: `EFL fetch failed: ${pdf.error}`,
+              queueReason: `EFL fetch failed: ${acquired.error}`,
             },
             update: {
               updatedAt: new Date(),
@@ -304,7 +304,7 @@ export async function POST(req: NextRequest) {
               tdspName,
               termMonths,
               finalStatus: "FAIL",
-              queueReason: `EFL fetch failed: ${pdf.error}`,
+              queueReason: `EFL fetch failed: ${acquired.error}`,
               resolvedAt: null,
               resolvedBy: null,
               resolutionNotes: null,
@@ -326,9 +326,10 @@ export async function POST(req: NextRequest) {
           actor: "system",
           dryRun: false,
           offerId,
-          eflUrl: (pdf as any).pdfUrl ?? eflUrl,
+          eflUrl: acquired.kind === "pdf" ? acquired.pdfUrl : eflUrl,
           eflSourceUrl: eflUrl,
-          pdfBytes: pdf.pdfBytes,
+          pdfBytes: acquired.kind === "pdf" ? acquired.pdfBytes : null,
+          rawText: acquired.kind === "raw_text" ? acquired.rawText : null,
           offerMeta: { supplier, planName, termMonths, tdspName },
         });
       } catch (e: any) {

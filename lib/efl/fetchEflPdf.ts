@@ -985,6 +985,50 @@ export async function fetchEflSourceFromUrl(
   }
 }
 
+export type AcquiredEflContent =
+  | {
+      kind: "pdf";
+      pdfUrl: string;
+      pdfBytes: Buffer;
+      notes: string[];
+    }
+  | {
+      kind: "raw_text";
+      sourceUrl: string;
+      rawText: string;
+      notes: string[];
+    };
+
+/** Fetch EFL content as PDF bytes or inline HTML/text EFL pages. */
+export async function acquireEflContentFromUrl(
+  eflUrl: string,
+  opts?: { timeoutMs?: number },
+): Promise<
+  | ({ ok: true } & AcquiredEflContent)
+  | { ok: false; error: string; notes: string[] }
+> {
+  const res = await fetchEflSourceFromUrl(eflUrl, opts);
+  if (!res.ok) {
+    return { ok: false, error: res.error, notes: res.notes };
+  }
+  if (res.kind === "raw_text") {
+    return {
+      ok: true,
+      kind: "raw_text",
+      sourceUrl: res.sourceUrl,
+      rawText: res.rawText,
+      notes: res.notes,
+    };
+  }
+  return {
+    ok: true,
+    kind: "pdf",
+    pdfUrl: res.pdfUrl,
+    pdfBytes: res.pdfBytes,
+    notes: res.notes,
+  };
+}
+
 export async function fetchEflPdfFromUrl(
   eflUrl: string,
   opts?: { timeoutMs?: number },
