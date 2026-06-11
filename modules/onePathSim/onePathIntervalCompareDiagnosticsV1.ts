@@ -1088,7 +1088,8 @@ export function buildOnePathIntervalCompareDiagnosticsV1(
       slotCountSimulated: simulatedSlots!.filter((value) => value > 0).length,
       actualDailyTotalKwh: dayTotalActual,
       simulatedDailyTotalKwh: dayTotalSimulated,
-      dailyTotalDeltaKwh: dayMeta?.deltaKwh ?? round2(dayTotalSimulated - dayTotalActual),
+      dailyTotalDeltaKwh:
+        dayMeta?.deltaKwh ?? round2((dayTotalSimulated ?? simulatedTotal) - (dayTotalActual ?? actualTotal)),
       rawIntervalWape,
       intervalMae: absErrors.length > 0 ? round4(absErrors.reduce((sum, value) => sum + value, 0) / absErrors.length) : null,
       normalizedShapeError: normalizedShapeError(actualSlots!, simulatedSlots!),

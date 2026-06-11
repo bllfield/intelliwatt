@@ -55,35 +55,43 @@ export async function resolveModelIntelligenceLabContext(args: {
   | { ok: true; context: ModelIntelligenceLabContext; houses: AdminHouseLookupRow[] }
   | { ok: false; error: string; message: string }
 > {
-  const selection = await resolveAdminHouseSelection({
-    email: args.email,
-    houseId: args.houseId,
-    esiid: args.esiid ?? null,
-  });
-  if (!selection.ok) {
+  const lookup = await lookupAdminHousesByEmail(args.email);
+  if (!lookup.ok) {
     return {
       ok: false,
-      error: selection.error,
+      error: lookup.error,
       message:
-        selection.error === "email_required"
+        lookup.error === "email_required"
           ? "Email is required."
-          : selection.error === "user_not_found"
-            ? "No user found for that email."
-            : "House could not be resolved for that email.",
+          : "No user found for that email.",
+    };
+  }
+
+  const selectedHouse =
+    (await resolveAdminHouseSelection({
+      email: lookup.email,
+      houseId: args.houseId,
+      esiid: args.esiid ?? null,
+    })) ?? null;
+  if (!selectedHouse || !lookup.houses.some((house) => house.id === selectedHouse.id)) {
+    return {
+      ok: false,
+      error: "house_not_found",
+      message: "House could not be resolved for that email.",
     };
   }
 
   const sourceContext = await resolveManualGapfillSmtSourceContext({
-    userId: selection.userId,
-    sourceHouseId: selection.house.id,
-    esiid: selection.house.esiid,
+    userId: lookup.userId,
+    sourceHouseId: selectedHouse.id,
+    esiid: selectedHouse.esiid,
     includeDiagnostics: true,
   });
 
   const labTestHome = await resolveLabTestHomeState({
-    ownerUserId: selection.userId,
-    selectedSourceHouseId: selection.house.id,
-    selectedSourceUserId: selection.userId,
+    ownerUserId: lookup.userId,
+    selectedSourceHouseId: selectedHouse.id,
+    selectedSourceUserId: lookup.userId,
   });
 
   const warnings = [...(sourceContext.diagnostics?.warnings ?? [])];
@@ -103,7 +111,7 @@ export async function resolveModelIntelligenceLabContext(args: {
 
   const houseRow = await prisma.houseAddress
     .findFirst({
-      where: { id: selection.house.id, archivedAt: null },
+      where: { id: selectedHouse.id, archivedAt: null },
       select: { addressLine1: true, addressCity: true, addressState: true, esiid: true },
     })
     .catch(() => null);
@@ -113,20 +121,18 @@ export async function resolveModelIntelligenceLabContext(args: {
     .filter(Boolean)
     .join(", ");
 
-  const lookup = await lookupAdminHousesByEmail(selection.email);
-
   return {
     ok: true,
-    houses: lookup.ok ? lookup.houses : [selection.house],
+    houses: lookup.houses,
     context: {
-      email: selection.email,
-      userId: selection.userId,
-      sourceHouseId: selection.house.id,
-      esiid: selection.house.esiid,
-      addressLabel: addressLabel || selection.house.label,
+      email: lookup.email,
+      userId: lookup.userId,
+      sourceHouseId: selectedHouse.id,
+      esiid: selectedHouse.esiid,
+      addressLabel: addressLabel || selectedHouse.label,
       committedUsageSource: sourceContext.committedUsageSource ?? null,
       actualSourceKind,
-      actualContextHouseId: sourceContext.onePathUpstream.actualContextHouseId ?? selection.house.id,
+      actualContextHouseId: sourceContext.onePathUpstream.actualContextHouseId ?? selectedHouse.id,
       sourceTruthAvailable,
       profileOnlyHouse,
       coverageStart: sourceContext.coverage?.coverageStart ?? null,
