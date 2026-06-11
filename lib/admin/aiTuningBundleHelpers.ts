@@ -115,14 +115,53 @@ export function extractValidationDayKeysFromPolicySnapshot(policy: unknown): str
   return Array.from(new Set(keys.filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)))).sort();
 }
 
+export function extractSelectedValidationDayKeysForOnePathExport(args: {
+  intervalDiagnostics?: Record<string, unknown> | null;
+  compareProjection?: unknown;
+  dailyCompareDays?: unknown;
+  lookupSourceContext?: unknown;
+  loadedSourceContext?: unknown;
+}): string[] {
+  const diagnostics = asRecord(args.intervalDiagnostics);
+  const curveDiagnostics = asRecord(diagnostics.validationIntervalCurveDiagnostics);
+  const fromCurve = asArray(curveDiagnostics.selectedValidationDayKeysUsed)
+    .map((value) => String(value).slice(0, 10))
+    .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date));
+  if (fromCurve.length > 0) return Array.from(new Set(fromCurve)).sort();
+
+  const fromDailyCompare = asArray(asRecord(diagnostics.dailyCompare).days)
+    .map((row) => asRecord(row))
+    .filter((row) => row.validationDay === true)
+    .map((row) => String(row.date ?? "").slice(0, 10))
+    .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date));
+  if (fromDailyCompare.length > 0) return Array.from(new Set(fromDailyCompare)).sort();
+
+  const fromCompare = extractValidationDayKeysFromCompareProjection(args.compareProjection);
+  if (fromCompare.length > 0) return fromCompare;
+
+  const fromDailyRows = asArray(args.dailyCompareDays)
+    .map((row) => asRecord(row))
+    .filter((row) => row.validationDay === true || String(row.sourceDetail ?? "").includes("VALIDATION"))
+    .map((row) => String(row.date ?? row.localDate ?? "").slice(0, 10))
+    .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date));
+  if (fromDailyRows.length > 0) return Array.from(new Set(fromDailyRows)).sort();
+
+  return extractValidationDayKeysFromPolicySnapshot(args.lookupSourceContext ?? args.loadedSourceContext);
+}
+
 export function extractValidationDayKeysFromCompareProjection(compareProjection: unknown): string[] {
   const rows = asArray(asRecord(compareProjection).rows);
-  const keys = rows
+  const validationOnly = rows
     .map((row) => asRecord(row))
     .filter((row) => row.validationDay === true || row.isValidationDay === true)
     .map((row) => String(row.localDate ?? row.date ?? "").slice(0, 10))
     .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date));
-  return Array.from(new Set(keys)).sort();
+  if (validationOnly.length > 0) return Array.from(new Set(validationOnly)).sort();
+
+  const allDates = rows
+    .map((row) => String(asRecord(row).localDate ?? asRecord(row).date ?? "").slice(0, 10))
+    .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date));
+  return Array.from(new Set(allDates)).sort();
 }
 
 export function sumKwhFromDailyRows(rows: unknown): number | null {

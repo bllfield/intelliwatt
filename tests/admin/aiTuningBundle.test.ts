@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildManualGapfillAiTuningBundle } from "@/lib/admin/manualGapfillAiTuningBundle";
 import { buildOnePathAiTuningBundle } from "@/lib/admin/onePathAiTuningBundle";
+import { extractSelectedValidationDayKeysForOnePathExport } from "@/lib/admin/aiTuningBundleHelpers";
 import { buildSimulationCodeMap, SIMULATION_CODE_MAP_VERSION } from "@/lib/admin/simulationCodeMap";
 
 const deployment = {
@@ -118,6 +119,61 @@ describe("buildOnePathAiTuningBundle", () => {
     const intervalExport = (bundle.diagnostics as any).onePathIntervalDiagnosticsV1;
     expect(intervalExport.available).toBe(false);
     expect(intervalExport.exportHints.length).toBeGreaterThan(0);
+  });
+
+  it("populates selectedValidationDateKeys from compare projection localDate rows without validationDay flag", () => {
+    const validationKeys = [
+      "2025-06-10",
+      "2025-07-01",
+      "2025-08-01",
+      "2025-09-01",
+      "2025-10-01",
+      "2025-11-01",
+      "2025-12-01",
+      "2025-12-02",
+      "2026-01-01",
+      "2026-02-01",
+      "2026-03-01",
+      "2026-04-01",
+      "2026-05-01",
+      "2026-06-01",
+    ];
+    const compareRows = validationKeys.map((localDate) => ({ localDate, actualKwh: 10, simulatedKwh: 10 }));
+    const bundle = buildOnePathAiTuningBundle({
+      mode: "INTERVAL",
+      runResult: {
+        onePathIntervalDiagnosticsV1: {
+          available: true,
+          validationIntervalCurveDiagnostics: {
+            selectedValidationDayKeysUsed: validationKeys,
+            days: [],
+            available: false,
+            unavailableReason: "no_actual_interval_rows_for_selected_validation_days",
+          },
+          exactMatchDiagnostics: { evaluatedDayCount: 0, skippedReason: "no_actual_interval_rows_for_selected_validation_days" },
+        },
+      },
+      simulationVariablesPayload: {
+        selectedMode: "INTERVAL",
+        readModel: { compareProjection: { rows: compareRows } },
+        runDisplayContract: { dailyUsage: { rows: compareRows } },
+      },
+    });
+
+    expect(bundle.selectedValidationDateKeys).toEqual(validationKeys);
+    const intervalExport = (bundle.diagnostics as any).onePathIntervalDiagnosticsV1;
+    expect(intervalExport.validationIntervalCurveDiagnostics.populated).toBe(false);
+    expect(intervalExport.exportHints.length).toBeGreaterThan(0);
+  });
+
+  it("extractSelectedValidationDayKeysForOnePathExport prefers diagnostics curve keys", () => {
+    const keys = extractSelectedValidationDayKeysForOnePathExport({
+      intervalDiagnostics: {
+        validationIntervalCurveDiagnostics: { selectedValidationDayKeysUsed: ["2025-07-01", "2025-08-01"] },
+      },
+      compareProjection: { rows: [{ localDate: "2025-06-01" }] },
+    });
+    expect(keys).toEqual(["2025-07-01", "2025-08-01"]);
   });
 });
 

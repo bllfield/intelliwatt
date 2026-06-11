@@ -3,8 +3,7 @@ import {
   asNumber,
   asRecord,
   asString,
-  extractValidationDayKeysFromCompareProjection,
-  extractValidationDayKeysFromPolicySnapshot,
+  extractSelectedValidationDayKeysForOnePathExport,
   pickKeys,
   type ExportDeploymentMetadata,
 } from "@/lib/admin/aiTuningBundleHelpers";
@@ -30,6 +29,7 @@ function buildIntervalDiagnosticsExportSection(diagnostics: Record<string, unkno
       unavailableReason: diagnostics?.unavailableReason ?? "missing_or_unavailable",
       validationIntervalCurveDiagnostics: null,
       exactMatchDiagnostics: null,
+      intervalTruthInterpretation: diagnostics?.intervalTruthInterpretation ?? null,
       exportHints: [
         "Run an INTERVAL or GREEN_BUTTON Past sim on the test home, then copy again.",
         "For posthoc top-miss curves, enable the checkbox and use Re-read run with posthoc interval curves.",
@@ -41,9 +41,11 @@ function buildIntervalDiagnosticsExportSection(diagnostics: Record<string, unkno
   const curveDays = asArray(validationCurves.days);
   const exactMatch = asRecord(diagnostics.exactMatchDiagnostics);
   const exportHints: string[] = [];
-  if (curveDays.length === 0) {
+  if (validationCurves.available === false || curveDays.length === 0) {
     exportHints.push(
-      "validationIntervalCurveDiagnostics.days is empty. Re-read diagnostics with includePosthocTopMissIntervalCurves or ensure validation-day keys exist in compare projection."
+      validationCurves.unavailableReason
+        ? String(validationCurves.unavailableReason)
+        : "validationIntervalCurveDiagnostics.days is empty. Re-read diagnostics with includePosthocTopMissIntervalCurves or ensure validation-day interval rows exist."
     );
   }
 
@@ -54,10 +56,11 @@ function buildIntervalDiagnosticsExportSection(diagnostics: Record<string, unkno
     weatherMissDiagnostics: diagnostics.weatherMissDiagnostics ?? null,
     worstDayDiagnostics: diagnostics.worstDayDiagnostics ?? null,
     todBucketDiagnostics: diagnostics.todBucketDiagnostics ?? null,
+    intervalTruthInterpretation: diagnostics.intervalTruthInterpretation ?? null,
     validationIntervalCurveDiagnostics: {
       ...validationCurves,
       days: curveDays,
-      populated: curveDays.length > 0,
+      populated: curveDays.length > 0 && validationCurves.available !== false,
       requiredFieldsPresent: curveDays.length
         ? curveDays.every((day) => {
             const record = asRecord(day);
@@ -98,10 +101,13 @@ export function buildOnePathAiTuningBundle(args: {
   const dailyRows = asArray(asRecord(runDisplayContract.dailyUsage).rows);
   const dailyWeather = asRecord(runDisplayContract.dailyUsage).dailyWeather ?? null;
   const intervalDiagnostics = asRecord(runResult.onePathIntervalDiagnosticsV1 ?? simulationVariables.onePathIntervalDiagnosticsV1);
-  const validationDayKeys =
-    extractValidationDayKeysFromCompareProjection(compareProjection).length > 0
-      ? extractValidationDayKeysFromCompareProjection(compareProjection)
-      : extractValidationDayKeysFromPolicySnapshot(lookup.sourceContext ?? loadedSourceContext);
+  const validationDayKeys = extractSelectedValidationDayKeysForOnePathExport({
+    intervalDiagnostics,
+    compareProjection,
+    dailyCompareDays: dailyRows.length ? dailyRows : compareRows,
+    lookupSourceContext: lookup.sourceContext,
+    loadedSourceContext,
+  });
 
   const actualTotalKwh =
     asNumber(asRecord(runDisplayContract.coverage).totalKwh) ??

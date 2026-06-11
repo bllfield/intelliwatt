@@ -1,4 +1,8 @@
 import type { TravelRange } from "@/modules/simulatedUsage/types";
+import {
+  filterTravelRangesToCoverageWindow,
+} from "@/lib/usage/pastSimTravelRanges";
+import { resolveReportedCoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
 
 export type OnePathIntervalSourceType = "SMT" | "GREEN_BUTTON";
 
@@ -81,6 +85,9 @@ export type OnePathWeatherMissDiagnostics = {
 
 export type OnePathValidationIntervalCurveDay = {
   date: string;
+  dayType: "weekday" | "weekend";
+  validationDay: boolean;
+  posthocTopMissDay: boolean;
   diagnosticConfidence: OnePathDiagnosticConfidence;
   slotCountActual: number;
   slotCountSimulated: number;
@@ -100,9 +107,19 @@ export type OnePathValidationIntervalCurveDay = {
   morning: { actual: number; simulated: number; delta: number };
   afternoon: { actual: number; simulated: number; delta: number };
   evening: { actual: number; simulated: number; delta: number };
+  todBuckets: {
+    overnight: { actualKwh: number; simulatedKwh: number; deltaKwh: number; shareActual: number | null; shareSimulated: number | null };
+    morning: { actualKwh: number; simulatedKwh: number; deltaKwh: number; shareActual: number | null; shareSimulated: number | null };
+    afternoon: { actualKwh: number; simulatedKwh: number; deltaKwh: number; shareActual: number | null; shareSimulated: number | null };
+    evening: { actualKwh: number; simulatedKwh: number; deltaKwh: number; shareActual: number | null; shareSimulated: number | null };
+  };
+  actual96SlotShape: number[];
+  simulated96SlotShape: number[];
+  actualIntervals: Array<{ timestamp: string; kwh: number }>;
+  simulatedIntervals: Array<{ timestamp: string; kwh: number }>;
   actualIntervalsLoadedForCompareOnly: true;
   actualIntervalsPassedToSimulator: false;
-  actualDayPotentiallyAvailableInDonorPool: boolean | "unknown";
+  actualIntervalsUsedAsDonorForThisDay: boolean | "unknown";
   cleanHoldoutDay: boolean;
   exactCurveMatchFlag: boolean;
   nearExactCurveMatchScore: number | null;
@@ -119,10 +136,14 @@ export type OnePathTodBucketDiagnostic = {
 };
 
 export type OnePathExactMatchDiagnostics = {
+  evaluatedDayCount: number;
   exactCurveMatchDayCount: number;
   nearExactCurveMatchDayCount: number;
   cleanHoldoutExactMatchCount: number;
   nonHoldoutExactMatchCount: number;
+  skippedReason: string | null;
+  actualIntervalsAvailableForCompare: boolean;
+  simulatedIntervalsAvailableForCompare: boolean;
   days: Array<{
     date: string;
     diagnosticConfidence: OnePathDiagnosticConfidence;
@@ -130,6 +151,14 @@ export type OnePathExactMatchDiagnostics = {
     nearExactCurveMatchScore: number | null;
     cleanHoldoutDay: boolean;
   }>;
+};
+
+export type OnePathIntervalTruthInterpretation = {
+  intervalTruthPassthrough: boolean;
+  simulatedDailyRowsAreActualBacked: boolean;
+  modelAccuracyTest: boolean;
+  usefulFor: string;
+  notUsefulFor: string;
 };
 
 export type OnePathWorstDayDiagnosticEntry = {
@@ -164,16 +193,25 @@ export type OnePathIntervalDiagnosticsV1 = {
   };
   weatherMissDiagnostics: OnePathWeatherMissDiagnostics;
   validationIntervalCurveDiagnostics: {
+    available: boolean;
+    unavailableReason: string | null;
     selectedValidationDayCount: number;
     includedPosthocDayCount: number;
     includePosthocTopMissIntervalCurves: boolean;
+    selectedValidationDayKeysUsed: string[];
+    posthocTopMissDayKeysUsed: string[];
+    actualIntervalRowsFound: number;
+    simulatedIntervalRowsFound: number;
     days: OnePathValidationIntervalCurveDay[];
   };
   todBucketDiagnostics: {
+    available: boolean;
+    unavailableReason: string | null;
     validationDaysOnly: true;
     buckets: OnePathTodBucketDiagnostic[];
   };
   exactMatchDiagnostics: OnePathExactMatchDiagnostics;
+  intervalTruthInterpretation: OnePathIntervalTruthInterpretation;
   worstDayDiagnostics: {
     topOverSimDays: OnePathWorstDayDiagnosticEntry[];
     topUnderSimDays: OnePathWorstDayDiagnosticEntry[];
@@ -331,9 +369,13 @@ function classifyWeatherBucket(weather: WeatherRecord | null | undefined): OnePa
   return "extreme_hot";
 }
 
-function buildTravelDaySet(ranges: TravelRange[] | undefined): Set<string> {
+function buildTravelDaySet(
+  ranges: TravelRange[] | undefined,
+  coverageWindow?: { startDate: string; endDate: string } | null
+): Set<string> {
+  const activeRanges = filterTravelRangesToCoverageWindow(ranges, coverageWindow);
   const out = new Set<string>();
-  for (const range of ranges ?? []) {
+  for (const range of activeRanges) {
     const start = new Date(`${range.startDate}T00:00:00.000Z`);
     const end = new Date(`${range.endDate}T00:00:00.000Z`);
     if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) continue;
@@ -342,6 +384,28 @@ function buildTravelDaySet(ranges: TravelRange[] | undefined): Set<string> {
     }
   }
   return out;
+}
+
+function resolveDiagnosticsCoverageWindow(args: {
+  actualDataset?: unknown;
+  simulatedDataset?: unknown;
+}): { startDate: string; endDate: string } | null {
+  const actualSummary = (args.actualDataset as any)?.summary;
+  const simulatedSummary = (args.simulatedDataset as any)?.summary;
+  const actualMeta = (args.actualDataset as any)?.meta;
+  const simulatedMeta = (args.simulatedDataset as any)?.meta;
+  const fallbackStart =
+    String(actualSummary?.start ?? simulatedSummary?.start ?? actualMeta?.coverageStart ?? simulatedMeta?.coverageStart ?? "").slice(0, 10);
+  const fallbackEnd =
+    String(actualSummary?.end ?? simulatedSummary?.end ?? actualMeta?.coverageEnd ?? simulatedMeta?.coverageEnd ?? "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fallbackStart) || !/^\d{4}-\d{2}-\d{2}$/.test(fallbackEnd)) {
+    return null;
+  }
+  return resolveReportedCoverageWindow({
+    dataset: args.simulatedDataset ?? args.actualDataset,
+    fallbackStartDate: fallbackStart,
+    fallbackEndDate: fallbackEnd,
+  });
 }
 
 function computeBucketSummary(days: OnePathIntervalDailyCompareDay[]): OnePathIntervalCompareBucketSummary {
@@ -554,11 +618,16 @@ export function buildOnePathIntervalDiagnosticsForPastResponse(args: {
   includePosthocTopMissIntervalCurves?: boolean;
   posthocTopMissDayCount?: number;
 }): OnePathIntervalDiagnosticsV1 {
-  const travelRanges =
+  const travelRanges = filterTravelRangesToCoverageWindow(
     args.travelRanges ??
-    extractTravelRangesFromPastVariables(
-      args.pastVariables as Array<{ kind?: string; payloadJson?: Record<string, unknown> }> | undefined
-    );
+      extractTravelRangesFromPastVariables(
+        args.pastVariables as Array<{ kind?: string; payloadJson?: Record<string, unknown> }> | undefined
+      ),
+    resolveDiagnosticsCoverageWindow({
+      actualDataset: args.actualDataset,
+      simulatedDataset: args.simulatedDataset,
+    })
+  );
   return buildOnePathIntervalDiagnosticsEnvelope({
     inputType: resolveOnePathIntervalDiagnosticsInputType(args),
     preferredActualSource: args.preferredActualSource ?? null,
@@ -578,6 +647,13 @@ export function isOnePathIntervalDiagnosticsInputType(inputType: string | null |
 
 export function extractValidationDayKeysFromCompareProjection(compareProjection: unknown): string[] {
   const rows = Array.isArray((compareProjection as any)?.rows) ? (compareProjection as any).rows : [];
+  const validationOnly = rows
+    .filter((row: any) => row?.validationDay === true || row?.isValidationDay === true)
+    .map((row: any) => String(row?.localDate ?? row?.date ?? "").slice(0, 10))
+    .filter((date: string) => /^\d{4}-\d{2}-\d{2}$/.test(date));
+  if (validationOnly.length > 0) {
+    return Array.from(new Set<string>(validationOnly)).sort();
+  }
   return Array.from(
     new Set<string>(
       rows
@@ -585,6 +661,107 @@ export function extractValidationDayKeysFromCompareProjection(compareProjection:
         .filter((date: string) => /^\d{4}-\d{2}-\d{2}$/.test(date))
     )
   ).sort();
+}
+
+function slotsHaveSignal(slots: number[] | undefined): boolean {
+  return Boolean(slots && slots.some((value) => value > 0));
+}
+
+function buildSlotIntervalSeries(date: string, slots: number[], timezone: string): Array<{ timestamp: string; kwh: number }> {
+  const out: Array<{ timestamp: string; kwh: number }> = [];
+  for (let slot = 0; slot < slots.length; slot += 1) {
+    const kwh = slots[slot] ?? 0;
+    if (kwh <= 0) continue;
+    out.push({ timestamp: slotTimestampFromLocalSlot(date, slot, timezone), kwh: round4(kwh) });
+  }
+  return out;
+}
+
+function slotTimestampFromLocalSlot(date: string, slot: number, timezone: string): string {
+  const hour = Math.floor(slot / 4);
+  const minute = (slot % 4) * 15;
+  const local = `${date}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00`;
+  try {
+    const dt = new Date(`${local}:00`);
+    if (Number.isFinite(dt.getTime())) return dt.toISOString();
+  } catch {
+    // fall through
+  }
+  return `${local}:00.000Z`;
+}
+
+function detectSimulatedDailyRowsAreActualBacked(simulatedDataset: unknown): boolean {
+  const daily = Array.isArray((simulatedDataset as any)?.daily) ? (simulatedDataset as any).daily : [];
+  return daily.some((row: any) => {
+    const detail = String(row?.sourceDetail ?? row?.source ?? "").toUpperCase();
+    return detail === "ACTUAL" || detail === "ACTUAL_VALIDATION_TEST_DAY";
+  });
+}
+
+function detectIntervalTruthPassthrough(args: {
+  sourceType: OnePathIntervalSourceType;
+  actualDataset?: unknown;
+  simulatedDataset?: unknown;
+  validationDayKeys: string[];
+}): boolean {
+  if (args.sourceType !== "SMT") return false;
+  const actualByDate = readDailyRows(args.actualDataset);
+  const simulatedByDate = readDailyRows(args.simulatedDataset);
+  const keys = args.validationDayKeys.length > 0 ? args.validationDayKeys : Array.from(actualByDate.keys());
+  if (keys.length === 0) return false;
+  let comparable = 0;
+  let matched = 0;
+  for (const date of keys) {
+    const actual = actualByDate.get(date);
+    const simulated = simulatedByDate.get(date);
+    if (actual == null || simulated == null) continue;
+    comparable += 1;
+    if (Math.abs(actual - simulated) <= 0.01) matched += 1;
+  }
+  const actualIntervals = readIntervalPoints(args.actualDataset);
+  const simulatedIntervals = readIntervalPoints(args.simulatedDataset);
+  const dailyBacked = detectSimulatedDailyRowsAreActualBacked(args.simulatedDataset);
+  return (
+    comparable > 0 &&
+    matched / comparable >= 0.95 &&
+    actualIntervals.length > 0 &&
+    (simulatedIntervals.length === 0 || matched === comparable) &&
+    dailyBacked
+  );
+}
+
+function buildIntervalTruthInterpretation(args: {
+  sourceType: OnePathIntervalSourceType;
+  intervalTruthPassthrough: boolean;
+  simulatedDailyRowsAreActualBacked: boolean;
+}): OnePathIntervalTruthInterpretation {
+  const passthrough = args.intervalTruthPassthrough;
+  return {
+    intervalTruthPassthrough: passthrough,
+    simulatedDailyRowsAreActualBacked: args.simulatedDailyRowsAreActualBacked,
+    modelAccuracyTest: !passthrough,
+    usefulFor: passthrough
+      ? "export plumbing, source truth, plan calculations, interval diagnostics"
+      : "masked model accuracy review, weather-shape tuning, interval curve diagnostics",
+    notUsefulFor: passthrough
+      ? "masked low-data model accuracy"
+      : "pure interval-truth passthrough accuracy scoring",
+  };
+}
+
+function buildTodBucketBlock(
+  actual: number,
+  simulated: number,
+  totalActual: number,
+  totalSimulated: number
+): OnePathValidationIntervalCurveDay["todBuckets"]["overnight"] {
+  return {
+    actualKwh: actual,
+    simulatedKwh: simulated,
+    deltaKwh: round4(simulated - actual),
+    shareActual: totalActual > 1e-6 ? round4(actual / totalActual) : null,
+    shareSimulated: totalSimulated > 1e-6 ? round4(simulated / totalSimulated) : null,
+  };
 }
 
 export function buildUnavailableOnePathIntervalDiagnosticsV1(args: {
@@ -614,19 +791,39 @@ export function buildUnavailableOnePathIntervalDiagnosticsV1(args: {
       heatingSensitivityDelta: null,
     },
     validationIntervalCurveDiagnostics: {
+      available: false,
+      unavailableReason: args.unavailableReason,
       selectedValidationDayCount: 0,
       includedPosthocDayCount: 0,
       includePosthocTopMissIntervalCurves: false,
+      selectedValidationDayKeysUsed: [],
+      posthocTopMissDayKeysUsed: [],
+      actualIntervalRowsFound: 0,
+      simulatedIntervalRowsFound: 0,
       days: [],
     },
-    todBucketDiagnostics: { validationDaysOnly: true, buckets: [] },
+    todBucketDiagnostics: {
+      available: false,
+      unavailableReason: args.unavailableReason,
+      validationDaysOnly: true,
+      buckets: [],
+    },
     exactMatchDiagnostics: {
+      evaluatedDayCount: 0,
       exactCurveMatchDayCount: 0,
       nearExactCurveMatchDayCount: 0,
       cleanHoldoutExactMatchCount: 0,
       nonHoldoutExactMatchCount: 0,
+      skippedReason: args.unavailableReason,
+      actualIntervalsAvailableForCompare: false,
+      simulatedIntervalsAvailableForCompare: false,
       days: [],
     },
+    intervalTruthInterpretation: buildIntervalTruthInterpretation({
+      sourceType: args.sourceType ?? "SMT",
+      intervalTruthPassthrough: false,
+      simulatedDailyRowsAreActualBacked: false,
+    }),
     worstDayDiagnostics: {
       topOverSimDays: [],
       topUnderSimDays: [],
@@ -644,7 +841,12 @@ export function buildOnePathIntervalCompareDiagnosticsV1(
   const validationHoldoutProofOk = args.validationHoldoutProofOk === true;
   const includePosthoc = args.includePosthocTopMissIntervalCurves === true;
   const posthocCount = args.posthocTopMissDayCount ?? 5;
-  const travelDaySet = buildTravelDaySet(args.travelRanges);
+  const coverageWindow = resolveDiagnosticsCoverageWindow({
+    actualDataset: args.actualDataset,
+    simulatedDataset: args.simulatedDataset,
+  });
+  const activeTravelRanges = filterTravelRangesToCoverageWindow(args.travelRanges, coverageWindow);
+  const travelDaySet = buildTravelDaySet(activeTravelRanges, coverageWindow);
   const actualByDate = readDailyRows(args.actualDataset);
   const simulatedByDate = readDailyRows(args.simulatedDataset);
   const dates = Array.from(
@@ -775,77 +977,135 @@ export function buildOnePathIntervalCompareDiagnosticsV1(
   const actualKwhPerHeatingDegreeDay = totalHdd > 0 ? round2(actualHeatingKwh / totalHdd) : null;
   const simulatedKwhPerHeatingDegreeDay = totalHdd > 0 ? round2(simHeatingKwh / totalHdd) : null;
 
-  const curveDates = Array.from(new Set([...(args.validationDayKeys ?? []), ...posthocDates])).sort();
+  const selectedValidationDayKeysUsed = Array.from(validationDaySet).sort();
+  const posthocTopMissDayKeysUsed = [...posthocDates].sort();
+  const curveDates = Array.from(new Set([...selectedValidationDayKeysUsed, ...posthocTopMissDayKeysUsed])).sort();
   const curveDateSet = new Set(curveDates);
   const actualIntervals = readIntervalPoints(args.actualDataset);
-  const simulatedIntervals = readIntervalPoints(args.simulatedDataset);
+  const simulatedIntervalsRaw = readIntervalPoints(args.simulatedDataset);
+  const intervalTruthPassthrough = detectIntervalTruthPassthrough({
+    sourceType: args.sourceType,
+    actualDataset: args.actualDataset,
+    simulatedDataset: args.simulatedDataset,
+    validationDayKeys: selectedValidationDayKeysUsed,
+  });
+  const simulatedDailyRowsAreActualBacked = detectSimulatedDailyRowsAreActualBacked(args.simulatedDataset);
+  const simulatedIntervals =
+    simulatedIntervalsRaw.length > 0
+      ? simulatedIntervalsRaw
+      : intervalTruthPassthrough
+        ? actualIntervals
+        : [];
   const actualBySlot = intervalsByDateAndSlot(actualIntervals, timezone, curveDateSet);
   const simulatedBySlot = intervalsByDateAndSlot(simulatedIntervals, timezone, curveDateSet);
 
   const curveDays: OnePathValidationIntervalCurveDay[] = [];
   for (const date of curveDates) {
-    const actualSlots = actualBySlot.get(date);
-    const simulatedSlots = simulatedBySlot.get(date);
-    if (!actualSlots || !simulatedSlots) continue;
-    const absErrors = actualSlots.map((value, index) => Math.abs(value - (simulatedSlots[index] ?? 0)));
-    const actualTotal = actualSlots.reduce((sum, value) => sum + value, 0);
+    let actualSlots = actualBySlot.get(date);
+    let simulatedSlots = simulatedBySlot.get(date);
+    if (!slotsHaveSignal(actualSlots) && intervalTruthPassthrough && slotsHaveSignal(simulatedSlots)) {
+      actualSlots = simulatedSlots;
+    }
+    if (!slotsHaveSignal(simulatedSlots) && intervalTruthPassthrough && slotsHaveSignal(actualSlots)) {
+      simulatedSlots = actualSlots;
+    }
+    if (!slotsHaveSignal(actualSlots) || !slotsHaveSignal(simulatedSlots)) continue;
+
+    const absErrors = actualSlots!.map((value, index) => Math.abs(value - (simulatedSlots![index] ?? 0)));
+    const actualTotal = actualSlots!.reduce((sum, value) => sum + value, 0);
+    const simulatedTotal = simulatedSlots!.reduce((sum, value) => sum + value, 0);
     const rawIntervalWape = actualTotal > 1e-6 ? round4(absErrors.reduce((sum, value) => sum + value, 0) / actualTotal) : null;
-    const nearExactScore = nearExactCurveMatchScore(actualSlots, simulatedSlots);
+    const nearExactScore = nearExactCurveMatchScore(actualSlots!, simulatedSlots!);
     const exactCurveMatchFlag = nearExactScore != null && nearExactScore <= 0.001;
-    const peakActualSlot = peakSlot(actualSlots);
-    const peakSimulatedSlot = peakSlot(simulatedSlots);
+    const peakActualSlot = peakSlot(actualSlots!);
+    const peakSimulatedSlot = peakSlot(simulatedSlots!);
     const dayMeta = dailyDays.find((day) => day.date === date);
+    const validationDay = validationDaySet.has(date);
+    const posthocTopMissDay = posthocDateSet.has(date) && !validationDay;
     const diagnosticConfidence =
-      posthocDateSet.has(date) && !validationDaySet.has(date)
+      posthocTopMissDay
         ? "posthoc_diagnostic"
         : dayMeta?.diagnosticConfidence ?? "unknown";
+    const dayTotalActual = dayMeta?.actualKwh ?? round2(actualTotal);
+    const dayTotalSimulated = dayMeta?.simulatedKwh ?? round2(simulatedTotal);
+    const overnightActual = sumBlock(actualSlots!, 0, 23);
+    const overnightSim = sumBlock(simulatedSlots!, 0, 23);
+    const morningActual = sumBlock(actualSlots!, 24, 47);
+    const morningSim = sumBlock(simulatedSlots!, 24, 47);
+    const afternoonActual = sumBlock(actualSlots!, 48, 71);
+    const afternoonSim = sumBlock(simulatedSlots!, 48, 71);
+    const eveningActual = sumBlock(actualSlots!, 72, 95);
+    const eveningSim = sumBlock(simulatedSlots!, 72, 95);
     curveDays.push({
       date,
+      dayType: weekdayWeekend(date),
+      validationDay,
+      posthocTopMissDay,
       diagnosticConfidence,
-      slotCountActual: actualSlots.filter((value) => value > 0).length,
-      slotCountSimulated: simulatedSlots.filter((value) => value > 0).length,
-      actualDailyTotalKwh: dayMeta?.actualKwh ?? round2(actualTotal),
-      simulatedDailyTotalKwh: dayMeta?.simulatedKwh ?? round2(simulatedSlots.reduce((sum, value) => sum + value, 0)),
-      dailyTotalDeltaKwh: dayMeta?.deltaKwh ?? null,
+      slotCountActual: actualSlots!.filter((value) => value > 0).length,
+      slotCountSimulated: simulatedSlots!.filter((value) => value > 0).length,
+      actualDailyTotalKwh: dayTotalActual,
+      simulatedDailyTotalKwh: dayTotalSimulated,
+      dailyTotalDeltaKwh: dayMeta?.deltaKwh ?? round2(dayTotalSimulated - dayTotalActual),
       rawIntervalWape,
       intervalMae: absErrors.length > 0 ? round4(absErrors.reduce((sum, value) => sum + value, 0) / absErrors.length) : null,
-      normalizedShapeError: normalizedShapeError(actualSlots, simulatedSlots),
-      shapeCorrelation: correlation(actualSlots, simulatedSlots),
-      peakActualKwh: round4(actualSlots[peakActualSlot] ?? 0),
-      peakSimulatedKwh: round4(simulatedSlots[peakSimulatedSlot] ?? 0),
+      normalizedShapeError: normalizedShapeError(actualSlots!, simulatedSlots!),
+      shapeCorrelation: correlation(actualSlots!, simulatedSlots!),
+      peakActualKwh: round4(actualSlots![peakActualSlot] ?? 0),
+      peakSimulatedKwh: round4(simulatedSlots![peakSimulatedSlot] ?? 0),
       peakActualLocalTime: hhmmFromSlot(peakActualSlot),
       peakSimulatedLocalTime: hhmmFromSlot(peakSimulatedSlot),
       peakTimingErrorMinutes: Math.abs(peakSimulatedSlot - peakActualSlot) * 15,
       overnight: {
-        actual: sumBlock(actualSlots, 0, 23),
-        simulated: sumBlock(simulatedSlots, 0, 23),
-        delta: round4(sumBlock(simulatedSlots, 0, 23) - sumBlock(actualSlots, 0, 23)),
+        actual: overnightActual,
+        simulated: overnightSim,
+        delta: round4(overnightSim - overnightActual),
       },
       morning: {
-        actual: sumBlock(actualSlots, 24, 47),
-        simulated: sumBlock(simulatedSlots, 24, 47),
-        delta: round4(sumBlock(simulatedSlots, 24, 47) - sumBlock(actualSlots, 24, 47)),
+        actual: morningActual,
+        simulated: morningSim,
+        delta: round4(morningSim - morningActual),
       },
       afternoon: {
-        actual: sumBlock(actualSlots, 48, 71),
-        simulated: sumBlock(simulatedSlots, 48, 71),
-        delta: round4(sumBlock(simulatedSlots, 48, 71) - sumBlock(actualSlots, 48, 71)),
+        actual: afternoonActual,
+        simulated: afternoonSim,
+        delta: round4(afternoonSim - afternoonActual),
       },
       evening: {
-        actual: sumBlock(actualSlots, 72, 95),
-        simulated: sumBlock(simulatedSlots, 72, 95),
-        delta: round4(sumBlock(simulatedSlots, 72, 95) - sumBlock(actualSlots, 72, 95)),
+        actual: eveningActual,
+        simulated: eveningSim,
+        delta: round4(eveningSim - eveningActual),
       },
+      todBuckets: {
+        overnight: buildTodBucketBlock(overnightActual, overnightSim, dayTotalActual ?? actualTotal, dayTotalSimulated ?? simulatedTotal),
+        morning: buildTodBucketBlock(morningActual, morningSim, dayTotalActual ?? actualTotal, dayTotalSimulated ?? simulatedTotal),
+        afternoon: buildTodBucketBlock(afternoonActual, afternoonSim, dayTotalActual ?? actualTotal, dayTotalSimulated ?? simulatedTotal),
+        evening: buildTodBucketBlock(eveningActual, eveningSim, dayTotalActual ?? actualTotal, dayTotalSimulated ?? simulatedTotal),
+      },
+      actual96SlotShape: [...actualSlots!],
+      simulated96SlotShape: [...simulatedSlots!],
+      actualIntervals: buildSlotIntervalSeries(date, actualSlots!, timezone),
+      simulatedIntervals: buildSlotIntervalSeries(date, simulatedSlots!, timezone),
       actualIntervalsLoadedForCompareOnly: true,
       actualIntervalsPassedToSimulator: false,
-      actualDayPotentiallyAvailableInDonorPool: "unknown",
+      actualIntervalsUsedAsDonorForThisDay:
+        intervalTruthPassthrough && simulatedIntervalsRaw.length === 0 ? true : "unknown",
       cleanHoldoutDay: Boolean(dayMeta?.cleanHoldoutDay),
       exactCurveMatchFlag,
       nearExactCurveMatchScore: nearExactScore,
     });
   }
 
-  const validationCurveDays = curveDays.filter((day) => validationDaySet.has(day.date));
+  const validationCurveDays = curveDays.filter((day) => day.validationDay);
+  const curveDiagnosticsAvailable = curveDays.length > 0;
+  const curveUnavailableReason =
+    curveDiagnosticsAvailable
+      ? null
+      : actualIntervals.length === 0
+        ? "no_actual_interval_rows_for_selected_validation_days"
+        : simulatedIntervalsRaw.length === 0 && !intervalTruthPassthrough
+          ? "no_simulated_interval_rows_for_selected_validation_days"
+          : "validation_interval_curve_days_unavailable_for_selected_dates";
   const todTotals = validationCurveDays.reduce(
     (acc, day) => ({
       overnight: {
@@ -894,10 +1154,14 @@ export function buildOnePathIntervalCompareDiagnosticsV1(
   });
 
   const exactMatchDiagnostics: OnePathExactMatchDiagnostics = {
+    evaluatedDayCount: curveDays.length,
     exactCurveMatchDayCount: curveDays.filter((day) => day.exactCurveMatchFlag).length,
     nearExactCurveMatchDayCount: curveDays.filter((day) => (day.nearExactCurveMatchScore ?? 1) <= 0.05).length,
     cleanHoldoutExactMatchCount: curveDays.filter((day) => day.cleanHoldoutDay && day.exactCurveMatchFlag).length,
     nonHoldoutExactMatchCount: curveDays.filter((day) => !day.cleanHoldoutDay && day.exactCurveMatchFlag).length,
+    skippedReason: curveDays.length > 0 ? null : curveUnavailableReason,
+    actualIntervalsAvailableForCompare: actualIntervals.length > 0,
+    simulatedIntervalsAvailableForCompare: simulatedIntervals.length > 0,
     days: curveDays.map((day) => ({
       date: day.date,
       diagnosticConfidence: day.diagnosticConfidence,
@@ -969,21 +1233,38 @@ export function buildOnePathIntervalCompareDiagnosticsV1(
           : null,
     },
     validationIntervalCurveDiagnostics: {
+      available: curveDiagnosticsAvailable,
+      unavailableReason: curveUnavailableReason,
       selectedValidationDayCount: validationDaySet.size,
-      includedPosthocDayCount: posthocDates.length,
+      includedPosthocDayCount: posthocTopMissDayKeysUsed.length,
       includePosthocTopMissIntervalCurves: includePosthoc,
+      selectedValidationDayKeysUsed,
+      posthocTopMissDayKeysUsed,
+      actualIntervalRowsFound: actualIntervals.length,
+      simulatedIntervalRowsFound: simulatedIntervals.length,
       days: curveDays,
     },
     todBucketDiagnostics: {
+      available: validationCurveDays.length > 0,
+      unavailableReason:
+        validationCurveDays.length > 0 ? null : curveUnavailableReason ?? "validation_interval_curve_days_unavailable",
       validationDaysOnly: true,
-      buckets: [
-        buildTodBucket("overnight", todTotals.overnight.actual, todTotals.overnight.simulated),
-        buildTodBucket("morning", todTotals.morning.actual, todTotals.morning.simulated),
-        buildTodBucket("afternoon", todTotals.afternoon.actual, todTotals.afternoon.simulated),
-        buildTodBucket("evening", todTotals.evening.actual, todTotals.evening.simulated),
-      ],
+      buckets:
+        validationCurveDays.length > 0
+          ? [
+              buildTodBucket("overnight", todTotals.overnight.actual, todTotals.overnight.simulated),
+              buildTodBucket("morning", todTotals.morning.actual, todTotals.morning.simulated),
+              buildTodBucket("afternoon", todTotals.afternoon.actual, todTotals.afternoon.simulated),
+              buildTodBucket("evening", todTotals.evening.actual, todTotals.evening.simulated),
+            ]
+          : [],
     },
     exactMatchDiagnostics,
+    intervalTruthInterpretation: buildIntervalTruthInterpretation({
+      sourceType: args.sourceType,
+      intervalTruthPassthrough,
+      simulatedDailyRowsAreActualBacked,
+    }),
     worstDayDiagnostics: {
       topOverSimDays: [...comparable].sort((a, b) => (b.deltaKwh ?? 0) - (a.deltaKwh ?? 0)).slice(0, topN).map((day) => buildWorstEntry(day.date)),
       topUnderSimDays: [...comparable].sort((a, b) => (a.deltaKwh ?? 0) - (b.deltaKwh ?? 0)).slice(0, topN).map((day) => buildWorstEntry(day.date)),

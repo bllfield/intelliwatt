@@ -322,4 +322,64 @@ describe("onePathIntervalCompareDiagnosticsV1", () => {
       })
     ).toEqual(["2025-07-01", "2025-07-02"]);
   });
+
+  it("populates interval curve days for INTERVAL truth passthrough when simulated artifact lacks intervals15", () => {
+    const date = "2025-07-01";
+    const pattern = makeSlotPattern(1);
+    const dailyKwh = pattern.reduce((sum, value) => sum + value, 0);
+    const actualDataset = {
+      meta: { timezone: "America/Chicago" },
+      daily: [{ date, kwh: dailyKwh }],
+      series: { intervals15: makeIntervalSeries(date, pattern) },
+    };
+    const simulatedDataset = {
+      meta: { timezone: "America/Chicago" },
+      daily: [{ date, kwh: dailyKwh, sourceDetail: "ACTUAL_VALIDATION_TEST_DAY" }],
+      series: { intervals15: [] },
+    };
+    const out = buildOnePathIntervalCompareDiagnosticsV1({
+      sourceType: "SMT",
+      actualDataset,
+      simulatedDataset,
+      validationDayKeys: [date],
+    });
+
+    expect(out.intervalTruthInterpretation.intervalTruthPassthrough).toBe(true);
+    expect(out.intervalTruthInterpretation.modelAccuracyTest).toBe(false);
+    expect(out.validationIntervalCurveDiagnostics.available).toBe(true);
+    expect(out.validationIntervalCurveDiagnostics.days).toHaveLength(1);
+    const day = out.validationIntervalCurveDiagnostics.days[0]!;
+    expect(day.rawIntervalWape).toBe(0);
+    expect(day.exactCurveMatchFlag).toBe(true);
+    expect(day.actualIntervalsUsedAsDonorForThisDay).toBe(true);
+    expect(out.todBucketDiagnostics.available).toBe(true);
+    expect(out.todBucketDiagnostics.buckets[0]?.bucketActualKwh).toBeGreaterThan(0);
+    expect(out.exactMatchDiagnostics.evaluatedDayCount).toBe(1);
+  });
+
+  it("marks curve and TOD diagnostics unavailable when no interval rows exist", () => {
+    const out = buildOnePathIntervalCompareDiagnosticsV1({
+      sourceType: "SMT",
+      actualDataset: {
+        daily: [{ date: "2025-07-01", kwh: 100 }],
+        series: { intervals15: [] },
+      },
+      simulatedDataset: {
+        daily: [{ date: "2025-07-01", kwh: 100 }],
+        series: { intervals15: [] },
+      },
+      validationDayKeys: ["2025-07-01"],
+    });
+
+    expect(out.validationIntervalCurveDiagnostics.available).toBe(false);
+    expect(out.validationIntervalCurveDiagnostics.unavailableReason).toBe(
+      "no_actual_interval_rows_for_selected_validation_days"
+    );
+    expect(out.validationIntervalCurveDiagnostics.days).toEqual([]);
+    expect(out.todBucketDiagnostics.available).toBe(false);
+    expect(out.exactMatchDiagnostics.evaluatedDayCount).toBe(0);
+    expect(out.exactMatchDiagnostics.skippedReason).toBe(
+      "no_actual_interval_rows_for_selected_validation_days"
+    );
+  });
 });
