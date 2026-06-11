@@ -39,6 +39,12 @@ const TOOL_CARDS = [
     description: "Debug-only MG-1–MG-5 route harness. Primary workflow: Manual GapFill Lab.",
   },
   {
+    href: "/admin/tools/model-intelligence-lab",
+    title: "Model Intelligence Lab",
+    description:
+      "Orchestrate One Path masked simulations, compare results using shared diagnostics, analyze cohorts, and manage tuning recommendations.",
+  },
+  {
     href: "/admin/tools/one-path-sim",
     title: "One Path Sim Admin",
     description: "Canonical admin harness for shared interval, manual, annual, and new-build simulation runs.",
