@@ -15,6 +15,7 @@ import {
 } from "@/modules/onePathSim/simulationVariablePresentation";
 import { buildOnePathSandboxHarnessSummary } from "@/modules/onePathSim/adminHarnessSummary";
 import { formatAdminToolErrorMessage } from "@/lib/admin/formatAdminToolError";
+import { fetchExportDeploymentMetadata } from "@/lib/admin/fetchExportDeploymentMetadata";
 import { buildOnePathTuningCycleSummary } from "@/modules/onePathSim/tuningCycleSummary";
 import type { WeatherSensitivityScore } from "@/modules/weatherSensitivity/shared";
 import {
@@ -602,6 +603,7 @@ export function OnePathSimAdmin() {
         knownScenario: lastRunKnownScenario ?? selectedKnownScenario,
         sandboxSummary: sandboxHarnessSummary,
       });
+      const deployment = await fetchExportDeploymentMetadata();
       const payload = buildOnePathAdminFullCopyPayload({
         simulationVariablesPayload,
         runResult: asRecord(runResult),
@@ -619,9 +621,10 @@ export function OnePathSimAdmin() {
           runReason,
           actualContextHouseId: effectiveActualContextHouseId || null,
         },
+        deployment,
       });
       await writeClipboardText(JSON.stringify(payload, null, 2));
-      setStatus("All simulation variables copied for AI.");
+      setStatus("Full One Path AI tuning bundle copied for ChatGPT review.");
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not copy variables to clipboard.");
@@ -2077,11 +2080,11 @@ export function OnePathSimAdmin() {
                 title={
                   !variablePolicy
                     ? "Loading shared simulation variables…"
-                    : "Copies variable policy and run context. Enable Debug diagnostics or Include sim run audit for the full simRunAudit block."
+                    : "Copies the full One Path AI tuning bundle: run outputs, diagnostics, simulation variables, and read-only simulation code map."
                 }
                 className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-brand-navy disabled:opacity-60"
               >
-                Copy all variables for AI
+                Copy full AI tuning bundle
               </button>
               {Object.entries(variablePolicy?.familyMeta ?? {}).map(([familyKey, meta]) => (
                 <button

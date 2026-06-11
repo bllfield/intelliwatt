@@ -35,6 +35,10 @@ describe("buildManualGapfillAllResponsesPayload", () => {
     });
 
     expect(payload.workflow).toBe("manual_gapfill_lab_mg1_mg5");
+    expect(payload.payloadVersion).toBe("manual-gapfill-lab-full-copy-v2");
+    expect((payload.aiTuningBundle as any).bundleVersion).toBe("manual-gapfill-ai-tuning-bundle-v1");
+    expect((payload.simulationCodeMap as any).readOnly).toBe(true);
+    expect((payload.copyMeta as any).includesAiTuningBundle).toBe(true);
     expect((payload.steps as any).step1_sourceContext.response).toEqual({
       status: "ready",
       sourceHouseId: "source-1",

@@ -1,4 +1,7 @@
 import type { ManualGapfillSeedMode } from "@/lib/admin/manualGapfillClient";
+import { buildManualGapfillAiTuningBundle } from "@/lib/admin/manualGapfillAiTuningBundle";
+import type { ExportDeploymentMetadata } from "@/lib/admin/aiTuningBundleHelpers";
+import { buildSimulationCodeMap } from "@/lib/admin/simulationCodeMap";
 
 type StepState<T> = {
   identityKey: string;
@@ -28,6 +31,7 @@ export function buildManualGapfillAllResponsesPayload(args: {
   step4: StepState<Record<string, unknown>>;
   step5: StepState<Record<string, unknown>>;
   isStepStale: (step: StepState<unknown> | null) => boolean;
+  deployment?: ExportDeploymentMetadata | null;
 }): Record<string, unknown> {
   const serializeStep = (step: StepState<Record<string, unknown>>, stepId: string) => {
     if (!step) return null;
@@ -41,10 +45,19 @@ export function buildManualGapfillAllResponsesPayload(args: {
 
   const step5Response = args.step5?.data ?? null;
   const step5Record = step5Response && typeof step5Response === "object" ? step5Response : null;
+  const aiTuningBundle = buildManualGapfillAiTuningBundle(args);
 
   return {
+    purpose:
+      "Complete Manual GapFill Lab AI tuning export for ChatGPT-assisted accuracy review and targeted tuning recommendations.",
+    payloadVersion: "manual-gapfill-lab-full-copy-v2",
     exportedAt: new Date().toISOString(),
     workflow: "manual_gapfill_lab_mg1_mg5",
+    aiTuningBundle,
+    simulationCodeMap: buildSimulationCodeMap({
+      surface: "manual_gapfill_lab",
+      deployment: args.deployment ?? null,
+    }),
     identityKey: args.identityKey,
     identity: {
       userEmail: args.userEmail.trim() || null,
@@ -91,6 +104,8 @@ export function buildManualGapfillAllResponsesPayload(args: {
       includesAllStepResponses: Boolean(
         args.step1 || args.step2Preview || args.step3 || args.step4 || args.step5
       ),
+      includesAiTuningBundle: true,
+      includesSimulationCodeMap: true,
       includesCompareDiagnosticsV1: Boolean(step5Record?.diagnosticsV1),
       includesCompareTopLevelDiagnostics: Boolean(
         step5Record?.weatherDiagnostics ||

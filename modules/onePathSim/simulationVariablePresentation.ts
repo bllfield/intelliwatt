@@ -18,6 +18,9 @@ import {
 import type { UserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
 import { WORKSPACE_PAST_SCENARIO_NAME } from "@/lib/usage/onePathPastUserSiteParityTypes";
 import type { WeatherSensitivityScore } from "@/modules/weatherSensitivity/shared";
+import { buildOnePathAiTuningBundle } from "@/lib/admin/onePathAiTuningBundle";
+import type { ExportDeploymentMetadata } from "@/lib/admin/aiTuningBundleHelpers";
+import { buildSimulationCodeMap } from "@/lib/admin/simulationCodeMap";
 
 export type SimulationVariablePolicyResponseShape = {
   familyMeta: Record<string, { title: string; description: string }>;
@@ -321,21 +324,38 @@ export function buildOnePathAdminFullCopyPayload(args: {
   runResult?: Record<string, unknown> | null;
   lookup?: Record<string, unknown> | null;
   uiControls?: Record<string, unknown> | null;
+  deployment?: ExportDeploymentMetadata | null;
 }): Record<string, unknown> {
   const runResult = asRecord(args.runResult);
   const lookup = asRecord(args.lookup);
+  const mode = String(args.uiControls?.mode ?? args.simulationVariablesPayload?.selectedMode ?? "").trim();
+  const aiTuningBundle = buildOnePathAiTuningBundle({
+    mode,
+    runResult,
+    lookup,
+    simulationVariablesPayload: args.simulationVariablesPayload,
+    uiControls: args.uiControls ?? {},
+    deployment: args.deployment ?? null,
+  });
   return {
     purpose:
-      "Full One Path admin copy payload: simulation-variable AI bundle plus complete last run/lookup responses and diagnostics.",
+      "Complete One Path admin AI tuning export for ChatGPT-assisted accuracy review, miss identification, and targeted tuning recommendations.",
     exportedAt: new Date().toISOString(),
     copyMeta: {
-      payloadVersion: "one-path-admin-full-copy-v1",
+      payloadVersion: "one-path-admin-full-copy-v2",
       includesSimulationVariables: true,
+      includesAiTuningBundle: true,
+      includesSimulationCodeMap: true,
       includesFullRunResponse: Object.keys(runResult).length > 0,
       includesFullLookup: Object.keys(lookup).length > 0,
       includesIntervalDiagnosticsV1: runResult.onePathIntervalDiagnosticsV1 != null,
     },
     uiControls: args.uiControls ?? {},
+    aiTuningBundle,
+    simulationCodeMap: buildSimulationCodeMap({
+      surface: "one_path_admin",
+      deployment: args.deployment ?? null,
+    }),
     simulationVariables: args.simulationVariablesPayload,
     onePathIntervalDiagnosticsV1: runResult.onePathIntervalDiagnosticsV1 ?? null,
     fullAdminRunResponse: Object.keys(runResult).length > 0 ? runResult : null,

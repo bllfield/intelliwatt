@@ -4,6 +4,8 @@ import Link from "next/link";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { copyTextToClipboard } from "@/lib/admin/copyTextToClipboard";
 import { buildManualGapfillAllResponsesPayload } from "@/lib/admin/manualGapfillCopyResponses";
+import { fetchExportDeploymentMetadata } from "@/lib/admin/fetchExportDeploymentMetadata";
+import type { ExportDeploymentMetadata } from "@/lib/admin/aiTuningBundleHelpers";
 import { formatAdminToolErrorMessage } from "@/lib/admin/formatAdminToolError";
 import {
   MANUAL_GAPFILL_DEFAULT_LAB_HOUSE_ID,
@@ -50,7 +52,7 @@ type StepState<T> = {
 } | null;
 
 export type ManualGapfillLabWorkflowHandle = {
-  buildAllResponsesPayload: () => Record<string, unknown>;
+  buildAllResponsesPayload: (deployment?: ExportDeploymentMetadata | null) => Record<string, unknown>;
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -701,7 +703,7 @@ export const ManualGapfillLabWorkflow = forwardRef<
   }
 
   const buildAllResponsesPayload = useCallback(
-    () =>
+    (deployment?: ExportDeploymentMetadata | null) =>
       buildManualGapfillAllResponsesPayload({
         identityKey,
         userEmail,
@@ -725,6 +727,7 @@ export const ManualGapfillLabWorkflow = forwardRef<
         step4,
         step5,
         isStepStale: isStale,
+        deployment: deployment ?? null,
       }),
     [
       identityKey,
@@ -755,10 +758,13 @@ export const ManualGapfillLabWorkflow = forwardRef<
   useImperativeHandle(ref, () => ({ buildAllResponsesPayload }), [buildAllResponsesPayload]);
 
   const copyAllResponses = useCallback(async () => {
-    const payloadText = JSON.stringify(buildAllResponsesPayload(), null, 2);
+    const deployment = await fetchExportDeploymentMetadata();
+    const payloadText = JSON.stringify(buildAllResponsesPayload(deployment), null, 2);
     const copied = await copyTextToClipboard(payloadText);
     setCopyNotice(
-      copied ? "Copied all Manual GapFill step responses to clipboard." : "Copy failed — check browser permissions."
+      copied
+        ? "Full Manual GapFill AI tuning bundle copied for ChatGPT review."
+        : "Copy failed — check browser permissions."
     );
   }, [buildAllResponsesPayload]);
 
@@ -781,7 +787,7 @@ export const ManualGapfillLabWorkflow = forwardRef<
             onClick={() => void copyAllResponses()}
             className="rounded-lg border border-brand-navy px-4 py-2 text-sm font-semibold text-brand-navy disabled:opacity-50"
           >
-            Copy all responses
+            Copy full AI tuning bundle
           </button>
         </div>
       ) : props.hideCopyResponsesButton ? null : (
@@ -792,7 +798,7 @@ export const ManualGapfillLabWorkflow = forwardRef<
             onClick={() => void copyAllResponses()}
             className="rounded-lg border border-brand-navy px-4 py-2 text-sm font-semibold text-brand-navy disabled:opacity-50"
           >
-            Copy all responses
+            Copy full AI tuning bundle
           </button>
         </div>
       )}

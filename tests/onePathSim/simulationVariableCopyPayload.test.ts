@@ -854,6 +854,10 @@ describe("one path simulation variable copy payload", () => {
 
     expect((payload.copyMeta as any).includesFullRunResponse).toBe(true);
     expect((payload.copyMeta as any).includesIntervalDiagnosticsV1).toBe(true);
+    expect((payload.copyMeta as any).payloadVersion).toBe("one-path-admin-full-copy-v2");
+    expect((payload.copyMeta as any).includesAiTuningBundle).toBe(true);
+    expect((payload.aiTuningBundle as any).bundleVersion).toBe("one-path-ai-tuning-bundle-v1");
+    expect((payload.simulationCodeMap as any).readOnly).toBe(true);
     expect((payload.fullAdminRunResponse as any).pastWeatherDiagnostics).toEqual({ score: 0.8 });
     expect((payload.onePathIntervalDiagnosticsV1 as any).available).toBe(true);
     expect((payload.simulationVariables as any).selectedMode).toBe("INTERVAL");
