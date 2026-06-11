@@ -24,6 +24,16 @@ import {
   ONE_PATH_LAB_TEST_HOME_LABEL,
 } from "@/modules/usageSimulator/labTestHomeLabels";
 
+/** Lab replace resets scenarios/events and re-copies source state; default Prisma tx timeout (5s) is too short in prod. */
+const LAB_TEST_HOME_REPLACE_TX_OPTIONS = {
+  maxWait: 10_000,
+  timeout: 60_000,
+} as const;
+
+async function runLabTestHomeReplaceTransaction(work: (tx: any) => Promise<void>): Promise<void> {
+  await (prisma as any).$transaction(work, LAB_TEST_HOME_REPLACE_TX_OPTIONS);
+}
+
 export {
   GAPFILL_LAB_TEST_HOME_LABEL,
   MANUAL_MONTHLY_LAB_TEST_HOME_LABEL,
@@ -793,7 +803,7 @@ export async function replaceGlobalLabTestHomeFromSource(args: {
       status: "replacing",
       statusMessage: "Replacing reusable lab test-home data from selected source house.",
     });
-    await (prisma as any).$transaction(async (tx: any) => {
+    await runLabTestHomeReplaceTransaction(async (tx: any) => {
       await resetLabHomeMutableState({ tx, ownerUserId: args.ownerUserId, houseId: testHome!.id });
       await copySourceHouseIdentityToLabHome({
         tx,
@@ -989,7 +999,7 @@ export async function replaceGlobalManualMonthlyLabTestHomeFromSource(args: {
   let testHome: { id: string; esiid: string | null; label: string } | null = null;
   try {
     testHome = await ensureGlobalManualMonthlyLabTestHomeHouse(args.ownerUserId);
-    await (prisma as any).$transaction(async (tx: any) => {
+    await runLabTestHomeReplaceTransaction(async (tx: any) => {
       await resetLabHomeMutableState({ tx, ownerUserId: args.ownerUserId, houseId: testHome!.id });
       await copySourceHouseIdentityToLabHome({
         tx,
@@ -1127,7 +1137,7 @@ export async function replaceGlobalOnePathLabTestHomeFromSource(args: {
       statusMessage: "Replacing One Path test home from selected source house.",
     });
 
-    await (prisma as any).$transaction(async (tx: any) => {
+    await runLabTestHomeReplaceTransaction(async (tx: any) => {
       await resetLabHomeMutableState({ tx, ownerUserId: args.ownerUserId, houseId: testHome!.id });
       await copySourceHouseIdentityToLabHome({
         tx,

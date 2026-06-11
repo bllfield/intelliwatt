@@ -311,6 +311,14 @@ describe("replaceGlobalLabTestHomeFromSource profile clone completeness", () => 
     expect(replaceBlock).toContain("clearOnePathActualUsageState");
     expect(replaceBlock).toContain("replacePastCorrectedScenarioTravelRanges");
   });
+
+  it("uses extended Prisma transaction timeout for lab test-home replace", () => {
+    const source = readFileSync(resolve(process.cwd(), "modules/usageSimulator/labTestHome.ts"), "utf8");
+    expect(source).toContain("LAB_TEST_HOME_REPLACE_TX_OPTIONS");
+    expect(source).toContain("runLabTestHomeReplaceTransaction");
+    expect(source).toContain("timeout: 60_000");
+    expect(source).not.toMatch(/\$transaction\(async \(tx: any\)/);
+  });
 });
 
 describe("labTestHomeCloneSummary", () => {
