@@ -311,6 +311,7 @@ function buildFailureEnvelope(args: {
       wapeChanged: false,
       ...MANUAL_GAPFILL_COMPARE_ISOLATION_DIAGNOSTICS,
       labSimulatedLoadedFromArtifact: args.usedLabSimulatedReadback ?? false,
+      diagnosticsV1Built: false,
       warnings: args.warnings,
     },
   };

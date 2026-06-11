@@ -271,7 +271,7 @@ export type ManualGapfillCompareDiagnosticsV1Args = {
   }>;
   monthlyRows?: ManualGapfillCompareMonthlyRow[];
   readModel?: ManualUsageReadModel | null;
-  validationDayKeys: string[];
+  validationDayKeys?: string[];
   sourceActualDataset?: any;
   labDataset?: any;
   labManualPayload?: ManualUsagePayload | null;
@@ -794,9 +794,9 @@ export function buildManualGapfillCompareDiagnosticsV1(
   const weatherByDate = buildDailyWeatherMap(args.sourceActualDataset);
   if (weatherByDate.size === 0) {
     const labWeather = buildDailyWeatherMap(args.labDataset);
-    for (const [date, weather] of labWeather.entries()) {
+    Array.from(labWeather.entries()).forEach(([date, weather]) => {
       if (!weatherByDate.has(date)) weatherByDate.set(date, weather);
-    }
+    });
   }
 
   const missingWeatherFields: string[] = [];
@@ -898,11 +898,15 @@ export function buildManualGapfillCompareDiagnosticsV1(
     travel_vacant_days: computeBucketSummary(enrichedDays.filter((day) => day.travelVacantFlag)),
     non_travel_days: computeBucketSummary(enrichedDays.filter((day) => !day.travelVacantFlag)),
   };
-  for (const [month, days] of byMonthBuckets.entries()) summaryBuckets[`month:${month}`] = computeBucketSummary(days);
-  for (const [season, days] of bySeasonBuckets.entries()) summaryBuckets[`season:${season}`] = computeBucketSummary(days);
-  for (const [periodId, days] of byBillPeriodBuckets.entries()) {
+  Array.from(byMonthBuckets.entries()).forEach(([month, days]) => {
+    summaryBuckets[`month:${month}`] = computeBucketSummary(days);
+  });
+  Array.from(bySeasonBuckets.entries()).forEach(([season, days]) => {
+    summaryBuckets[`season:${season}`] = computeBucketSummary(days);
+  });
+  Array.from(byBillPeriodBuckets.entries()).forEach(([periodId, days]) => {
     summaryBuckets[`bill_period:${periodId}`] = computeBucketSummary(days);
-  }
+  });
 
   const weatherDiagnostics = buildWeatherSensitivity(enrichedDays);
   const weatherDiagnosticsAvailable = weatherByDate.size > 0;
