@@ -531,6 +531,26 @@ describe("buildManualGapfillRunReadbackResult", () => {
     expect(out.diagnostics.pastSimRecalcDispatched).toBe(true);
   });
 
+  it("returns MG-4 replacement isolation labels", async () => {
+    mockSufficientSourceContext();
+    getManualUsageInputForUserHouse.mockResolvedValue({ payload: monthlySeed, updatedAt: new Date().toISOString() });
+    mockSuccessfulRunReadback();
+    const { buildManualGapfillRunReadbackResult } = await import("@/modules/manualUsage/manualGapfillRunReadback");
+    const out = await buildManualGapfillRunReadbackResult({
+      userId: USER_ID,
+      sourceHouseId: SOURCE_HOUSE_ID,
+      labHouseId: LAB_HOUSE_ID,
+      mode: "MONTHLY_FROM_SOURCE_INTERVALS",
+      expectedSourceFingerprint: "fp-1",
+    });
+
+    expect(out.diagnostics.usedSourceActualTruthAsContextOnly).toBe(true);
+    expect(out.diagnostics.usedSourceActualTruthAsContextOnlyDeprecated).toBe(true);
+    expect(out.diagnostics.sourceActualPassedIntoManualSimulator).toBe(false);
+    expect(out.diagnostics.sourceActualUsedForSeedOnly).toBe(true);
+    expect(out.diagnostics.sourceActualUsedForFingerprintGuardrail).toBe(true);
+  });
+
   it("returns manual run isolation diagnostics", async () => {
     mockSufficientSourceContext();
     getManualUsageInputForUserHouse.mockResolvedValue({ payload: monthlySeed, updatedAt: new Date().toISOString() });

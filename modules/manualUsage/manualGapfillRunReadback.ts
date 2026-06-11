@@ -15,6 +15,10 @@ import {
   resolveManualGapfillSmtSourceContext,
   type ManualGapfillSourceContext,
 } from "@/modules/manualUsage/manualGapfillSourceContext";
+import {
+  buildMg4SourceActualIsolationLabelCleanup,
+  type Mg4SourceActualIsolationLabelCleanup,
+} from "@/modules/manualUsage/manualGapfillCompareDiagnosticsV1";
 import type { ManualValidationSummary } from "@/modules/manualUsage/manualValidationSummary";
 import { getManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
 import { validateManualUsagePayload } from "@/modules/manualUsage/validation";
@@ -100,21 +104,20 @@ export type ManualGapfillRunReadbackResult = {
   };
   diagnostics: {
     usedPreparedLabSeed: boolean;
-    usedSourceActualTruthAsContextOnly: boolean;
     usedTestHomeAsTruth: false;
     globalValidationPolicyUsed: true;
     localGapFillSelectorUsed: false;
     pastSimRecalcDispatched: boolean;
     compareRun: false;
     sourceHouseWritten: false;
-    labManualPayloadWritten: false;
+    labManualPayloadWritten: boolean;
     manualRunIsolation: "manual_totals_only";
     sourceActualIntervalsPassedToSimulator: false;
     sourceActualDailyRowsPassedToSimulator: false;
     validationDayActualsPassedToSimulator: false;
     validationDaysCopiedFromActual: false;
     warnings: string[];
-  };
+  } & Mg4SourceActualIsolationLabelCleanup;
 };
 
 const MANUAL_GAPFILL_RUN_ISOLATION_DIAGNOSTICS = {
@@ -124,6 +127,32 @@ const MANUAL_GAPFILL_RUN_ISOLATION_DIAGNOSTICS = {
   validationDayActualsPassedToSimulator: false as const,
   validationDaysCopiedFromActual: false as const,
 };
+
+function buildRunReadbackDiagnostics(args: {
+  usedPreparedLabSeed: boolean;
+  usedSourceActualTruthAsContextOnly: boolean;
+  pastSimRecalcDispatched: boolean;
+  labManualPayloadWritten: boolean;
+  sourceActualUsedForFingerprintGuardrail?: boolean;
+  warnings: string[];
+}): ManualGapfillRunReadbackResult["diagnostics"] {
+  return {
+    usedPreparedLabSeed: args.usedPreparedLabSeed,
+    usedTestHomeAsTruth: false,
+    globalValidationPolicyUsed: true,
+    localGapFillSelectorUsed: false,
+    pastSimRecalcDispatched: args.pastSimRecalcDispatched,
+    compareRun: false,
+    sourceHouseWritten: false,
+    labManualPayloadWritten: args.labManualPayloadWritten,
+    ...MANUAL_GAPFILL_RUN_ISOLATION_DIAGNOSTICS,
+    warnings: args.warnings,
+    ...buildMg4SourceActualIsolationLabelCleanup({
+      usedSourceActualTruthAsContextOnly: args.usedSourceActualTruthAsContextOnly,
+      sourceActualUsedForFingerprintGuardrail: args.sourceActualUsedForFingerprintGuardrail ?? false,
+    }),
+  };
+}
 
 function mapSourceContextBlock(
   source: ManualGapfillSourceContext,
@@ -212,19 +241,13 @@ function buildFailureResult(args: {
       source: null,
       sourceDetail: null,
     },
-    diagnostics: {
+    diagnostics: buildRunReadbackDiagnostics({
       usedPreparedLabSeed: args.manualSeedFound ?? false,
       usedSourceActualTruthAsContextOnly: args.status !== "needs_seed",
-      usedTestHomeAsTruth: false,
-      globalValidationPolicyUsed: true,
-      localGapFillSelectorUsed: false,
       pastSimRecalcDispatched: args.pastSimRecalcDispatched ?? false,
-      compareRun: false,
-      sourceHouseWritten: false,
       labManualPayloadWritten: false,
-      ...MANUAL_GAPFILL_RUN_ISOLATION_DIAGNOSTICS,
       warnings: args.warnings,
-    },
+    }),
   };
 }
 
@@ -698,18 +721,13 @@ export async function buildManualGapfillRunReadbackResult(
       persisted: runOut.persisted,
     },
     readback: readOut.readback,
-    diagnostics: {
+    diagnostics: buildRunReadbackDiagnostics({
       usedPreparedLabSeed: true,
       usedSourceActualTruthAsContextOnly: true,
-      usedTestHomeAsTruth: false,
-      globalValidationPolicyUsed: true,
-      localGapFillSelectorUsed: false,
       pastSimRecalcDispatched: true,
-      compareRun: false,
-      sourceHouseWritten: false,
       labManualPayloadWritten: false,
-      ...MANUAL_GAPFILL_RUN_ISOLATION_DIAGNOSTICS,
+      sourceActualUsedForFingerprintGuardrail: Boolean(args.expectedSourceFingerprint),
       warnings,
-    },
+    }),
   };
 }

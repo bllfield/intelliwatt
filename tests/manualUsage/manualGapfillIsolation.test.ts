@@ -15,6 +15,7 @@ const buildOnePathManualUsagePastSimReadResult = vi.fn();
 const dispatchPastSimRecalc = vi.fn();
 const resolveGlobalValidationDayKeysForPastSim = vi.fn();
 const getFlag = vi.fn();
+const readTravelRangesForHouse = vi.fn();
 
 vi.mock("@/lib/flags", () => ({
   getFlag: (...args: unknown[]) => getFlag(...args),
@@ -80,6 +81,10 @@ vi.mock("@/lib/usage/validationDayPolicy", async (importOriginal) => {
       resolveGlobalValidationDayKeysForPastSim(...args),
   };
 });
+
+vi.mock("@/lib/usage/pastSimTravelRanges", () => ({
+  readTravelRangesForHouse: (...args: unknown[]) => readTravelRangesForHouse(...args),
+}));
 
 const SOURCE_HOUSE_ID = "4da5d9d3-f139-4d3a-a602-3250d933c71c";
 const LAB_HOUSE_ID = "29a3d820-2593-4673-9dd6-cd161bbd7f6f";
@@ -154,6 +159,10 @@ describe("manual gapfill lab isolation", () => {
       inputHash: "artifact-hash-1",
       engineVersion: "engine-v1",
     });
+    resolveGlobalValidationDayKeysForPastSim.mockResolvedValue({
+      validationOnlyDateKeysLocal: [VALIDATION_DAY],
+    });
+    readTravelRangesForHouse.mockResolvedValue([]);
   });
 
   it("MG-5 daily compare uses raw artifact rows, not baseline-stitched display rows", async () => {

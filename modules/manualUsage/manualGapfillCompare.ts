@@ -4,7 +4,9 @@ import { PAST_VALIDATION_POLICY_REVISION } from "@/lib/usage/pastValidationPolic
 import {
   computeValidationDayPolicyHash,
   resolveActiveValidationDayPolicyLive,
+  resolveGlobalValidationDayKeysForPastSim,
 } from "@/lib/usage/validationDayPolicy";
+import { readTravelRangesForHouse } from "@/lib/usage/pastSimTravelRanges";
 import { buildOnePathManualUsagePastSimReadResult } from "@/modules/onePathSim/manualPastSimReadResult";
 import {
   hashManualGapfillSavedSeedPayload,
@@ -15,6 +17,10 @@ import {
   resolveManualGapfillSmtSourceContext,
   type ManualGapfillSourceContext,
 } from "@/modules/manualUsage/manualGapfillSourceContext";
+import {
+  buildManualGapfillCompareDiagnosticsV1,
+  type ManualGapfillCompareDiagnosticsV1,
+} from "@/modules/manualUsage/manualGapfillCompareDiagnosticsV1";
 import { buildManualUsageReadModel } from "@/modules/manualUsage/readModel";
 import { getManualUsageInputForUserHouse } from "@/modules/manualUsage/store";
 import { validateManualUsagePayload } from "@/modules/manualUsage/validation";
@@ -155,8 +161,16 @@ export type ManualGapfillCompareEnvelope = {
     sourceActualLoadedOnlyForCompare: true;
     labSimulatedLoadedFromArtifact: boolean;
     labRowsMutatedByCompare: false;
+    diagnosticsV1Built: boolean;
     warnings: string[];
   };
+  diagnosticsV1?: ManualGapfillCompareDiagnosticsV1;
+  weatherDiagnostics?: ManualGapfillCompareDiagnosticsV1["weatherDiagnostics"];
+  travelDiagnostics?: ManualGapfillCompareDiagnosticsV1["travelDiagnostics"];
+  billPeriodAllocationDiagnostics?: ManualGapfillCompareDiagnosticsV1["billPeriodAllocationDiagnostics"];
+  validationIntervalCurveDiagnostics?: ManualGapfillCompareDiagnosticsV1["validationIntervalCurveDiagnostics"];
+  worstDayDiagnostics?: ManualGapfillCompareDiagnosticsV1["worstDayDiagnostics"];
+  dashboardSummary?: ManualGapfillCompareDiagnosticsV1["dashboardSummary"];
 };
 
 const MANUAL_GAPFILL_COMPARE_ISOLATION_DIAGNOSTICS = {
@@ -434,6 +448,9 @@ export function buildManualGapfillCompareEnvelope(args: {
   artifactInputHash: string | null;
   buildInputsHash: string | null;
   includeDailyRows: boolean;
+  includeDiagnostics?: boolean;
+  validationDayKeys?: string[];
+  travelContext?: Parameters<typeof buildManualGapfillCompareDiagnosticsV1>[0]["travelContext"];
   warnings?: string[];
 }): ManualGapfillCompareEnvelope {
   const warnings = [...(args.warnings ?? [])];
@@ -550,6 +567,33 @@ export function buildManualGapfillCompareEnvelope(args: {
         : "partial";
   }
 
+  const includeDiagnostics = args.includeDiagnostics !== false;
+  const diagnosticsV1 =
+    includeDiagnostics && args.includeDailyRows && dailyRows
+      ? buildManualGapfillCompareDiagnosticsV1({
+          dailyRows: dailyRows.map((row) => ({
+            date: row.date,
+            actualKwh: row.actualKwh,
+            simulatedKwh: row.simulatedKwh,
+            deltaKwh: row.deltaKwh,
+            percentDelta: row.percentDelta,
+          })),
+          monthlyRows: monthly?.rows,
+          readModel,
+          validationDayKeys: args.validationDayKeys ?? [],
+          sourceActualDataset: args.sourceActualDataset,
+          labDataset: args.labDataset,
+          labManualPayload: args.labManualPayload,
+          travelContext: args.travelContext,
+          timezone:
+            typeof args.labDataset?.meta?.timezone === "string"
+              ? args.labDataset.meta.timezone
+              : typeof args.sourceActualDataset?.meta?.timezone === "string"
+                ? args.sourceActualDataset.meta.timezone
+                : null,
+        })
+      : undefined;
+
   return {
     ok: true,
     status: "ready",
@@ -600,8 +644,16 @@ export function buildManualGapfillCompareEnvelope(args: {
       wapeChanged: false,
       ...MANUAL_GAPFILL_COMPARE_ISOLATION_DIAGNOSTICS,
       labSimulatedLoadedFromArtifact: true,
+      diagnosticsV1Built: Boolean(diagnosticsV1),
       warnings,
     },
+    diagnosticsV1,
+    weatherDiagnostics: diagnosticsV1?.weatherDiagnostics,
+    travelDiagnostics: diagnosticsV1?.travelDiagnostics,
+    billPeriodAllocationDiagnostics: diagnosticsV1?.billPeriodAllocationDiagnostics,
+    validationIntervalCurveDiagnostics: diagnosticsV1?.validationIntervalCurveDiagnostics,
+    worstDayDiagnostics: diagnosticsV1?.worstDayDiagnostics,
+    dashboardSummary: diagnosticsV1?.dashboardSummary,
   };
 }
 
@@ -613,6 +665,7 @@ export async function compareManualGapfillSourceActualToLabSim(
   const labHouseId = String(args.labHouseId ?? "").trim();
   const mode = args.mode;
   const includeDailyRows = args.includeDailyRows === true;
+  const includeDiagnostics = args.includeDiagnostics !== false;
   const warnings: string[] = [];
   const activePolicy = await resolveActiveValidationDayPolicyLive({ surface: "admin_lab" });
   const policyHash = computeValidationDayPolicyHash(activePolicy);
@@ -885,6 +938,27 @@ export async function compareManualGapfillSourceActualToLabSim(
     });
   }
 
+  const validationSelection = await resolveGlobalValidationDayKeysForPastSim({
+    houseId: labHouseId,
+    userId,
+    esiid: args.esiid ?? sourceContext.esiid,
+    sourceHouseId,
+    surface: "admin_lab",
+  }).catch(() => ({ validationOnlyDateKeysLocal: [] as string[] }));
+
+  const labDbTravelRanges = await readTravelRangesForHouse({ userId, houseId: labHouseId }).catch(() => []);
+  const sourceFallbackTravelRanges = await readTravelRangesForHouse({
+    userId: sourceContext.userId,
+    houseId: sourceHouseId,
+  }).catch(() => []);
+  const seedPayloadTravelRanges = normalizeManualGapfillTravelRanges(labManualPayload.travelRanges);
+  const effectiveTravelRanges =
+    labDbTravelRanges.length > 0
+      ? labDbTravelRanges
+      : seedPayloadTravelRanges.length > 0
+        ? seedPayloadTravelRanges
+        : sourceFallbackTravelRanges;
+
   const envelope = buildManualGapfillCompareEnvelope({
     mode,
     sourceContext,
@@ -898,8 +972,27 @@ export async function compareManualGapfillSourceActualToLabSim(
     artifactInputHash: resolvedArtifactInputHash,
     buildInputsHash: buildRow?.buildInputsHash ? String(buildRow.buildInputsHash) : null,
     includeDailyRows,
+    includeDiagnostics,
+    validationDayKeys: validationSelection.validationOnlyDateKeysLocal,
+    travelContext: {
+      effectiveRanges: effectiveTravelRanges,
+      labDbRanges: labDbTravelRanges,
+      sourceFallbackRanges: sourceFallbackTravelRanges,
+      seedPayloadRanges: seedPayloadTravelRanges,
+    },
     warnings,
   });
 
   return envelope;
+}
+
+function normalizeManualGapfillTravelRanges(
+  ranges: ManualUsagePayload["travelRanges"] | undefined | null
+): ManualUsagePayload["travelRanges"] {
+  return (ranges ?? [])
+    .map((range) => ({
+      startDate: String(range.startDate ?? "").slice(0, 10),
+      endDate: String(range.endDate ?? "").slice(0, 10),
+    }))
+    .filter((range) => /^\d{4}-\d{2}-\d{2}$/.test(range.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(range.endDate));
 }

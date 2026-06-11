@@ -18,6 +18,8 @@ const buildOnePathManualUsagePastSimReadResult = vi.fn();
 const buildGapfillCompareSimShared = vi.fn();
 const computeWapePercent = vi.fn();
 const selectValidationDayKeys = vi.fn();
+const resolveGlobalValidationDayKeysForPastSim = vi.fn();
+const readTravelRangesForHouse = vi.fn();
 const getFlag = vi.fn();
 
 vi.mock("@/lib/flags", () => ({
@@ -97,6 +99,19 @@ vi.mock("@/modules/usageSimulator/validationSelection", async (importOriginal) =
     selectValidationDayKeys: (...args: unknown[]) => selectValidationDayKeys(...args),
   };
 });
+
+vi.mock("@/lib/usage/validationDayPolicy", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/usage/validationDayPolicy")>();
+  return {
+    ...actual,
+    resolveGlobalValidationDayKeysForPastSim: (...args: unknown[]) =>
+      resolveGlobalValidationDayKeysForPastSim(...args),
+  };
+});
+
+vi.mock("@/lib/usage/pastSimTravelRanges", () => ({
+  readTravelRangesForHouse: (...args: unknown[]) => readTravelRangesForHouse(...args),
+}));
 
 const SOURCE_HOUSE_ID = "4da5d9d3-f139-4d3a-a602-3250d933c71c";
 const LAB_HOUSE_ID = "29a3d820-2593-4673-9dd6-cd161bbd7f6f";
@@ -202,6 +217,10 @@ describe("compareManualGapfillSourceActualToLabSim", () => {
       selectedDateKeys: ["2025-07-04"],
       diagnostics: { modeUsed: "stratified_weather_balanced" },
     });
+    resolveGlobalValidationDayKeysForPastSim.mockResolvedValue({
+      validationOnlyDateKeysLocal: ["2025-07-04"],
+    });
+    readTravelRangesForHouse.mockResolvedValue([]);
   });
 
   it("missing source actual truth returns source_context_missing and does not compare", async () => {

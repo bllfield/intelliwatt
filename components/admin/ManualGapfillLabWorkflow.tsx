@@ -33,6 +33,7 @@ import {
   type ManualGapfillSeedMode,
 } from "@/lib/admin/manualGapfillClient";
 import { BillMatchReconciliationPanel } from "@/components/admin/manual-gapfill/BillMatchReconciliationPanel";
+import { CompareDiagnosticsV1Panel } from "@/components/admin/manual-gapfill/CompareDiagnosticsV1Panel";
 import { MonthlyCompareRowsTable } from "@/components/admin/manual-gapfill/MonthlyCompareRowsTable";
 import { SeedPreview } from "@/components/admin/manual-gapfill/SeedPreview";
 import {
@@ -1248,6 +1249,7 @@ export const ManualGapfillLabWorkflow = forwardRef<
                 asString(policySnapshot?.policyHash)
               }
             />
+            <CompareDiagnosticsV1Panel compareResult={compareResult} />
           </>
         ) : null}
         <WarningsList
