@@ -112,7 +112,7 @@ export function pickKeys(source: Record<string, unknown>, keys: string[]): Recor
 export function extractValidationDayKeysFromPolicySnapshot(policy: unknown): string[] {
   const record = asRecord(policy);
   const keys = asArray(record.selectedDateKeys).map((value) => String(value).slice(0, 10));
-  return [...new Set(keys.filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)))].sort();
+  return Array.from(new Set(keys.filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)))).sort();
 }
 
 export function extractValidationDayKeysFromCompareProjection(compareProjection: unknown): string[] {
@@ -122,7 +122,7 @@ export function extractValidationDayKeysFromCompareProjection(compareProjection:
     .filter((row) => row.validationDay === true || row.isValidationDay === true)
     .map((row) => String(row.localDate ?? row.date ?? "").slice(0, 10))
     .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date));
-  return [...new Set(keys)].sort();
+  return Array.from(new Set(keys)).sort();
 }
 
 export function sumKwhFromDailyRows(rows: unknown): number | null {
@@ -202,7 +202,7 @@ export function buildTravelRangeExportClassification(args: {
   storedTravelRanges: unknown;
   coverageWindow: { startDate: string; endDate: string } | null;
 }): Record<string, unknown> {
-  const summary = summarizeTravelRangesForExportWindow(args.storedTravelRanges, args.coverageWindow);
+  const summary = summarizeTravelRangesForExportWindow(asArray(args.storedTravelRanges), args.coverageWindow);
   return {
     storedTravelRanges: asArray(args.storedTravelRanges),
     coverageWindow: args.coverageWindow,
