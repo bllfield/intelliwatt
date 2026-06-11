@@ -1407,6 +1407,18 @@ export async function modelAvgCentsPerKwhAtUsage(args: {
     components = null;
   }
 
+  // Peak/Off-Peak TOU with disclosed off-peak usage % but no parseable hour window:
+  // use blended validator math (matches validateEflAvgPriceTable anchor checks).
+  if (
+    planRules?.rateType === "TIME_OF_USE" &&
+    nightUsagePercent != null &&
+    Array.isArray((planRules as any).timeOfUsePeriods) &&
+    (planRules as any).timeOfUsePeriods.length >= 2 &&
+    (nightStartHour == null || nightEndHour == null)
+  ) {
+    components = null;
+  }
+
   if (!components || Number.isNaN(components.avgCentsPerKwh)) {
     components = computeValidatorModeledBreakdown(
       planRules,
@@ -2623,6 +2635,28 @@ export async function scoreEflPassStrength(args: {
     });
 
   if (hasThresholdBillCredits) {
+    return {
+      strength: "STRONG",
+      reasons: Array.from(new Set(reasons)),
+      offPointDiffs: [],
+    };
+  }
+
+  // Energy Charge Breakdown / peak-off-peak TOU where avg-price validation used a
+  // disclosed usage profile (off-peak %) rather than uniform hourly engine math.
+  // Linear off-point interpolation between 500/1000/2000 anchors is not a valid
+  // expectation model for these EFLs (TDSP monthly fee + usage-profile blending).
+  const assumptionsUsed = validation?.assumptionsUsed ?? {};
+  const hasDisclosedOffPeakUsageProfile =
+    String((planRules as any)?.rateType ?? (rateStructure as any)?.type ?? "").toUpperCase() ===
+      "TIME_OF_USE" &&
+    typeof assumptionsUsed.nightUsagePercent === "number" &&
+    Array.isArray((planRules as any)?.timeOfUsePeriods) &&
+    (planRules as any).timeOfUsePeriods.length >= 2 &&
+    assumptionsUsed.nightStartHour == null &&
+    assumptionsUsed.nightEndHour == null;
+
+  if (hasDisclosedOffPeakUsageProfile) {
     return {
       strength: "STRONG",
       reasons: Array.from(new Set(reasons)),
