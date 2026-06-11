@@ -38,11 +38,11 @@ function RunModeCheckbox(props: {
   availability: ModelIntelligenceModeAvailability | undefined;
   onChange: (checked: boolean) => void;
 }) {
-  const gbDisabled = props.mode === "GREEN_BUTTON_TRUTH" && availability && !availability.available;
+  const gbDisabled = props.mode === "GREEN_BUTTON_TRUTH" && props.availability && !props.availability.available;
   return (
     <label
       className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-sm ${gbDisabled ? "border-slate-200 bg-slate-50 opacity-80" : "border-slate-300 bg-white"}`}
-      title={availability?.unavailableReason ?? undefined}
+      title={props.availability?.unavailableReason ?? undefined}
     >
       <input
         type="checkbox"
@@ -53,8 +53,8 @@ function RunModeCheckbox(props: {
       />
       <span>
         <span className="font-semibold text-brand-navy">{MODEL_INTELLIGENCE_RUN_MODE_LABELS[props.mode]}</span>
-        {availability && !availability.available ? (
-          <span className="mt-1 block text-xs text-amber-700">{availability.unavailableReason}</span>
+        {props.availability && !props.availability.available ? (
+          <span className="mt-1 block text-xs text-amber-700">{props.availability.unavailableReason}</span>
         ) : null}
       </span>
     </label>
