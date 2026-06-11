@@ -9,7 +9,7 @@ import { solveEflValidationGaps } from "@/lib/efl/validation/solveEflValidationG
 import { requiredBucketsForRateStructure } from "@/lib/plan-engine/requiredBucketsForPlan";
 import { extractDeterministicTouSchedule } from "@/lib/plan-engine/touPeriods";
 
-const POWERSHIFT_EFL_SNIPPET = `
+const POWERSHIFT_EFL_INLINE = `
 Electricity Facts Label
 Average monthly use: 500 kWh 1000 kWh 2000 kWh
 Average price per kWh: 16.5¢ 15.7¢ 15.3¢
@@ -23,36 +23,47 @@ Other Key Terms and Questions
 PUCT Certificate Number #10279. Version 10.0
 `.trim();
 
+const POWERSHIFT_EFL_TABLE_LAYOUT = `
+Energy Charge Breakdown
+Off-peak                                                                             6.015¢                                  77.00%
+  12:00am - 5:59pm,
+  10:00pm - 11:59pm,
+On-peak                             6:00pm - 9:59pm,                                16.513¢                                  23.00%
+On-peak: High-demand time when electricity costs more.
+`.trim();
+
 describe("EFL - Energy Charge Breakdown TOU extraction", () => {
   it("extracts three clock windows with correct rates (not fixed TDSP)", () => {
-    const breakdown = extractEnergyChargeBreakdownTou(POWERSHIFT_EFL_SNIPPET);
-    expect(breakdown).not.toBeNull();
-    expect(breakdown!.periods).toHaveLength(3);
-    expect(breakdown!.periods).toEqual([
-      expect.objectContaining({
-        label: "Off-Peak 1",
-        startHour: 0,
-        endHour: 18,
-        rateCentsPerKwh: 6.015,
-      }),
-      expect.objectContaining({
-        label: "Off-Peak 2",
-        startHour: 22,
-        endHour: 24,
-        rateCentsPerKwh: 6.015,
-      }),
-      expect.objectContaining({
-        label: "Peak",
-        startHour: 18,
-        endHour: 22,
-        rateCentsPerKwh: 16.513,
-      }),
-    ]);
-    expect(breakdown!.offPeakUsagePercent).toBeCloseTo(0.77, 5);
+    for (const rawText of [POWERSHIFT_EFL_INLINE, POWERSHIFT_EFL_TABLE_LAYOUT]) {
+      const breakdown = extractEnergyChargeBreakdownTou(rawText);
+      expect(breakdown).not.toBeNull();
+      expect(breakdown!.periods).toHaveLength(3);
+      expect(breakdown!.periods).toEqual([
+        expect.objectContaining({
+          label: "Off-Peak 1",
+          startHour: 0,
+          endHour: 18,
+          rateCentsPerKwh: 6.015,
+        }),
+        expect.objectContaining({
+          label: "Off-Peak 2",
+          startHour: 22,
+          endHour: 24,
+          rateCentsPerKwh: 6.015,
+        }),
+        expect.objectContaining({
+          label: "Peak",
+          startHour: 18,
+          endHour: 22,
+          rateCentsPerKwh: 16.513,
+        }),
+      ]);
+      expect(breakdown!.offPeakUsagePercent).toBeCloseTo(0.77, 5);
+    }
   });
 
   it("labels template as TIME_OF_USE and yields TOU bucket keys", () => {
-    const breakdown = extractEnergyChargeBreakdownTou(POWERSHIFT_EFL_SNIPPET)!;
+    const breakdown = extractEnergyChargeBreakdownTou(POWERSHIFT_EFL_TABLE_LAYOUT)!;
     const planRules: Record<string, unknown> = {
       rateType: "FIXED",
       energyRateCents: 7.85,
@@ -89,7 +100,7 @@ describe("EFL - Energy Charge Breakdown TOU extraction", () => {
 
 describe("EFL solver - Energy Charge Breakdown peak/off-peak TOU", () => {
   it("derives TOU from breakdown table rows and turns FAIL->PASS using disclosed usage %", async () => {
-    const rawText = POWERSHIFT_EFL_SNIPPET;
+    const rawText = POWERSHIFT_EFL_INLINE;
 
     const planRules = {
       rateType: "FIXED",

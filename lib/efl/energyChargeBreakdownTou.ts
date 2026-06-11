@@ -53,24 +53,49 @@ function parseClockRanges(text: string): Array<{ startHour: number; endHour: num
   return out;
 }
 
-function parseBreakdownRow(args: {
-  text: string;
-  labelPattern: RegExp;
+function extractBreakdownRegion(rawText: string): string | null {
+  const t = String(rawText ?? "");
+  const m = t.match(
+    /Energy\s*Charge\s*Breakdown([\s\S]*?)(?:\n\s*On-peak:\s*[A-Z]|Your average price per kWh|Price per kWh\s*=|Other Key Terms|Disclosure Chart)/i,
+  );
+  return m?.[1]?.trim() ? m[1] : null;
+}
+
+function extractBreakdownRowSection(args: {
+  region: string;
+  kind: "off" | "on";
+}): string | null {
+  const labelRe = args.kind === "off" ? /Off-?\s*peak\b/i : /On-?\s*peak\b/i;
+  const labelIdx = args.region.search(labelRe);
+  if (labelIdx < 0) return null;
+
+  const rest = args.region.slice(labelIdx);
+  if (args.kind === "off") {
+    // Stop at the On-peak table row (not the prose "On-peak: High-demand...").
+    const stop = rest.slice(1).search(/\n\s*On-?\s*peak(?!\s*:)/i);
+    return stop > 0 ? rest.slice(0, stop + 1) : rest.slice(0, 900);
+  }
+
+  // On-peak row: stop at explanatory prose or end of region.
+  const stop = rest.slice(1).search(/\n\s*On-peak:\s*[A-Z]/i);
+  return stop > 0 ? rest.slice(0, stop + 1) : rest.slice(0, 600);
+}
+
+function parseBreakdownRowSection(args: {
+  section: string;
   defaultLabel: string;
 }): { periods: EnergyChargeBreakdownTouPeriod[]; usagePercent: number | null } | null {
-  const m = args.text.match(args.labelPattern);
-  if (!m?.[0]) return null;
-  const rowText = m[0];
-  const rateMatch = rowText.match(/([0-9]+(?:\.[0-9]+)?)\s*¢/i);
+  const section = args.section;
+  const rateMatch = section.match(/([0-9]+(?:\.[0-9]+)?)\s*¢/i);
   if (!rateMatch?.[1]) return null;
   const rateCentsPerKwh = Number(rateMatch[1]);
   if (!Number.isFinite(rateCentsPerKwh)) return null;
 
-  const pctMatch = rowText.match(/([0-9]+(?:\.[0-9]+)?)\s*%/i);
+  const pctMatch = section.match(/([0-9]+(?:\.[0-9]+)?)\s*%/i);
   const usagePercent =
     pctMatch?.[1] && Number.isFinite(Number(pctMatch[1])) ? Number(pctMatch[1]) / 100 : null;
 
-  const windows = parseClockRanges(rowText);
+  const windows = parseClockRanges(section);
   if (!windows.length) return null;
 
   const periods = windows.map((w, idx) => ({
@@ -98,17 +123,13 @@ export function extractEnergyChargeBreakdownTou(rawText: string): EnergyChargeBr
   const t = String(rawText ?? "");
   if (!hasEnergyChargeBreakdownTou(t)) return null;
 
-  const off = parseBreakdownRow({
-    text: t,
-    labelPattern: /Off-?\s*peak[\s\S]{0,900}?[0-9]+(?:\.[0-9]+)?\s*¢[\s\S]{0,120}?[0-9]+(?:\.[0-9]+)?\s*%/i,
-    defaultLabel: "Off-Peak",
-  });
-  const on = parseBreakdownRow({
-    text: t,
-    labelPattern: /On-?\s*peak[\s\S]{0,600}?[0-9]+(?:\.[0-9]+)?\s*¢[\s\S]{0,120}?[0-9]+(?:\.[0-9]+)?\s*%/i,
-    defaultLabel: "Peak",
-  });
+  const region = extractBreakdownRegion(t) ?? t;
+  const offSection = extractBreakdownRowSection({ region, kind: "off" });
+  const onSection = extractBreakdownRowSection({ region, kind: "on" });
+  if (!offSection || !onSection) return null;
 
+  const off = parseBreakdownRowSection({ section: offSection, defaultLabel: "Off-Peak" });
+  const on = parseBreakdownRowSection({ section: onSection, defaultLabel: "Peak" });
   if (!off?.periods.length || !on?.periods.length) return null;
 
   return {

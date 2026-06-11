@@ -10,6 +10,7 @@ import { planRulesToRateStructure, validatePlanRules } from "@/lib/efl/planEngin
 import {
   applyEnergyChargeBreakdownTouToTemplateShapes,
   extractEnergyChargeBreakdownTou,
+  hasEnergyChargeBreakdownTou,
 } from "@/lib/efl/energyChargeBreakdownTou";
 
 export interface EflAiParseResult {
@@ -225,7 +226,10 @@ async function buildDeterministicOnlyParseResult(args: {
     planRules.usageTiers = deterministicTiers;
     planRules.rateType = planRules.rateType ?? "FIXED";
     (planRules as any).planType = (planRules as any).planType ?? "flat";
-  } else if (deterministicSingleEnergy != null) {
+  } else if (
+    deterministicSingleEnergy != null &&
+    !hasEnergyChargeBreakdownTou(rawText)
+  ) {
     planRules.rateType = planRules.rateType ?? "FIXED";
     (planRules as any).planType = (planRules as any).planType ?? "flat";
     planRules.defaultRateCentsPerKwh = deterministicSingleEnergy;
@@ -310,6 +314,18 @@ async function buildDeterministicOnlyParseResult(args: {
   if (fallbackTerm != null && typeof (planRules as any).termMonths !== "number") {
     (planRules as any).termMonths = fallbackTerm;
     warnings.push("Fallback filled contract term (months) from 'Contract Term' line.");
+  }
+
+  const breakdownTou = extractEnergyChargeBreakdownTou(rawText);
+  if (breakdownTou) {
+    applyEnergyChargeBreakdownTouToTemplateShapes({
+      planRules,
+      rateStructure: {},
+      breakdown: breakdownTou,
+    });
+    warnings.push(
+      "Deterministic extract mapped Energy Charge Breakdown table to TIME_OF_USE periods (not fixed-rate).",
+    );
   }
 
   if (deterministicTdspIncluded != null) {
@@ -723,10 +739,12 @@ OUTPUT CONTRACT:
 
   const breakdownTou = extractEnergyChargeBreakdownTou(fallbackSourceText);
   const hasBreakdownTou = breakdownTou != null;
+  const breakdownTablePresent = hasEnergyChargeBreakdownTou(fallbackSourceText);
 
-  const singleEnergy = hasBreakdownTou
-    ? null
-    : deterministicSingleEnergy ?? fallbackExtractSingleEnergyChargeCents(fallbackSourceText);
+  const singleEnergy =
+    hasBreakdownTou || breakdownTablePresent
+      ? null
+      : deterministicSingleEnergy ?? fallbackExtractSingleEnergyChargeCents(fallbackSourceText);
 
   if (breakdownTou) {
     applyEnergyChargeBreakdownTouToTemplateShapes({
@@ -736,6 +754,10 @@ OUTPUT CONTRACT:
     });
     warnings.push(
       "Deterministic extract mapped Energy Charge Breakdown table to TIME_OF_USE periods (not fixed-rate).",
+    );
+  } else if (breakdownTablePresent) {
+    warnings.push(
+      "Energy Charge Breakdown table detected but TOU periods could not be parsed; skipping fixed-rate fallback.",
     );
   }
 
@@ -787,6 +809,7 @@ OUTPUT CONTRACT:
   // charge but the Disclosure Chart didn't provide a rate type, treat as FIXED.
   if (
     !breakdownTou &&
+    !breakdownTablePresent &&
     !planRules.rateType &&
     (singleEnergy != null ||
       (Array.isArray(planRules.usageTiers) && planRules.usageTiers.length > 0))
@@ -798,6 +821,7 @@ OUTPUT CONTRACT:
   if (
     singleEnergy != null &&
     !breakdownTou &&
+    !breakdownTablePresent &&
     (planRules.currentBillEnergyRateCents == null ||
       typeof planRules.currentBillEnergyRateCents !== "number")
   ) {
@@ -810,6 +834,7 @@ OUTPUT CONTRACT:
   if (
     singleEnergy != null &&
     !breakdownTou &&
+    !breakdownTablePresent &&
     planRules.rateType === "FIXED" &&
     (planRules.defaultRateCentsPerKwh == null ||
       typeof planRules.defaultRateCentsPerKwh !== "number")
@@ -830,6 +855,7 @@ OUTPUT CONTRACT:
   if (
     singleEnergy != null &&
     !breakdownTou &&
+    !breakdownTablePresent &&
     typeof rs.energyRateCents !== "number" &&
     (!Array.isArray(planRules.usageTiers) ||
       planRules.usageTiers.length === 0)
@@ -1338,6 +1364,8 @@ function centsStringToNumber(cents: string): number | null {
 // Fallback: Single, non-tiered energy charge (e.g. "Energy Charge 16.3500 ¢ per kWh")
 // ----------------------------------------------------------------------
 function fallbackExtractSingleEnergyChargeCents(text: string): number | null {
+  if (hasEnergyChargeBreakdownTou(text)) return null;
+
   // Avoid parsing narrative discount lines like:
   // "50 percent discount off the Energy Charge..."
   const looksLikeDiscountLine = (s: string): boolean =>
@@ -1664,6 +1692,7 @@ function extractEnergyChargeTiers(text: string): UsageTier[] {
 }
 
 function extractSingleEnergyCharge(text: string): number | null {
+  if (hasEnergyChargeBreakdownTou(text)) return null;
   return fallbackExtractSingleEnergyChargeCents(text);
 }
 
