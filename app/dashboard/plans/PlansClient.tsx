@@ -504,6 +504,8 @@ export default function PlansClient() {
       .filter((o) => {
         const tceStatus = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
         const templateAvailableRaw = (o as any)?.intelliwatt?.templateAvailable;
+        // After the pipeline finishes estimate work, unmapped templates are admin-queued — stop prefetch thrash.
+        if (resp?.estimateReadiness?.complete === true && tceStatus === "MISSING_TEMPLATE") return false;
         // Target only "missing template" queueing, not "missing usage" queueing.
         // NOTE: do not coerce: Boolean(undefined) === false would incorrectly match legacy/partial payloads.
         return tceStatus === "MISSING_TEMPLATE" || templateAvailableRaw === false;
@@ -575,7 +577,15 @@ export default function PlansClient() {
 
     run();
     return () => controller.abort();
-  }, [resp?.ok, resp?.offers, warmupKey, ENABLE_PLANS_AUTO_WARMUPS, allowWarmupInBackground, warmupSessionActive]);
+  }, [
+    resp?.ok,
+    resp?.offers,
+    resp?.estimateReadiness?.complete,
+    warmupKey,
+    ENABLE_PLANS_AUTO_WARMUPS,
+    allowWarmupInBackground,
+    warmupSessionActive,
+  ]);
 
   // Fallback warm-up: if the user lands on /dashboard/plans before background warm-up ran,
   // kick the plan pipeline once per session and poll until queued clears (or timeout).

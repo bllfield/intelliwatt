@@ -67,6 +67,62 @@ function daysUntil(a: Date, b: Date): number | null {
   return Math.ceil((t1 - t0) / DAY_MS);
 }
 
+async function enqueueTemplateFailureForAdminReview(args: {
+  offerId: string;
+  eflUrl: string | null;
+  supplier: string | null;
+  planName: string | null;
+  termMonths: number | null;
+  tdspName: string | null;
+  queueReason: string;
+  eflPdfSha256?: string | null;
+}): Promise<void> {
+  const { offerId, eflUrl, supplier, planName, termMonths, tdspName, queueReason } = args;
+  if (!offerId) return;
+  const syntheticSha =
+    args.eflPdfSha256 ??
+    sha256HexCache(["plan_pipeline", "TEMPLATE_QUEUE", offerId, eflUrl ?? "", queueReason].join("|"));
+  try {
+    await upsertReviewQueueRowRespectingOpenUrl({
+      prismaClient: prisma as any,
+      where: { kind_dedupeKey: { kind: "EFL_PARSE", dedupeKey: offerId } },
+      create: {
+        source: "plan_pipeline",
+        kind: "EFL_PARSE",
+        dedupeKey: offerId,
+        eflPdfSha256: syntheticSha,
+        offerId,
+        supplier,
+        planName,
+        eflUrl,
+        tdspName,
+        termMonths,
+        finalStatus: "FAIL",
+        queueReason,
+        resolvedAt: null,
+        resolvedBy: null,
+        resolutionNotes: null,
+      },
+      update: {
+        updatedAt: new Date(),
+        eflPdfSha256: syntheticSha,
+        supplier,
+        planName,
+        eflUrl,
+        tdspName,
+        termMonths,
+        finalStatus: "FAIL",
+        queueReason,
+        resolvedAt: null,
+        resolvedBy: null,
+        resolutionNotes: null,
+      },
+    });
+  } catch {
+    // best-effort
+  }
+}
+
 
 export type RunPlanPipelineForHomeArgs = {
   homeId: string;
@@ -349,6 +405,15 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
     const pdf = await fetchEflPdfFromUrl(eflUrl, { timeoutMs: 20_000 });
     if (!pdf.ok) {
       templatesQueued++;
+      await enqueueTemplateFailureForAdminReview({
+        offerId,
+        eflUrl,
+        supplier: o?.supplier_name ?? null,
+        planName: o?.plan_name ?? null,
+        termMonths: typeof o?.term_months === "number" ? o.term_months : null,
+        tdspName: o?.distributor_name ?? null,
+        queueReason: `EFL PDF fetch failed: ${String((pdf as any)?.error ?? "unknown")}`,
+      });
       continue;
     }
 
@@ -368,52 +433,16 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
     } catch (e: any) {
       // Fail-soft: one bad/unparseable EFL should not crash the whole plan pipeline run.
       templatesQueued++;
-      try {
-        const supplier = o?.supplier_name ?? null;
-        const planName = o?.plan_name ?? null;
-        const termMonths = typeof o?.term_months === "number" ? o.term_months : null;
-        const tdspName = o?.distributor_name ?? null;
-        const msg = e?.message ? String(e.message) : String(e);
-        const syntheticSha = sha256HexCache(["plan_pipeline", "EFL_PARSE_EXCEPTION", offerId, eflUrl].join("|"));
-        await (prisma as any).eflParseReviewQueue
-          .upsert({
-            where: { kind_dedupeKey: { kind: "EFL_PARSE", dedupeKey: offerId } },
-            create: {
-              source: "plan_pipeline",
-              kind: "EFL_PARSE",
-              dedupeKey: offerId,
-              eflPdfSha256: syntheticSha,
-              offerId,
-              supplier,
-              planName,
-              eflUrl,
-              tdspName,
-              termMonths,
-              finalStatus: "FAIL",
-              queueReason: `EFL pipeline exception: ${msg}`,
-              resolvedAt: null,
-              resolvedBy: null,
-              resolutionNotes: null,
-            },
-            update: {
-              updatedAt: new Date(),
-              eflPdfSha256: syntheticSha,
-              supplier,
-              planName,
-              eflUrl,
-              tdspName,
-              termMonths,
-              finalStatus: "FAIL",
-              queueReason: `EFL pipeline exception: ${msg}`,
-              resolvedAt: null,
-              resolvedBy: null,
-              resolutionNotes: null,
-            },
-          })
-          .catch(() => null);
-      } catch {
-        // ignore
-      }
+      const msg = e?.message ? String(e.message) : String(e);
+      await enqueueTemplateFailureForAdminReview({
+        offerId,
+        eflUrl,
+        supplier: o?.supplier_name ?? null,
+        planName: o?.plan_name ?? null,
+        termMonths: typeof o?.term_months === "number" ? o.term_months : null,
+        tdspName: o?.distributor_name ?? null,
+        queueReason: `EFL pipeline exception: ${msg}`,
+      });
       continue;
     }
 
@@ -431,12 +460,32 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
 
     if (!canAutoTemplate) {
       templatesQueued++;
+      await enqueueTemplateFailureForAdminReview({
+        offerId,
+        eflUrl,
+        supplier: o?.supplier_name ?? null,
+        planName: o?.plan_name ?? null,
+        termMonths: typeof o?.term_months === "number" ? o.term_months : null,
+        tdspName: o?.distributor_name ?? null,
+        queueReason: `Auto-template gate failed (finalStatus=${String(finalStatus ?? "null")}, passStrength=${String(passStrength ?? "null")})`,
+        eflPdfSha256: det.eflPdfSha256 ? String(det.eflPdfSha256) : null,
+      });
       continue;
     }
 
     const planRulesValidation = validatePlanRules(pipeline.planRules as any);
     if (planRulesValidation?.requiresManualReview === true) {
       templatesQueued++;
+      await enqueueTemplateFailureForAdminReview({
+        offerId,
+        eflUrl,
+        supplier: o?.supplier_name ?? null,
+        planName: o?.plan_name ?? null,
+        termMonths: typeof o?.term_months === "number" ? o.term_months : null,
+        tdspName: o?.distributor_name ?? null,
+        queueReason: "Plan rules require manual review",
+        eflPdfSha256: det.eflPdfSha256 ? String(det.eflPdfSha256) : null,
+      });
       continue;
     }
 
@@ -482,8 +531,19 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
         rateStructure: rsWithEvidence as any,
         validation: planRulesValidation as any,
       });
-    } catch {
+    } catch (e: any) {
       templatesQueued++;
+      const msg = e?.message ? String(e.message) : String(e);
+      await enqueueTemplateFailureForAdminReview({
+        offerId,
+        eflUrl,
+        supplier: o?.supplier_name ?? null,
+        planName: o?.plan_name ?? null,
+        termMonths: typeof o?.term_months === "number" ? o.term_months : null,
+        tdspName: o?.distributor_name ?? null,
+        queueReason: `Rate plan upsert failed: ${msg}`,
+        eflPdfSha256: det.eflPdfSha256 ? String(det.eflPdfSha256) : null,
+      });
       continue;
     }
 
@@ -491,6 +551,16 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
     const templatePersisted = Boolean((saved as any)?.templatePersisted);
     if (!templatePersisted || !ratePlanId) {
       templatesQueued++;
+      await enqueueTemplateFailureForAdminReview({
+        offerId,
+        eflUrl,
+        supplier: o?.supplier_name ?? null,
+        planName: o?.plan_name ?? null,
+        termMonths: typeof o?.term_months === "number" ? o.term_months : null,
+        tdspName: o?.distributor_name ?? null,
+        queueReason: "Template persist/link incomplete after upsert",
+        eflPdfSha256: det.eflPdfSha256 ? String(det.eflPdfSha256) : null,
+      });
       continue;
     }
 

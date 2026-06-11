@@ -46,8 +46,9 @@ export function isOfferEstimateActivelyPending(offer: any): boolean {
   if (tceStatus === "NOT_IMPLEMENTED" && tceReason === "MISSING_USAGE_TOTALS") return false;
   if (tceStatus === "NOT_IMPLEMENTED" && tceReason === "TEMPLATE_LOOKUP_ERROR") return false;
 
+  // Unmapped / failed templates are queued for admin review — not user-facing "calculating".
   if (tceStatus === "MISSING_TEMPLATE" || (tceStatus === "NOT_IMPLEMENTED" && tceReason.includes("MISSING TEMPLATE"))) {
-    return offerHasEflUrl(offer);
+    return false;
   }
 
   if (statusLabel !== "QUEUED") return false;

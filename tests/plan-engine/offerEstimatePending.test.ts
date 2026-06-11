@@ -19,7 +19,7 @@ describe("offerEstimatePending", () => {
     expect(classifyOfferEstimateUiState(offer)).toBe("UNAVAILABLE");
   });
 
-  it("keeps EFL-backed template gaps in the active pending bucket", () => {
+  it("treats EFL-backed missing-template offers as terminal (admin queue)", () => {
     const offer = {
       efl: { eflUrl: "https://example.com/efl.pdf" },
       intelliwatt: {
@@ -28,8 +28,8 @@ describe("offerEstimatePending", () => {
         trueCostEstimate: { status: "MISSING_TEMPLATE" },
       },
     };
-    expect(isOfferEstimateActivelyPending(offer)).toBe(true);
-    expect(classifyOfferEstimateUiState(offer)).toBe("CALCULATING");
+    expect(isOfferEstimateActivelyPending(offer)).toBe(false);
+    expect(classifyOfferEstimateUiState(offer)).toBe("UNAVAILABLE");
   });
 
   it("treats cache misses on mapped plans as actively pending", () => {
