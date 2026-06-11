@@ -71,6 +71,9 @@ describe("Manual GapFill admin UI contract (MG-6)", () => {
     expect(workflowSource).toContain("Does not change production Simulation");
     expect(workflowSource).toContain("Accuracy or WAPE labels");
     expect(workflowSource).toContain("Copy all responses");
+    expect(workflowSource).toContain("MANUAL_GAPFILL_LAB_INCLUDE_DAILY_ROWS_IN_COMPARE");
+    expect(workflowSource).toContain("always on for Manual GapFill Lab");
+    expect(workflowSource).not.toContain("setIncludeDailyRows");
     expect(gapfillLabSource).toContain("Copy all responses");
     expect(readRepoFile("lib/admin/manualGapfillCopyResponses.ts")).toContain(
       "buildManualGapfillAllResponsesPayload"

@@ -10,6 +10,7 @@ import {
   MANUAL_GAPFILL_DEFAULT_MODE,
   MANUAL_GAPFILL_DEFAULT_SOURCE_HOUSE_ID,
   MANUAL_GAPFILL_DEFAULT_USER_EMAIL,
+  MANUAL_GAPFILL_LAB_INCLUDE_DAILY_ROWS_IN_COMPARE,
   MANUAL_GAPFILL_PIPELINE_STOP_AFTER_DRY_RUN_MESSAGE,
   buildManualGapfillIdentityKey,
   canContinuePipelineAfterPrepareSeed,
@@ -202,8 +203,8 @@ export const ManualGapfillLabWorkflow = forwardRef<
   const [esiid, setEsiid] = useState("");
   const [includeDiagnostics, setIncludeDiagnostics] = useState(true);
   const [anchorEndDate, setAnchorEndDate] = useState("");
-  const [includeDailyRows, setIncludeDailyRows] = useState(false);
   const [persistSeedToggle, setPersistSeedToggle] = useState(false);
+  const includeDailyRows = MANUAL_GAPFILL_LAB_INCLUDE_DAILY_ROWS_IN_COMPARE;
 
   const [busyStep, setBusyStep] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1154,17 +1155,13 @@ export const ManualGapfillLabWorkflow = forwardRef<
       <StepSection
         step={5}
         title="Compare"
-        description="Compare source actual usage vs lab simulated usage (admin diagnostic only)."
+        description="Compare source actual usage vs lab simulated usage (admin diagnostic only). Daily compare rows are always included."
         stale={isStale(step5)}
       >
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={includeDailyRows}
-            onChange={(e) => setIncludeDailyRows(e.target.checked)}
-          />
-          <span className="font-semibold">Include daily rows in compare response</span>
-        </label>
+        <p className="text-sm text-slate-600">
+          <span className="font-semibold">Include daily rows in compare response:</span> always on for Manual GapFill Lab
+          (validation-day diagnostics require per-day actual vs simulated rows).
+        </p>
         <button
           type="button"
           disabled={busyStep === "step5" || sameHouseBlocked(sourceHouseId, labHouseId)}
@@ -1215,7 +1212,7 @@ export const ManualGapfillLabWorkflow = forwardRef<
                 <Field label="Mean abs daily delta kWh" value={asNumber(dailySummary.meanAbsoluteDailyDeltaKwh)} />
               </FieldGrid>
             ) : null}
-            {includeDailyRows && dailyRows.length > 0 ? (
+            {dailyRows.length > 0 ? (
               <div className="mt-3 overflow-x-auto">
                 <table className="min-w-full text-left text-xs">
                   <thead>

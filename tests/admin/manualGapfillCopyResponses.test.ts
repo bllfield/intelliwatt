@@ -13,7 +13,7 @@ describe("buildManualGapfillAllResponsesPayload", () => {
       esiid: "E123",
       includeDiagnostics: true,
       anchorEndDate: "",
-      includeDailyRows: false,
+      includeDailyRows: true,
       persistSeedToggle: false,
       persistedSeedInSession: false,
       status: "ready",
