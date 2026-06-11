@@ -568,6 +568,15 @@ export async function solveEflValidationGaps(args: {
   // directly from the EFL text. If we don't upgrade the template to TIME_OF_USE,
   // we can end up with a plan that "validates" but is not safely computable.
   if (derivedPlanRules) {
+    const breakdown = extractEnergyChargeBreakdownTou(rawText);
+    if (breakdown) {
+      applyEnergyChargeBreakdownTouToTemplateShapes({
+        planRules: derivedPlanRules,
+        rateStructure: derivedRateStructure ?? (derivedRateStructure = {}),
+        breakdown,
+      });
+      solverApplied.push("TOU_ENERGY_CHARGE_BREAKDOWN_FROM_EFL_TEXT");
+    } else {
     const hasTou =
       Array.isArray((derivedPlanRules as any).timeOfUsePeriods) &&
       (derivedPlanRules as any).timeOfUsePeriods.length > 0;
@@ -619,15 +628,6 @@ export async function solveEflValidationGaps(args: {
         solverApplied.push("TOU_UPGRADE_FROM_EXISTING_PERIODS");
       }
     } else {
-      const breakdown = extractEnergyChargeBreakdownTou(rawText);
-      if (breakdown) {
-        applyEnergyChargeBreakdownTouToTemplateShapes({
-          planRules: derivedPlanRules,
-          rateStructure: derivedRateStructure ?? (derivedRateStructure = {}),
-          breakdown,
-        });
-        solverApplied.push("TOU_ENERGY_CHARGE_BREAKDOWN_FROM_EFL_TEXT");
-      } else {
       const tou = extractPeakOffPeakTouFromEflText(rawText);
       if (tou) {
         const allDays = [0, 1, 2, 3, 4, 5, 6];
@@ -671,7 +671,7 @@ export async function solveEflValidationGaps(args: {
 
         solverApplied.push("TOU_PEAK_OFFPEAK_FROM_EFL_TEXT");
       }
-      }
+    }
     }
   }
 

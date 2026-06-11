@@ -61,6 +61,19 @@ function extractBreakdownRegion(rawText: string): string | null {
   return m?.[1]?.trim() ? m[1] : null;
 }
 
+function linesBeforeLabel(region: string, labelIdx: number, maxLines = 8): string {
+  const before = region.slice(0, labelIdx);
+  const lines = before.split(/\r?\n/);
+  const collected: string[] = [];
+  for (let i = lines.length - 1; i >= 0 && collected.length < maxLines; i--) {
+    const line = lines[i] ?? "";
+    if (/Off-?\s*peak\b/i.test(line) || /On-?\s*peak\b/i.test(line)) break;
+    if (/Energy\s*Charge\s*Period/i.test(line)) break;
+    collected.unshift(line);
+  }
+  return collected.join("\n");
+}
+
 function extractBreakdownRowSection(args: {
   region: string;
   kind: "off" | "on";
@@ -69,16 +82,20 @@ function extractBreakdownRowSection(args: {
   const labelIdx = args.region.search(labelRe);
   if (labelIdx < 0) return null;
 
+  const prefix = args.kind === "off" ? linesBeforeLabel(args.region, labelIdx) : "";
   const rest = args.region.slice(labelIdx);
+  let body: string;
   if (args.kind === "off") {
     // Stop at the On-peak table row (not the prose "On-peak: High-demand...").
     const stop = rest.slice(1).search(/\n\s*On-?\s*peak(?!\s*:)/i);
-    return stop > 0 ? rest.slice(0, stop + 1) : rest.slice(0, 900);
+    body = stop > 0 ? rest.slice(0, stop + 1) : rest.slice(0, 900);
+  } else {
+    // On-peak row: stop at explanatory prose or end of region.
+    const stop = rest.slice(1).search(/\n\s*On-peak:\s*[A-Z]/i);
+    body = stop > 0 ? rest.slice(0, stop + 1) : rest.slice(0, 600);
   }
 
-  // On-peak row: stop at explanatory prose or end of region.
-  const stop = rest.slice(1).search(/\n\s*On-peak:\s*[A-Z]/i);
-  return stop > 0 ? rest.slice(0, stop + 1) : rest.slice(0, 600);
+  return prefix ? `${prefix}\n${body}` : body;
 }
 
 function parseBreakdownRowSection(args: {

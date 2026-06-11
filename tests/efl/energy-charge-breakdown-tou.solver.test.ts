@@ -32,9 +32,23 @@ On-peak                             6:00pm - 9:59pm,                            
 On-peak: High-demand time when electricity costs more.
 `.trim();
 
+// pdftotext often places the first off-peak hour window on the line above the label.
+const POWERSHIFT_EFL_PDF_LAYOUT = `
+Energy Charge Breakdown
+  12:00am - 5:59pm,
+Off-peak                                                                             6.015¢                                  77.00%
+  10:00pm - 11:59pm,
+On-peak                             6:00pm - 9:59pm,                                16.513¢                                  23.00%
+On-peak: High-demand time when electricity costs more.
+`.trim();
+
 describe("EFL - Energy Charge Breakdown TOU extraction", () => {
   it("extracts three clock windows with correct rates (not fixed TDSP)", () => {
-    for (const rawText of [POWERSHIFT_EFL_INLINE, POWERSHIFT_EFL_TABLE_LAYOUT]) {
+    for (const rawText of [
+      POWERSHIFT_EFL_INLINE,
+      POWERSHIFT_EFL_TABLE_LAYOUT,
+      POWERSHIFT_EFL_PDF_LAYOUT,
+    ]) {
       const breakdown = extractEnergyChargeBreakdownTou(rawText);
       expect(breakdown).not.toBeNull();
       expect(breakdown!.periods).toHaveLength(3);
