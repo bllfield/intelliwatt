@@ -3,6 +3,17 @@ import { IntervalSeriesKind } from "@/modules/usageSimulator/kinds";
 
 type IntervalInput = { tsUtc: string | Date; kwh: number | string };
 
+/** Chunk size for intervalPoint15m writes — kept outside long interactive transactions. */
+export const INTERVAL_POINT15M_PERSIST_CHUNK_SIZE = 5000;
+
+export type IntervalSeriesPersistDiagnostics = {
+  intervalRowsToPersist: number;
+  intervalChunkSize: number;
+  intervalChunksWritten: number;
+  intervalPersistDurationMs: number;
+  transactionTimeoutAvoided: true;
+};
+
 function asUtcDate(input: string | Date): Date {
   const d = input instanceof Date ? new Date(input.getTime()) : new Date(input);
   if (Number.isNaN(d.getTime())) {
@@ -33,7 +44,7 @@ export async function saveIntervalSeries15m(params: {
   derivationVersion: string;
   buildInputsHash: string;
   intervals15: IntervalInput[];
-}): Promise<{ seriesId: string }> {
+}): Promise<{ seriesId: string; diagnostics: IntervalSeriesPersistDiagnostics }> {
   const scenarioId = params.scenarioId ?? null;
   const intervals = params.intervals15 ?? [];
   if (!intervals.length) throw new Error("intervals15 must contain at least one interval");
@@ -47,60 +58,93 @@ export async function saveIntervalSeries15m(params: {
     };
   });
 
-  return usagePrisma.$transaction(async (tx) => {
-    const existing = await (tx as any).intervalSeries.findFirst({
-      where: {
+  const persistStartedAt = Date.now();
+  const chunkSize = INTERVAL_POINT15M_PERSIST_CHUNK_SIZE;
+
+  const seriesId = await usagePrisma.$transaction(
+    async (tx) => {
+      const existing = await (tx as any).intervalSeries.findFirst({
+        where: {
+          userId: params.userId,
+          houseId: params.houseId,
+          kind: params.kind,
+          scenarioId,
+        },
+        select: { id: true },
+      });
+
+      const data = {
         userId: params.userId,
         houseId: params.houseId,
         kind: params.kind,
         scenarioId,
-      },
-      select: { id: true },
-    });
+        anchorStartUtc: params.anchorStartUtc,
+        anchorEndUtc: params.anchorEndUtc,
+        derivationVersion: params.derivationVersion,
+        buildInputsHash: params.buildInputsHash,
+      };
 
-    const data = {
-      userId: params.userId,
-      houseId: params.houseId,
-      kind: params.kind,
-      scenarioId,
-      anchorStartUtc: params.anchorStartUtc,
-      anchorEndUtc: params.anchorEndUtc,
-      derivationVersion: params.derivationVersion,
-      buildInputsHash: params.buildInputsHash,
-    };
+      const series = existing
+        ? await (tx as any).intervalSeries.update({
+            where: { id: existing.id },
+            data,
+            select: { id: true },
+          })
+        : await (tx as any).intervalSeries.create({
+            data,
+            select: { id: true },
+          });
 
-    const series = existing
-      ? await (tx as any).intervalSeries.update({
-          where: { id: existing.id },
-          data,
-          select: { id: true },
-        })
-      : await (tx as any).intervalSeries.create({
-          data,
-          select: { id: true },
-        });
-
-    await (tx as any).intervalPoint15m.deleteMany({
-      where: { seriesId: series.id },
-    });
-
-    const chunkSize = 5000;
-    for (let i = 0; i < prepared.length; i += chunkSize) {
-      const chunk = prepared.slice(i, i + chunkSize);
-      await (tx as any).intervalPoint15m.createMany({
-        data: chunk.map((row) => ({
-          seriesId: series.id,
-          tsUtc: row.tsUtc,
-          kwh: row.kwh,
-        })),
+      await (tx as any).intervalPoint15m.deleteMany({
+        where: { seriesId: series.id },
       });
-    }
 
-    return { seriesId: String(series.id) };
-  }, {
-    maxWait: 10_000,
-    timeout: 60_000,
+      return String(series.id);
+    },
+    {
+      maxWait: 10_000,
+      timeout: 15_000,
+    }
+  );
+
+  let intervalChunksWritten = 0;
+  for (let i = 0; i < prepared.length; i += chunkSize) {
+    const chunk = prepared.slice(i, i + chunkSize);
+    await usagePrisma.$transaction(
+      async (tx) => {
+        await (tx as any).intervalPoint15m.createMany({
+          data: chunk.map((row) => ({
+            seriesId,
+            tsUtc: row.tsUtc,
+            kwh: row.kwh,
+          })),
+        });
+      },
+      {
+        maxWait: 10_000,
+        timeout: 30_000,
+      }
+    );
+    intervalChunksWritten += 1;
+  }
+
+  const diagnostics: IntervalSeriesPersistDiagnostics = {
+    intervalRowsToPersist: prepared.length,
+    intervalChunkSize: chunkSize,
+    intervalChunksWritten,
+    intervalPersistDurationMs: Date.now() - persistStartedAt,
+    transactionTimeoutAvoided: true,
+  };
+
+  console.info("[intervalSeriesRepo] saveIntervalSeries15m", {
+    userId: params.userId,
+    houseId: params.houseId,
+    kind: params.kind,
+    scenarioId,
+    ...diagnostics,
   });
+
+  return { seriesId, diagnostics };
 }
 
 export async function getIntervalSeries15m(params: {

@@ -219,7 +219,16 @@ describe("recalcSimulatorBuild admin lab manual totals", () => {
     saveCachedPastDataset.mockResolvedValue(undefined);
     getCachedPastDataset.mockResolvedValue(null);
     deleteCachedPastDatasetsForScenario.mockResolvedValue(0);
-    saveIntervalSeries15m.mockResolvedValue({ seriesId: "series-1" });
+    saveIntervalSeries15m.mockResolvedValue({
+      seriesId: "series-1",
+      diagnostics: {
+        intervalRowsToPersist: 2,
+        intervalChunkSize: 5000,
+        intervalChunksWritten: 1,
+        intervalPersistDurationMs: 1,
+        transactionTimeoutAvoided: true,
+      },
+    });
     upsertSimulatedUsageBuckets.mockResolvedValue(undefined);
     computePastInputHash.mockReturnValue("input-hash-1");
     getIntervalDataFingerprint.mockResolvedValue("interval-fingerprint-1");
@@ -1024,9 +1033,18 @@ describe("recalcSimulatorBuild admin lab manual totals", () => {
     });
   }, 15000);
 
-  it("returns MANUAL_TOTALS recalc success without waiting on post-artifact bucket or interval persistence", async () => {
+  it("awaits MANUAL_TOTALS interval persistence but defers usage bucket persistence", async () => {
     upsertSimulatedUsageBuckets.mockImplementationOnce(() => new Promise(() => {}));
-    saveIntervalSeries15m.mockImplementationOnce(() => new Promise(() => {}));
+    saveIntervalSeries15m.mockResolvedValueOnce({
+      seriesId: "series-1",
+      diagnostics: {
+        intervalRowsToPersist: 2,
+        intervalChunkSize: 5000,
+        intervalChunksWritten: 1,
+        intervalPersistDurationMs: 1,
+        transactionTimeoutAvoided: true,
+      },
+    });
     manualUsageInputFindUnique.mockResolvedValueOnce({
       payload: {
         mode: "ANNUAL",

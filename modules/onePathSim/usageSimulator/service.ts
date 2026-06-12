@@ -7005,7 +7005,7 @@ async function recalcSimulatorBuildImpl(args: {
       memoryRssMb: getMemoryRssMb(),
     });
     try {
-      await saveIntervalSeries15m({
+      const saved = await saveIntervalSeries15m({
         userId,
         houseId,
         kind: IntervalSeriesKind.PAST_SIM_BASELINE,
@@ -7024,6 +7024,11 @@ async function recalcSimulatorBuildImpl(args: {
         mode: simMode,
         buildInputsHash,
         intervalCount: validIntervals.length,
+        intervalRowsToPersist: saved.diagnostics.intervalRowsToPersist,
+        intervalChunkSize: saved.diagnostics.intervalChunkSize,
+        intervalChunksWritten: saved.diagnostics.intervalChunksWritten,
+        intervalPersistDurationMs: saved.diagnostics.intervalPersistDurationMs,
+        transactionTimeoutAvoided: saved.diagnostics.transactionTimeoutAvoided,
         durationMs: Date.now() - intervalSeriesStartedAt,
         source: "recalcSimulatorBuildImpl",
         memoryRssMb: getMemoryRssMb(),
@@ -7048,6 +7053,9 @@ async function recalcSimulatorBuildImpl(args: {
         scenarioId,
         error: e instanceof Error ? e.message : String(e),
       });
+      if (simMode === "MANUAL_TOTALS") {
+        throw e;
+      }
     }
   };
 
@@ -7073,17 +7081,7 @@ async function recalcSimulatorBuildImpl(args: {
       void runUsageBucketsPersistence();
     }
     if (shouldPersistPastSeries) {
-      logSimPipelineEvent("recalc_interval_series_persist_deferred", {
-        correlationId: args.correlationId,
-        houseId,
-        sourceHouseId: actualContextHouseId !== houseId ? actualContextHouseId : undefined,
-        scenarioId,
-        mode: simMode,
-        artifactInputHash: canonicalArtifactInputHash,
-        source: "recalcSimulatorBuildImpl",
-        memoryRssMb: getMemoryRssMb(),
-      });
-      void runIntervalSeriesPersistence();
+      await runIntervalSeriesPersistence();
     }
   } else {
     await runUsageBucketsPersistence();

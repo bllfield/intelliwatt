@@ -157,6 +157,7 @@ function makeIntervals(startIso: string, count: number, kwh = 0.25) {
 describe("intervalSeriesRepo", () => {
   beforeEach(() => {
     mockState.reset();
+    mockState.prismaMock.$transaction.mockClear();
   });
 
   it("saves and reads back an ordered 15-minute roundtrip", async () => {
@@ -253,12 +254,12 @@ describe("intervalSeriesRepo", () => {
     ).rejects.toThrow("off-grid");
   });
 
-  it("uses an extended interactive transaction timeout for large interval writes", async () => {
+  it("writes large interval sets in chunked transactions outside one long persistence tx", async () => {
     const userId = "user-1";
     const houseId = "house-1";
-    const intervals = makeIntervals("2026-01-01T00:00:00.000Z", 35040, 0.25);
+    const intervals = makeIntervals("2026-01-01T00:00:00.000Z", 12001, 0.25);
 
-    await saveIntervalSeries15m({
+    const saved = await saveIntervalSeries15m({
       userId,
       houseId,
       kind: IntervalSeriesKind.PAST_SIM_BASELINE,
@@ -266,14 +267,30 @@ describe("intervalSeriesRepo", () => {
       anchorStartUtc: new Date(intervals[0].tsUtc),
       anchorEndUtc: new Date(intervals[intervals.length - 1].tsUtc),
       derivationVersion: "v1",
-      buildInputsHash: "hash-timeout",
+      buildInputsHash: "hash-chunked",
       intervals15: intervals,
     });
 
-    expect(mockState.prismaMock.$transaction).toHaveBeenCalled();
-    expect(mockState.prismaMock.$transaction.mock.calls[0]?.[1]).toMatchObject({
-      maxWait: 10000,
-      timeout: 60000,
+    expect(saved.diagnostics.intervalRowsToPersist).toBe(12001);
+    expect(saved.diagnostics.intervalChunkSize).toBe(5000);
+    expect(saved.diagnostics.intervalChunksWritten).toBe(3);
+    expect(saved.diagnostics.transactionTimeoutAvoided).toBe(true);
+
+    const txCalls = mockState.prismaMock.$transaction.mock.calls;
+    expect(txCalls.length).toBe(4);
+    expect(txCalls[0]?.[1]).toMatchObject({ timeout: 15000 });
+    for (let i = 1; i < txCalls.length; i++) {
+      expect(txCalls[i]?.[1]).toMatchObject({ timeout: 30000 });
+    }
+    expect(mockState.state().pointRows.length).toBe(12001);
+
+    const read = await getIntervalSeries15m({
+      userId,
+      houseId,
+      kind: IntervalSeriesKind.PAST_SIM_BASELINE,
+      scenarioId: "scenario-1",
     });
+    expect(read?.points.length).toBe(12001);
+    expect(read?.points[0].kwh).toBe("0.250000");
   });
 });
