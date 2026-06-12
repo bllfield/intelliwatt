@@ -51,6 +51,8 @@ export async function resolveModelIntelligenceLabContext(args: {
   email: string;
   houseId: string;
   esiid?: string | null;
+  /** Admin One Path lab owner — must match resolveOnePathSimOwnerUserId(), not the looked-up customer userId. */
+  ownerUserId: string;
 }): Promise<
   | { ok: true; context: ModelIntelligenceLabContext; houses: AdminHouseLookupRow[] }
   | { ok: false; error: string; message: string }
@@ -89,7 +91,7 @@ export async function resolveModelIntelligenceLabContext(args: {
   });
 
   const labTestHome = await resolveLabTestHomeState({
-    ownerUserId: lookup.userId,
+    ownerUserId: args.ownerUserId,
     selectedSourceHouseId: selectedHouse.id,
     selectedSourceUserId: lookup.userId,
   });

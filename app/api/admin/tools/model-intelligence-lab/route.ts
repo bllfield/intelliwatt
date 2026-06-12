@@ -140,10 +140,18 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    const ownerUserId = await resolveOnePathSimOwnerUserId(request);
+    if (!ownerUserId) {
+      return NextResponse.json(
+        { ok: false, error: "lab_owner_not_found", message: "One Path lab owner could not be resolved." },
+        { status: 400 }
+      );
+    }
     const resolved = await resolveModelIntelligenceLabContext({
       email,
       houseId,
       esiid: asString(body.esiid),
+      ownerUserId,
     });
     if (!resolved.ok) {
       return NextResponse.json(resolved, { status: resolved.error === "user_not_found" ? 404 : 400 });
@@ -166,10 +174,18 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    const ownerUserId = await resolveOnePathSimOwnerUserId(request);
+    if (!ownerUserId) {
+      return NextResponse.json(
+        { ok: false, error: "lab_owner_not_found", message: "One Path lab owner could not be resolved." },
+        { status: 400 }
+      );
+    }
     const resolved = await resolveModelIntelligenceLabContext({
       email,
       houseId,
       esiid: asString(body.esiid),
+      ownerUserId,
     });
     if (!resolved.ok) {
       return NextResponse.json(resolved, { status: resolved.error === "user_not_found" ? 404 : 400 });
@@ -219,10 +235,18 @@ export async function POST(request: NextRequest) {
       );
     }
     const runMode = runModeRaw as ModelIntelligenceRunMode;
+    const ownerUserId = await resolveOnePathSimOwnerUserId(request);
+    if (!ownerUserId) {
+      return NextResponse.json(
+        { ok: false, error: "lab_owner_not_found", message: "One Path lab owner could not be resolved." },
+        { status: 400 }
+      );
+    }
     const resolved = await resolveModelIntelligenceLabContext({
       email,
       houseId,
       esiid: asString(body.esiid),
+      ownerUserId,
     });
     if (!resolved.ok) {
       return NextResponse.json(resolved, { status: resolved.error === "user_not_found" ? 404 : 400 });
@@ -242,7 +266,6 @@ export async function POST(request: NextRequest) {
       manualGapfillOptions,
       flags,
     });
-    const ownerUserId = await resolveOnePathSimOwnerUserId(request);
     const prepared = await prepareModelIntelligenceDispatchStep({
       context,
       preview,
