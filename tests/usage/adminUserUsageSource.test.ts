@@ -56,6 +56,22 @@ describe("resolveAdminUserUsageSource", () => {
       })
     ).toBe("GB");
   });
+
+  it("prefers committed SMT/GB over stale manual payload rows when no simulator build is loaded", () => {
+    expect(
+      resolveAdminUserUsageSource({
+        committedUsageSource: "SMT",
+        manualUsageMode: "MONTHLY",
+      })
+    ).toBe("SMT");
+
+    expect(
+      resolveAdminUserUsageSource({
+        committedUsageSource: "GREEN_BUTTON",
+        manualUsageMode: "MONTHLY",
+      })
+    ).toBe("GB");
+  });
 });
 
 describe("parseAdminUserUsageSourceFilter", () => {

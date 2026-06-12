@@ -63,9 +63,6 @@ export function resolveAdminUserUsageSource(args: {
     return "MANUAL_MONTHLY";
   }
 
-  if (!simulatorMode && manualMode === "ANNUAL") return "MANUAL_ANNUAL";
-  if (!simulatorMode && manualMode === "MONTHLY") return "MANUAL_MONTHLY";
-
   const committed =
     args.committedUsageSource === "SMT" || args.committedUsageSource === "GREEN_BUTTON"
       ? args.committedUsageSource
@@ -73,6 +70,9 @@ export function resolveAdminUserUsageSource(args: {
 
   if (committed === "GREEN_BUTTON") return "GB";
   if (committed === "SMT") return "SMT";
+
+  if (!simulatorMode && manualMode === "ANNUAL") return "MANUAL_ANNUAL";
+  if (!simulatorMode && manualMode === "MONTHLY") return "MANUAL_MONTHLY";
 
   if (simulatorMode === "SMT_BASELINE") return "SMT";
 

@@ -28,7 +28,7 @@ import {
   ONE_PATH_SCENARIO_PRESETS,
   getKnownHouseScenarioByKey,
   isOnePathPastSimPreset,
-  resolveDefaultPastPresetKeyForCommittedSource,
+  resolveDefaultPastPresetKeyForLookupSourceContext,
   resolveKnownHouseScenarioSelection,
   type OnePathKnownScenario,
 } from "@/modules/onePathSim/knownHouseScenarios";
@@ -193,11 +193,15 @@ function TruthSummaryPanel(props: {
 function resolveLookupDefaultPresetKey(json: LookupResponse): string {
   const sourceContext = asRecord(json.sourceContext) ?? {};
   const committed = String(sourceContext.committedUsageSource ?? "").trim();
-  const manualPayload = asRecord(sourceContext.manualUsagePayload) ?? {};
-  const manualMode = String(manualPayload.mode ?? "").trim();
-  return resolveDefaultPastPresetKeyForCommittedSource({
-    committedUsageSource:
-      committed === "GREEN_BUTTON" ? "GREEN_BUTTON" : committed === "SMT" ? "SMT" : null,
+  const committedUsageSource =
+    committed === "GREEN_BUTTON" ? "GREEN_BUTTON" : committed === "SMT" ? "SMT" : null;
+  const manualPayloadSource =
+    committedUsageSource != null
+      ? null
+      : asRecord(sourceContext.sourceManualUsagePayload) ?? asRecord(sourceContext.manualUsagePayload);
+  const manualMode = String(manualPayloadSource?.mode ?? "").trim();
+  return resolveDefaultPastPresetKeyForLookupSourceContext({
+    committedUsageSource,
     manualUsageMode: manualMode || null,
   });
 }

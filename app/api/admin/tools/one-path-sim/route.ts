@@ -3043,6 +3043,7 @@ export async function POST(request: NextRequest) {
         debugDiagnosticsIncluded: false,
         committedUsageSource: sourceCommittedUsageSource,
         manualUsagePayload: sourceManualUsageForPreset.payload ?? null,
+        sourceManualUsagePayload: sourceManualUsageForPreset.payload ?? null,
         manualUsageUpdatedAt: sourceManualUsageForPreset.updatedAt ?? null,
         onePathTestHome: onePathTestHomeSummary,
         smtRefreshCheck,
@@ -3170,6 +3171,7 @@ export async function POST(request: NextRequest) {
   }).catch(() => ({ score: null, derivedInput: null }));
   const previewLookupSourceContext = {
     committedUsageSource: sourceCommittedUsageSource,
+    sourceManualUsagePayload: sourceManualUsageForPreset.payload ?? null,
     actualDatasetSummary: usageTruth?.dataset?.summary ?? null,
     actualDatasetMeta: (usageTruth?.dataset as any)?.meta ?? null,
     usageTruthSource: usageTruth?.usageTruthSource ?? "missing_usage_truth",

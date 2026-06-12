@@ -1,3 +1,8 @@
+import {
+  resolveAdminUserUsageSource,
+  type AdminUserUsageSource,
+} from "@/lib/usage/adminUserUsageSource";
+
 export type OnePathKnownScenarioMode = "INTERVAL" | "GREEN_BUTTON" | "MANUAL_MONTHLY" | "MANUAL_ANNUAL" | "NEW_BUILD";
 
 export type OnePathKnownScenarioType =
@@ -409,16 +414,43 @@ export function isOnePathPastSimPreset(
   return hint.includes("past");
 }
 
-/** Default Past preset for lookup based on the source house committed usage type. */
+const PAST_PRESET_KEY_BY_ADMIN_USAGE_SOURCE: Record<AdminUserUsageSource, string> = {
+  SMT: DEFAULT_ONE_PATH_SCENARIO_PRESET_KEY,
+  GB: "green-button-past-primary",
+  MANUAL_MONTHLY: "manual-monthly-past-primary",
+  MANUAL_ANNUAL: "manual-annual-past-primary",
+  NEW_BUILD: "new-build-past-primary",
+  UNKNOWN: DEFAULT_ONE_PATH_SCENARIO_PRESET_KEY,
+};
+
+/** Map admin usage-source classification to the default Past sim preset key. */
+export function resolveDefaultPastPresetKeyForAdminUsageSource(source: AdminUserUsageSource): string {
+  return PAST_PRESET_KEY_BY_ADMIN_USAGE_SOURCE[source] ?? DEFAULT_ONE_PATH_SCENARIO_PRESET_KEY;
+}
+
+/**
+ * Default Past preset for One Path lookup — same usage-source priority as the admin user table
+ * (`resolveAdminUserUsageSource`): committed SMT/GB wins over stale manual payload rows.
+ */
+export function resolveDefaultPastPresetKeyForLookupSourceContext(args: {
+  committedUsageSource?: "SMT" | "GREEN_BUTTON" | null;
+  manualUsageMode?: string | null;
+  simulatorMode?: string | null;
+}): string {
+  const usageSource = resolveAdminUserUsageSource({
+    committedUsageSource: args.committedUsageSource,
+    manualUsageMode: args.manualUsageMode,
+    simulatorMode: args.simulatorMode,
+  });
+  return resolveDefaultPastPresetKeyForAdminUsageSource(usageSource);
+}
+
+/** @deprecated Prefer resolveDefaultPastPresetKeyForLookupSourceContext */
 export function resolveDefaultPastPresetKeyForCommittedSource(args: {
   committedUsageSource?: "SMT" | "GREEN_BUTTON" | null;
   manualUsageMode?: string | null;
 }): string {
-  if (args.committedUsageSource === "GREEN_BUTTON") return "green-button-past-primary";
-  const manualMode = String(args.manualUsageMode ?? "").trim().toUpperCase();
-  if (manualMode === "MONTHLY") return "manual-monthly-past-primary";
-  if (manualMode === "ANNUAL") return "manual-annual-past-primary";
-  return DEFAULT_ONE_PATH_SCENARIO_PRESET_KEY;
+  return resolveDefaultPastPresetKeyForLookupSourceContext(args);
 }
 
 export function getKnownHouseScenarioByKey(scenarioKey: string | null | undefined): OnePathKnownScenario | null {

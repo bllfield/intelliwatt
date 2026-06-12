@@ -4,7 +4,8 @@ import {
   ONE_PATH_SCENARIO_PRESETS,
   getKnownHouseScenarioByKey,
   isOnePathPastSimPreset,
-  resolveDefaultPastPresetKeyForCommittedSource,
+  resolveDefaultPastPresetKeyForAdminUsageSource,
+  resolveDefaultPastPresetKeyForLookupSourceContext,
   resolveKnownHouseScenarioSelection,
 } from "@/modules/onePathSim/knownHouseScenarios";
 
@@ -39,16 +40,46 @@ describe("one path scenario presets", () => {
     );
   });
 
-  it("maps committed usage source to the matching Past preset key", () => {
-    expect(resolveDefaultPastPresetKeyForCommittedSource({ committedUsageSource: "SMT" })).toBe(
+  it("maps every admin usage source to the matching Past preset key", () => {
+    expect(resolveDefaultPastPresetKeyForAdminUsageSource("SMT")).toBe("interval-past-primary");
+    expect(resolveDefaultPastPresetKeyForAdminUsageSource("GB")).toBe("green-button-past-primary");
+    expect(resolveDefaultPastPresetKeyForAdminUsageSource("MANUAL_MONTHLY")).toBe("manual-monthly-past-primary");
+    expect(resolveDefaultPastPresetKeyForAdminUsageSource("MANUAL_ANNUAL")).toBe("manual-annual-past-primary");
+    expect(resolveDefaultPastPresetKeyForAdminUsageSource("NEW_BUILD")).toBe("new-build-past-primary");
+    expect(resolveDefaultPastPresetKeyForAdminUsageSource("UNKNOWN")).toBe("interval-past-primary");
+  });
+
+  it("maps lookup source context with committed-source priority over stale manual payload", () => {
+    expect(resolveDefaultPastPresetKeyForLookupSourceContext({ committedUsageSource: "SMT" })).toBe(
       "interval-past-primary"
     );
-    expect(resolveDefaultPastPresetKeyForCommittedSource({ committedUsageSource: "GREEN_BUTTON" })).toBe(
+    expect(resolveDefaultPastPresetKeyForLookupSourceContext({ committedUsageSource: "GREEN_BUTTON" })).toBe(
       "green-button-past-primary"
     );
     expect(
-      resolveDefaultPastPresetKeyForCommittedSource({ committedUsageSource: null, manualUsageMode: "MONTHLY" })
+      resolveDefaultPastPresetKeyForLookupSourceContext({
+        committedUsageSource: "SMT",
+        manualUsageMode: "MONTHLY",
+      })
+    ).toBe("interval-past-primary");
+    expect(
+      resolveDefaultPastPresetKeyForLookupSourceContext({
+        committedUsageSource: "GREEN_BUTTON",
+        manualUsageMode: "MONTHLY",
+      })
+    ).toBe("green-button-past-primary");
+    expect(
+      resolveDefaultPastPresetKeyForLookupSourceContext({ committedUsageSource: null, manualUsageMode: "MONTHLY" })
     ).toBe("manual-monthly-past-primary");
+    expect(
+      resolveDefaultPastPresetKeyForLookupSourceContext({ committedUsageSource: null, manualUsageMode: "ANNUAL" })
+    ).toBe("manual-annual-past-primary");
+    expect(
+      resolveDefaultPastPresetKeyForLookupSourceContext({
+        committedUsageSource: null,
+        simulatorMode: "NEW_BUILD_ESTIMATE",
+      })
+    ).toBe("new-build-past-primary");
   });
 
   it("detects Past sim presets for sim-run audit defaults", () => {
