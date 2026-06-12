@@ -583,10 +583,19 @@ export function buildUsage365Payload(args: {
   };
 }
 
-/** Fetch all travel/vacant ranges stored in scenario events for this house (all scenarios). */
-export async function getTravelRangesFromDb(userId: string, houseId: string): Promise<Array<{ startDate: string; endDate: string }>> {
-  const { readTravelRangesForHouse } = await import("@/lib/usage/pastSimTravelRanges");
-  return readTravelRangesForHouse({ userId, houseId });
+/** Fetch active travel/vacant ranges stored for this house (Past Corrected + manual payload). */
+export async function getTravelRangesFromDb(
+  userId: string,
+  houseId: string,
+  options?: { coverageWindow?: { startDate: string; endDate: string } | null }
+): Promise<Array<{ startDate: string; endDate: string }>> {
+  const { readTravelRangesForHouse, resolveActiveTravelCoverageWindowForHouse } = await import(
+    "@/lib/usage/pastSimTravelRanges"
+  );
+  const coverageWindow =
+    options?.coverageWindow ??
+    (await resolveActiveTravelCoverageWindowForHouse({ userId, houseId }).catch(() => null));
+  return readTravelRangesForHouse({ userId, houseId, coverageWindow });
 }
 
 export const REPORT_VERSION = "gapfill_lab_report_v3";
