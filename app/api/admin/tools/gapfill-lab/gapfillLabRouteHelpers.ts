@@ -594,7 +594,7 @@ export async function getTravelRangesFromDb(
   );
   const coverageWindow =
     options?.coverageWindow ??
-    (await resolveActiveTravelCoverageWindowForHouse({ userId, houseId }).catch(() => null));
+    resolveActiveTravelCoverageWindowForHouse({ userId, houseId });
   return readTravelRangesForHouse({ userId, houseId, coverageWindow });
 }
 
