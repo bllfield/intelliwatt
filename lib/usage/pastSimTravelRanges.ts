@@ -1,6 +1,33 @@
 import { prisma } from "@/lib/db";
+import type { CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
 
 export type PastSimTravelRange = { startDate: string; endDate: string };
+
+export type TravelRangeCoverageClassification = {
+  storedRange: PastSimTravelRange;
+  /** Stale/historical: final day is before the canonical usage window start. */
+  archivedHistorical: boolean;
+  /** Overlaps the canonical usage window for current workflow. */
+  activeForCurrentWindow: boolean;
+  /** Starts after the canonical usage window end — excluded from current workflow, not archived. */
+  futureOutsideCurrentWindow: boolean;
+  /** Same condition as archivedHistorical; explicit alias for diagnostics. */
+  beforeWindowHistorical: boolean;
+  /** Excluded from current workflow (archived historical or future outside window). */
+  filteredOutOfCurrentWindow: boolean;
+  /** Clipped overlap used for operational exclusion/display; null when not active. */
+  clippedOperationalOverlap: PastSimTravelRange | null;
+};
+
+export type TravelRangeCoverageWindowSummary = {
+  storedCount: number;
+  archivedHistoricalCount: number;
+  activeCurrentWindowCount: number;
+  futureOutsideCurrentWindowCount: number;
+  filteredOutOfCurrentWindowCount: number;
+  clippedOperationalRanges: PastSimTravelRange[];
+  classifications: TravelRangeCoverageClassification[];
+};
 
 export const PAST_CORRECTED_SCENARIO_NAME = "Past (Corrected)";
 
@@ -26,6 +53,93 @@ export function normalizePastSimTravelRanges(
   return out.sort((left, right) =>
     left.startDate === right.startDate ? left.endDate.localeCompare(right.endDate) : left.startDate.localeCompare(right.startDate)
   );
+}
+
+/** Classify one stored travel range against the canonical usage window. */
+export function classifyTravelRangeForCoverageWindow(
+  range: PastSimTravelRange,
+  window: CoverageWindow | null | undefined
+): TravelRangeCoverageClassification {
+  const windowStart = asDateKey(window?.startDate);
+  const windowEnd = asDateKey(window?.endDate);
+  const startDate = asDateKey(range.startDate) ?? range.startDate;
+  const endDate = asDateKey(range.endDate) ?? range.endDate;
+
+  if (!windowStart || !windowEnd || windowStart > windowEnd) {
+    return {
+      storedRange: range,
+      archivedHistorical: false,
+      activeForCurrentWindow: true,
+      futureOutsideCurrentWindow: false,
+      beforeWindowHistorical: false,
+      filteredOutOfCurrentWindow: false,
+      clippedOperationalOverlap: range,
+    };
+  }
+
+  const archivedHistorical = endDate < windowStart;
+  const futureOutsideCurrentWindow = startDate > windowEnd;
+  const activeForCurrentWindow = endDate >= windowStart && startDate <= windowEnd;
+  const filteredOutOfCurrentWindow = !activeForCurrentWindow;
+
+  return {
+    storedRange: range,
+    archivedHistorical,
+    activeForCurrentWindow,
+    futureOutsideCurrentWindow,
+    beforeWindowHistorical: archivedHistorical,
+    filteredOutOfCurrentWindow,
+    clippedOperationalOverlap: activeForCurrentWindow
+      ? {
+          startDate: startDate < windowStart ? windowStart : startDate,
+          endDate: endDate > windowEnd ? windowEnd : endDate,
+        }
+      : null,
+  };
+}
+
+/** Summarize stored travel ranges against the canonical usage window. */
+export function summarizeTravelRangesForCoverageWindow(
+  ranges: ReadonlyArray<{ startDate?: unknown; endDate?: unknown }> | null | undefined,
+  window: CoverageWindow | null | undefined
+): TravelRangeCoverageWindowSummary {
+  const normalized = normalizePastSimTravelRanges(ranges);
+  const classifications = normalized.map((range) => classifyTravelRangeForCoverageWindow(range, window));
+  const clippedOperationalRanges = classifications
+    .map((row) => row.clippedOperationalOverlap)
+    .filter((range): range is PastSimTravelRange => range != null);
+  return {
+    storedCount: normalized.length,
+    archivedHistoricalCount: classifications.filter((row) => row.archivedHistorical).length,
+    activeCurrentWindowCount: classifications.filter((row) => row.activeForCurrentWindow).length,
+    futureOutsideCurrentWindowCount: classifications.filter((row) => row.futureOutsideCurrentWindow).length,
+    filteredOutOfCurrentWindowCount: classifications.filter((row) => row.filteredOutOfCurrentWindow).length,
+    clippedOperationalRanges,
+    classifications,
+  };
+}
+
+/** True when a stored range overlaps the canonical window (match by overlap, not clipped keys). */
+export function travelRangeIsActiveForCoverageWindow(
+  range: { startDate?: unknown; endDate?: unknown },
+  window: CoverageWindow | null | undefined
+): boolean {
+  const normalized = normalizePastSimTravelRanges([range]);
+  if (normalized.length === 0) return false;
+  return classifyTravelRangeForCoverageWindow(normalized[0]!, window).activeForCurrentWindow;
+}
+
+/** Operational current-window ranges clipped to the canonical usage window bounds. */
+export function filterTravelRangesToCoverageWindow(
+  ranges: ReadonlyArray<{ startDate?: unknown; endDate?: unknown }> | null | undefined,
+  window: CoverageWindow | null | undefined
+): PastSimTravelRange[] {
+  const windowStart = asDateKey(window?.startDate);
+  const windowEnd = asDateKey(window?.endDate);
+  if (!windowStart || !windowEnd || windowStart > windowEnd) {
+    return normalizePastSimTravelRanges(ranges);
+  }
+  return summarizeTravelRangesForCoverageWindow(ranges, window).clippedOperationalRanges;
 }
 
 function travelRangesFromScenarioEvents(
@@ -128,6 +242,7 @@ function travelRangesFromManualPayload(payload: unknown): PastSimTravelRange[] {
 export async function readTravelRangesForHouse(args: {
   userId: string;
   houseId: string;
+  coverageWindow?: CoverageWindow | null;
 }): Promise<PastSimTravelRange[]> {
   const userId = String(args.userId ?? "").trim();
   const houseId = String(args.houseId ?? "").trim();
@@ -157,10 +272,11 @@ export async function readTravelRangesForHouse(args: {
     })
     .catch(() => null);
 
-  return normalizePastSimTravelRanges([
+  const merged = normalizePastSimTravelRanges([
     ...travelRangesFromScenarioEvents(events ?? []),
     ...travelRangesFromManualPayload(manualRec?.payload),
   ]);
+  return filterTravelRangesToCoverageWindow(merged, args.coverageWindow);
 }
 
 /** Lab seed / replace: prefer saved lab-home travel; fall back to linked source home. */
