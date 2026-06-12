@@ -1,5 +1,8 @@
 import { prisma } from "@/lib/db";
-import type { CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
+import {
+  resolveCanonicalUsage365CoverageWindow,
+  type CoverageWindow,
+} from "@/lib/usage/canonicalMetadataWindow";
 
 export type PastSimTravelRange = { startDate: string; endDate: string };
 
@@ -142,6 +145,20 @@ export function filterTravelRangesToCoverageWindow(
   return summarizeTravelRangesForCoverageWindow(ranges, window).clippedOperationalRanges;
 }
 
+/** Canonical usage window for operational Past travel exclusion (recalc + admin reads). */
+export function resolveActiveTravelCoverageWindowForHouse(_args: {
+  userId: string;
+  houseId: string;
+}): CoverageWindow {
+  return resolveCanonicalUsage365CoverageWindow();
+}
+
+function operationalTravelRangesForRecalc(
+  ranges: ReadonlyArray<PastSimTravelRange>
+): PastSimTravelRange[] {
+  return filterTravelRangesToCoverageWindow(ranges, resolveCanonicalUsage365CoverageWindow());
+}
+
 function travelRangesFromScenarioEvents(
   events: ReadonlyArray<{ kind?: unknown; payloadJson?: unknown }>
 ): PastSimTravelRange[] {
@@ -182,21 +199,21 @@ export async function resolvePastSimTravelRangesForRecalc(args: {
   scenarioTravelRanges?: ReadonlyArray<PastSimTravelRange>;
 }): Promise<PastSimTravelRange[]> {
   const preLockbox = normalizePastSimTravelRanges(args.preLockboxTravelRanges);
-  if (preLockbox.length > 0) return preLockbox;
+  if (preLockbox.length > 0) return operationalTravelRangesForRecalc(preLockbox);
 
   const merged = normalizePastSimTravelRanges(args.scenarioTravelRanges);
 
   const actualContextHouseId = String(args.actualContextHouseId ?? args.houseId).trim();
   const houseId = String(args.houseId).trim();
   if (!actualContextHouseId || actualContextHouseId === houseId) {
-    return merged;
+    return operationalTravelRangesForRecalc(merged);
   }
 
   const scenarioModel = args.prisma.usageSimulatorScenario;
   const eventModel = args.prisma.usageSimulatorScenarioEvent;
   const houseModel = args.prisma.houseAddress;
   if (!scenarioModel?.findFirst || !eventModel?.findMany || !houseModel?.findUnique) {
-    return merged;
+    return operationalTravelRangesForRecalc(merged);
   }
 
   const sourceOwner = await houseModel
@@ -206,7 +223,7 @@ export async function resolvePastSimTravelRangesForRecalc(args: {
     })
     .catch(() => null);
   const sourceUserId = String(sourceOwner?.userId ?? "").trim();
-  if (!sourceUserId) return merged;
+  if (!sourceUserId) return operationalTravelRangesForRecalc(merged);
 
   const sourcePastScenario = await scenarioModel
     .findFirst({
@@ -219,7 +236,7 @@ export async function resolvePastSimTravelRangesForRecalc(args: {
       select: { id: true },
     })
     .catch(() => null);
-  if (!sourcePastScenario?.id) return merged;
+  if (!sourcePastScenario?.id) return operationalTravelRangesForRecalc(merged);
 
   const sourceEvents = await eventModel
     .findMany({
@@ -229,7 +246,9 @@ export async function resolvePastSimTravelRangesForRecalc(args: {
     })
     .catch(() => []);
 
-  return normalizePastSimTravelRanges([...merged, ...travelRangesFromScenarioEvents(sourceEvents)]);
+  return operationalTravelRangesForRecalc(
+    normalizePastSimTravelRanges([...merged, ...travelRangesFromScenarioEvents(sourceEvents)])
+  );
 }
 
 function travelRangesFromManualPayload(payload: unknown): PastSimTravelRange[] {

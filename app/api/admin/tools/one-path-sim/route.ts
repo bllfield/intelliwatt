@@ -14,6 +14,7 @@ import {
 } from "@/lib/usage/pastVisibleWeatherReadDiagnostics";
 import { resolveStaleIncompleteMeterSlotCompleteDateKeys } from "@/lib/usage/pastSimStaleIncompleteMeter";
 import { resolveActualDatasetForCompareDiagnostics } from "@/lib/usage/compareDiagnosticsActualIntervals";
+import { travelRangeIsActiveForCoverageWindow } from "@/lib/usage/pastSimTravelRanges";
 import { sageActualDailyRowsFromDataset } from "@/lib/usage/sageActualDailyTruth";
 import { buildUserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
 import {
@@ -932,6 +933,16 @@ async function buildPastSimRunReadbackResponse(args: {
   });
   const sageGbFullIntervals =
     preferredActualSourceForCompare === "GREEN_BUTTON";
+  const needsFullYearActualIntervalsForDiagnostics = args.includePosthocTopMissIntervalCurves === true;
+  logSimPipelineEvent("one_path_admin_past_compare_sidecar_start", {
+    correlationId: args.correlationId ?? null,
+    houseId: args.houseId,
+    scenarioId: args.scenarioId,
+    includePosthocTopMissIntervalCurves: needsFullYearActualIntervalsForDiagnostics,
+    skipFullYearActualIntervalReload: !needsFullYearActualIntervalsForDiagnostics,
+    source: "buildPastSimRunReadbackResponse",
+    memoryRssMb: getMemoryRssMb(),
+  });
   const sageTruthForCompare = await resolveSageActualTruthForRunDisplay({
     userId: args.userId,
     houseId: args.houseId,
@@ -943,13 +954,17 @@ async function buildPastSimRunReadbackResponse(args: {
   });
   const actualContextHouseIdForCompare =
     args.actualContextHouseId ?? args.smtPostSimHealing?.actualContextHouseId ?? args.houseId;
-  const actualDatasetForIntervalCompare = await resolveActualDatasetForCompareDiagnostics({
-    userId: args.linkedSourceUserId ?? args.userId,
-    actualContextHouseId: actualContextHouseIdForCompare,
-    esiid: args.smtSourceEsiid ?? args.smtPostSimHealing?.sourceEsiid ?? null,
-    preferredActualSource: preferredActualSourceForCompare,
-    baseDataset: sageTruthForCompare?.dataset ?? null,
-  });
+  const actualDatasetForIntervalCompare = needsFullYearActualIntervalsForDiagnostics
+    ? await resolveActualDatasetForCompareDiagnostics({
+        userId: args.linkedSourceUserId ?? args.userId,
+        actualContextHouseId: actualContextHouseIdForCompare,
+        esiid: args.smtSourceEsiid ?? args.smtPostSimHealing?.sourceEsiid ?? null,
+        preferredActualSource: preferredActualSourceForCompare,
+        baseDataset: sageTruthForCompare?.dataset ?? null,
+      })
+    : sageTruthForCompare?.dataset && typeof sageTruthForCompare.dataset === "object"
+      ? (sageTruthForCompare.dataset as Record<string, unknown>)
+      : null;
   const compareProjection = resolveValidationCompareProjectionForRead({
     dataset: readback.dataset,
     actualDataset: sageTruthForCompare?.dataset ?? null,
@@ -982,15 +997,7 @@ async function buildPastSimRunReadbackResponse(args: {
     memoryRssMb: getMemoryRssMb(),
   });
   const displayViewStartedAt = Date.now();
-  const sageTruth = await resolveSageActualTruthForRunDisplay({
-    userId: args.userId,
-    houseId: args.houseId,
-    actualContextHouseId:
-      args.actualContextHouseId ?? args.smtPostSimHealing?.actualContextHouseId ?? args.houseId,
-    smtSourceEsiid: args.smtSourceEsiid ?? args.smtPostSimHealing?.sourceEsiid ?? null,
-    preferredActualSource: preferredActualSourceForCompare,
-    greenButtonFullYearIntervalsForDisplay: sageGbFullIntervals,
-  });
+  const sageTruth = sageTruthForCompare;
   const sageDisplayArgs = await sageAndStaleIncompleteDisplayArgs({
     sageDataset: sageTruth?.dataset,
     datasetForMeta: asRecord(readback.dataset),
@@ -1032,11 +1039,23 @@ async function buildPastSimRunReadbackResponse(args: {
     source: "buildPastSimRunReadbackResponse",
     memoryRssMb: getMemoryRssMb(),
   });
+  const travelCoverageWindow = resolveCanonicalUsage365CoverageWindow();
   const pastVariables =
     scenarioEvents.ok && Array.isArray(scenarioEvents.events)
       ? scenarioEvents.events
           .map((event) => asScenarioVariable(event))
-          .filter((event): event is NonNullable<ReturnType<typeof asScenarioVariable>> => event != null)
+          .filter((event): event is NonNullable<ReturnType<typeof asScenarioVariable>> => {
+            if (!event) return false;
+            if (event.kind !== "TRAVEL_RANGE") return true;
+            const payload = event.payloadJson ?? {};
+            return travelRangeIsActiveForCoverageWindow(
+              {
+                startDate: payload.startDate,
+                endDate: payload.endDate,
+              },
+              travelCoverageWindow
+            );
+          })
       : [];
 
   logSimPipelineEvent("one_path_admin_past_response_ready", {
@@ -1056,7 +1075,9 @@ async function buildPastSimRunReadbackResponse(args: {
         }
       : null;
   const pastWeatherApiFields = buildAdminPastWeatherApiFields(pastWeather);
+  const skipCrossSurfaceWeatherAudit = Boolean(args.exactArtifactInputHash);
   const pastWeatherCrossSurfaceParity =
+    !skipCrossSurfaceWeatherAudit &&
     args.linkedSourceUserId &&
     args.linkedSourceHouseId &&
     args.linkedSourceScenarioId &&

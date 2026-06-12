@@ -1,8 +1,9 @@
-import { readTravelRangesForHouse } from "@/lib/usage/pastSimTravelRanges";
+import { readTravelRangesForHouse, resolveActiveTravelCoverageWindowForHouse } from "@/lib/usage/pastSimTravelRanges";
 
 export async function getOnePathTravelRangesFromDb(
   userId: string,
   houseId: string
 ): Promise<Array<{ startDate: string; endDate: string }>> {
-  return readTravelRangesForHouse({ userId, houseId });
+  const coverageWindow = resolveActiveTravelCoverageWindowForHouse({ userId, houseId });
+  return readTravelRangesForHouse({ userId, houseId, coverageWindow });
 }
