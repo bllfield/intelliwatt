@@ -112,7 +112,11 @@ export function pickKeys(source: Record<string, unknown>, keys: string[]): Recor
 
 export function extractValidationDayKeysFromPolicySnapshot(policy: unknown): string[] {
   const record = asRecord(policy);
-  const keys = asArray(record.selectedDateKeys).map((value) => String(value).slice(0, 10));
+  const keys = [
+    ...asArray(record.selectedValidationDateKeys),
+    ...asArray(record.selectedDateKeys),
+    ...asArray(record.validationOnlyDateKeysLocal),
+  ].map((value) => String(value).slice(0, 10));
   return Array.from(new Set(keys.filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)))).sort();
 }
 
@@ -179,16 +183,35 @@ export function sumKwhFromDailyRows(rows: unknown): number | null {
   return count > 0 ? Math.round(total * 100) / 100 : null;
 }
 
-function dateKeyFromIntervalTimestamp(timestamp: unknown): string | null {
-  const text = String(timestamp ?? "");
-  const match = text.match(/^(\d{4}-\d{2}-\d{2})/);
-  return match?.[1] ?? null;
+function dateKeyFromIntervalTimestamp(timestamp: unknown, timezone = "America/Chicago"): string | null {
+  const text = String(timestamp ?? "").trim();
+  if (!text) return null;
+  try {
+    const d = new Date(text);
+    if (!Number.isFinite(d.getTime())) return text.slice(0, 10);
+    const fmt = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const parts = fmt.formatToParts(d);
+    const y = parts.find((part) => part.type === "year")?.value ?? "";
+    const m = parts.find((part) => part.type === "month")?.value ?? "";
+    const day = parts.find((part) => part.type === "day")?.value ?? "";
+    const local = `${y}-${m}-${day}`;
+    return /^\d{4}-\d{2}-\d{2}$/.test(local) ? local : text.slice(0, 10);
+  } catch {
+    const match = text.match(/^(\d{4}-\d{2}-\d{2})/);
+    return match?.[1] ?? null;
+  }
 }
 
 export function extractValidationDayIntervalSeries(args: {
   actualDataset?: unknown;
   simulatedDataset?: unknown;
   validationDayKeys: string[];
+  timezone?: string | null;
 }): {
   validationDayKeys: string[];
   sourceActualByDate: Record<string, Array<{ timestamp: string; kwh: number }>>;
@@ -240,22 +263,24 @@ export function extractValidationDayIntervalSeries(args: {
 
 export function resolveManualGapfillStoredTravelRangesForExport(args: {
   step1TravelRanges?: unknown;
+  step2TravelRanges?: unknown;
   step4ReadbackTravelRanges?: unknown;
   travelContext?: unknown;
 }): Array<{ startDate: string; endDate: string }> {
-  const fromStep1 = normalizeTravelRangesForExport(asArray(args.step1TravelRanges));
-  if (fromStep1.length > 0) return fromStep1;
-
   const travelContext = asRecord(args.travelContext);
-  const fromContext = normalizeTravelRangesForExport([
+  const merged = normalizeTravelRangesForExport([
+    ...asArray(args.step1TravelRanges),
+    ...asArray(args.step2TravelRanges),
+    ...asArray(travelContext.storedTravelRanges),
     ...asArray(travelContext.labDbRanges),
     ...asArray(travelContext.seedPayloadRanges),
     ...asArray(travelContext.sourceFallbackRanges),
     ...asArray(travelContext.effectiveRanges),
+    ...asArray(args.step4ReadbackTravelRanges),
   ]);
-  if (fromContext.length > 0) return fromContext;
+  if (merged.length > 0) return merged;
 
-  return normalizeTravelRangesForExport(asArray(args.step4ReadbackTravelRanges));
+  return [];
 }
 
 export function buildTravelRangeExportClassification(args: {

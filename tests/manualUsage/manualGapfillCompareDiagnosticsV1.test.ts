@@ -315,6 +315,8 @@ describe("manualGapfillCompareDiagnosticsV1", () => {
     });
 
     const tod = out.validationIntervalCurveDiagnostics.todBucketSummary;
+    expect(tod.available).toBe(true);
+    expect(tod.unavailableReason).toBeNull();
     expect(tod.overnight.actual).toBeGreaterThan(0);
     expect(tod.morning.actual).toBeGreaterThan(0);
     expect(tod.afternoon.actual).toBeGreaterThan(0);

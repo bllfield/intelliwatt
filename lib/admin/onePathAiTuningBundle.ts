@@ -109,6 +109,13 @@ export function buildOnePathAiTuningBundle(args: {
     loadedSourceContext,
   });
 
+  const scenarioId = asString(engineInputIdentity.scenarioId) ?? asString(engineInput.scenarioId);
+  const artifactId = asString(artifactIdentity.artifactId);
+  const artifactInputHash = asString(artifactIdentity.artifactInputHash);
+  const buildInputsHash = asString(artifactIdentity.buildInputsHash);
+  const engineVersion = asString(artifactIdentity.engineVersion);
+  const selectedMode = String(args.mode ?? simulationVariables.selectedMode ?? "").toUpperCase() || null;
+  const isPastReadbackWithoutArtifactRow = !artifactId && Boolean(artifactInputHash);
   const actualTotalKwh =
     asNumber(asRecord(runDisplayContract.coverage).totalKwh) ??
     asNumber(asRecord(asRecord(readModel.dataset).summary).totalKwh) ??
@@ -122,7 +129,7 @@ export function buildOnePathAiTuningBundle(args: {
       "Structured One Path admin AI tuning bundle for simulation accuracy review, miss identification, and targeted tuning recommendations.",
     bundleVersion: "one-path-ai-tuning-bundle-v1",
     exportedAt: new Date().toISOString(),
-    selectedMode: String(args.mode ?? simulationVariables.selectedMode ?? "").toUpperCase() || null,
+    selectedMode,
     sourceKind: resolveSourceKind({ mode: args.mode, loadedSourceContext, engineInput }),
     identity: {
       actualContextHouseId:
@@ -133,11 +140,21 @@ export function buildOnePathAiTuningBundle(args: {
         asString(lookup.selectedHouseId) ??
         asString(asRecord(lookup.selectedHouse).id) ??
         asString(loadedSourceContext.sourceHouseId),
-      scenarioId: asString(engineInputIdentity.scenarioId) ?? asString(engineInput.scenarioId),
-      artifactId: asString(artifactIdentity.artifactId),
-      artifactInputHash: asString(artifactIdentity.artifactInputHash),
-      buildInputsHash: asString(artifactIdentity.buildInputsHash),
-      engineVersion: asString(artifactIdentity.engineVersion),
+      scenarioId,
+      scenarioIdUnavailableReason: scenarioId
+        ? null
+        : isPastReadbackWithoutArtifactRow
+          ? "past_readback_export_uses_dataset_identity_without_scenario_row"
+          : "scenario_id_not_present_in_run_or_engine_input",
+      artifactId,
+      artifactIdUnavailableReason: artifactId
+        ? null
+        : isPastReadbackWithoutArtifactRow
+          ? "past_readback_export_uses_dataset_identity_without_persisted_artifact_row"
+          : "artifact_id_not_present_in_run_audit",
+      artifactInputHash,
+      buildInputsHash,
+      engineVersion,
       simulatorMode: asString(artifactIdentity.simulatorMode) ?? asString(engineInput.simulatorMode),
       inputType: asString(artifactIdentity.inputType) ?? asString(engineInput.inputType),
       coverageStart:

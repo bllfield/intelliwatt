@@ -254,6 +254,33 @@ describe("buildManualGapfillAiTuningBundle", () => {
     expect((bundle.simulationCodeMap as any).surface).toBe("manual_gapfill_lab");
   });
 
+  it("populates selectedValidationDateKeys from MG-2 selectedValidationDateKeys policy field", () => {
+    const validationKeys = ["2025-06-10", "2025-07-01", "2025-08-01"];
+    const bundle = buildManualGapfillAiTuningBundle({
+      identityKey: "user:source:lab:MONTHLY_FROM_SOURCE_INTERVALS",
+      userEmail: "test@example.com",
+      userId: "user-1",
+      sourceHouseId: "source-1",
+      labHouseId: "lab-1",
+      mode: "MONTHLY_FROM_SOURCE_INTERVALS",
+      esiid: "E123",
+      includeDiagnostics: true,
+      anchorEndDate: "",
+      includeDailyRows: true,
+      policySnapshot: null,
+      step1: { identityKey: "x", data: {} },
+      step2Preview: {
+        identityKey: "x",
+        data: { selectedValidationDateKeys: validationKeys },
+      },
+      step3: null,
+      step4: null,
+      step5: null,
+      isStepStale: () => false,
+    });
+    expect(bundle.selectedValidationDateKeys).toEqual(validationKeys);
+  });
+
   it("classifies travel ranges from step5 travelContext when step1 travelRanges are empty", () => {
     const bundle = buildManualGapfillAiTuningBundle({
       identityKey: "user:source:lab:MONTHLY_FROM_SOURCE_INTERVALS",

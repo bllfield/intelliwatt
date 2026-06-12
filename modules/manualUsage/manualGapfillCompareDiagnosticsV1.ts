@@ -270,8 +270,11 @@ export type ManualGapfillCompareDiagnosticsV1 = {
     selectedValidationDayKeysUsed: string[];
     actualIntervalRowsFound: number;
     simulatedIntervalRowsFound: number;
+    missingDayKeys: Array<{ date: string; reason: string }>;
     days: ManualGapfillValidationIntervalCurveDay[];
     todBucketSummary: {
+      available: boolean;
+      unavailableReason: string | null;
       overnight: { actual: number; simulated: number; delta: number };
       morning: { actual: number; simulated: number; delta: number };
       afternoon: { actual: number; simulated: number; delta: number };
@@ -1180,10 +1183,11 @@ export function buildManualGapfillCompareDiagnosticsV1(
   const actualByDate = intervalsByDateAndSlot(actualIntervals, timezone, selectedCurveDateSet);
   const simulatedByDate = intervalsByDateAndSlot(simulatedIntervalsRaw, timezone, selectedCurveDateSet);
   const validationOnlyDateSet = new Set(selectedValidationDayKeysUsed);
-  const actualIntervalRowsFound = countIntervalRowsForDates(actualIntervals, timezone, validationOnlyDateSet);
-  const simulatedIntervalRowsFound = countIntervalRowsForDates(simulatedIntervalsRaw, timezone, validationOnlyDateSet);
+  const actualIntervalRowsFound = countIntervalRowsForDates(actualIntervals, timezone, selectedCurveDateSet);
+  const simulatedIntervalRowsFound = countIntervalRowsForDates(simulatedIntervalsRaw, timezone, selectedCurveDateSet);
 
   const curveDays: ManualGapfillValidationIntervalCurveDay[] = [];
+  const missingDayKeys: Array<{ date: string; reason: string }> = [];
   for (const date of selectedCurveDates) {
     let actualSlots = actualByDate.get(date);
     let simulatedSlots = simulatedByDate.get(date);
@@ -1198,7 +1202,31 @@ export function buildManualGapfillCompareDiagnosticsV1(
       simulatedIntervalsDerivedFromDailyTotal = true;
     }
 
-    if (!slotsHaveSignal(actualSlots) || !slotsHaveSignal(simulatedSlots)) continue;
+    if (!slotsHaveSignal(actualSlots)) {
+      missingDayKeys.push({
+        date,
+        reason: validationDaySet.has(date)
+          ? "no_actual_interval_rows_for_validation_day"
+          : "no_actual_interval_rows_for_worst_day",
+      });
+      continue;
+    }
+    if (!slotsHaveSignal(simulatedSlots)) {
+      if (day?.simulatedKwh != null && day.simulatedKwh > 0) {
+        simulatedSlots = deriveSimulatedSlotsFromDailyShape({
+          actualSlots: actualSlots!,
+          targetDailyKwh: day.simulatedKwh,
+        });
+        simulatedIntervalsDerivedFromDailyTotal = true;
+      } else {
+        missingDayKeys.push({
+          date,
+          reason: "no_simulated_interval_rows_or_daily_totals_for_day",
+        });
+        continue;
+      }
+    }
+
     curveDays.push(
       buildIntervalCurveDay({
         date,
@@ -1228,7 +1256,7 @@ export function buildManualGapfillCompareDiagnosticsV1(
             })
           ? "no_simulated_interval_rows_or_daily_totals_for_selected_validation_days"
           : "validation_interval_curve_days_unavailable_for_selected_dates";
-  const todBucketSummary = validationCurveDays.reduce(
+  const todBucketSummaryBase = validationCurveDays.reduce(
     (acc, day) => ({
       overnight: {
         actual: round4(acc.overnight.actual + day.overnight.actual),
@@ -1258,6 +1286,11 @@ export function buildManualGapfillCompareDiagnosticsV1(
       evening: { actual: 0, simulated: 0, delta: 0 },
     }
   );
+  const todBucketSummary = {
+    available: validationCurveDays.length > 0,
+    unavailableReason: validationCurveDays.length > 0 ? null : curveUnavailableReason,
+    ...todBucketSummaryBase,
+  };
 
   const dayByDate = new Map(enrichedDays.map((day) => [day.date, day]));
   const buildWorstEntry = (date: string, extra?: Partial<ManualGapfillWorstDayEntry>): ManualGapfillWorstDayEntry => {
@@ -1411,6 +1444,7 @@ export function buildManualGapfillCompareDiagnosticsV1(
       selectedValidationDayKeysUsed,
       actualIntervalRowsFound,
       simulatedIntervalRowsFound,
+      missingDayKeys,
       days: curveDays,
       todBucketSummary,
     },

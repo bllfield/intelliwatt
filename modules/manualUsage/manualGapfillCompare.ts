@@ -6,7 +6,8 @@ import {
   resolveActiveValidationDayPolicyLive,
   resolveGlobalValidationDayKeysForPastSim,
 } from "@/lib/usage/validationDayPolicy";
-import { readTravelRangesForHouse } from "@/lib/usage/pastSimTravelRanges";
+import { readTravelRangesForHouse, filterTravelRangesToCoverageWindow } from "@/lib/usage/pastSimTravelRanges";
+import { resolveActualDatasetForCompareDiagnostics } from "@/lib/usage/compareDiagnosticsActualIntervals";
 import { buildOnePathManualUsagePastSimReadResult } from "@/modules/onePathSim/manualPastSimReadResult";
 import {
   hashManualGapfillSavedSeedPayload,
@@ -947,12 +948,33 @@ export async function compareManualGapfillSourceActualToLabSim(
     surface: "admin_lab",
   }).catch(() => ({ validationOnlyDateKeysLocal: [] as string[] }));
 
-  const labDbTravelRanges = await readTravelRangesForHouse({ userId, houseId: labHouseId }).catch(() => []);
+  const coverageWindow =
+    sourceContext.coverage.coverageStart && sourceContext.coverage.coverageEnd
+      ? {
+          startDate: sourceContext.coverage.coverageStart,
+          endDate: sourceContext.coverage.coverageEnd,
+        }
+      : sourceContext.coverage.windowStart && sourceContext.coverage.windowEnd
+        ? {
+            startDate: sourceContext.coverage.windowStart,
+            endDate: sourceContext.coverage.windowEnd,
+          }
+        : null;
+
+  const labDbTravelRanges = await readTravelRangesForHouse({
+    userId,
+    houseId: labHouseId,
+    coverageWindow,
+  }).catch(() => []);
   const sourceFallbackTravelRanges = await readTravelRangesForHouse({
     userId: sourceContext.userId,
     houseId: sourceHouseId,
+    coverageWindow,
   }).catch(() => []);
-  const seedPayloadTravelRanges = normalizeManualGapfillTravelRanges(labManualPayload.travelRanges);
+  const seedPayloadTravelRanges = filterTravelRangesToCoverageWindow(
+    normalizeManualGapfillTravelRanges(labManualPayload.travelRanges),
+    coverageWindow
+  );
   const effectiveTravelRanges =
     labDbTravelRanges.length > 0
       ? labDbTravelRanges
@@ -960,11 +982,22 @@ export async function compareManualGapfillSourceActualToLabSim(
         ? seedPayloadTravelRanges
         : sourceFallbackTravelRanges;
 
+  const sourceActualDatasetForCompare =
+    includeDiagnostics && includeDailyRows
+      ? await resolveActualDatasetForCompareDiagnostics({
+          userId: sourceContext.userId,
+          actualContextHouseId: sourceActualResult.actualContextHouseId,
+          esiid: args.esiid ?? sourceContext.esiid,
+          preferredActualSource: sourceContext.actualSource ?? sourceContext.committedUsageSource ?? null,
+          baseDataset: sourceActualResult.dataset!,
+        })
+      : sourceActualResult.dataset!;
+
   const envelope = buildManualGapfillCompareEnvelope({
     mode,
     sourceContext,
     labHouseId,
-    sourceActualDataset: sourceActualResult.dataset!,
+    sourceActualDataset: sourceActualDatasetForCompare ?? sourceActualResult.dataset!,
     labDataset,
     labManualPayload,
     policyHash,

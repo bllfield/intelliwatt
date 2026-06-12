@@ -197,8 +197,11 @@ export type OnePathExactMatchDiagnostics = {
 
 export type OnePathIntervalTruthInterpretation = {
   intervalTruthPassthrough: boolean;
+  correctedTravelVacantReadback: boolean;
   simulatedDailyRowsAreActualBacked: boolean;
   modelAccuracyTest: boolean;
+  maskedBacktestMode: boolean;
+  runClassification: "interval_truth_readback" | "masked_model_accuracy" | "compare_only";
   usefulFor: string;
   notUsefulFor: string;
 };
@@ -244,6 +247,7 @@ export type OnePathIntervalDiagnosticsV1 = {
     posthocTopMissDayKeysUsed: string[];
     actualIntervalRowsFound: number;
     simulatedIntervalRowsFound: number;
+    missingDayKeys: Array<{ date: string; reason: string }>;
     days: OnePathValidationIntervalCurveDay[];
   };
   todBucketDiagnostics: {
@@ -265,6 +269,7 @@ export type OnePathIntervalDiagnosticsV1 = {
 
 export type BuildOnePathIntervalCompareDiagnosticsV1Args = {
   sourceType: OnePathIntervalSourceType;
+  inputType?: string | null;
   actualDataset?: unknown;
   simulatedDataset?: unknown;
   validationDayKeys?: string[];
@@ -514,6 +519,15 @@ function readIntervalPoints(dataset: unknown): IntervalPoint[] {
       kwh: Number(row?.kwh ?? Number.NaN),
     }))
     .filter((row: IntervalPoint) => row.timestamp && Number.isFinite(row.kwh));
+}
+
+function countIntervalRowsForDates(rows: IntervalPoint[], timezone: string, dateKeys: Set<string>): number {
+  let count = 0;
+  for (const row of rows) {
+    const localDate = dateKeyInTimezone(row.timestamp, timezone);
+    if (localDate && dateKeys.has(localDate)) count += 1;
+  }
+  return count;
 }
 
 function intervalsByDateAndSlot(
@@ -774,20 +788,32 @@ function detectIntervalTruthPassthrough(args: {
 
 function buildIntervalTruthInterpretation(args: {
   sourceType: OnePathIntervalSourceType;
+  inputType?: string | null;
   intervalTruthPassthrough: boolean;
   simulatedDailyRowsAreActualBacked: boolean;
 }): OnePathIntervalTruthInterpretation {
-  const passthrough = args.intervalTruthPassthrough;
+  const inputType = String(args.inputType ?? "").trim().toUpperCase();
+  const intervalTruthReadbackRun =
+    inputType === "INTERVAL" ||
+    (args.sourceType === "SMT" && args.simulatedDailyRowsAreActualBacked && args.intervalTruthPassthrough);
+  const passthrough = intervalTruthReadbackRun || args.intervalTruthPassthrough;
   return {
     intervalTruthPassthrough: passthrough,
+    correctedTravelVacantReadback: intervalTruthReadbackRun,
     simulatedDailyRowsAreActualBacked: args.simulatedDailyRowsAreActualBacked,
-    modelAccuracyTest: !passthrough,
-    usefulFor: passthrough
-      ? "export plumbing, source truth, plan calculations, interval diagnostics"
-      : "masked model accuracy review, weather-shape tuning, interval curve diagnostics",
-    notUsefulFor: passthrough
-      ? "masked low-data model accuracy"
-      : "pure interval-truth passthrough accuracy scoring",
+    modelAccuracyTest: !intervalTruthReadbackRun,
+    maskedBacktestMode: false,
+    runClassification: intervalTruthReadbackRun ? "interval_truth_readback" : "compare_only",
+    usefulFor: intervalTruthReadbackRun
+      ? "source truth verification, export plumbing, diagnostics plumbing, plan calculations"
+      : passthrough
+        ? "export plumbing, source truth, plan calculations, interval diagnostics"
+        : "masked model accuracy review, weather-shape tuning, interval curve diagnostics",
+    notUsefulFor: intervalTruthReadbackRun
+      ? "Annual/New Build low-data model accuracy"
+      : passthrough
+        ? "masked low-data model accuracy"
+        : "pure interval-truth passthrough accuracy scoring",
   };
 }
 
@@ -842,6 +868,7 @@ export function buildUnavailableOnePathIntervalDiagnosticsV1(args: {
       posthocTopMissDayKeysUsed: [],
       actualIntervalRowsFound: 0,
       simulatedIntervalRowsFound: 0,
+      missingDayKeys: [],
       days: [],
     },
     todBucketDiagnostics: {
@@ -863,6 +890,7 @@ export function buildUnavailableOnePathIntervalDiagnosticsV1(args: {
     },
     intervalTruthInterpretation: buildIntervalTruthInterpretation({
       sourceType: args.sourceType ?? "SMT",
+      inputType: null,
       intervalTruthPassthrough: false,
       simulatedDailyRowsAreActualBacked: false,
     }),
@@ -1040,8 +1068,11 @@ export function buildOnePathIntervalCompareDiagnosticsV1(
         : [];
   const actualBySlot = intervalsByDateAndSlot(actualIntervals, timezone, curveDateSet);
   const simulatedBySlot = intervalsByDateAndSlot(simulatedIntervals, timezone, curveDateSet);
+  const actualIntervalRowsFound = countIntervalRowsForDates(actualIntervals, timezone, curveDateSet);
+  const simulatedIntervalRowsFound = countIntervalRowsForDates(simulatedIntervalsRaw, timezone, curveDateSet);
 
   const curveDays: OnePathValidationIntervalCurveDay[] = [];
+  const missingDayKeys: Array<{ date: string; reason: string }> = [];
   for (const date of curveDates) {
     let actualSlots = actualBySlot.get(date);
     let simulatedSlots = simulatedBySlot.get(date);
@@ -1051,7 +1082,24 @@ export function buildOnePathIntervalCompareDiagnosticsV1(
     if (!slotsHaveSignal(simulatedSlots) && intervalTruthPassthrough && slotsHaveSignal(actualSlots)) {
       simulatedSlots = actualSlots;
     }
-    if (!slotsHaveSignal(actualSlots) || !slotsHaveSignal(simulatedSlots)) continue;
+    if (!slotsHaveSignal(actualSlots)) {
+      missingDayKeys.push({
+        date,
+        reason: validationDaySet.has(date)
+          ? "no_actual_interval_rows_for_validation_day"
+          : posthocDateSet.has(date)
+            ? "no_actual_interval_rows_for_posthoc_day"
+            : "no_actual_interval_rows_for_day",
+      });
+      continue;
+    }
+    if (!slotsHaveSignal(simulatedSlots)) {
+      missingDayKeys.push({
+        date,
+        reason: "no_simulated_interval_rows_for_day",
+      });
+      continue;
+    }
 
     const absErrors = actualSlots!.map((value, index) => Math.abs(value - (simulatedSlots![index] ?? 0)));
     const actualTotal = actualSlots!.reduce((sum, value) => sum + value, 0);
@@ -1144,9 +1192,9 @@ export function buildOnePathIntervalCompareDiagnosticsV1(
   const curveUnavailableReason =
     curveDiagnosticsAvailable
       ? null
-      : actualIntervals.length === 0
+      : actualIntervalRowsFound === 0
         ? "no_actual_interval_rows_for_selected_validation_days"
-        : simulatedIntervalsRaw.length === 0 && !intervalTruthPassthrough
+        : simulatedIntervalRowsFound === 0 && !intervalTruthPassthrough
           ? "no_simulated_interval_rows_for_selected_validation_days"
           : "validation_interval_curve_days_unavailable_for_selected_dates";
   const todTotals = validationCurveDays.reduce(
@@ -1283,8 +1331,9 @@ export function buildOnePathIntervalCompareDiagnosticsV1(
       includePosthocTopMissIntervalCurves: includePosthoc,
       selectedValidationDayKeysUsed,
       posthocTopMissDayKeysUsed,
-      actualIntervalRowsFound: actualIntervals.length,
-      simulatedIntervalRowsFound: simulatedIntervals.length,
+      actualIntervalRowsFound,
+      simulatedIntervalRowsFound,
+      missingDayKeys,
       days: curveDays,
     },
     todBucketDiagnostics: {
@@ -1305,6 +1354,7 @@ export function buildOnePathIntervalCompareDiagnosticsV1(
     exactMatchDiagnostics,
     intervalTruthInterpretation: buildIntervalTruthInterpretation({
       sourceType: args.sourceType,
+      inputType: args.inputType ?? null,
       intervalTruthPassthrough,
       simulatedDailyRowsAreActualBacked,
     }),
@@ -1368,6 +1418,7 @@ export function buildOnePathIntervalDiagnosticsEnvelope(args: {
   const validationHoldoutProofOk = Boolean(meta?.validationHoldoutProof?.ok === true);
   return buildOnePathIntervalCompareDiagnosticsV1({
     sourceType,
+    inputType: resolveOnePathIntervalDiagnosticsInputType(args),
     actualDataset: args.actualDataset,
     simulatedDataset: args.simulatedDataset,
     validationDayKeys: extractValidationDayKeysFromCompareProjection(args.compareProjection),

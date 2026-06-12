@@ -13,6 +13,7 @@ import {
   resolvePastWeatherHouseIdFromDataset,
 } from "@/lib/usage/pastVisibleWeatherReadDiagnostics";
 import { resolveStaleIncompleteMeterSlotCompleteDateKeys } from "@/lib/usage/pastSimStaleIncompleteMeter";
+import { resolveActualDatasetForCompareDiagnostics } from "@/lib/usage/compareDiagnosticsActualIntervals";
 import { sageActualDailyRowsFromDataset } from "@/lib/usage/sageActualDailyTruth";
 import { buildUserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
 import {
@@ -941,6 +942,15 @@ async function buildPastSimRunReadbackResponse(args: {
     preferredActualSource: preferredActualSourceForCompare,
     greenButtonFullYearIntervalsForDisplay: sageGbFullIntervals,
   });
+  const actualContextHouseIdForCompare =
+    args.actualContextHouseId ?? args.smtPostSimHealing?.actualContextHouseId ?? args.houseId;
+  const actualDatasetForIntervalCompare = await resolveActualDatasetForCompareDiagnostics({
+    userId: args.linkedSourceUserId ?? args.userId,
+    actualContextHouseId: actualContextHouseIdForCompare,
+    esiid: args.smtSourceEsiid ?? args.smtPostSimHealing?.sourceEsiid ?? null,
+    preferredActualSource: preferredActualSourceForCompare,
+    baseDataset: sageTruthForCompare?.dataset ?? null,
+  });
   const compareProjection = resolveValidationCompareProjectionForRead({
     dataset: readback.dataset,
     actualDataset: sageTruthForCompare?.dataset ?? null,
@@ -1079,7 +1089,7 @@ async function buildPastSimRunReadbackResponse(args: {
     onePathIntervalDiagnosticsV1: buildOnePathIntervalDiagnosticsForPastResponse({
       mode: preferredActualSourceForCompare === "GREEN_BUTTON" ? "GREEN_BUTTON" : "INTERVAL",
       preferredActualSource: preferredActualSourceForCompare,
-      actualDataset: sageTruthForCompare?.dataset ?? null,
+      actualDataset: actualDatasetForIntervalCompare ?? sageTruthForCompare?.dataset ?? null,
       simulatedDataset: artifactDataset,
       compareProjection,
       pastVariables,
@@ -2674,6 +2684,13 @@ export async function POST(request: NextRequest) {
         const compactPastWeatherApiFields = compactPastWeather
           ? buildAdminPastWeatherApiFields(compactPastWeather)
           : null;
+        const compactActualDatasetForIntervalCompare = await resolveActualDatasetForCompareDiagnostics({
+          userId: greenButtonRunActualContext?.userId ?? effectiveRawInputBase.actualContextUserId ?? effectiveUserId,
+          actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
+          esiid: smtSourceEsiid,
+          preferredActualSource: preferredActualSourceForPast,
+          baseDataset: sageTruthForPastDisplay?.dataset ?? null,
+        });
         return NextResponse.json({
           ok: true,
           debugDiagnosticsIncluded: false,
@@ -2687,7 +2704,7 @@ export async function POST(request: NextRequest) {
           onePathIntervalDiagnosticsV1: buildOnePathIntervalDiagnosticsForPastResponse({
             mode,
             preferredActualSource: preferredActualSourceForPast,
-            actualDataset: sageTruthForPastDisplay?.dataset ?? null,
+            actualDataset: compactActualDatasetForIntervalCompare,
             simulatedDataset: artifactDataset,
             compareProjection: compareProjectionForPast,
             travelRanges: Array.isArray(effectiveRawInputBase.travelRanges)
@@ -2804,11 +2821,17 @@ export async function POST(request: NextRequest) {
       const compareProjectionForDiagnostics = manualPastReadResult?.ok
         ? manualPastReadResult.compareProjection
         : readModel.compareProjection;
+      const actualDatasetForIntervalCompare = await resolveActualDatasetForCompareDiagnostics({
+        userId: greenButtonRunActualContext?.userId ?? effectiveRawInputBase.actualContextUserId ?? effectiveUserId,
+        actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
+        esiid: smtSourceEsiid,
+        preferredActualSource: preferredActualSourceForPast,
+        baseDataset: (isManualMode ? actualDatasetForManualRun : sageTruthForPastDisplay?.dataset) ?? null,
+      });
       const onePathIntervalDiagnosticsV1 = buildOnePathIntervalDiagnosticsForPastResponse({
         mode,
         preferredActualSource: preferredActualSourceForPast,
-        actualDataset:
-          (isManualMode ? actualDatasetForManualRun : sageTruthForPastDisplay?.dataset) ?? null,
+        actualDataset: actualDatasetForIntervalCompare,
         simulatedDataset: runDisplayDataset,
         compareProjection: compareProjectionForDiagnostics,
         travelRanges: Array.isArray(effectiveRawInputBase.travelRanges)

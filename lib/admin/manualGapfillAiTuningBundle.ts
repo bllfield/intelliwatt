@@ -57,7 +57,9 @@ export function buildManualGapfillAiTuningBundle(args: {
   const sourceActual = asRecord(step5Record.sourceActual);
   const labSimulated = asRecord(step5Record.labSimulated);
   const diagnosticsV1 = asRecord(step5Record.diagnosticsV1);
-  const validationDayKeys = extractValidationDayKeysFromPolicySnapshot(args.policySnapshot ?? step2);
+  const validationDayKeys = extractValidationDayKeysFromPolicySnapshot(
+    args.policySnapshot ?? step2 ?? asRecord(step1).validation
+  );
   const coverageWindowRaw = asRecord(asRecord(step1).coverage);
   const coverageWindow =
     asString(coverageWindowRaw.coverageStart) && asString(coverageWindowRaw.coverageEnd)
@@ -69,6 +71,7 @@ export function buildManualGapfillAiTuningBundle(args: {
   const travelContext = step5Record.travelContext ?? asRecord(compare).travelContext ?? null;
   const storedTravelRanges = resolveManualGapfillStoredTravelRangesForExport({
     step1TravelRanges: asRecord(step1).travelRanges,
+    step2TravelRanges: asRecord(step2).travelRanges,
     step4ReadbackTravelRanges: asRecord(asRecord(step4).readback).travelRanges,
     travelContext,
   });
@@ -128,6 +131,9 @@ export function buildManualGapfillAiTuningBundle(args: {
       actualDataset: step5Record.sourceActualDataset ?? null,
       simulatedDataset: step5Record.labDataset ?? null,
       validationDayKeys,
+      timezone:
+        asString(asRecord(asRecord(step5Record.labDataset).meta).timezone) ??
+        asString(asRecord(asRecord(step5Record.sourceActualDataset).meta).timezone),
     }),
     diagnostics: {
       dailyWeatherMissDiagnostics: diagnosticsV1.dailyWeatherMissDiagnostics ?? null,
