@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { monthsEndingAt } from "@/lib/time/chicago";
 import { hydrateGreenButtonInsightsForCoverageWindow } from "@/lib/usage/actualDatasetForHouse";
 import { fillCanonicalDailyTotals } from "@/lib/usage/canonicalMetadataWindow";
+import { buildImmutablePastArtifactKey } from "@/lib/usage/pastArtifactIdentity";
 import { resolvePastValidationEngineInput } from "@/lib/usage/pastValidationPolicy";
 import { resolveGreenButtonBaselineCoverageWindow } from "@/lib/usage/greenButtonCoverage";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
@@ -37,6 +38,7 @@ import {
   runOnePathSimulatorBuild,
 } from "@/modules/onePathSim/serviceBridge";
 import { getMemoryRssMb, logSimPipelineEvent } from "@/modules/onePathSim/usageSimulator/simObservability";
+import { getPersistedPastArtifactRowMeta } from "@/modules/onePathSim/usageSimulator/pastCache";
 import {
   type WeatherEfficiencyDerivedInput,
   type WeatherSensitivityScore,
@@ -132,7 +134,12 @@ export type CanonicalSimulationEngineInput = {
 };
 
 export type CanonicalSimulationArtifact = {
+  /** Immutable PastSimulatedDatasetCache row id when persisted; falls back to build row id. */
   artifactId: string | null;
+  /** Mutable usageSimulatorBuild row id for the scenario (admin diagnostics only). */
+  buildRowId: string | null;
+  /** Stable Phase 3 compare key: scenarioId + artifactInputHash. */
+  immutableArtifactKey: string | null;
   artifactInputHash: string | null;
   engineVersion: string | null;
   buildInputsHash: string | null;
@@ -1239,6 +1246,8 @@ async function buildBaselinePassthroughArtifactFromResolvedTruth(args: {
 
   return {
     artifactId: null,
+    buildRowId: null,
+    immutableArtifactKey: null,
     artifactInputHash: null,
     engineVersion: "baseline_passthrough_v1",
     buildInputsHash: null,
@@ -1898,6 +1907,49 @@ export async function adaptNewBuildRawInput(raw: NewBuildRawInput): Promise<Cano
   });
 }
 
+async function resolvePersistedArtifactResponseIdentity(args: {
+  houseId: string;
+  scenarioId: string | null;
+  artifactInputHash: string | null;
+  buildRec: {
+    id: string;
+    buildInputsHash?: string | null;
+    createdAt?: Date | string | null;
+    updatedAt?: Date | string | null;
+  } | null;
+}): Promise<{
+  artifactId: string | null;
+  buildRowId: string | null;
+  immutableArtifactKey: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}> {
+  const scenarioIdForCache = args.scenarioId ?? null;
+  const cacheMeta =
+    args.artifactInputHash && scenarioIdForCache
+      ? await getPersistedPastArtifactRowMeta({
+          houseId: args.houseId,
+          scenarioId: scenarioIdForCache,
+          inputHash: args.artifactInputHash,
+        }).catch(() => null)
+      : null;
+  const buildRowId = args.buildRec?.id ? String(args.buildRec.id) : null;
+  return {
+    artifactId: cacheMeta?.id ?? buildRowId,
+    buildRowId,
+    immutableArtifactKey: buildImmutablePastArtifactKey({
+      scenarioId: scenarioIdForCache,
+      artifactInputHash: args.artifactInputHash,
+    }),
+    createdAt:
+      cacheMeta?.createdAt?.toISOString() ??
+      (args.buildRec?.createdAt ? new Date(args.buildRec.createdAt).toISOString() : null),
+    updatedAt:
+      cacheMeta?.updatedAt?.toISOString() ??
+      (args.buildRec?.updatedAt ? new Date(args.buildRec.updatedAt).toISOString() : null),
+  };
+}
+
 async function buildArtifactFromEngineInput(args: {
   engineInput: CanonicalSimulationEngineInput;
   callerType: SharedDiagnosticsCallerType;
@@ -1938,6 +1990,18 @@ async function buildArtifactFromEngineInput(args: {
       },
     })
     .catch(() => null);
+  const artifactInputHash =
+    typeof (datasetRead.dataset as any)?.meta?.artifactInputHash === "string"
+      ? String((datasetRead.dataset as any).meta.artifactInputHash)
+      : typeof args.exactArtifactInputHash === "string" && args.exactArtifactInputHash.trim()
+        ? args.exactArtifactInputHash.trim()
+        : null;
+  const persistedArtifactIdentity = await resolvePersistedArtifactResponseIdentity({
+    houseId: args.engineInput.houseId,
+    scenarioId: args.engineInput.scenarioId,
+    artifactInputHash,
+    buildRec,
+  });
   const compareProjection = buildOnePathValidationCompareProjectionSidecar(datasetRead.dataset);
   const manualReadResult =
     args.engineInput.inputType === "MANUAL_MONTHLY" || args.engineInput.inputType === "MANUAL_ANNUAL"
@@ -1965,11 +2029,8 @@ async function buildArtifactFromEngineInput(args: {
             callerType: args.callerType,
             usageInputMode: args.engineInput.inputType,
             weatherLogicMode: args.engineInput.weatherLogicMode,
-            artifactId: buildRec?.id ? String(buildRec.id) : null,
-            artifactInputHash:
-              typeof (datasetRead.dataset as any)?.meta?.artifactInputHash === "string"
-                ? String((datasetRead.dataset as any).meta.artifactInputHash)
-                : null,
+            artifactId: persistedArtifactIdentity.artifactId,
+            artifactInputHash,
             artifactEngineVersion:
               typeof (datasetRead.dataset as any)?.meta?.engineVersion === "string"
                 ? String((datasetRead.dataset as any).meta.engineVersion)
@@ -1988,8 +2049,8 @@ async function buildArtifactFromEngineInput(args: {
           scenarioId: args.engineInput.scenarioId,
           usageInputMode: args.engineInput.inputType,
           weatherLogicMode: args.engineInput.weatherLogicMode,
-          artifactId: buildRec?.id ? String(buildRec.id) : null,
-          artifactInputHash: String((datasetRead.dataset as any)?.meta?.artifactInputHash ?? ""),
+          artifactId: persistedArtifactIdentity.artifactId,
+          artifactInputHash: artifactInputHash ?? "",
           artifactEngineVersion: String((datasetRead.dataset as any)?.meta?.engineVersion ?? ""),
           compareProjection,
           manualMonthlyReconciliation: null,
@@ -1997,11 +2058,8 @@ async function buildArtifactFromEngineInput(args: {
   const effectiveSimulationVariablesUsed = attachOnePathRunIdentityToEffectiveSimulationVariablesUsed(
     ((datasetRead.dataset as any)?.meta?.effectiveSimulationVariablesUsed as EffectiveSimulationVariablesUsed | null | undefined) ?? null,
     {
-      artifactId: buildRec?.id ? String(buildRec.id) : null,
-      artifactInputHash:
-        typeof (datasetRead.dataset as any)?.meta?.artifactInputHash === "string"
-          ? String((datasetRead.dataset as any).meta.artifactInputHash)
-          : null,
+      artifactId: persistedArtifactIdentity.artifactId,
+      artifactInputHash,
       buildInputsHash: buildRec?.buildInputsHash ? String(buildRec.buildInputsHash) : null,
       engineVersion:
         typeof (datasetRead.dataset as any)?.meta?.engineVersion === "string"
@@ -2015,11 +2073,10 @@ async function buildArtifactFromEngineInput(args: {
     }
   );
   return {
-    artifactId: buildRec?.id ? String(buildRec.id) : null,
-    artifactInputHash:
-      typeof (datasetRead.dataset as any)?.meta?.artifactInputHash === "string"
-        ? String((datasetRead.dataset as any).meta.artifactInputHash)
-        : null,
+    artifactId: persistedArtifactIdentity.artifactId,
+    buildRowId: persistedArtifactIdentity.buildRowId,
+    immutableArtifactKey: persistedArtifactIdentity.immutableArtifactKey,
+    artifactInputHash,
     engineVersion:
       typeof (datasetRead.dataset as any)?.meta?.engineVersion === "string"
         ? String((datasetRead.dataset as any).meta.engineVersion)
@@ -2027,8 +2084,8 @@ async function buildArtifactFromEngineInput(args: {
           ? String((datasetRead.dataset as any).meta.simVersion)
           : null,
     buildInputsHash: buildRec?.buildInputsHash ? String(buildRec.buildInputsHash) : null,
-    createdAt: buildRec?.createdAt ? new Date(buildRec.createdAt).toISOString() : null,
-    updatedAt: buildRec?.updatedAt ? new Date(buildRec.updatedAt).toISOString() : null,
+    createdAt: persistedArtifactIdentity.createdAt,
+    updatedAt: persistedArtifactIdentity.updatedAt,
     houseId: args.engineInput.houseId,
     scenarioId: args.engineInput.scenarioId,
     actualContextHouseId: args.engineInput.actualContextHouseId,

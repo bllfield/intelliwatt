@@ -7,11 +7,12 @@ import {
 import { buildModelIntelligenceSequencePreview } from "@/modules/modelIntelligence/runPlanBuilder";
 import type { ModelIntelligenceLabContext } from "@/modules/modelIntelligence/types";
 
-const ensureWorkspaceScenariosForHouse = vi.fn();
+const ensureModelIntelligenceScenarioForRunMode = vi.fn();
 const scenarioFindFirst = vi.fn();
 
-vi.mock("@/lib/usage/ensureWorkspaceScenarios", () => ({
-  ensureWorkspaceScenariosForHouse: (...args: unknown[]) => ensureWorkspaceScenariosForHouse(...args),
+vi.mock("@/modules/modelIntelligence/modelIntelligenceScenarios", () => ({
+  ensureModelIntelligenceScenarioForRunMode: (...args: unknown[]) =>
+    ensureModelIntelligenceScenarioForRunMode(...args),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -58,20 +59,30 @@ function pinnedContext(overrides: Partial<ModelIntelligenceLabContext> = {}): Mo
 describe("orchestrationPrepare", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    ensureWorkspaceScenariosForHouse.mockImplementation(async (args: { userId: string; houseId: string }) => {
-      if (args.houseId === "29a3d820-2593-4673-9dd6-cd161bbd7f6f") {
-        return { pastScenarioId: "scenario-lab-b", futureScenarioId: "future-lab" };
+    ensureModelIntelligenceScenarioForRunMode.mockImplementation(
+      async (args: { userId: string; houseId: string; runMode: string }) => {
+        if (args.houseId === "29a3d820-2593-4673-9dd6-cd161bbd7f6f") {
+          if (args.runMode === "MONTHLY_MASKED") return "scenario-lab-monthly";
+          if (args.runMode === "ANNUAL_MASKED") return "scenario-lab-annual";
+          return "scenario-lab-past";
+        }
+        if (args.houseId === "8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8") {
+          return "scenario-source-a";
+        }
+        return null;
       }
-      if (args.houseId === "8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8") {
-        return { pastScenarioId: "scenario-source-a", futureScenarioId: "future-source" };
-      }
-      return { pastScenarioId: null, futureScenarioId: null };
-    });
+    );
     scenarioFindFirst.mockImplementation(async (query: { where?: { id?: string; houseId?: string } }) => {
       const id = String(query?.where?.id ?? "");
       const houseId = String(query?.where?.houseId ?? "");
-      if (id === "scenario-lab-b" && houseId === "29a3d820-2593-4673-9dd6-cd161bbd7f6f") {
-        return { id: "scenario-lab-b" };
+      if (id === "scenario-lab-past" && houseId === "29a3d820-2593-4673-9dd6-cd161bbd7f6f") {
+        return { id: "scenario-lab-past" };
+      }
+      if (id === "scenario-lab-monthly" && houseId === "29a3d820-2593-4673-9dd6-cd161bbd7f6f") {
+        return { id: "scenario-lab-monthly" };
+      }
+      if (id === "scenario-lab-annual" && houseId === "29a3d820-2593-4673-9dd6-cd161bbd7f6f") {
+        return { id: "scenario-lab-annual" };
       }
       if (id === "scenario-source-a" && houseId === "8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8") {
         return { id: "scenario-source-a" };
@@ -101,13 +112,50 @@ describe("orchestrationPrepare", () => {
 
     expect(prepared.ok).toBe(true);
     if (!prepared.ok) return;
-    expect(ensureWorkspaceScenariosForHouse).toHaveBeenCalledWith({
+    expect(ensureModelIntelligenceScenarioForRunMode).toHaveBeenCalledWith({
       userId: "admin-owner",
       houseId: "29a3d820-2593-4673-9dd6-cd161bbd7f6f",
+      runMode: "SMT_INTERVAL_TRUTH",
     });
-    expect(prepared.onePathRunRequest.scenarioId).toBe("scenario-lab-b");
+    expect(prepared.onePathRunRequest.scenarioId).toBe("scenario-lab-past");
     expect(prepared.onePathRunRequest.houseId).toBe("29a3d820-2593-4673-9dd6-cd161bbd7f6f");
     expect(prepared.onePathRunRequest.actualContextHouseId).toBe("8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8");
+  });
+
+  it("prepare_dispatch_step uses distinct lab scenarios for masked modes", async () => {
+    const { prepareModelIntelligenceDispatchStep } = await import("@/modules/modelIntelligence/orchestrationPrepare");
+    const context = pinnedContext();
+    const preview = buildModelIntelligenceSequencePreview({
+      context,
+      selectedRuns: { MONTHLY_MASKED: true, ANNUAL_MASKED: true },
+      onePathOptions: defaultModelIntelligenceOnePathOptions(),
+      manualGapfillOptions: defaultModelIntelligenceManualGapfillOptions(),
+      flags: defaultModelIntelligenceOrchestrationFlags(),
+    });
+
+    const monthlyPrepared = await prepareModelIntelligenceDispatchStep({
+      context,
+      preview,
+      runMode: "MONTHLY_MASKED",
+      onePathOptions: defaultModelIntelligenceOnePathOptions(),
+      manualGapfillOptions: defaultModelIntelligenceManualGapfillOptions(),
+      ownerUserId: "admin-owner",
+    });
+    const annualPrepared = await prepareModelIntelligenceDispatchStep({
+      context,
+      preview,
+      runMode: "ANNUAL_MASKED",
+      onePathOptions: defaultModelIntelligenceOnePathOptions(),
+      manualGapfillOptions: defaultModelIntelligenceManualGapfillOptions(),
+      ownerUserId: "admin-owner",
+    });
+
+    expect(monthlyPrepared.ok).toBe(true);
+    expect(annualPrepared.ok).toBe(true);
+    if (!monthlyPrepared.ok || !annualPrepared.ok) return;
+    expect(monthlyPrepared.onePathRunRequest.scenarioId).toBe("scenario-lab-monthly");
+    expect(annualPrepared.onePathRunRequest.scenarioId).toBe("scenario-lab-annual");
+    expect(monthlyPrepared.onePathRunRequest.scenarioId).not.toBe(annualPrepared.onePathRunRequest.scenarioId);
   });
 
   it("blocks lab dispatch when scenarioId belongs to source house", async () => {

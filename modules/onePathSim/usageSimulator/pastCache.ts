@@ -161,6 +161,40 @@ export async function getCachedPastDataset(args: {
   };
 }
 
+/** Immutable Past artifact row identity for (houseId, scenarioId, inputHash). */
+export async function getPersistedPastArtifactRowMeta(args: {
+  houseId: string;
+  scenarioId: string;
+  inputHash: string;
+}): Promise<{
+  id: string;
+  inputHash: string;
+  createdAt: Date | null;
+  updatedAt: Date | null;
+} | null> {
+  const model = getCacheModel();
+  if (!model) return null;
+  const row = await model
+    .findUnique({
+      where: {
+        houseId_scenarioId_inputHash: {
+          houseId: args.houseId,
+          scenarioId: args.scenarioId,
+          inputHash: args.inputHash,
+        },
+      },
+      select: { id: true, inputHash: true, createdAt: true, updatedAt: true },
+    })
+    .catch(() => null);
+  if (!row?.id) return null;
+  return {
+    id: String(row.id),
+    inputHash: String(row.inputHash ?? args.inputHash ?? ""),
+    createdAt: row.createdAt ? new Date(row.createdAt) : null,
+    updatedAt: row.updatedAt ? new Date(row.updatedAt) : null,
+  };
+}
+
 /**
  * Returns the most recently updated cache row for (houseId, scenarioId), regardless of input hash.
  * Do not use for artifact identity, compare truth, or user-facing Past/GapFill correctness surfaces;

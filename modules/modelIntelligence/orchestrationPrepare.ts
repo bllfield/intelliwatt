@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { ensureWorkspaceScenariosForHouse } from "@/lib/usage/ensureWorkspaceScenarios";
+import { ensureModelIntelligenceScenarioForRunMode } from "@/modules/modelIntelligence/modelIntelligenceScenarios";
 import {
   buildModelIntelligenceOnePathRunRequest,
   listOrchestrationDispatchSteps,
@@ -37,6 +37,7 @@ export async function scenarioBelongsToHouse(args: {
 export async function resolveOrchestrationPastScenarioId(args: {
   context: ModelIntelligenceLabContext;
   ownerUserId: string | null;
+  runMode: ModelIntelligenceRunMode;
 }): Promise<string | null> {
   const pinned = args.context.labTestHome.isPinnedToSource && Boolean(args.context.labTestHome.testHomeHouseId);
   const effectiveUserId = pinned && args.ownerUserId ? args.ownerUserId : args.context.userId;
@@ -44,12 +45,12 @@ export async function resolveOrchestrationPastScenarioId(args: {
     pinned && args.context.labTestHome.testHomeHouseId
       ? args.context.labTestHome.testHomeHouseId
       : args.context.sourceHouseId;
-  if (!effectiveHouseId) return null;
-  const ensured = await ensureWorkspaceScenariosForHouse({
+  if (!effectiveUserId || !effectiveHouseId) return null;
+  return ensureModelIntelligenceScenarioForRunMode({
     userId: effectiveUserId,
     houseId: effectiveHouseId,
-  }).catch(() => ({ pastScenarioId: null, futureScenarioId: null }));
-  return ensured.pastScenarioId ? String(ensured.pastScenarioId) : null;
+    runMode: args.runMode,
+  });
 }
 
 export type PrepareModelIntelligenceDispatchStepFailure = {
@@ -140,6 +141,7 @@ export async function prepareModelIntelligenceDispatchStep(args: {
     scenarioId = await resolveOrchestrationPastScenarioId({
       context: args.context,
       ownerUserId: args.ownerUserId,
+      runMode: args.runMode,
     });
     if (!scenarioId) {
       const pinned =

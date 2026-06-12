@@ -171,3 +171,14 @@ export async function resolvePastArtifactIdentity(args: {
     canonicalActualEsiid: canonicalActual.esiid,
   };
 }
+
+/** Stable Phase 3 compare key: one persisted cache row per scenario + artifact input hash. */
+export function buildImmutablePastArtifactKey(args: {
+  scenarioId: string | null | undefined;
+  artifactInputHash: string | null | undefined;
+}): string | null {
+  const scenarioId = String(args.scenarioId ?? "").trim();
+  const artifactInputHash = String(args.artifactInputHash ?? "").trim();
+  if (!scenarioId || !artifactInputHash) return null;
+  return `${scenarioId}:${artifactInputHash}`;
+}

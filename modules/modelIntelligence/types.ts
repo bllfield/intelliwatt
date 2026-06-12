@@ -140,6 +140,7 @@ export type ModelIntelligenceSequencePreview = {
 export type ModelIntelligenceOnePathRunReadback = {
   scenarioId: string | null;
   artifactId: string | null;
+  immutableArtifactKey: string | null;
   artifactInputHash: string | null;
   buildInputsHash: string | null;
   engineVersion: string | null;

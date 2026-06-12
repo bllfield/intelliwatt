@@ -178,6 +178,7 @@ describe("onePathDispatchPlan", () => {
       engineInput: { scenarioId: "scenario-1" },
       artifact: {
         artifactId: "artifact-1",
+        immutableArtifactKey: "scenario-1:hash-artifact",
         artifactInputHash: "hash-artifact",
         buildInputsHash: "hash-build",
         engineVersion: "engine-v1",
@@ -189,6 +190,7 @@ describe("onePathDispatchPlan", () => {
     });
     expect(readback.scenarioId).toBe("scenario-1");
     expect(readback.artifactId).toBe("artifact-1");
+    expect(readback.immutableArtifactKey).toBe("scenario-1:hash-artifact");
     expect(readback.artifactInputHash).toBe("hash-artifact");
     expect(readback.buildInputsHash).toBe("hash-build");
     expect(readback.engineVersion).toBe("engine-v1");

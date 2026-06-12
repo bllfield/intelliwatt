@@ -400,6 +400,8 @@ function buildCompactArtifactSummary(artifact: Record<string, unknown> | null) {
   return artifact
     ? {
         artifactId: artifact.artifactId ?? null,
+        buildRowId: artifact.buildRowId ?? null,
+        immutableArtifactKey: artifact.immutableArtifactKey ?? null,
         artifactInputHash: artifact.artifactInputHash ?? null,
         buildInputsHash: artifact.buildInputsHash ?? null,
         engineVersion: artifact.engineVersion ?? null,
@@ -524,6 +526,7 @@ async function buildOnePathAdminManualSeeds(args: {
   userId: string;
   houseId: string;
   actualContextHouseId: string;
+  sourceHouseId?: string | null;
   smtSourceEsiid?: string | null;
   payload: ManualUsagePayload | null;
   overrideTravelRanges?: unknown;
@@ -632,6 +635,8 @@ async function buildOnePathAdminManualSeeds(args: {
       MANUAL_ANNUAL: annualSeed,
     } as const,
     provenance: {
+      sourceHouseId: String(args.sourceHouseId ?? args.actualContextHouseId ?? "").trim() || null,
+      labHouseId: args.houseId,
       actualContextHouseId: args.actualContextHouseId,
       forceActualDerivedManualPayload: Boolean(args.forceActualDerivedManualPayload),
       savedLabPayloadPresent: Boolean(args.payload),
@@ -2248,6 +2253,10 @@ export async function POST(request: NextRequest) {
             userId: effectiveUserId,
             houseId: effectiveHouseId,
             actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
+            sourceHouseId:
+              typeof body?.sourceHouseId === "string" && body.sourceHouseId.trim()
+                ? body.sourceHouseId.trim()
+                : onePathTestHomeState.linkedSourceHouseId ?? effectiveRawInputBase.actualContextHouseId,
             smtSourceEsiid,
             payload: forceActualDerivedManualPayload ? null : manualUsage.payload ?? null,
             overrideTravelRanges: effectiveRawInputBase.travelRanges,
@@ -2856,6 +2865,7 @@ export async function POST(request: NextRequest) {
               : "BASELINE_OR_UNSET",
         engineInput: slimEngineInput,
         artifact,
+        adminManualPayloadProvenance: adminManualSeeds?.provenance ?? null,
         readModel: readModelWithPerf,
         manualStageOneView: readModel.manualStageOneView ?? null,
         runDisplayView,

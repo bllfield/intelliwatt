@@ -212,9 +212,16 @@ export function extractModelIntelligenceOnePathRunReadback(
         ? provenance.manualPayloadHashMonthly
         : null;
 
+  const immutableArtifactKey =
+    pick("immutableArtifactKey") ??
+    (pick("scenarioId") && pick("artifactInputHash")
+      ? `${pick("scenarioId")}:${pick("artifactInputHash")}`
+      : null);
+
   return {
     scenarioId: pick("scenarioId"),
     artifactId: pick("artifactId"),
+    immutableArtifactKey,
     artifactInputHash: pick("artifactInputHash"),
     buildInputsHash: pick("buildInputsHash"),
     engineVersion: pick("engineVersion"),
