@@ -851,6 +851,10 @@ async function buildPastSimRunReadbackResponse(args: {
   disableArtifactRebuildFallback?: boolean;
 }) {
   const startedAt = Date.now();
+  const preserveLabDualRunActualContext =
+    typeof args.actualContextHouseId === "string" &&
+    args.actualContextHouseId.trim().length > 0 &&
+    args.actualContextHouseId.trim() !== args.houseId;
   const readScenarioDataset = (
     mode: "artifact_only" | "allow_rebuild",
     forceRebuildArtifact = false
@@ -868,7 +872,9 @@ async function buildPastSimRunReadbackResponse(args: {
         artifactReadMode: mode,
         projectionMode: "baseline",
         compareSidecarRequest: true,
-        userSiteIsolation: true,
+        // One Path dual-run: test home sim reads mirrored build inputs whose actualContextHouseId
+        // points at the source house. User-site isolation would reset that anchor and break identity.
+        userSiteIsolation: !preserveLabDualRunActualContext,
       },
     });
 
@@ -2388,6 +2394,7 @@ export async function POST(request: NextRequest) {
           smtSourceEsiid,
           exactArtifactInputHash,
           readMode: exactArtifactInputHash ? "artifact_only" : undefined,
+          disableArtifactRebuildFallback: Boolean(exactArtifactInputHash),
           linkedSourceUserId: onePathTestHomeState.linkedSourceUserId,
           linkedSourceHouseId: onePathTestHomeState.linkedSourceHouseId,
           linkedSourceScenarioId,

@@ -7781,13 +7781,23 @@ export async function getSimulatedUsageForHouseScenario(args: {
         });
       }
       const sharedCoverageWindow = resolveCanonicalUsage365CoverageWindow();
-      const pastArtifactIdentity = await resolvePastArtifactIdentity({
-        userId: args.userId,
-        requestHouseId: args.houseId,
-        requestHouseEsiid: pastSimEsiid,
-        buildInputs: buildInputs as Record<string, unknown>,
-      });
-      if (!pastArtifactIdentity) {
+      let requestedExactArtifactInputHash =
+        typeof args.exactArtifactInputHash === "string" && args.exactArtifactInputHash.trim()
+          ? args.exactArtifactInputHash.trim()
+          : null;
+      const requireExactArtifactMatch = args.requireExactArtifactMatch === true;
+      const skipLiveIdentityForExactRead = Boolean(
+        requestedExactArtifactInputHash && requireExactArtifactMatch
+      );
+      const pastArtifactIdentity = skipLiveIdentityForExactRead
+        ? null
+        : await resolvePastArtifactIdentity({
+            userId: args.userId,
+            requestHouseId: args.houseId,
+            requestHouseEsiid: pastSimEsiid,
+            buildInputs: buildInputs as Record<string, unknown>,
+          });
+      if (!skipLiveIdentityForExactRead && !pastArtifactIdentity) {
         return {
           ok: false,
           code: "ARTIFACT_MISSING",
@@ -7795,14 +7805,27 @@ export async function getSimulatedUsageForHouseScenario(args: {
           engineVersion: PAST_ENGINE_VERSION,
         };
       }
-      const window = pastArtifactIdentity.window;
-      let requestedExactArtifactInputHash =
-        typeof args.exactArtifactInputHash === "string" && args.exactArtifactInputHash.trim()
-          ? args.exactArtifactInputHash.trim()
-          : null;
-      const requireExactArtifactMatch = args.requireExactArtifactMatch === true;
+      const window =
+        pastArtifactIdentity?.window ??
+        resolveWindowFromBuildInputsForPastIdentity(buildInputs as Record<string, unknown>);
+      if (!window) {
+        return {
+          ok: false,
+          code: "ARTIFACT_MISSING",
+          message: "Persisted artifact identity window is unavailable for this house/scenario.",
+          engineVersion: PAST_ENGINE_VERSION,
+        };
+      }
       const resolvedInputHash =
-        requestedExactArtifactInputHash ?? pastArtifactIdentity.inputHash;
+        requestedExactArtifactInputHash ?? pastArtifactIdentity?.inputHash ?? null;
+      if (!resolvedInputHash) {
+        return {
+          ok: false,
+          code: "ARTIFACT_MISSING",
+          message: "Persisted artifact not found for this house/scenario identity. Run Past Sim recalc on this home, then retry.",
+          engineVersion: PAST_ENGINE_VERSION,
+        };
+      }
 
       let exactCached = await getCachedPastDataset({
         houseId: args.houseId,
