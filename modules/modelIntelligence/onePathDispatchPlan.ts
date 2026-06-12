@@ -32,6 +32,17 @@ export function mapModelIntelligenceRunModeToOnePathMode(
   }
 }
 
+/** Masked lab runs must persist Past artifacts on the pinned test home for Phase 3 compare. */
+export function resolveModelIntelligencePersistRequested(args: {
+  runMode: ModelIntelligenceRunMode;
+  onePathOptions: ModelIntelligenceOnePathOptions;
+}): boolean {
+  if (args.runMode === "MONTHLY_MASKED" || args.runMode === "ANNUAL_MASKED") {
+    return true;
+  }
+  return args.onePathOptions.persistRequested;
+}
+
 export function runReasonForModelIntelligenceMode(
   runMode: ModelIntelligenceRunMode,
   onePathOptions: ModelIntelligenceOnePathOptions
@@ -137,7 +148,10 @@ export function buildModelIntelligenceOnePathRunRequest(args: {
       actualContextHouseId: args.onePathOptions.actualContextHouseIdOverride ?? targets.actualContextHouseId,
       preferredActualSource,
       weatherPreference: args.onePathOptions.weatherPreference,
-      persistRequested: args.onePathOptions.persistRequested,
+      persistRequested: resolveModelIntelligencePersistRequested({
+        runMode: args.runMode,
+        onePathOptions: args.onePathOptions,
+      }),
       runReason: runReasonForModelIntelligenceMode(args.runMode, args.onePathOptions),
       includeDebugDiagnostics: true,
       includePosthocTopMissIntervalCurves:

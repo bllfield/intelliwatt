@@ -4,6 +4,7 @@ import {
   extractModelIntelligenceOnePathRunReadback,
   listOrchestrationDispatchSteps,
   mapModelIntelligenceRunModeToOnePathMode,
+  resolveModelIntelligencePersistRequested,
 } from "@/modules/modelIntelligence/onePathDispatchPlan";
 import { buildModelIntelligenceSequencePreview } from "@/modules/modelIntelligence/runPlanBuilder";
 import {
@@ -54,21 +55,23 @@ describe("onePathDispatchPlan", () => {
     expect(mapModelIntelligenceRunModeToOnePathMode("NEW_BUILD")).toBeNull();
   });
 
-  it("builds lab-home-only masked run requests against the pinned test home", () => {
+  it("builds MONTHLY_MASKED run requests with lab persistence and actual-derived payload", () => {
     const context = baseContext();
+    const onePathOptions = { ...defaultModelIntelligenceOnePathOptions(), persistRequested: false };
     const preview = buildModelIntelligenceSequencePreview({
       context,
       selectedRuns: { MONTHLY_MASKED: true },
-      onePathOptions: defaultModelIntelligenceOnePathOptions(),
+      onePathOptions,
       manualGapfillOptions: defaultModelIntelligenceManualGapfillOptions(),
       flags: defaultModelIntelligenceOrchestrationFlags(),
     });
     const availability = preview.modeAvailability.find((row) => row.mode === "MONTHLY_MASKED")!;
+    expect(availability.writesToLabHomeOnly).toBe(true);
     const built = buildModelIntelligenceOnePathRunRequest({
       context,
       runMode: "MONTHLY_MASKED",
       availability,
-      onePathOptions: defaultModelIntelligenceOnePathOptions(),
+      onePathOptions,
       manualGapfillOptions: defaultModelIntelligenceManualGapfillOptions(),
       scenarioId: "scenario-past-1",
       ownerUserId: "owner-1",
@@ -76,11 +79,67 @@ describe("onePathDispatchPlan", () => {
     expect(built.ok).toBe(true);
     if (!built.ok) return;
     expect(built.request.mode).toBe("MANUAL_MONTHLY");
+    expect(built.request.persistRequested).toBe(true);
     expect(built.request.sourceHouseId).toBe("source-1");
     expect(built.request.houseId).toBe("lab-1");
     expect(built.request.actualContextHouseId).toBe("source-1");
+    expect((built.request.orchestration as any).surface).toBe("model_intelligence_lab");
     expect((built.request.orchestration as any).forceActualDerivedManualPayload).toBe(true);
     expect(built.request.action).toBe("run");
+  });
+
+  it("builds ANNUAL_MASKED run requests with lab persistence and actual-derived payload", () => {
+    const context = baseContext();
+    const onePathOptions = { ...defaultModelIntelligenceOnePathOptions(), persistRequested: false };
+    const preview = buildModelIntelligenceSequencePreview({
+      context,
+      selectedRuns: { ANNUAL_MASKED: true },
+      onePathOptions,
+      manualGapfillOptions: defaultModelIntelligenceManualGapfillOptions(),
+      flags: defaultModelIntelligenceOrchestrationFlags(),
+    });
+    const availability = preview.modeAvailability.find((row) => row.mode === "ANNUAL_MASKED")!;
+    expect(availability.writesToLabHomeOnly).toBe(true);
+    const built = buildModelIntelligenceOnePathRunRequest({
+      context,
+      runMode: "ANNUAL_MASKED",
+      availability,
+      onePathOptions,
+      manualGapfillOptions: defaultModelIntelligenceManualGapfillOptions(),
+      scenarioId: "scenario-past-1",
+      ownerUserId: "owner-1",
+    });
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.request.mode).toBe("MANUAL_ANNUAL");
+    expect(built.request.persistRequested).toBe(true);
+    expect(built.request.sourceHouseId).toBe("source-1");
+    expect(built.request.houseId).toBe("lab-1");
+    expect(built.request.actualContextHouseId).toBe("source-1");
+    expect((built.request.orchestration as any).surface).toBe("model_intelligence_lab");
+    expect((built.request.orchestration as any).forceActualDerivedManualPayload).toBe(true);
+  });
+
+  it("does not force persistRequested for non-masked One Path dispatch modes", () => {
+    const onePathOptions = { ...defaultModelIntelligenceOnePathOptions(), persistRequested: false };
+    expect(
+      resolveModelIntelligencePersistRequested({
+        runMode: "SMT_INTERVAL_TRUTH",
+        onePathOptions,
+      })
+    ).toBe(false);
+    expect(
+      resolveModelIntelligencePersistRequested({
+        runMode: "GREEN_BUTTON_TRUTH",
+        onePathOptions,
+      })
+    ).toBe(false);
+    expect(
+      resolveModelIntelligencePersistRequested({
+        runMode: "MONTHLY_MASKED",
+        onePathOptions,
+      })
+    ).toBe(true);
   });
 
   it("keeps source actualContextHouseId for SMT interval truth while dispatching to pinned lab home", () => {
