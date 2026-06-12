@@ -1,6 +1,6 @@
 import { lookupAdminHousesByEmail, resolveAdminHouseSelection, type AdminHouseLookupRow } from "@/lib/admin/adminHouseLookup";
 import { resolveManualGapfillSmtSourceContext } from "@/modules/manualUsage/manualGapfillSourceContext";
-import { ensureGlobalOnePathLabTestHomeHouse, getOnePathLabTestHomeLink } from "@/modules/usageSimulator/labTestHome";
+import { resolveOnePathTestHomeState } from "@/modules/onePathSim/testHomeState";
 import { prisma } from "@/lib/db";
 import type { ModelIntelligenceLabContext } from "@/modules/modelIntelligence/types";
 
@@ -11,29 +11,6 @@ function mapActualSourceKind(
   if (kind === "GREEN_BUTTON") return "GREEN_BUTTON";
   if (kind === "ambiguous") return "ambiguous";
   return "none";
-}
-
-async function resolveLabTestHomeState(args: {
-  ownerUserId: string;
-  selectedSourceHouseId: string;
-  selectedSourceUserId: string;
-}) {
-  const ensured = await ensureGlobalOnePathLabTestHomeHouse(args.ownerUserId);
-  const link = await getOnePathLabTestHomeLink(args.ownerUserId);
-  const testHomeHouseId = String(link?.testHomeHouseId ?? ensured.id);
-  const linkedSourceHouseId = link?.sourceHouseId ? String(link.sourceHouseId) : null;
-  const status = String(link?.status ?? (linkedSourceHouseId ? "ready" : "unlinked"));
-  const isPinnedToSource = Boolean(
-    testHomeHouseId && status === "ready" && linkedSourceHouseId && linkedSourceHouseId === args.selectedSourceHouseId
-  );
-  return {
-    testHomeHouseId,
-    linkedSourceHouseId,
-    isPinnedToSource,
-    status,
-    statusMessage: link?.statusMessage ? String(link.statusMessage) : null,
-    needsReplace: !isPinnedToSource,
-  };
 }
 
 export async function loadModelIntelligenceHousesByEmail(email: string) {
@@ -90,11 +67,20 @@ export async function resolveModelIntelligenceLabContext(args: {
     includeDiagnostics: true,
   });
 
-  const labTestHome = await resolveLabTestHomeState({
+  const onePathTestHomeState = await resolveOnePathTestHomeState({
     ownerUserId: args.ownerUserId,
     selectedSourceHouseId: selectedHouse.id,
     selectedSourceUserId: lookup.userId,
+    fallbackSourceHouseId: selectedHouse.id,
   });
+  const labTestHome = {
+    testHomeHouseId: onePathTestHomeState.testHomeHouseId,
+    linkedSourceHouseId: onePathTestHomeState.linkedSourceHouseId,
+    isPinnedToSource: onePathTestHomeState.isPinned,
+    status: onePathTestHomeState.status,
+    statusMessage: onePathTestHomeState.statusMessage,
+    needsReplace: onePathTestHomeState.needsReplace,
+  };
 
   const warnings = [...(sourceContext.diagnostics?.warnings ?? [])];
   const actualSourceKind = mapActualSourceKind(sourceContext.actualSourceKind);
