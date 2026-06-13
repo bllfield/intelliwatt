@@ -1000,7 +1000,7 @@ async function buildPastSimRunReadbackResponse(args: {
   });
   const sidecarStartedAt = Date.now();
   const artifactDataset = asRecord(readback.dataset) ?? {};
-  const artifactMeta = asRecord(artifactDataset.meta);
+  const artifactMeta = asRecord(artifactDataset.meta) ?? {};
   const buildInputsForCompare = await loadPastSimBuildInputsForRead({
     userId: args.userId,
     houseId: args.houseId,
