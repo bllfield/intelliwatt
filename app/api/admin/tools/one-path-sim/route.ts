@@ -726,7 +726,7 @@ async function buildPastReadbackArtifactSummary(args: {
   const scenarioId = String(args.scenarioId ?? "").trim();
   const summary = args.datasetSummary ?? {};
   const summaryTotals = asRecord(summary.totals);
-  const totalKwhRaw = summary.totalKwh ?? summaryTotals.netKwh ?? null;
+  const totalKwhRaw = summary.totalKwh ?? summaryTotals?.netKwh ?? null;
   const totalKwh = typeof totalKwhRaw === "number" && Number.isFinite(totalKwhRaw) ? totalKwhRaw : null;
   const coverageStart =
     (typeof summary.coverageStart === "string" && summary.coverageStart) ||
