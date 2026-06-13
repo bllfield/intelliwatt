@@ -13,7 +13,7 @@ import {
   resolvePastWeatherHouseIdFromDataset,
 } from "@/lib/usage/pastVisibleWeatherReadDiagnostics";
 import { resolveStaleIncompleteMeterSlotCompleteDateKeys } from "@/lib/usage/pastSimStaleIncompleteMeter";
-import { resolveActualDatasetForCompareDiagnostics } from "@/lib/usage/compareDiagnosticsActualIntervals";
+import { resolveActualDatasetForCompareDiagnostics, loadCompactActualDatasetForCompareDiagnostics } from "@/lib/usage/compareDiagnosticsActualIntervals";
 import { travelRangeIsActiveForCoverageWindow } from "@/lib/usage/pastSimTravelRanges";
 import { sageActualDailyRowsFromDataset } from "@/lib/usage/sageActualDailyTruth";
 import { buildUserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
@@ -1087,6 +1087,14 @@ async function buildPastSimRunReadbackResponse(args: {
         greenButtonFullYearIntervalsForDisplay: sageGbFullIntervals,
       });
   const sourceTruthReloadDurationMs = canSkipSageTruthReload ? 0 : Date.now() - sourceTruthReloadStartedAt;
+  const compareProjection = canReuseEmbeddedCompareSidecar
+    ? buildValidationCompareProjectionSidecar(artifactDataset)
+    : resolveValidationCompareProjectionForRead({
+        dataset: readback.dataset,
+        actualDataset: sageTruthForCompare?.dataset ?? null,
+        displayDataset: readback.dataset,
+        buildInputs: buildInputsForCompare,
+      });
   const actualDatasetForIntervalCompare = needsFullYearActualIntervalsForDiagnostics
     ? await resolveActualDatasetForCompareDiagnostics({
         userId: args.linkedSourceUserId ?? args.userId,
@@ -1096,18 +1104,18 @@ async function buildPastSimRunReadbackResponse(args: {
         baseDataset: sageTruthForCompare?.dataset ?? null,
       })
     : canSkipSageTruthReload
-      ? null
+      ? await loadCompactActualDatasetForCompareDiagnostics({
+          userId: args.linkedSourceUserId ?? args.userId,
+          actualContextHouseId: actualContextHouseIdForCompare,
+          esiid: args.smtSourceEsiid ?? args.smtPostSimHealing?.sourceEsiid ?? null,
+          preferredActualSource: preferredActualSourceForCompare,
+          compareProjection,
+          artifactMeta: artifactMeta,
+          includePosthocTopMissIntervalCurves: needsFullYearActualIntervalsForDiagnostics,
+        })
       : sageTruthForCompare?.dataset && typeof sageTruthForCompare.dataset === "object"
         ? (sageTruthForCompare.dataset as Record<string, unknown>)
         : null;
-  const compareProjection = canReuseEmbeddedCompareSidecar
-    ? buildValidationCompareProjectionSidecar(artifactDataset)
-    : resolveValidationCompareProjectionForRead({
-        dataset: readback.dataset,
-        actualDataset: sageTruthForCompare?.dataset ?? null,
-        displayDataset: readback.dataset,
-        buildInputs: buildInputsForCompare,
-      });
   logSimPipelineEvent("one_path_admin_past_compare_sidecar_success", {
     correlationId: args.correlationId ?? null,
     houseId: args.houseId,

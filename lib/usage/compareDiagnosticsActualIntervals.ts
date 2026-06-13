@@ -1,4 +1,8 @@
-import { getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
+import { extractValidationDayKeysFromCompareProjection } from "@/lib/admin/aiTuningBundleHelpers";
+import {
+  getActualIntervalsForRange,
+  type ActualIntervalPoint,
+} from "@/lib/usage/actualDatasetForHouse";
 import type { ActualUsageSource } from "@/modules/realUsageAdapter/actual";
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -7,6 +11,137 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
+}
+
+function normalizeChicagoDateKeys(dateKeys: Iterable<string>): string[] {
+  return Array.from(
+    new Set(
+      Array.from(dateKeys)
+        .map((date) => String(date).slice(0, 10))
+        .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date))
+    )
+  ).sort();
+}
+
+function readValidationDateKeysFromArtifactMeta(meta: Record<string, unknown> | null | undefined): string[] {
+  if (!meta) return [];
+  return normalizeChicagoDateKeys([
+    ...asArray(meta.selectedValidationDateKeys),
+    ...asArray(meta.validationOnlyDateKeysLocal),
+    ...asArray(asRecord(meta.validationSelectionDiagnostics).selectedValidationDateKeys),
+  ]);
+}
+
+function resolvePosthocTopMissDayKeysFromCompareProjection(
+  compareProjection: unknown,
+  posthocTopMissDayCount: number
+): string[] {
+  const rows = asArray(asRecord(compareProjection).rows);
+  return rows
+    .map((row) => {
+      const record = asRecord(row);
+      const date = String(record.localDate ?? record.date ?? "").slice(0, 10);
+      const delta = Number(record.errorKwh ?? record.deltaKwh ?? record.dailyDeltaKwh ?? Number.NaN);
+      return { date, absDelta: Math.abs(delta) };
+    })
+    .filter((row) => /^\d{4}-\d{2}-\d{2}$/.test(row.date) && Number.isFinite(row.absDelta))
+    .sort((a, b) => b.absDelta - a.absDelta)
+    .slice(0, posthocTopMissDayCount)
+    .map((row) => row.date);
+}
+
+/** Compare/export only: validation (+ optional posthoc) local date keys for compact actual interval loads. */
+export function resolveCompareDiagnosticsDateKeys(args: {
+  compareProjection?: unknown;
+  includePosthocTopMissIntervalCurves?: boolean;
+  posthocTopMissDayCount?: number;
+  artifactMeta?: Record<string, unknown> | null;
+}): string[] {
+  const fromMeta = readValidationDateKeysFromArtifactMeta(args.artifactMeta);
+  const validationKeys =
+    fromMeta.length > 0 ? fromMeta : extractValidationDayKeysFromCompareProjection(args.compareProjection);
+  const posthocKeys =
+    args.includePosthocTopMissIntervalCurves === true
+      ? resolvePosthocTopMissDayKeysFromCompareProjection(
+          args.compareProjection,
+          args.posthocTopMissDayCount ?? 5
+        )
+      : [];
+  return normalizeChicagoDateKeys([...validationKeys, ...posthocKeys]);
+}
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function buildDailyRowsFromIntervalPoints(
+  dateKeys: string[],
+  intervals: ActualIntervalPoint[]
+): Array<{ date: string; kwh: number }> {
+  const totals = new Map<string, number>();
+  for (const point of intervals) {
+    const date = String(point.homeDateKey ?? "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    totals.set(date, round2((totals.get(date) ?? 0) + point.kwh));
+  }
+  return dateKeys.map((date) => ({ date, kwh: totals.get(date) ?? 0 }));
+}
+
+/**
+ * Compare/export only: load persisted actual intervals for selected validation/posthoc days.
+ * Does not mutate persisted rows, simulator inputs, or admin response embedding of full-year truth.
+ */
+export async function loadCompactActualDatasetForCompareDiagnostics(args: {
+  userId: string;
+  actualContextHouseId: string;
+  esiid?: string | null;
+  preferredActualSource?: ActualUsageSource | null;
+  compareProjection?: unknown;
+  includePosthocTopMissIntervalCurves?: boolean;
+  posthocTopMissDayCount?: number;
+  artifactMeta?: Record<string, unknown> | null;
+  homeTimezone?: string;
+}): Promise<Record<string, unknown> | null> {
+  const houseId = String(args.actualContextHouseId ?? "").trim();
+  if (!houseId) return null;
+
+  const dateKeys = resolveCompareDiagnosticsDateKeys(args);
+  if (dateKeys.length === 0) return null;
+
+  const timezone = String(args.homeTimezone ?? "America/Chicago").trim() || "America/Chicago";
+  const intervals: ActualIntervalPoint[] = [];
+  for (const dateKey of dateKeys) {
+    const dayIntervals = await getActualIntervalsForRange({
+      houseId,
+      esiid: args.esiid ?? null,
+      startDate: dateKey,
+      endDate: dateKey,
+      preferredSource: args.preferredActualSource ?? null,
+      homeTimezone: timezone,
+    });
+    intervals.push(...dayIntervals);
+  }
+
+  const source: ActualUsageSource =
+    args.preferredActualSource === "GREEN_BUTTON" ? "GREEN_BUTTON" : "SMT";
+
+  return {
+    meta: {
+      timezone,
+      source,
+      compareDiagnosticsCompactSlice: true,
+      compactSliceDateKeys: dateKeys,
+      actualContextHouseId: houseId,
+      actualContextUserId: String(args.userId ?? "").trim() || null,
+    },
+    daily: buildDailyRowsFromIntervalPoints(dateKeys, intervals),
+    series: {
+      intervals15: intervals.map((point) => ({
+        timestamp: point.timestamp,
+        kwh: point.kwh,
+      })),
+    },
+  };
 }
 
 /**
@@ -23,6 +158,7 @@ export async function loadActualIntervalsDatasetForCompareDiagnostics(args: {
   const houseId = String(args.actualContextHouseId ?? "").trim();
   if (!userId || !houseId) return null;
 
+  const { getActualUsageDatasetForHouse } = await import("@/lib/usage/actualDatasetForHouse");
   const loaded = await getActualUsageDatasetForHouse(houseId, args.esiid ?? null, {
     userId,
     preferredSource: args.preferredActualSource ?? undefined,
