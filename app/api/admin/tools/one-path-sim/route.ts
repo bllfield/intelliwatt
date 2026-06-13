@@ -721,8 +721,21 @@ async function buildPastReadbackArtifactSummary(args: {
   exactArtifactInputHash?: string | null;
   actualContextHouseId?: string | null;
   datasetMeta?: Record<string, unknown> | null;
+  datasetSummary?: Record<string, unknown> | null;
 }) {
   const scenarioId = String(args.scenarioId ?? "").trim();
+  const summary = args.datasetSummary ?? {};
+  const summaryTotals = asRecord(summary.totals);
+  const totalKwhRaw = summary.totalKwh ?? summaryTotals.netKwh ?? null;
+  const totalKwh = typeof totalKwhRaw === "number" && Number.isFinite(totalKwhRaw) ? totalKwhRaw : null;
+  const coverageStart =
+    (typeof summary.coverageStart === "string" && summary.coverageStart) ||
+    (typeof summary.start === "string" && summary.start) ||
+    null;
+  const coverageEnd =
+    (typeof summary.coverageEnd === "string" && summary.coverageEnd) ||
+    (typeof summary.end === "string" && summary.end) ||
+    null;
   const artifactInputHash =
     String(
       args.exactArtifactInputHash ??
@@ -768,6 +781,9 @@ async function buildPastReadbackArtifactSummary(args: {
     scenarioId,
     houseId: args.houseId,
     actualContextHouseId: args.actualContextHouseId ?? args.houseId,
+    totalKwh,
+    coverageStart,
+    coverageEnd,
     createdAt:
       cacheMeta?.createdAt?.toISOString() ??
       (buildRec?.createdAt ? new Date(buildRec.createdAt).toISOString() : null),
@@ -906,6 +922,23 @@ async function sageAndStaleIncompleteDisplayArgs(args: {
   return { ...sageDisplayArgs, smtSlotCompleteDateKeys };
 }
 
+function resolveSkipSageTruthReloadDecision(args: {
+  exactArtifactInputHash?: string | null;
+  embeddedCompareRowCount: number;
+  needsFullYearActualIntervalsForDiagnostics: boolean;
+}): { canSkip: boolean; reason: string } {
+  if (args.needsFullYearActualIntervalsForDiagnostics) {
+    return { canSkip: false, reason: "posthoc_top_miss_interval_curves_requested" };
+  }
+  if (!String(args.exactArtifactInputHash ?? "").trim()) {
+    return { canSkip: false, reason: "missing_exact_artifact_input_hash" };
+  }
+  if (args.embeddedCompareRowCount <= 0) {
+    return { canSkip: false, reason: "missing_embedded_validation_compare_rows" };
+  }
+  return { canSkip: true, reason: "exact_hash_with_embedded_validation_compare_rows" };
+}
+
 async function buildPastSimRunReadbackResponse(args: {
   userId: string;
   houseId: string;
@@ -1020,8 +1053,13 @@ async function buildPastSimRunReadbackResponse(args: {
     : [];
   const canReuseEmbeddedCompareSidecar =
     embeddedCompareRows.length > 0 && !needsFullYearActualIntervalsForDiagnostics;
-  const canSkipSageTruthReload =
-    Boolean(args.exactArtifactInputHash) && canReuseEmbeddedCompareSidecar;
+  const skipSageTruthReloadDecision = resolveSkipSageTruthReloadDecision({
+    exactArtifactInputHash: args.exactArtifactInputHash,
+    embeddedCompareRowCount: embeddedCompareRows.length,
+    needsFullYearActualIntervalsForDiagnostics,
+  });
+  const canSkipSageTruthReload = skipSageTruthReloadDecision.canSkip;
+  const skipSageTruthReloadReason = skipSageTruthReloadDecision.reason;
   logSimPipelineEvent("one_path_admin_past_compare_sidecar_start", {
     correlationId: args.correlationId ?? null,
     houseId: args.houseId,
@@ -1030,11 +1068,13 @@ async function buildPastSimRunReadbackResponse(args: {
     skipFullYearActualIntervalReload: !needsFullYearActualIntervalsForDiagnostics,
     reuseEmbeddedCompareSidecar: canReuseEmbeddedCompareSidecar,
     skipSageTruthReload: canSkipSageTruthReload,
+    skipSageTruthReloadReason,
     source: "buildPastSimRunReadbackResponse",
     memoryRssMb: getMemoryRssMb(),
   });
   const actualContextHouseIdForCompare =
     args.actualContextHouseId ?? args.smtPostSimHealing?.actualContextHouseId ?? args.houseId;
+  const sourceTruthReloadStartedAt = Date.now();
   const sageTruthForCompare = canSkipSageTruthReload
     ? null
     : await resolveSageActualTruthForRunDisplay({
@@ -1046,6 +1086,7 @@ async function buildPastSimRunReadbackResponse(args: {
         preferredActualSource: preferredActualSourceForCompare,
         greenButtonFullYearIntervalsForDisplay: sageGbFullIntervals,
       });
+  const sourceTruthReloadDurationMs = canSkipSageTruthReload ? 0 : Date.now() - sourceTruthReloadStartedAt;
   const actualDatasetForIntervalCompare = needsFullYearActualIntervalsForDiagnostics
     ? await resolveActualDatasetForCompareDiagnostics({
         userId: args.linkedSourceUserId ?? args.userId,
@@ -1075,6 +1116,8 @@ async function buildPastSimRunReadbackResponse(args: {
     durationMs: Date.now() - sidecarStartedAt,
     reuseEmbeddedCompareSidecar: canReuseEmbeddedCompareSidecar,
     skipSageTruthReload: canSkipSageTruthReload,
+    skipSageTruthReloadReason,
+    sourceTruthReloadDurationMs,
     source: "buildPastSimRunReadbackResponse",
     memoryRssMb: getMemoryRssMb(),
   });
@@ -1155,15 +1198,6 @@ async function buildPastSimRunReadbackResponse(args: {
           })
       : [];
 
-  logSimPipelineEvent("one_path_admin_past_response_ready", {
-    correlationId: args.correlationId ?? null,
-    houseId: args.houseId,
-    scenarioId: args.scenarioId,
-    pastVariableCount: pastVariables.length,
-    durationMs: Date.now() - startedAt,
-    source: "buildPastSimRunReadbackResponse",
-    memoryRssMb: getMemoryRssMb(),
-  });
   const compactRunDisplayView =
     runDisplayViewBase != null
       ? {
@@ -1191,6 +1225,7 @@ async function buildPastSimRunReadbackResponse(args: {
           adminHouseId: args.houseId,
         })
       : null;
+  const artifactDatasetSummary = asRecord(artifactDataset.summary);
   const readbackArtifact = await buildPastReadbackArtifactSummary({
     userId: args.userId,
     houseId: args.houseId,
@@ -1198,8 +1233,17 @@ async function buildPastSimRunReadbackResponse(args: {
     exactArtifactInputHash: args.exactArtifactInputHash,
     actualContextHouseId: actualContextHouseIdForCompare,
     datasetMeta: artifactMeta,
+    datasetSummary: artifactDatasetSummary,
   });
-  return {
+  const responseBuildDurationMs = Date.now() - startedAt;
+  const pastReadbackPerformance = {
+    skipSageTruthReload: canSkipSageTruthReload,
+    skipSageTruthReloadReason,
+    sourceTruthReloadDurationMs,
+    responseBuildDurationMs,
+    responseApproxSizeKb: null as number | null,
+  };
+  const responsePayload = {
     ok: true as const,
     debugDiagnosticsIncluded: false,
     executionMode: args.exactArtifactInputHash ? ("past_recalc_readback" as const) : ("artifact_readback" as const),
@@ -1236,7 +1280,30 @@ async function buildPastSimRunReadbackResponse(args: {
       sageActualDataset: null,
       sageActualDaily: sageDisplayArgs.sageActualDaily ?? null,
     },
+    pastReadbackPerformance,
   };
+  try {
+    pastReadbackPerformance.responseApproxSizeKb = Math.round(
+      Buffer.byteLength(JSON.stringify(responsePayload), "utf8") / 1024
+    );
+  } catch {
+    pastReadbackPerformance.responseApproxSizeKb = null;
+  }
+  logSimPipelineEvent("one_path_admin_past_response_ready", {
+    correlationId: args.correlationId ?? null,
+    houseId: args.houseId,
+    scenarioId: args.scenarioId,
+    pastVariableCount: pastVariables.length,
+    durationMs: responseBuildDurationMs,
+    skipSageTruthReload: canSkipSageTruthReload,
+    skipSageTruthReloadReason,
+    sourceTruthReloadDurationMs,
+    responseBuildDurationMs,
+    responseApproxSizeKb: pastReadbackPerformance.responseApproxSizeKb,
+    source: "buildPastSimRunReadbackResponse",
+    memoryRssMb: getMemoryRssMb(),
+  });
+  return responsePayload;
 }
 
 function buildEnvironmentVisibility() {
