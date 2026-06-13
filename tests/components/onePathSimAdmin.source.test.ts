@@ -320,7 +320,9 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(routeSource).toContain("debugDiagnosticsSuppressedReason: \"past_sim_compact_response\"");
     expect(routeSource).toContain("effectiveRawInputBase.scenarioId && !isManualMode");
     expect(routeSource).toContain("one_path_admin_past_compare_sidecar_success");
-    expect(routeSource).toContain("loadCompactActualDatasetForCompareDiagnostics");
+    expect(routeSource).toContain("logOnePathAdminRunStageMarker");
+    expect(routeSource).toContain("adminRunTrace");
+    expect(routeSource).toContain("onePathAdminMaskedRunDiagnostics");
     expect(routeSource).toContain("skipSageTruthReload");
     expect(routeSource).toContain("skipSageTruthReloadReason");
     expect(routeSource).toContain("sourceTruthReloadDurationMs");

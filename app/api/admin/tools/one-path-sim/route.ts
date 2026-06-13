@@ -128,6 +128,14 @@ import { buildRuntimeEnvParityTrace } from "@/modules/onePathSim/runtimeEnvParit
 import { listScenarios } from "@/modules/usageSimulator/service";
 import { buildPerformanceAuditSnapshot } from "@/lib/usage/usageParityAudit";
 import { isEsiidUniqueConstraintError } from "@/lib/house/syncIdentifiers";
+import {
+  buildOnePathAdminRunTrace,
+  createOnePathAdminRunCorrelationId,
+  isModelIntelligenceMaskedAdminRun,
+  logOnePathAdminRunStageMarker,
+  resolveModelIntelligenceMaskedRunMode,
+  type OnePathAdminRunStage,
+} from "@/lib/usage/onePathAdminMaskedRunDiagnostics";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -1952,6 +1960,7 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json().catch(() => ({}));
   const action = String(body?.action ?? "").trim().toLowerCase();
+  const adminRunCorrelationId = action === "run" ? createOnePathAdminRunCorrelationId() : null;
   const includeDebugDiagnostics = includeDebugDiagnosticsByDefault(body?.includeDebugDiagnostics);
   const resolved = await resolveOnePathSimUserSelection({
     email: typeof body?.email === "string" ? body.email : null,
@@ -2271,10 +2280,10 @@ export async function POST(request: NextRequest) {
   }
 
   if (action === "run") {
-    const mode = normalizeMode(body?.mode);
-    const correlationId = createSimCorrelationId();
+    const correlationId = adminRunCorrelationId ?? createSimCorrelationId();
     const routeStartedAt = Date.now();
     const stageTimingsMs: Record<string, number> = {};
+    let lastStageReached: OnePathAdminRunStage = "request_received";
     let runScenarioId =
       typeof body?.scenarioId === "string" && body.scenarioId.trim() ? body.scenarioId.trim() : null;
     const runReasonText = String(body?.runReason ?? "").trim().toLowerCase();
@@ -2286,6 +2295,41 @@ export async function POST(request: NextRequest) {
       runReasonText.includes("model_intelligence_monthly_masked") ||
       runReasonText.includes("model_intelligence_annual_masked") ||
       orchestrationRecord.forceActualDerivedManualPayload === true;
+    const mode = normalizeMode(body?.mode);
+    const maskedRunMode = resolveModelIntelligenceMaskedRunMode({
+      runReason: body?.runReason,
+      orchestration: orchestrationRecord,
+      forceActualDerivedManualPayload,
+    });
+    const traceBase = () => ({
+      correlationId,
+      lastStageReached,
+      routeStartedAt,
+      mode,
+      runMode: maskedRunMode,
+      scenarioId: runScenarioId,
+      dispatchHouseId: effectiveHouseId,
+      actualContextHouseId:
+        typeof body?.actualContextHouseId === "string" && body.actualContextHouseId.trim()
+          ? body.actualContextHouseId.trim()
+          : defaultActualContextHouseId,
+      persistRequested: body?.persistRequested !== false,
+      forceActualDerivedManualPayload,
+    });
+    const markMaskedRunStage = (
+      stage: OnePathAdminRunStage,
+      extra?: Record<string, string | number | boolean | null | undefined>
+    ) => {
+      lastStageReached = stage;
+      if (!maskedRunMode) return;
+      logOnePathAdminRunStageMarker({
+        ...traceBase(),
+        stage,
+        extra,
+      });
+    };
+    markMaskedRunStage("request_received");
+    markMaskedRunStage("resolved_user_house");
     if (!runScenarioId && mode === "GREEN_BUTTON" && onePathTestHomeState.isPinned && effectiveHouseId) {
       const ensured = await ensureWorkspaceScenariosForHouse({
         userId: effectiveUserId,
@@ -2304,6 +2348,9 @@ export async function POST(request: NextRequest) {
       }
     }
     const isManualMode = mode === "MANUAL_MONTHLY" || mode === "MANUAL_ANNUAL";
+    if (runScenarioId) {
+      markMaskedRunStage("scenario_resolved");
+    }
     const includePosthocTopMissIntervalCurves = body?.includePosthocTopMissIntervalCurves === true;
     const manualUsage =
       isManualMode
@@ -2423,20 +2470,25 @@ export async function POST(request: NextRequest) {
     }
     const adminManualSeeds =
       isManualMode
-        ? await buildOnePathAdminManualSeeds({
-            userId: effectiveUserId,
-            houseId: effectiveHouseId,
-            actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
-            sourceHouseId:
-              typeof body?.sourceHouseId === "string" && body.sourceHouseId.trim()
-                ? body.sourceHouseId.trim()
-                : onePathTestHomeState.linkedSourceHouseId ?? effectiveRawInputBase.actualContextHouseId,
-            smtSourceEsiid,
-            payload: forceActualDerivedManualPayload ? null : manualUsage.payload ?? null,
-            overrideTravelRanges: effectiveRawInputBase.travelRanges,
-            dbTravelRanges: await getOnePathTravelRangesFromDb(effectiveUserId, effectiveHouseId).catch(() => []),
-            forceActualDerivedManualPayload,
-          })
+        ? await (async () => {
+            markMaskedRunStage("prepared_manual_payload_start");
+            const seeds = await buildOnePathAdminManualSeeds({
+              userId: effectiveUserId,
+              houseId: effectiveHouseId,
+              actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
+              sourceHouseId:
+                typeof body?.sourceHouseId === "string" && body.sourceHouseId.trim()
+                  ? body.sourceHouseId.trim()
+                  : onePathTestHomeState.linkedSourceHouseId ?? effectiveRawInputBase.actualContextHouseId,
+              smtSourceEsiid,
+              payload: forceActualDerivedManualPayload ? null : manualUsage.payload ?? null,
+              overrideTravelRanges: effectiveRawInputBase.travelRanges,
+              dbTravelRanges: await getOnePathTravelRangesFromDb(effectiveUserId, effectiveHouseId).catch(() => []),
+              forceActualDerivedManualPayload,
+            });
+            markMaskedRunStage("prepared_manual_payload_success");
+            return seeds;
+          })()
         : null;
     const effectiveManualUsagePayload =
       isManualMode
@@ -2456,6 +2508,11 @@ export async function POST(request: NextRequest) {
           error: "requirements_unmet",
           missingItems,
           message: `requirements_unmet: ${missingItems.join("; ")}`,
+          correlationId,
+          corrId: correlationId,
+          lastStageReached,
+          failurePhase: lastStageReached,
+          adminRunTrace: buildOnePathAdminRunTrace(traceBase()),
         },
         { status: 409 }
       );
@@ -2687,7 +2744,27 @@ export async function POST(request: NextRequest) {
                     manualUsagePayload: effectiveManualUsagePayload,
                   });
       const slimEngineInput = buildSlimAdminEngineInput(engineInput);
+      markMaskedRunStage("recalc_start");
+      if (isModelIntelligenceMaskedAdminRun({
+        mode,
+        runReason: body?.runReason,
+        orchestration: orchestrationRecord,
+        forceActualDerivedManualPayload,
+      }) &&
+        effectiveRawInputBase.persistRequested !== false) {
+        markMaskedRunStage("persist_start");
+      }
       let artifact = await runSharedSimulation(engineInput);
+      markMaskedRunStage("recalc_success", {
+        artifactInputHash: artifact.artifactInputHash ?? null,
+        artifactId: artifact.artifactId ?? null,
+      });
+      if (artifact.artifactInputHash || artifact.artifactId) {
+        markMaskedRunStage("persist_success", {
+          artifactInputHash: artifact.artifactInputHash ?? null,
+          artifactId: artifact.artifactId ?? null,
+        });
+      }
       let artifactDataset = asRecord(artifact.dataset);
       let artifactDatasetMeta = asRecord(artifactDataset?.meta);
       const isGreenButtonBaselinePassthroughRun =
@@ -2879,22 +2956,29 @@ export async function POST(request: NextRequest) {
           : null;
       const manualPastReadResult =
         isManualMode && effectiveRawInputBase.scenarioId
-          ? await buildOnePathManualUsagePastSimReadResult({
-              userId: effectiveUserId,
-              houseId: effectiveHouseId,
-              scenarioId: effectiveRawInputBase.scenarioId,
-              readMode: "artifact_only",
-              callerType: "user_past",
-              exactArtifactInputHash: artifact.artifactInputHash ?? null,
-              requireExactArtifactMatch: Boolean(artifact.artifactInputHash),
-              usageInputMode: mode,
-              weatherLogicMode: artifact.engineInput?.weatherLogicMode ?? null,
-              artifactId: artifact.artifactId ?? null,
-              artifactInputHash: artifact.artifactInputHash ?? null,
-              artifactEngineVersion: artifact.engineVersion ?? null,
-              manualUsagePayload: effectiveManualUsagePayload,
-              actualDataset: actualDatasetForManualRun,
-            })
+          ? await (async () => {
+              markMaskedRunStage("artifact_readback_start");
+              const readResult = await buildOnePathManualUsagePastSimReadResult({
+                userId: effectiveUserId,
+                houseId: effectiveHouseId,
+                scenarioId: effectiveRawInputBase.scenarioId,
+                readMode: "artifact_only",
+                callerType: "user_past",
+                exactArtifactInputHash: artifact.artifactInputHash ?? null,
+                requireExactArtifactMatch: Boolean(artifact.artifactInputHash),
+                usageInputMode: mode,
+                weatherLogicMode: artifact.engineInput?.weatherLogicMode ?? null,
+                artifactId: artifact.artifactId ?? null,
+                artifactInputHash: artifact.artifactInputHash ?? null,
+                artifactEngineVersion: artifact.engineVersion ?? null,
+                manualUsagePayload: effectiveManualUsagePayload,
+                actualDataset: actualDatasetForManualRun,
+              });
+              if (readResult?.ok) {
+                markMaskedRunStage("artifact_readback_success");
+              }
+              return readResult;
+            })()
           : null;
       const manualSageDisplayArgs = actualDatasetForManualRun
         ? await sageAndStaleIncompleteDisplayArgs({
@@ -2988,6 +3072,12 @@ export async function POST(request: NextRequest) {
           : undefined,
         includePosthocTopMissIntervalCurves,
       });
+      markMaskedRunStage("response_build_start", {
+        includeDebugDiagnostics,
+      });
+      const maskedAdminRunTrace = maskedRunMode
+        ? buildOnePathAdminRunTrace(traceBase())
+        : null;
       if (!includeDebugDiagnostics) {
         const compactReadModel = buildCompactSimulationReadModel({
           artifact: asRecord(artifact),
@@ -3002,8 +3092,8 @@ export async function POST(request: NextRequest) {
           stageTimingsMs,
           routeStartedAt,
         });
-        return NextResponse.json({
-          ok: true,
+        const compactResponsePayload = {
+          ok: true as const,
           debugDiagnosticsIncluded: false,
           runType:
             effectiveRawInputBase.scenarioId
@@ -3011,6 +3101,8 @@ export async function POST(request: NextRequest) {
               : Boolean(artifactDatasetMeta?.baselinePassthrough)
                 ? "BASELINE_PASSTHROUGH"
                 : "BASELINE_OR_UNSET",
+          correlationId,
+          corrId: correlationId,
           engineInput: slimEngineInput,
           manualStageOneView: readModel.manualStageOneView ?? null,
           runDisplayView,
@@ -3021,15 +3113,28 @@ export async function POST(request: NextRequest) {
           readModel: compactReadModelWithPerf,
           performanceAudit: compactReadModelWithPerf?.performanceAudit ?? null,
           greenButtonRehydrateFromRaw,
-        });
+          adminRunTrace: maskedAdminRunTrace,
+        };
+        let responseApproxSizeKb: number | null = null;
+        try {
+          responseApproxSizeKb = Math.round(Buffer.byteLength(JSON.stringify(compactResponsePayload), "utf8") / 1024);
+        } catch {
+          responseApproxSizeKb = null;
+        }
+        markMaskedRunStage("response_ready", { responseApproxSizeKb, includeDebugDiagnostics: false });
+        if (maskedAdminRunTrace) {
+          maskedAdminRunTrace.responseApproxSizeKb = responseApproxSizeKb;
+          maskedAdminRunTrace.lastStageReached = "response_ready";
+        }
+        return NextResponse.json(compactResponsePayload);
       }
       const readModelWithPerf = withRunPerformanceAudit({
         readModel: readModel as Record<string, unknown>,
         stageTimingsMs,
         routeStartedAt,
       });
-      return NextResponse.json({
-        ok: true,
+      const debugResponsePayload = {
+        ok: true as const,
         debugDiagnosticsIncluded: true,
         runType:
           effectiveRawInputBase.scenarioId
@@ -3037,6 +3142,8 @@ export async function POST(request: NextRequest) {
             : Boolean(artifactDatasetMeta?.baselinePassthrough)
               ? "BASELINE_PASSTHROUGH"
               : "BASELINE_OR_UNSET",
+        correlationId,
+        corrId: correlationId,
         engineInput: slimEngineInput,
         artifact,
         adminManualPayloadProvenance: adminManualSeeds?.provenance ?? null,
@@ -3047,7 +3154,23 @@ export async function POST(request: NextRequest) {
         onePathIntervalDiagnosticsV1,
         performanceAudit: readModelWithPerf?.performanceAudit ?? null,
         greenButtonRehydrateFromRaw,
+        adminRunTrace: maskedAdminRunTrace,
+      };
+      let debugResponseApproxSizeKb: number | null = null;
+      try {
+        debugResponseApproxSizeKb = Math.round(Buffer.byteLength(JSON.stringify(debugResponsePayload), "utf8") / 1024);
+      } catch {
+        debugResponseApproxSizeKb = null;
+      }
+      markMaskedRunStage("response_ready", {
+        responseApproxSizeKb: debugResponseApproxSizeKb,
+        includeDebugDiagnostics: true,
       });
+      if (maskedAdminRunTrace) {
+        maskedAdminRunTrace.responseApproxSizeKb = debugResponseApproxSizeKb;
+        maskedAdminRunTrace.lastStageReached = "response_ready";
+      }
+      return NextResponse.json(debugResponsePayload);
     } catch (error) {
       if (isUpstreamUsageTruthMissingFailure(error)) {
         const environmentVisibility = buildEnvironmentVisibility();
@@ -3071,6 +3194,11 @@ export async function POST(request: NextRequest) {
         );
       }
       if (isAdminRouteStageTimeoutFailure(error)) {
+        markMaskedRunStage("error_caught", {
+          errorCode: error.code,
+          stage: error.stage,
+          timeoutMs: error.timeoutMs,
+        });
         return NextResponse.json(
           {
             ok: false,
@@ -3078,9 +3206,13 @@ export async function POST(request: NextRequest) {
             message: error.message,
             stage: error.stage,
             correlationId: error.correlationId,
+            corrId: error.correlationId,
+            lastStageReached,
+            failurePhase: lastStageReached,
             timeoutMs: error.timeoutMs,
             elapsedMs: error.elapsedMs,
             stageTimingsMs,
+            adminRunTrace: buildOnePathAdminRunTrace(traceBase()),
           },
           { status: 504 }
         );
@@ -3099,19 +3231,45 @@ export async function POST(request: NextRequest) {
             : error instanceof Error && error.message
               ? error.message
               : code;
+        markMaskedRunStage("error_caught", { errorCode: code });
         return NextResponse.json(
           {
             ok: false,
             error: code,
             missingItems,
             message,
+            correlationId,
+            corrId: correlationId,
+            lastStageReached,
+            failurePhase: lastStageReached,
+            adminRunTrace: buildOnePathAdminRunTrace(traceBase()),
           },
           { status: 409 }
         );
       }
       const esiidConflict = onePathEsiidSiblingConflictResponse(error);
       if (esiidConflict) return esiidConflict;
-      throw error;
+      const failureMessage = error instanceof Error ? error.message : String(error);
+      markMaskedRunStage("error_caught", {
+        errorCode: "one_path_admin_run_failed",
+        errorMessage: failureMessage,
+      });
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "one_path_admin_run_failed",
+          message: failureMessage,
+          correlationId,
+          corrId: correlationId,
+          lastStageReached,
+          failurePhase: lastStageReached,
+          elapsedMs: Date.now() - routeStartedAt,
+          stageTimingsMs,
+          memoryRssMb: getMemoryRssMb(),
+          adminRunTrace: buildOnePathAdminRunTrace(traceBase()),
+        },
+        { status: 500 }
+      );
     }
   }
 
