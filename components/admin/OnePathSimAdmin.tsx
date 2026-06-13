@@ -867,7 +867,14 @@ export function OnePathSimAdmin() {
       setLookup(json);
       setSelectedHouseId(overrides?.selectedHouseId ?? json.selectedHouse?.id ?? "");
       setActualContextHouseId(overrides?.actualContextHouseId ?? json.selectedHouse?.id ?? "");
-      setSelectedScenarioId((current) => overrides?.selectedScenarioId ?? current);
+      const scenarioRows = Array.isArray(json.scenarios) ? json.scenarios : [];
+      setSelectedScenarioId((current) => {
+        const candidate = overrides?.selectedScenarioId ?? current;
+        if (!candidate) return "";
+        return scenarioRows.some((row) => String((row as { id?: string }).id ?? "") === candidate)
+          ? candidate
+          : "";
+      });
       const sourceTravelRanges = Array.isArray((json.sourceContext?.travelRangesFromDb as any[]))
         ? (json.sourceContext.travelRangesFromDb as Array<{ startDate: string; endDate: string }>)
         : [];
@@ -1123,6 +1130,7 @@ export function OnePathSimAdmin() {
         );
         return null;
       }
+      setSelectedScenarioId("");
 
       const refreshed = await requestLookup({
         email: lookupEmail,
@@ -1543,6 +1551,14 @@ export function OnePathSimAdmin() {
     }
     setBusy(false);
     if (!res.ok || !json?.ok) {
+      if (
+        json?.errorCode === "scenario_not_owned_by_dispatch_house" ||
+        json?.error === "scenario_not_owned_by_dispatch_house" ||
+        json?.errorCode === "scenario_not_found" ||
+        json?.error === "scenario_not_found"
+      ) {
+        setSelectedScenarioId("");
+      }
       if (json?.upstreamUsageTruth) {
         setLookup((current) =>
           current
@@ -1560,6 +1576,7 @@ export function OnePathSimAdmin() {
         ? json.missingItems.map((item: unknown) => String(item ?? "").trim()).filter(Boolean)
         : [];
       const surfacedMessage =
+        formatAdminToolErrorMessage(json?.instruction) ||
         formatAdminToolErrorMessage(json?.message) ||
         (missingItems.length > 0 ? missingItems.join("; ") : "") ||
         formatAdminToolErrorMessage(json?.error) ||

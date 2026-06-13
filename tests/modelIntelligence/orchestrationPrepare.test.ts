@@ -7,13 +7,19 @@ import {
 import { buildModelIntelligenceSequencePreview } from "@/modules/modelIntelligence/runPlanBuilder";
 import type { ModelIntelligenceLabContext } from "@/modules/modelIntelligence/types";
 
+vi.mock("server-only", () => ({}));
+
 const ensureModelIntelligenceScenarioForRunMode = vi.fn();
 const scenarioFindFirst = vi.fn();
 
-vi.mock("@/modules/modelIntelligence/modelIntelligenceScenarios", () => ({
-  ensureModelIntelligenceScenarioForRunMode: (...args: unknown[]) =>
-    ensureModelIntelligenceScenarioForRunMode(...args),
-}));
+vi.mock("@/modules/modelIntelligence/modelIntelligenceScenarios", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/modules/modelIntelligence/modelIntelligenceScenarios")>();
+  return {
+    ...actual,
+    ensureModelIntelligenceScenarioForRunMode: (...args: unknown[]) =>
+      ensureModelIntelligenceScenarioForRunMode(...args),
+  };
+});
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -72,20 +78,37 @@ describe("orchestrationPrepare", () => {
         return null;
       }
     );
-    scenarioFindFirst.mockImplementation(async (query: { where?: { id?: string; houseId?: string } }) => {
+    scenarioFindFirst.mockImplementation(async (query: { where?: { id?: string; houseId?: string; userId?: string } }) => {
       const id = String(query?.where?.id ?? "");
-      const houseId = String(query?.where?.houseId ?? "");
-      if (id === "scenario-lab-past" && houseId === "29a3d820-2593-4673-9dd6-cd161bbd7f6f") {
-        return { id: "scenario-lab-past" };
+      const houseId = query?.where?.houseId ? String(query.where.houseId) : null;
+      const rowForId = (rowId: string, rowHouseId: string, name: string) => ({
+        id: rowId,
+        userId: "admin-owner",
+        houseId: rowHouseId,
+        name,
+      });
+      if (id === "orphan-scenario-id") {
+        return null;
       }
-      if (id === "scenario-lab-monthly" && houseId === "29a3d820-2593-4673-9dd6-cd161bbd7f6f") {
-        return { id: "scenario-lab-monthly" };
+      if (id === "scenario-lab-past" && (!houseId || houseId === "29a3d820-2593-4673-9dd6-cd161bbd7f6f")) {
+        return rowForId("scenario-lab-past", "29a3d820-2593-4673-9dd6-cd161bbd7f6f", "Past (Corrected)");
       }
-      if (id === "scenario-lab-annual" && houseId === "29a3d820-2593-4673-9dd6-cd161bbd7f6f") {
-        return { id: "scenario-lab-annual" };
+      if (id === "scenario-lab-monthly" && (!houseId || houseId === "29a3d820-2593-4673-9dd6-cd161bbd7f6f")) {
+        return rowForId(
+          "scenario-lab-monthly",
+          "29a3d820-2593-4673-9dd6-cd161bbd7f6f",
+          "Model Intelligence · Monthly Masked"
+        );
       }
-      if (id === "scenario-source-a" && houseId === "8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8") {
-        return { id: "scenario-source-a" };
+      if (id === "scenario-lab-annual" && (!houseId || houseId === "29a3d820-2593-4673-9dd6-cd161bbd7f6f")) {
+        return rowForId(
+          "scenario-lab-annual",
+          "29a3d820-2593-4673-9dd6-cd161bbd7f6f",
+          "Model Intelligence · Annual Masked"
+        );
+      }
+      if (id === "scenario-source-a" && (!houseId || houseId === "8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8")) {
+        return rowForId("scenario-source-a", "8a6fe8b9-601e-4f9d-aa3e-7ef0b4bddde8", "Past (Corrected)");
       }
       return null;
     });
@@ -178,5 +201,42 @@ describe("orchestrationPrepare", () => {
     expect(blocked.message).toBe(
       "Model Intelligence refused to dispatch a lab-home run with a source-house scenarioId."
     );
+  });
+
+  it("prepare_dispatch_step heals a stale orphan scenario id for the current pinned lab home", async () => {
+    let monthlyEnsureCalls = 0;
+    ensureModelIntelligenceScenarioForRunMode.mockImplementation(
+      async (args: { userId: string; houseId: string; runMode: string }) => {
+        if (args.runMode !== "MONTHLY_MASKED") {
+          return args.houseId === "29a3d820-2593-4673-9dd6-cd161bbd7f6f" ? "scenario-lab-past" : null;
+        }
+        monthlyEnsureCalls += 1;
+        return monthlyEnsureCalls === 1 ? "orphan-scenario-id" : "scenario-lab-monthly";
+      }
+    );
+
+    const { prepareModelIntelligenceDispatchStep } = await import("@/modules/modelIntelligence/orchestrationPrepare");
+    const context = pinnedContext();
+    const preview = buildModelIntelligenceSequencePreview({
+      context,
+      selectedRuns: { MONTHLY_MASKED: true },
+      onePathOptions: defaultModelIntelligenceOnePathOptions(),
+      manualGapfillOptions: defaultModelIntelligenceManualGapfillOptions(),
+      flags: defaultModelIntelligenceOrchestrationFlags(),
+    });
+    const prepared = await prepareModelIntelligenceDispatchStep({
+      context,
+      preview,
+      runMode: "MONTHLY_MASKED",
+      onePathOptions: defaultModelIntelligenceOnePathOptions(),
+      manualGapfillOptions: defaultModelIntelligenceManualGapfillOptions(),
+      ownerUserId: "admin-owner",
+    });
+
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+    expect(monthlyEnsureCalls).toBe(2);
+    expect(prepared.onePathRunRequest.scenarioId).toBe("scenario-lab-monthly");
+    expect(prepared.scenarioIdHealed).toBe(true);
   });
 });

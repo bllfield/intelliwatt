@@ -20,6 +20,8 @@ const prismaSmtIntervalDayLedgerFindUnique = vi.fn();
 const prismaSmtIntervalDayLedgerUpdate = vi.fn();
 const prismaSmtIntervalDayLedgerCreate = vi.fn();
 const prismaSmtIntervalDayLedgerUpdateMany = vi.fn();
+const prismaUsageSimulatorScenarioFindFirst = vi.fn();
+const prismaSmtAuthorizationFindMany = vi.fn();
 const usageGreenButtonIntervalAggregate = vi.fn();
 const requestUsageRefreshForUserHouse = vi.fn();
 const getManualUsageInputForUserHouse = vi.fn();
@@ -94,12 +96,18 @@ vi.mock("@/lib/db", () => ({
       aggregate: (...args: any[]) => prismaSmtIntervalAggregate(...args),
       findMany: (...args: any[]) => prismaSmtIntervalFindMany(...args),
     },
+    smtAuthorization: {
+      findMany: (...args: any[]) => prismaSmtAuthorizationFindMany(...args),
+    },
     smtIntervalDayLedger: {
       findMany: (...args: any[]) => prismaSmtIntervalDayLedgerFindMany(...args),
       findUnique: (...args: any[]) => prismaSmtIntervalDayLedgerFindUnique(...args),
       update: (...args: any[]) => prismaSmtIntervalDayLedgerUpdate(...args),
       create: (...args: any[]) => prismaSmtIntervalDayLedgerCreate(...args),
       updateMany: (...args: any[]) => prismaSmtIntervalDayLedgerUpdateMany(...args),
+    },
+    usageSimulatorScenario: {
+      findFirst: (...args: any[]) => prismaUsageSimulatorScenarioFindFirst(...args),
     },
   },
 }));
@@ -382,6 +390,21 @@ describe("admin one path sim route", () => {
 
     requireAdmin.mockReturnValue({ ok: false, status: 401, body: { error: "Unauthorized" } });
     prismaUserFindFirst.mockResolvedValue({ id: "user-1" });
+    prismaUsageSimulatorScenarioFindFirst.mockImplementation(async ({ where }: any) => {
+      const id = String(where?.id ?? "");
+      if (id === "scenario-1") {
+        return { id: "scenario-1", userId: "user-1", houseId: "house-1", name: "Past (Corrected)" };
+      }
+      if (id === "stale-scenario-id") {
+        return {
+          id: "stale-scenario-id",
+          userId: "user-1",
+          houseId: "old-test-home-1",
+          name: "Past (Corrected)",
+        };
+      }
+      return null;
+    });
     prismaHouseAddressFindFirst.mockImplementation(async ({ where }: any) => {
       if (!where?.id) return null;
       if (String(where.id) === "test-home-1") {
@@ -401,6 +424,7 @@ describe("admin one path sim route", () => {
     prismaSmtIntervalDayLedgerUpdate.mockResolvedValue({});
     prismaSmtIntervalDayLedgerCreate.mockResolvedValue({});
     prismaSmtIntervalDayLedgerUpdateMany.mockResolvedValue({ count: 0 });
+    prismaSmtAuthorizationFindMany.mockResolvedValue([]);
     requestUsageRefreshForUserHouse.mockResolvedValue({ ok: true, homes: [], backfill: [] });
     ensureSmtCoverageForHouse.mockImplementation(async (args: any) => {
       const sessionKey = String(args?.sessionKey ?? "");
@@ -1340,6 +1364,36 @@ describe("admin one path sim route", () => {
     expect(getTravelRangesFromDb).not.toHaveBeenCalled();
     expect(getSimulationVariablePolicy).not.toHaveBeenCalled();
     expect(buildUserUsageHouseContract).not.toHaveBeenCalled();
+  });
+
+  it("returns structured 409 when run scenarioId is not owned by dispatch house", async () => {
+    const { POST } = await import("@/app/api/admin/tools/one-path-sim/route");
+    const res = await POST(
+      buildRequest({
+        action: "run",
+        email: "customer@example.com",
+        houseId: "house-1",
+        mode: "INTERVAL",
+        scenarioId: "stale-scenario-id",
+        includeDebugDiagnostics: true,
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(json).toEqual(
+      expect.objectContaining({
+        ok: false,
+        error: "scenario_not_owned_by_dispatch_house",
+        errorCode: "scenario_not_owned_by_dispatch_house",
+        providedScenarioId: "stale-scenario-id",
+        dispatchHouseId: "house-1",
+        actualScenarioHouseId: "old-test-home-1",
+        instruction: expect.stringContaining("prepare_dispatch_step"),
+      })
+    );
+    expect(runSharedSimulation).not.toHaveBeenCalled();
+    expect(dispatchPastSimRecalc).not.toHaveBeenCalled();
   });
 
   it("does not run SMT backfill on interval sim run (heal runs on lookup/load instead)", async () => {

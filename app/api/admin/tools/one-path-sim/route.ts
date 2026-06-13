@@ -41,6 +41,7 @@ import {
 } from "@/modules/onePathSim/onePathSim";
 import { listOnePathScenarioEvents, readOnePathSimulatedUsageScenario } from "@/modules/onePathSim/serviceBridge";
 import { dispatchPastSimRecalc } from "@/modules/usageSimulator/pastSimRecalcDispatch";
+import { validateDispatchScenarioOwnership } from "@/lib/usage/labDispatchScenarioOwnership";
 import { resolveGlobalValidationDayKeysForPastSim } from "@/lib/usage/validationDayPolicy";
 import { resolveOnePathGbPastCachedArtifactInputHash } from "@/lib/usage/onePathGbPastArtifactRun";
 import { findPastScenarioId } from "@/lib/usage/onePathPastUserSiteParity";
@@ -2345,6 +2346,37 @@ export async function POST(request: NextRequest) {
         runReasonText.includes("keeper-green-button-future")
       ) {
         runScenarioId = ensured.futureScenarioId;
+      }
+    }
+    if (runScenarioId && effectiveHouseId) {
+      const scenarioOwnership = await validateDispatchScenarioOwnership({
+        scenarioId: runScenarioId,
+        dispatchHouseId: effectiveHouseId,
+        ownerUserId: effectiveUserId,
+      });
+      if (!scenarioOwnership.ok) {
+        markMaskedRunStage("error_caught", { errorCode: scenarioOwnership.errorCode });
+        return NextResponse.json(
+          {
+            ok: false,
+            error: scenarioOwnership.error,
+            errorCode: scenarioOwnership.errorCode,
+            message: scenarioOwnership.message,
+            providedScenarioId: scenarioOwnership.providedScenarioId,
+            dispatchHouseId: scenarioOwnership.dispatchHouseId,
+            actualScenarioHouseId: scenarioOwnership.actualScenarioHouseId,
+            actualScenarioUserId: scenarioOwnership.actualScenarioUserId,
+            expectedScenarioName: scenarioOwnership.expectedScenarioName,
+            actualScenarioName: scenarioOwnership.actualScenarioName,
+            instruction: scenarioOwnership.instruction,
+            correlationId,
+            corrId: correlationId,
+            lastStageReached: "error_caught",
+            failurePhase: "error_caught",
+            adminRunTrace: buildOnePathAdminRunTrace(traceBase()),
+          },
+          { status: 409 }
+        );
       }
     }
     const isManualMode = mode === "MANUAL_MONTHLY" || mode === "MANUAL_ANNUAL";

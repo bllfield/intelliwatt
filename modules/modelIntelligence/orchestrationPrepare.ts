@@ -1,5 +1,11 @@
-import { prisma } from "@/lib/db";
-import { ensureModelIntelligenceScenarioForRunMode } from "@/modules/modelIntelligence/modelIntelligenceScenarios";
+import {
+  validateDispatchScenarioOwnership,
+  scenarioBelongsToDispatchHouse,
+} from "@/lib/usage/labDispatchScenarioOwnership";
+import {
+  ensureModelIntelligenceScenarioForRunMode,
+  scenarioNameForModelIntelligenceRunMode,
+} from "@/modules/modelIntelligence/modelIntelligenceScenarios";
 import {
   buildModelIntelligenceOnePathRunRequest,
   listOrchestrationDispatchSteps,
@@ -16,23 +22,7 @@ import type {
   ModelIntelligenceSequencePreview,
 } from "@/modules/modelIntelligence/types";
 
-export async function scenarioBelongsToHouse(args: {
-  scenarioId: string;
-  userId: string;
-  houseId: string;
-}): Promise<boolean> {
-  const scenarioId = String(args.scenarioId ?? "").trim();
-  const userId = String(args.userId ?? "").trim();
-  const houseId = String(args.houseId ?? "").trim();
-  if (!scenarioId || !userId || !houseId) return false;
-  const row = await (prisma as any).usageSimulatorScenario
-    .findFirst({
-      where: { id: scenarioId, userId, houseId, archivedAt: null },
-      select: { id: true },
-    })
-    .catch(() => null);
-  return Boolean(row?.id);
-}
+export { scenarioBelongsToDispatchHouse as scenarioBelongsToHouse };
 
 export async function resolveOrchestrationPastScenarioId(args: {
   context: ModelIntelligenceLabContext;
@@ -60,6 +50,7 @@ export type PrepareModelIntelligenceDispatchStepFailure = {
   scenarioHouseMismatch?: boolean;
   expectedScenarioHouseId?: string;
   actualContextHouseId?: string;
+  scenarioIdHealed?: boolean;
 };
 
 export type PrepareModelIntelligenceDispatchStepResult =
@@ -68,8 +59,89 @@ export type PrepareModelIntelligenceDispatchStepResult =
       stepId: string;
       runMode: ModelIntelligenceRunMode;
       onePathRunRequest: Record<string, unknown>;
+      scenarioIdHealed?: boolean;
     }
   | PrepareModelIntelligenceDispatchStepFailure;
+
+function resolveEffectiveLabDispatchIdentity(args: {
+  context: ModelIntelligenceLabContext;
+  ownerUserId: string | null;
+}): { ownerUserId: string; dispatchHouseId: string } | null {
+  const pinned = args.context.labTestHome.isPinnedToSource && Boolean(args.context.labTestHome.testHomeHouseId);
+  const ownerUserId = String(
+    pinned && args.ownerUserId ? args.ownerUserId : args.context.userId
+  ).trim();
+  const dispatchHouseId = String(
+    pinned && args.context.labTestHome.testHomeHouseId
+      ? args.context.labTestHome.testHomeHouseId
+      : args.context.sourceHouseId
+  ).trim();
+  if (!ownerUserId || !dispatchHouseId) return null;
+  return { ownerUserId, dispatchHouseId };
+}
+
+export async function resolveOwnedLabDispatchScenarioForRunMode(args: {
+  context: ModelIntelligenceLabContext;
+  ownerUserId: string | null;
+  runMode: ModelIntelligenceRunMode;
+}): Promise<
+  | { ok: true; scenarioId: string; healed: boolean }
+  | PrepareModelIntelligenceDispatchStepFailure
+> {
+  const identity = resolveEffectiveLabDispatchIdentity(args);
+  if (!identity) {
+    return {
+      ok: false,
+      error: "past_scenario_missing",
+      message: "Past scenario could not be resolved for the current lab home.",
+    };
+  }
+
+  const expectedScenarioName = scenarioNameForModelIntelligenceRunMode(args.runMode);
+  let healed = false;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const scenarioId = await ensureModelIntelligenceScenarioForRunMode({
+      userId: identity.ownerUserId,
+      houseId: identity.dispatchHouseId,
+      runMode: args.runMode,
+    });
+    if (!scenarioId) {
+      const pinned =
+        args.context.labTestHome.isPinnedToSource && Boolean(args.context.labTestHome.testHomeHouseId);
+      return {
+        ok: false,
+        error: "past_scenario_missing",
+        message: pinned
+          ? "Pinned lab home has no Past scenario. Run replace_test_home_from_source first."
+          : "Past (Corrected) scenario is missing on the effective One Path house. Load context again or replace/link the lab test home.",
+      };
+    }
+
+    const ownership = await validateDispatchScenarioOwnership({
+      scenarioId,
+      dispatchHouseId: identity.dispatchHouseId,
+      ownerUserId: identity.ownerUserId,
+      expectedScenarioName,
+    });
+    if (ownership.ok) {
+      return { ok: true, scenarioId: ownership.scenario.id, healed };
+    }
+
+    healed = true;
+  }
+
+  return {
+    ok: false,
+    error: "scenario_house_mismatch",
+    message:
+      "Model Intelligence could not resolve a Past scenario owned by the current pinned lab home.",
+    scenarioHouseMismatch: true,
+    expectedScenarioHouseId: identity.dispatchHouseId,
+    actualContextHouseId: args.context.actualContextHouseId,
+    scenarioIdHealed: true,
+  };
+}
 
 export async function validateLabDispatchScenarioHouseMatch(args: {
   scenarioId: string | null;
@@ -88,20 +160,23 @@ export async function validateLabDispatchScenarioHouseMatch(args: {
   }
 
   const ownerUserId = String(args.ownerUserId ?? args.contextUserId).trim();
-  const belongsToDispatchHouse = await scenarioBelongsToHouse({
+  const ownership = await validateDispatchScenarioOwnership({
     scenarioId,
-    userId: ownerUserId,
-    houseId: dispatchHouseId,
+    dispatchHouseId,
+    ownerUserId,
   });
-  if (belongsToDispatchHouse) {
+  if (ownership.ok) {
     return { ok: true };
   }
 
   return {
     ok: false,
-    error: "scenario_house_mismatch",
-    message: "Model Intelligence refused to dispatch a lab-home run with a source-house scenarioId.",
-    scenarioHouseMismatch: true,
+    error: ownership.errorCode === "scenario_not_found" ? "scenario_not_found" : "scenario_house_mismatch",
+    message:
+      ownership.errorCode === "scenario_not_found"
+        ? "Model Intelligence refused to dispatch a missing Past scenarioId."
+        : "Model Intelligence refused to dispatch a lab-home run with a source-house scenarioId.",
+    scenarioHouseMismatch: ownership.errorCode === "scenario_not_owned_by_dispatch_house",
     expectedScenarioHouseId: dispatchHouseId,
     actualContextHouseId,
   };
@@ -137,23 +212,16 @@ export async function prepareModelIntelligenceDispatchStep(args: {
 
   const onePathMode = mapModelIntelligenceRunModeToOnePathMode(args.runMode);
   let scenarioId: string | null = null;
+  let scenarioIdHealed = false;
   if (onePathMode) {
-    scenarioId = await resolveOrchestrationPastScenarioId({
+    const resolved = await resolveOwnedLabDispatchScenarioForRunMode({
       context: args.context,
       ownerUserId: args.ownerUserId,
       runMode: args.runMode,
     });
-    if (!scenarioId) {
-      const pinned =
-        args.context.labTestHome.isPinnedToSource && Boolean(args.context.labTestHome.testHomeHouseId);
-      return {
-        ok: false,
-        error: "past_scenario_missing",
-        message: pinned
-          ? "Pinned lab home has no Past scenario. Run replace_test_home_from_source first."
-          : "Past (Corrected) scenario is missing on the effective One Path house. Load context again or replace/link the lab test home.",
-      };
-    }
+    if (!resolved.ok) return resolved;
+    scenarioId = resolved.scenarioId;
+    scenarioIdHealed = resolved.healed;
   }
 
   const built = buildModelIntelligenceOnePathRunRequest({
@@ -191,5 +259,6 @@ export async function prepareModelIntelligenceDispatchStep(args: {
     stepId: step.stepId,
     runMode: args.runMode,
     onePathRunRequest: built.request,
+    scenarioIdHealed: scenarioIdHealed || undefined,
   };
 }

@@ -292,7 +292,10 @@ describe("One Path Sim Admin harness wiring", () => {
   it("resolves known-preset run controls locally before run without a server reload", () => {
     const source = readRepoFile("components/admin/OnePathSimAdmin.tsx");
 
-    expect(source).toContain('setSelectedScenarioId((current) => overrides?.selectedScenarioId ?? current);');
+    expect(source).toContain('setSelectedScenarioId((current) =>');
+    expect(source).toContain("scenarioRows.some((row) => String((row as { id?: string }).id ?? \"\") === candidate)");
+    expect(source).toContain('setSelectedScenarioId("");');
+    expect(source).toContain('json?.errorCode === "scenario_not_owned_by_dispatch_house"');
     expect(source).toContain("buildKnownScenarioHarnessRunControls");
     expect(source).toContain("const presetRunControls = selectedKnownScenario");
     expect(source).toContain("applyKnownScenarioHarnessControls(presetRunControls");
@@ -318,6 +321,8 @@ describe("One Path Sim Admin harness wiring", () => {
     expect(routeSource).toContain("skipLightweightInsightRecompute: false");
     expect(routeSource).toContain("buildPastSimRunReadbackResponse");
     expect(routeSource).toContain("debugDiagnosticsSuppressedReason: \"past_sim_compact_response\"");
+    expect(routeSource).toContain("validateDispatchScenarioOwnership");
+    expect(routeSource).toContain("errorCode: scenarioOwnership.errorCode");
     expect(routeSource).toContain("effectiveRawInputBase.scenarioId && !isManualMode");
     expect(routeSource).toContain("one_path_admin_past_compare_sidecar_success");
     expect(routeSource).toContain("logOnePathAdminRunStageMarker");
