@@ -113,6 +113,10 @@ import {
   INTERVAL_CODEC_V1,
 } from "@/modules/onePathSim/usageSimulator/intervalCodec";
 import {
+  isCanonicalPastArtifactScenarioName,
+  shouldPersistCanonicalPastArtifactForScenario,
+} from "@/lib/usage/canonicalPastArtifactScenario";
+import {
   WORKSPACE_PAST_SCENARIO_NAME,
   readOnePathUserSiteParityLock,
   isParityBuildInputsDirty,
@@ -5499,7 +5503,8 @@ async function recalcSimulatorBuildImpl(args: {
   /** Timezone for Past sim and stored build; set when building Past so getPastSimulatedDatasetForHouse and cache use same. */
   let timezoneForStoredBuild = (baselineInputsForRecalc as any)?.timezone ?? "America/Chicago";
   const pastSharedSimChainModes: SimulatorBuildInputsV1["mode"][] = ["SMT_BASELINE", "MANUAL_TOTALS", "NEW_BUILD_ESTIMATE"];
-  const shouldUseSharedPastProducer = scenario?.name === WORKSPACE_PAST_NAME && pastSharedSimChainModes.includes(simMode);
+  const shouldUseSharedPastProducer =
+    isCanonicalPastArtifactScenarioName(scenario?.name) && pastSharedSimChainModes.includes(simMode);
   const shouldUseIntervalPreload = resolveShouldUsePastRecalcIntervalPreload({
     scenarioName: scenario?.name,
     simMode,
@@ -6547,10 +6552,11 @@ async function recalcSimulatorBuildImpl(args: {
   }
 
   let canonicalArtifactInputHash: string | null = null;
-  const shouldPersistCanonicalPastArtifact =
-    args.persistPastSimBaseline === true &&
-    scenario?.name === WORKSPACE_PAST_NAME &&
-    (simMode === "SMT_BASELINE" || simMode === "MANUAL_TOTALS" || simMode === "NEW_BUILD_ESTIMATE");
+  const shouldPersistCanonicalPastArtifact = shouldPersistCanonicalPastArtifactForScenario({
+    persistPastSimBaseline: args.persistPastSimBaseline,
+    scenarioName: scenario?.name,
+    simMode,
+  });
   if (shouldPersistCanonicalPastArtifact) {
     const intervals15 = (
       Array.isArray((dataset as any)?.series?.intervals15) ? (dataset as any).series.intervals15 : []
@@ -7062,7 +7068,7 @@ async function recalcSimulatorBuildImpl(args: {
   // Persist usage buckets for Past/Future so plan costing can use simulated usage.
   const shouldPersistPastSeries =
     args.persistPastSimBaseline === true &&
-    scenario?.name === WORKSPACE_PAST_NAME &&
+    isCanonicalPastArtifactScenarioName(scenario?.name) &&
     (simMode === "SMT_BASELINE" || simMode === "MANUAL_TOTALS");
   const shouldDeferManualPostArtifactPersistence =
     isLeanManualTotalsMode(simMode) && canonicalArtifactInputHash != null;

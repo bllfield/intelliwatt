@@ -1,12 +1,17 @@
-import { WORKSPACE_PAST_SCENARIO_NAME } from "@/lib/usage/ensureWorkspaceScenarios";
+import {
+  MODEL_INTELLIGENCE_ANNUAL_MASKED_SCENARIO_NAME,
+  MODEL_INTELLIGENCE_MONTHLY_MASKED_SCENARIO_NAME,
+  WORKSPACE_PAST_SCENARIO_NAME,
+} from "@/lib/usage/canonicalPastArtifactScenario";
 import { buildImmutablePastArtifactKey } from "@/lib/usage/pastArtifactIdentity";
 import { createScenario, listScenarios } from "@/modules/usageSimulator/service";
 import type { ModelIntelligenceRunMode } from "@/modules/modelIntelligence/types";
 
 export { buildImmutablePastArtifactKey };
-
-export const MODEL_INTELLIGENCE_MONTHLY_MASKED_SCENARIO_NAME = "Model Intelligence · Monthly Masked";
-export const MODEL_INTELLIGENCE_ANNUAL_MASKED_SCENARIO_NAME = "Model Intelligence · Annual Masked";
+export {
+  MODEL_INTELLIGENCE_ANNUAL_MASKED_SCENARIO_NAME,
+  MODEL_INTELLIGENCE_MONTHLY_MASKED_SCENARIO_NAME,
+};
 
 type WorkspaceScenarioRow = { id: string; name: string };
 

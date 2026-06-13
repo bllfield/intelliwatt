@@ -1,6 +1,6 @@
 import { createScenario, listScenarios } from "@/modules/usageSimulator/service";
+export { WORKSPACE_PAST_SCENARIO_NAME } from "@/lib/usage/canonicalPastArtifactScenario";
 
-export const WORKSPACE_PAST_SCENARIO_NAME = "Past (Corrected)";
 export const WORKSPACE_FUTURE_SCENARIO_NAME = "Future (What-if)";
 
 type WorkspaceScenarioRow = { id: string; name: string };
