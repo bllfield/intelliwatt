@@ -2,6 +2,7 @@ import type { ManualGapfillCompareMonthlyRow } from "@/modules/manualUsage/manua
 import type { ManualUsageReadModel } from "@/modules/manualUsage/readModel";
 import type { ManualUsagePayload, TravelRange } from "@/modules/simulatedUsage/types";
 import { resolveReportedCoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
+import { smtCoverageDateKey } from "@/lib/time/chicago";
 
 function dateKeyInTimezone(tsIso: string, tz: string): string {
   try {
@@ -713,6 +714,36 @@ function readIntervalPoints(dataset: any): IntervalPoint[] {
     .filter((row: IntervalPoint) => row.timestamp && Number.isFinite(row.kwh));
 }
 
+function readIntervalPointsForCurveDates(
+  dataset: unknown,
+  selectedDateKeys: Set<string>,
+  timezone: string
+): IntervalPoint[] {
+  if (selectedDateKeys.size === 0) return [];
+  const rows = Array.isArray((dataset as any)?.series?.intervals15) ? (dataset as any).series.intervals15 : [];
+  const out: IntervalPoint[] = [];
+  for (const row of rows) {
+    const timestamp = String(row?.timestamp ?? "").trim();
+    const kwh = Number(row?.kwh ?? Number.NaN);
+    if (!timestamp || !Number.isFinite(kwh)) continue;
+
+    const homeDateKey = String(row?.homeDateKey ?? "").slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(homeDateKey) && selectedDateKeys.has(homeDateKey)) {
+      out.push({ timestamp, kwh });
+      continue;
+    }
+
+    const ts = new Date(timestamp);
+    if (!Number.isFinite(ts.getTime())) continue;
+    const localDate =
+      timezone === "America/Chicago" ? smtCoverageDateKey(ts) : dateKeyInTimezone(timestamp, timezone);
+    if (localDate && selectedDateKeys.has(localDate)) {
+      out.push({ timestamp, kwh });
+    }
+  }
+  return out;
+}
+
 function inferSimUsedTravelAdjustment(args: {
   date: string;
   actualKwh: number | null;
@@ -1178,8 +1209,8 @@ export function buildManualGapfillCompareDiagnosticsV1(
     .map((day) => day.date);
   const selectedCurveDates = Array.from(new Set([...(args.validationDayKeys ?? []), ...worstAbsoluteDates])).sort();
   const selectedCurveDateSet = new Set(selectedCurveDates);
-  const actualIntervals = readIntervalPoints(args.sourceActualDataset);
-  const simulatedIntervalsRaw = readIntervalPoints(args.labDataset);
+  const actualIntervals = readIntervalPointsForCurveDates(args.sourceActualDataset, selectedCurveDateSet, timezone);
+  const simulatedIntervalsRaw = readIntervalPointsForCurveDates(args.labDataset, selectedCurveDateSet, timezone);
   const actualByDate = intervalsByDateAndSlot(actualIntervals, timezone, selectedCurveDateSet);
   const simulatedByDate = intervalsByDateAndSlot(simulatedIntervalsRaw, timezone, selectedCurveDateSet);
   const validationOnlyDateSet = new Set(selectedValidationDayKeysUsed);

@@ -82,9 +82,13 @@ vi.mock("@/lib/usage/validationDayPolicy", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/usage/pastSimTravelRanges", () => ({
-  readTravelRangesForHouse: (...args: unknown[]) => readTravelRangesForHouse(...args),
-}));
+vi.mock("@/lib/usage/pastSimTravelRanges", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/usage/pastSimTravelRanges")>();
+  return {
+    ...actual,
+    readTravelRangesForHouse: (...args: unknown[]) => readTravelRangesForHouse(...args),
+  };
+});
 
 const SOURCE_HOUSE_ID = "4da5d9d3-f139-4d3a-a602-3250d933c71c";
 const LAB_HOUSE_ID = "29a3d820-2593-4673-9dd6-cd161bbd7f6f";

@@ -63,10 +63,14 @@ vi.mock("@/modules/usageSimulator/pastSimRecalcDispatch", () => ({
   dispatchPastSimRecalc: (...args: unknown[]) => dispatchPastSimRecalc(...args),
 }));
 
-vi.mock("@/lib/usage/pastSimTravelRanges", () => ({
-  resolveEffectiveTravelRangesForLabHome: (...args: unknown[]) =>
-    resolveEffectiveTravelRangesForLabHome(...args),
-}));
+vi.mock("@/lib/usage/pastSimTravelRanges", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/usage/pastSimTravelRanges")>();
+  return {
+    ...actual,
+    resolveEffectiveTravelRangesForLabHome: (...args: unknown[]) =>
+      resolveEffectiveTravelRangesForLabHome(...args),
+  };
+});
 
 vi.mock("@/modules/usageSimulator/validationSelection", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/modules/usageSimulator/validationSelection")>();
@@ -417,6 +421,10 @@ describe("resolveManualGapfillSeedFromSourceContext", () => {
       labHouseId: LAB_HOUSE_ID,
       sourceUserId: USER_ID,
       sourceHouseId: SOURCE_HOUSE_ID,
+      coverageWindow: {
+        startDate: "2025-06-08",
+        endDate: "2026-06-07",
+      },
     });
     expect(out.payload?.travelRanges).toEqual([
       { startDate: "2025-08-14", endDate: "2025-08-17" },

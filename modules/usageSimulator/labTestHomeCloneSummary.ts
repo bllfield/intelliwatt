@@ -2,12 +2,23 @@ import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProf
 import { normalizeStoredApplianceProfile, validateApplianceProfile } from "@/modules/applianceProfile/validation";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { validateHomeProfile } from "@/modules/homeProfile/validation";
-import { readTravelRangesForHouse, type PastSimTravelRange } from "@/lib/usage/pastSimTravelRanges";
+import type { CoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
+import {
+  filterTravelRangesToCoverageWindow,
+  readTravelRangesForHouse,
+  summarizeTravelRangesForCoverageWindow,
+  type PastSimTravelRange,
+} from "@/lib/usage/pastSimTravelRanges";
 
 export type LabTestHomeCloneSummary = {
   copiedHomeProfile: boolean;
   copiedAppliances: boolean;
+  /** Stored/history-preserved count copied to lab (includes archived historical rows). */
+  copiedTravelRangesStoredCount: number;
+  copiedVacantRangesStoredCount: number;
+  /** @deprecated Use copiedTravelRangesStoredCount — raw stored count, not active operational count. */
   copiedTravelRanges: number;
+  /** @deprecated Use copiedVacantRangesStoredCount — raw stored count, not active operational count. */
   copiedVacantRanges: number;
   copiedThermostatSettings: boolean;
   copiedHvacs: number;
@@ -22,9 +33,22 @@ export type LabTestHomeCloneSummary = {
   labHasRequiredAppliances: boolean;
   missingRequiredProfileFields: string[];
   missingRequiredApplianceFields: string[];
+  /** @deprecated Use sourceTravelRangeStoredCount */
   sourceTravelRangeCount: number;
+  /** @deprecated Use labTravelRangeStoredCount */
   labTravelRangeCount: number;
   travelRangesPersistedToLab: boolean;
+  sourceTravelRangeStoredCount: number;
+  sourceTravelRangeActiveCurrentWindowCount: number;
+  sourceTravelRangeArchivedHistoricalCount: number;
+  sourceTravelRangeFutureOutsideWindowCount: number;
+  labTravelRangeStoredCount: number;
+  labTravelRangeActiveCurrentWindowCount: number;
+  labTravelRangeArchivedHistoricalCount: number;
+  labTravelRangeFutureOutsideWindowCount: number;
+  copiedActiveTravelRanges: number;
+  copiedArchivedHistoricalRangesAsActive: boolean;
+  effectiveTravelRangesForRecalc: PastSimTravelRange[];
 };
 
 function countAppliancesByType(appliances: Array<{ type?: unknown }>, ...types: string[]): number {
@@ -87,6 +111,7 @@ export async function buildLabTestHomeCloneSummary(args: {
   labTravelRanges: ReadonlyArray<PastSimTravelRange>;
   copiedHomeProfile: boolean;
   copiedAppliances: boolean;
+  coverageWindow?: CoverageWindow | null;
 }): Promise<LabTestHomeCloneSummary> {
   const [labHomeProfile, labApplianceProfile] = await Promise.all([
     getHomeProfileSimulatedByUserHouse({ userId: args.ownerUserId, houseId: args.labHouseId }),
@@ -107,13 +132,24 @@ export async function buildLabTestHomeCloneSummary(args: {
 
   const missingRequiredProfileFields = collectMissingProfileFields(labHomeProfile);
   const missingRequiredApplianceFields = collectMissingApplianceFields(labApplianceProfile);
-  const unifiedTravelVacantCount = args.sourceTravelRanges.length;
+  const sourceSummary = summarizeTravelRangesForCoverageWindow(args.sourceTravelRanges, args.coverageWindow);
+  const labSummary = summarizeTravelRangesForCoverageWindow(args.labTravelRanges, args.coverageWindow);
+  const effectiveTravelRangesForRecalc = filterTravelRangesToCoverageWindow(
+    args.labTravelRanges.length > 0 ? args.labTravelRanges : args.sourceTravelRanges,
+    args.coverageWindow
+  );
+  const copiedActiveTravelRanges = labSummary.activeCurrentWindowCount;
+  const copiedArchivedHistoricalRangesAsActive = labSummary.classifications.some(
+    (row) => row.archivedHistorical && row.activeForCurrentWindow
+  );
 
   return {
     copiedHomeProfile: args.copiedHomeProfile,
     copiedAppliances: args.copiedAppliances,
-    copiedTravelRanges: unifiedTravelVacantCount,
-    copiedVacantRanges: unifiedTravelVacantCount,
+    copiedTravelRangesStoredCount: args.sourceTravelRanges.length,
+    copiedVacantRangesStoredCount: args.sourceTravelRanges.length,
+    copiedTravelRanges: args.sourceTravelRanges.length,
+    copiedVacantRanges: args.sourceTravelRanges.length,
     copiedThermostatSettings: featureCounts.copiedThermostatSettings,
     copiedHvacs: featureCounts.copiedHvacs,
     copiedWaterHeaters: waterHeaterCount,
@@ -130,9 +166,18 @@ export async function buildLabTestHomeCloneSummary(args: {
     sourceTravelRangeCount: args.sourceTravelRanges.length,
     labTravelRangeCount: args.labTravelRanges.length,
     travelRangesPersistedToLab:
-      args.sourceTravelRanges.length === 0
-        ? true
-        : args.labTravelRanges.length >= args.sourceTravelRanges.length,
+      args.sourceTravelRanges.length === 0 ? true : args.labTravelRanges.length >= args.sourceTravelRanges.length,
+    sourceTravelRangeStoredCount: sourceSummary.storedCount,
+    sourceTravelRangeActiveCurrentWindowCount: sourceSummary.activeCurrentWindowCount,
+    sourceTravelRangeArchivedHistoricalCount: sourceSummary.archivedHistoricalCount,
+    sourceTravelRangeFutureOutsideWindowCount: sourceSummary.futureOutsideCurrentWindowCount,
+    labTravelRangeStoredCount: labSummary.storedCount,
+    labTravelRangeActiveCurrentWindowCount: labSummary.activeCurrentWindowCount,
+    labTravelRangeArchivedHistoricalCount: labSummary.archivedHistoricalCount,
+    labTravelRangeFutureOutsideWindowCount: labSummary.futureOutsideCurrentWindowCount,
+    copiedActiveTravelRanges,
+    copiedArchivedHistoricalRangesAsActive,
+    effectiveTravelRangesForRecalc,
   };
 }
 

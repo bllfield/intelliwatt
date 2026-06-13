@@ -356,11 +356,25 @@ export async function resolveManualGapfillSeedFromSourceContext(
     sourceContext.coverage.coverageEnd ??
     resolveGapfillSyntheticAnchorEndDate(sourceContext.coverage.latestDate);
 
+  const coverageWindow =
+    sourceContext.coverage.coverageStart && sourceContext.coverage.coverageEnd
+      ? {
+          startDate: sourceContext.coverage.coverageStart,
+          endDate: sourceContext.coverage.coverageEnd,
+        }
+      : sourceContext.coverage.windowStart && sourceContext.coverage.windowEnd
+        ? {
+            startDate: sourceContext.coverage.windowStart,
+            endDate: sourceContext.coverage.windowEnd,
+          }
+        : null;
+
   const travelRanges: PastSimTravelRange[] = await resolveEffectiveTravelRangesForLabHome({
     labOwnerUserId: userId,
     labHouseId,
     sourceUserId: sourceContext.userId,
     sourceHouseId,
+    coverageWindow,
   });
 
   const stageOneMode = resolveStageOneMode(mode);

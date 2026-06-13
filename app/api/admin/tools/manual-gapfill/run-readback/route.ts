@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { buildManualGapfillRunReadbackResult } from "@/modules/manualUsage/manualGapfillRunReadback";
 import type { ManualGapfillSeedMode } from "@/modules/manualUsage/manualGapfillSeed";
 import type { WeatherPreference } from "@/modules/weatherNormalization/normalizer";
+import { getMemoryRssMb, logSimPipelineEvent } from "@/modules/usageSimulator/simObservability";
 import { gateManualGapfillAdmin } from "../_helpers";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const maxDuration = 120;
 
 const MODES: ManualGapfillSeedMode[] = ["MONTHLY_FROM_SOURCE_INTERVALS", "ANNUAL_FROM_SOURCE_INTERVALS"];
 const WEATHER: WeatherPreference[] = ["LAST_YEAR_WEATHER", "LONG_TERM_AVERAGE"];
@@ -75,7 +77,25 @@ export async function POST(request: NextRequest) {
       includeDiagnostics,
     });
 
-    return NextResponse.json({ ok: result.ok, result });
+    const payload = { ok: result.ok, result };
+    let responseApproxSizeKb: number | null = null;
+    try {
+      responseApproxSizeKb = Math.round(Buffer.byteLength(JSON.stringify(payload), "utf8") / 1024);
+    } catch {
+      responseApproxSizeKb = null;
+    }
+
+    logSimPipelineEvent("manual_gapfill_run_readback_response_ready", {
+      houseId: labHouseId,
+      sourceHouseId,
+      ok: result.ok,
+      status: result.status,
+      responseApproxSizeKb,
+      memoryRssMb: getMemoryRssMb(),
+      source: "manual-gapfill/run-readback/route",
+    });
+
+    return NextResponse.json(payload);
   } catch (error) {
     return NextResponse.json(
       {

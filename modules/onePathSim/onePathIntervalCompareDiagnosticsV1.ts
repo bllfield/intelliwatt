@@ -312,26 +312,6 @@ function weekdayWeekend(date: string): "weekday" | "weekend" {
   return day === 0 || day === 6 ? "weekend" : "weekday";
 }
 
-function dateKeyInTimezone(tsIso: string, tz: string): string {
-  try {
-    const d = new Date(tsIso);
-    if (!Number.isFinite(d.getTime())) return tsIso.slice(0, 10);
-    const fmt = new Intl.DateTimeFormat("en-CA", {
-      timeZone: tz,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    });
-    const parts = fmt.formatToParts(d);
-    const y = parts.find((part) => part.type === "year")?.value ?? "";
-    const m = parts.find((part) => part.type === "month")?.value ?? "";
-    const day = parts.find((part) => part.type === "day")?.value ?? "";
-    return `${y}-${m}-${day}`;
-  } catch {
-    return tsIso.slice(0, 10);
-  }
-}
-
 function localSlot96InTimezone(tsIso: string, tz: string): number {
   try {
     const d = new Date(tsIso);

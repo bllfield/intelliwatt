@@ -7,6 +7,7 @@ const findUniqueBuild = vi.fn();
 const findFirstArtifact = vi.fn();
 const resolveOnePathUpstreamUsageTruthForSimulation = vi.fn();
 const getIntervalDataFingerprint = vi.fn();
+const getActualIntervalsForRange = vi.fn();
 const resolveHouseCommittedUsageSource = vi.fn();
 const computePastWeatherIdentity = vi.fn();
 const getLatestUsageFingerprintByHouseId = vi.fn();
@@ -46,6 +47,7 @@ vi.mock("@/lib/db/usageClient", () => ({
 
 vi.mock("@/lib/usage/actualDatasetForHouse", () => ({
   getIntervalDataFingerprint: (...args: unknown[]) => getIntervalDataFingerprint(...args),
+  getActualIntervalsForRange: (...args: unknown[]) => getActualIntervalsForRange(...args),
 }));
 
 vi.mock("@/modules/onePathSim/runtime", () => ({
@@ -109,9 +111,13 @@ vi.mock("@/lib/usage/validationDayPolicy", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/usage/pastSimTravelRanges", () => ({
-  readTravelRangesForHouse: (...args: unknown[]) => readTravelRangesForHouse(...args),
-}));
+vi.mock("@/lib/usage/pastSimTravelRanges", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/usage/pastSimTravelRanges")>();
+  return {
+    ...actual,
+    readTravelRangesForHouse: (...args: unknown[]) => readTravelRangesForHouse(...args),
+  };
+});
 
 const SOURCE_HOUSE_ID = "4da5d9d3-f139-4d3a-a602-3250d933c71c";
 const LAB_HOUSE_ID = "29a3d820-2593-4673-9dd6-cd161bbd7f6f";
@@ -209,6 +215,7 @@ describe("compareManualGapfillSourceActualToLabSim", () => {
     getLatestUsageFingerprintByHouseId.mockResolvedValue(null);
     computePastWeatherIdentity.mockResolvedValue("weather:test");
     getIntervalDataFingerprint.mockResolvedValue("35040:1719792000000:abc123");
+    getActualIntervalsForRange.mockResolvedValue([]);
     saveManualUsageInputForUserHouse.mockResolvedValue({ ok: true });
     dispatchPastSimRecalc.mockResolvedValue({ ok: true });
     buildGapfillCompareSimShared.mockResolvedValue({ ok: true });

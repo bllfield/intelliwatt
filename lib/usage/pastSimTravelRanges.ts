@@ -304,16 +304,22 @@ export async function resolveEffectiveTravelRangesForLabHome(args: {
   labHouseId: string;
   sourceUserId: string;
   sourceHouseId: string;
+  coverageWindow?: CoverageWindow | null;
 }): Promise<PastSimTravelRange[]> {
   const labTravel = await readTravelRangesForHouse({
     userId: args.labOwnerUserId,
     houseId: args.labHouseId,
+    coverageWindow: args.coverageWindow ?? undefined,
   });
-  if (labTravel.length > 0) return labTravel;
-  return readTravelRangesForHouse({
+  if (labTravel.length > 0) {
+    return filterTravelRangesToCoverageWindow(labTravel, args.coverageWindow);
+  }
+  const sourceTravel = await readTravelRangesForHouse({
     userId: args.sourceUserId,
     houseId: args.sourceHouseId,
+    coverageWindow: args.coverageWindow ?? undefined,
   });
+  return filterTravelRangesToCoverageWindow(sourceTravel, args.coverageWindow);
 }
 
 /** Replace all TRAVEL_RANGE events on the house Past (Corrected) scenario. */

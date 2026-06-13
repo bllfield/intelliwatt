@@ -5,6 +5,7 @@ import { homeDetailsPrisma } from "@/lib/db/homeDetailsClient";
 import { appliancesPrisma } from "@/lib/db/appliancesClient";
 import { normalizeEmailSafe } from "@/lib/utils/email";
 import { getActualIntervalsForRange, getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
+import { stripIntervalHeavyDatasetFields } from "@/lib/usage/compactAdminDatasetProjection";
 import { runSimulatorDiagnostic } from "@/lib/admin/simulatorDiagnostic";
 import { chooseActualSource } from "@/modules/realUsageAdapter/actual";
 import {
@@ -934,8 +935,8 @@ async function buildGapfillManualUsageReadbackResponse(args: {
     selectionDiagnostics: args.selectionDiagnostics,
     validationSelectionDiagnostics: args.selectionDiagnostics,
     usage365: args.usage365,
-    baselineDatasetProjection: readResultWithManualPayload.dataset,
-    displayDatasetProjection: readResultWithManualPayload.displayDataset,
+    baselineDatasetProjection: stripIntervalHeavyDatasetFields(readResultWithManualPayload.dataset),
+    displayDatasetProjection: stripIntervalHeavyDatasetFields(readResultWithManualPayload.displayDataset),
     compareProjection: readResultWithManualPayload.compareProjection,
     manualReadModel: readResultWithManualPayload.manualReadModel,
     manualMonthlyReconciliation: readResultWithManualPayload.manualMonthlyReconciliation,
@@ -2840,8 +2841,8 @@ export async function POST(req: NextRequest) {
       validationSelectionDiagnostics: selectionDiagnostics,
       ...(sourcePolicyRefreshDiagnostics ?? {}),
       usage365,
-      baselineDatasetProjection: baselineDataset,
-      displayDatasetProjection,
+      baselineDatasetProjection: stripIntervalHeavyDatasetFields(baselineDataset),
+      displayDatasetProjection: stripIntervalHeavyDatasetFields(displayDatasetProjection),
       compareProjection: compareProjectionForResponse,
       buildId: buildRow?.id ?? null,
       buildLastBuiltAt: buildRow?.lastBuiltAt ? (buildRow.lastBuiltAt as Date).toISOString() : null,

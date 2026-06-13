@@ -7,8 +7,13 @@ import {
   resolveGlobalValidationDayKeysForPastSim,
 } from "@/lib/usage/validationDayPolicy";
 import { readTravelRangesForHouse, filterTravelRangesToCoverageWindow } from "@/lib/usage/pastSimTravelRanges";
-import { resolveActualDatasetForCompareDiagnostics } from "@/lib/usage/compareDiagnosticsActualIntervals";
+import {
+  loadCompactActualDatasetForCompareDiagnostics,
+  sliceSimulatedDatasetIntervalsForCompareDiagnostics,
+} from "@/lib/usage/compareDiagnosticsActualIntervals";
+import { stripIntervalHeavyDatasetFields } from "@/lib/usage/compactAdminDatasetProjection";
 import { buildOnePathManualUsagePastSimReadResult } from "@/modules/onePathSim/manualPastSimReadResult";
+import { getMemoryRssMb, logSimPipelineEvent } from "@/modules/usageSimulator/simObservability";
 import {
   hashManualGapfillSavedSeedPayload,
   type ManualGapfillSeedMode,
@@ -442,7 +447,9 @@ export function buildManualGapfillCompareEnvelope(args: {
   sourceContext: ManualGapfillSourceContext;
   labHouseId: string;
   sourceActualDataset: any;
+  sourceActualIntervalDataset?: any;
   labDataset: any;
+  labIntervalDataset?: any;
   labManualPayload: ManualUsagePayload;
   policyHash: string;
   scenarioId: string;
@@ -583,8 +590,8 @@ export function buildManualGapfillCompareEnvelope(args: {
           monthlyRows: monthly?.rows,
           readModel,
           validationDayKeys: args.validationDayKeys ?? [],
-          sourceActualDataset: args.sourceActualDataset,
-          labDataset: args.labDataset,
+          sourceActualDataset: args.sourceActualIntervalDataset ?? args.sourceActualDataset,
+          labDataset: args.labIntervalDataset ?? args.labDataset,
           labManualPayload: args.labManualPayload,
           travelContext: args.travelContext,
           timezone:
@@ -865,6 +872,19 @@ export async function compareManualGapfillSourceActualToLabSim(
     });
   }
 
+  logSimPipelineEvent("manual_gapfill_compare_post_readback_start", {
+    houseId: labHouseId,
+    scenarioId,
+    sourceHouseId,
+    includeDailyRows: args.includeDailyRows === true,
+    includeDiagnostics: args.includeDiagnostics !== false,
+    labIntervalCount: Array.isArray(labReadResult.dataset?.series?.intervals15)
+      ? labReadResult.dataset.series.intervals15.length
+      : 0,
+    memoryRssMb: getMemoryRssMb(),
+    source: "compareManualGapfillSourceActualToLabSim",
+  });
+
   const labDataset = labReadResult.dataset;
   if (!labDataset) {
     return buildFailureEnvelope({
@@ -940,6 +960,7 @@ export async function compareManualGapfillSourceActualToLabSim(
     });
   }
 
+  const sourceActualStartedAt = Date.now();
   const validationSelection = await resolveGlobalValidationDayKeysForPastSim({
     houseId: labHouseId,
     userId,
@@ -947,6 +968,40 @@ export async function compareManualGapfillSourceActualToLabSim(
     sourceHouseId,
     surface: "admin_lab",
   }).catch(() => ({ validationOnlyDateKeysLocal: [] as string[] }));
+
+  const sourceActualIntervalDataset =
+    includeDiagnostics && includeDailyRows
+      ? (await loadCompactActualDatasetForCompareDiagnostics({
+          userId: sourceContext.userId,
+          actualContextHouseId: sourceActualResult.actualContextHouseId,
+          esiid: args.esiid ?? sourceContext.esiid,
+          preferredActualSource: sourceContext.actualSource ?? sourceContext.committedUsageSource ?? null,
+          artifactMeta: {
+            validationOnlyDateKeysLocal: validationSelection.validationOnlyDateKeysLocal,
+          },
+        })) ?? null
+      : null;
+
+  logSimPipelineEvent("manual_gapfill_compare_source_actual_ready", {
+    houseId: labHouseId,
+    scenarioId,
+    sourceHouseId,
+    durationMs: Date.now() - sourceActualStartedAt,
+    compactActualSlice: sourceActualIntervalDataset != null,
+    actualIntervalCount: Array.isArray((sourceActualIntervalDataset as { series?: { intervals15?: unknown[] } } | null)?.series?.intervals15)
+      ? (sourceActualIntervalDataset as { series: { intervals15: unknown[] } }).series.intervals15.length
+      : 0,
+    memoryRssMb: getMemoryRssMb(),
+    source: "compareManualGapfillSourceActualToLabSim",
+  });
+
+  const labDatasetForDiagnostics =
+    sliceSimulatedDatasetIntervalsForCompareDiagnostics({
+      simulatedDataset: labDataset,
+      artifactMeta: {
+        validationOnlyDateKeysLocal: validationSelection.validationOnlyDateKeysLocal,
+      },
+    }) ?? labDataset;
 
   const coverageWindow =
     sourceContext.coverage.coverageStart && sourceContext.coverage.coverageEnd
@@ -982,23 +1037,17 @@ export async function compareManualGapfillSourceActualToLabSim(
         ? seedPayloadTravelRanges
         : sourceFallbackTravelRanges;
 
-  const sourceActualDatasetForCompare =
-    includeDiagnostics && includeDailyRows
-      ? await resolveActualDatasetForCompareDiagnostics({
-          userId: sourceContext.userId,
-          actualContextHouseId: sourceActualResult.actualContextHouseId,
-          esiid: args.esiid ?? sourceContext.esiid,
-          preferredActualSource: sourceContext.actualSource ?? sourceContext.committedUsageSource ?? null,
-          baseDataset: sourceActualResult.dataset!,
-        })
-      : sourceActualResult.dataset!;
-
+  const envelopeStartedAt = Date.now();
+  const sourceActualDatasetForEnvelope = stripIntervalHeavyDatasetFields(sourceActualResult.dataset!) ?? sourceActualResult.dataset!;
+  const labDatasetForEnvelope = stripIntervalHeavyDatasetFields(labDataset) ?? labDataset;
   const envelope = buildManualGapfillCompareEnvelope({
     mode,
     sourceContext,
     labHouseId,
-    sourceActualDataset: sourceActualDatasetForCompare ?? sourceActualResult.dataset!,
-    labDataset,
+    sourceActualDataset: sourceActualDatasetForEnvelope,
+    sourceActualIntervalDataset,
+    labDataset: labDatasetForEnvelope,
+    labIntervalDataset: labDatasetForDiagnostics,
     labManualPayload,
     policyHash,
     scenarioId,
@@ -1015,6 +1064,23 @@ export async function compareManualGapfillSourceActualToLabSim(
       seedPayloadRanges: seedPayloadTravelRanges,
     },
     warnings,
+  });
+
+  logSimPipelineEvent("manual_gapfill_compare_envelope_ready", {
+    houseId: labHouseId,
+    scenarioId,
+    sourceHouseId,
+    durationMs: Date.now() - envelopeStartedAt,
+    compareStatus: envelope.status,
+    diagnosticsV1Built: Boolean(envelope.diagnosticsV1),
+    labIntervalCountBeforeSlice: Array.isArray(labDataset?.series?.intervals15)
+      ? labDataset.series.intervals15.length
+      : 0,
+    labIntervalCountAfterSlice: Array.isArray(labDatasetForDiagnostics?.series?.intervals15)
+      ? labDatasetForDiagnostics.series.intervals15.length
+      : 0,
+    memoryRssMb: getMemoryRssMb(),
+    source: "compareManualGapfillSourceActualToLabSim",
   });
 
   return envelope;
