@@ -13,7 +13,7 @@ function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
-function normalizeChicagoDateKeys(dateKeys: Iterable<string>): string[] {
+function normalizeChicagoDateKeys(dateKeys: Iterable<unknown>): string[] {
   return Array.from(
     new Set(
       Array.from(dateKeys)
