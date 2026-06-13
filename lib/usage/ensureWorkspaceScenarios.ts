@@ -1,5 +1,7 @@
 import { createScenario, listScenarios } from "@/modules/usageSimulator/service";
-export { WORKSPACE_PAST_SCENARIO_NAME } from "@/lib/usage/canonicalPastArtifactScenario";
+import { WORKSPACE_PAST_SCENARIO_NAME } from "@/lib/usage/canonicalPastArtifactScenario";
+
+export { WORKSPACE_PAST_SCENARIO_NAME };
 
 export const WORKSPACE_FUTURE_SCENARIO_NAME = "Future (What-if)";
 
