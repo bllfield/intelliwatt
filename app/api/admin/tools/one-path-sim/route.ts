@@ -13,7 +13,7 @@ import {
   resolvePastWeatherHouseIdFromDataset,
 } from "@/lib/usage/pastVisibleWeatherReadDiagnostics";
 import { resolveStaleIncompleteMeterSlotCompleteDateKeys } from "@/lib/usage/pastSimStaleIncompleteMeter";
-import { resolveActualDatasetForCompareDiagnostics, loadCompactActualDatasetForCompareDiagnostics } from "@/lib/usage/compareDiagnosticsActualIntervals";
+import { resolveActualDatasetForCompareDiagnostics, loadCompactActualDatasetForCompareDiagnostics, sliceSimulatedDatasetIntervalsForCompareDiagnostics } from "@/lib/usage/compareDiagnosticsActualIntervals";
 import { travelRangeIsActiveForCoverageWindow } from "@/lib/usage/pastSimTravelRanges";
 import { sageActualDailyRowsFromDataset } from "@/lib/usage/sageActualDailyTruth";
 import { buildUserUsageHouseContract } from "@/lib/usage/userUsageHouseContract";
@@ -142,6 +142,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 const GREEN_BUTTON_ROUTE_STAGE_TIMEOUT_MS = 120_000;
+const PAST_READBACK_RESPONSE_TIMEOUT_MS = 90_000;
 /** Same heal profile as POST /api/user/usage/refresh. */
 /** Lookup/load must wait for full canonical SMT coverage (admin waits), not the short user-session tail budget. */
 const ONE_PATH_SMT_HEAL_PROFILE = "admin_sim" as const;
@@ -1196,6 +1197,14 @@ async function buildPastSimRunReadbackResponse(args: {
     source: "buildPastSimRunReadbackResponse",
     memoryRssMb: getMemoryRssMb(),
   });
+  const responseAssemblyStartedAt = Date.now();
+  logSimPipelineEvent("one_path_admin_past_response_assembly_start", {
+    correlationId: args.correlationId ?? null,
+    houseId: args.houseId,
+    scenarioId: args.scenarioId,
+    source: "buildPastSimRunReadbackResponse",
+    memoryRssMb: getMemoryRssMb(),
+  });
   const travelCoverageWindow = resolveCanonicalUsage365CoverageWindow();
   const pastVariables =
     scenarioEvents.ok && Array.isArray(scenarioEvents.events)
@@ -1243,6 +1252,14 @@ async function buildPastSimRunReadbackResponse(args: {
         })
       : null;
   const artifactDatasetSummary = asRecord(artifactDataset.summary);
+  const artifactSummaryStartedAt = Date.now();
+  logSimPipelineEvent("one_path_admin_past_artifact_summary_start", {
+    correlationId: args.correlationId ?? null,
+    houseId: args.houseId,
+    scenarioId: args.scenarioId,
+    source: "buildPastSimRunReadbackResponse",
+    memoryRssMb: getMemoryRssMb(),
+  });
   const readbackArtifact = await buildPastReadbackArtifactSummary({
     userId: args.userId,
     houseId: args.houseId,
@@ -1252,12 +1269,65 @@ async function buildPastSimRunReadbackResponse(args: {
     datasetMeta: artifactMeta,
     datasetSummary: artifactDatasetSummary,
   });
+  logSimPipelineEvent("one_path_admin_past_artifact_summary_success", {
+    correlationId: args.correlationId ?? null,
+    houseId: args.houseId,
+    scenarioId: args.scenarioId,
+    durationMs: Date.now() - artifactSummaryStartedAt,
+    source: "buildPastSimRunReadbackResponse",
+    memoryRssMb: getMemoryRssMb(),
+  });
+  const simulatedDatasetForIntervalDiagnostics =
+    sliceSimulatedDatasetIntervalsForCompareDiagnostics({
+      simulatedDataset: artifactDataset,
+      compareProjection,
+      includePosthocTopMissIntervalCurves: args.includePosthocTopMissIntervalCurves === true,
+      artifactMeta,
+    }) ?? artifactDataset;
+  const readIntervalRowCount = (dataset: Record<string, unknown>) => {
+    const intervals = asRecord(dataset.series)?.intervals15;
+    return Array.isArray(intervals) ? intervals.length : 0;
+  };
+  const simulatedIntervalRowCountBeforeSlice = readIntervalRowCount(artifactDataset);
+  const simulatedIntervalRowCountAfterSlice = readIntervalRowCount(simulatedDatasetForIntervalDiagnostics);
+  const intervalDiagnosticsStartedAt = Date.now();
+  logSimPipelineEvent("one_path_admin_past_interval_diagnostics_start", {
+    correlationId: args.correlationId ?? null,
+    houseId: args.houseId,
+    scenarioId: args.scenarioId,
+    simulatedIntervalRowCountBeforeSlice,
+    simulatedIntervalRowCountAfterSlice,
+    source: "buildPastSimRunReadbackResponse",
+    memoryRssMb: getMemoryRssMb(),
+  });
+  const onePathIntervalDiagnosticsV1 = buildOnePathIntervalDiagnosticsForPastResponse({
+    mode: preferredActualSourceForCompare === "GREEN_BUTTON" ? "GREEN_BUTTON" : "INTERVAL",
+    preferredActualSource: preferredActualSourceForCompare,
+    actualDataset: actualDatasetForIntervalCompare ?? sageTruthForCompare?.dataset ?? null,
+    simulatedDataset: simulatedDatasetForIntervalDiagnostics,
+    compareProjection,
+    pastVariables,
+    includePosthocTopMissIntervalCurves: args.includePosthocTopMissIntervalCurves === true,
+  });
+  logSimPipelineEvent("one_path_admin_past_interval_diagnostics_success", {
+    correlationId: args.correlationId ?? null,
+    houseId: args.houseId,
+    scenarioId: args.scenarioId,
+    available: onePathIntervalDiagnosticsV1.available === true,
+    durationMs: Date.now() - intervalDiagnosticsStartedAt,
+    simulatedIntervalRowCountBeforeSlice,
+    simulatedIntervalRowCountAfterSlice,
+    source: "buildPastSimRunReadbackResponse",
+    memoryRssMb: getMemoryRssMb(),
+  });
   const responseBuildDurationMs = Date.now() - startedAt;
+  const responseAssemblyDurationMs = Date.now() - responseAssemblyStartedAt;
   const pastReadbackPerformance = {
     skipSageTruthReload: canSkipSageTruthReload,
     skipSageTruthReloadReason,
     sourceTruthReloadDurationMs,
     responseBuildDurationMs,
+    responseAssemblyDurationMs,
     responseApproxSizeKb: null as number | null,
   };
   const responsePayload = {
@@ -1277,15 +1347,7 @@ async function buildPastSimRunReadbackResponse(args: {
     ...pastWeatherApiFields,
     pastWeatherCrossSurfaceParity,
     artifact: readbackArtifact,
-    onePathIntervalDiagnosticsV1: buildOnePathIntervalDiagnosticsForPastResponse({
-      mode: preferredActualSourceForCompare === "GREEN_BUTTON" ? "GREEN_BUTTON" : "INTERVAL",
-      preferredActualSource: preferredActualSourceForCompare,
-      actualDataset: actualDatasetForIntervalCompare ?? sageTruthForCompare?.dataset ?? null,
-      simulatedDataset: artifactDataset,
-      compareProjection,
-      pastVariables,
-      includePosthocTopMissIntervalCurves: args.includePosthocTopMissIntervalCurves === true,
-    }),
+    onePathIntervalDiagnosticsV1,
     readModel: {
       ...buildCompactSimulationReadModel({
         artifact: readbackArtifact,
@@ -1299,6 +1361,22 @@ async function buildPastSimRunReadbackResponse(args: {
     },
     pastReadbackPerformance,
   };
+  logSimPipelineEvent("one_path_admin_past_response_ready", {
+    correlationId: args.correlationId ?? null,
+    houseId: args.houseId,
+    scenarioId: args.scenarioId,
+    pastVariableCount: pastVariables.length,
+    durationMs: responseBuildDurationMs,
+    responseAssemblyDurationMs,
+    skipSageTruthReload: canSkipSageTruthReload,
+    skipSageTruthReloadReason,
+    sourceTruthReloadDurationMs,
+    responseBuildDurationMs,
+    simulatedIntervalRowCountBeforeSlice,
+    simulatedIntervalRowCountAfterSlice,
+    source: "buildPastSimRunReadbackResponse",
+    memoryRssMb: getMemoryRssMb(),
+  });
   try {
     pastReadbackPerformance.responseApproxSizeKb = Math.round(
       Buffer.byteLength(JSON.stringify(responsePayload), "utf8") / 1024
@@ -1306,20 +1384,6 @@ async function buildPastSimRunReadbackResponse(args: {
   } catch {
     pastReadbackPerformance.responseApproxSizeKb = null;
   }
-  logSimPipelineEvent("one_path_admin_past_response_ready", {
-    correlationId: args.correlationId ?? null,
-    houseId: args.houseId,
-    scenarioId: args.scenarioId,
-    pastVariableCount: pastVariables.length,
-    durationMs: responseBuildDurationMs,
-    skipSageTruthReload: canSkipSageTruthReload,
-    skipSageTruthReloadReason,
-    sourceTruthReloadDurationMs,
-    responseBuildDurationMs,
-    responseApproxSizeKb: pastReadbackPerformance.responseApproxSizeKb,
-    source: "buildPastSimRunReadbackResponse",
-    memoryRssMb: getMemoryRssMb(),
-  });
   return responsePayload;
 }
 
@@ -2656,21 +2720,29 @@ export async function POST(request: NextRequest) {
                 houseId: onePathTestHomeState.linkedSourceHouseId,
               })
             : null;
-        const readback = await buildPastSimRunReadbackResponse({
-          userId: effectiveUserId,
-          houseId: effectiveHouseId,
-          scenarioId: effectiveRawInputBase.scenarioId,
+        const readback = await withAdminRouteStageTimeout({
+          stage: "build_past_sim_run_readback",
           correlationId,
-          actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
-          preferredActualSource: effectiveRawInputBase.preferredActualSource,
-          smtSourceEsiid,
-          exactArtifactInputHash,
-          readMode: exactArtifactInputHash ? "artifact_only" : undefined,
-          disableArtifactRebuildFallback: Boolean(exactArtifactInputHash),
-          linkedSourceUserId: onePathTestHomeState.linkedSourceUserId,
-          linkedSourceHouseId: onePathTestHomeState.linkedSourceHouseId,
-          linkedSourceScenarioId,
-          includePosthocTopMissIntervalCurves,
+          timeoutMs: PAST_READBACK_RESPONSE_TIMEOUT_MS,
+          mode,
+          houseId: effectiveHouseId,
+          stageTimingsMs,
+          promise: buildPastSimRunReadbackResponse({
+            userId: effectiveUserId,
+            houseId: effectiveHouseId,
+            scenarioId: effectiveRawInputBase.scenarioId,
+            correlationId,
+            actualContextHouseId: effectiveRawInputBase.actualContextHouseId,
+            preferredActualSource: effectiveRawInputBase.preferredActualSource,
+            smtSourceEsiid,
+            exactArtifactInputHash,
+            readMode: exactArtifactInputHash ? "artifact_only" : undefined,
+            disableArtifactRebuildFallback: Boolean(exactArtifactInputHash),
+            linkedSourceUserId: onePathTestHomeState.linkedSourceUserId,
+            linkedSourceHouseId: onePathTestHomeState.linkedSourceHouseId,
+            linkedSourceScenarioId,
+            includePosthocTopMissIntervalCurves,
+          }),
         });
         if (!readback.ok) {
           const status =

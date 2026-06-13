@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   loadCompactActualDatasetForCompareDiagnostics,
   resolveCompareDiagnosticsDateKeys,
+  sliceSimulatedDatasetIntervalsForCompareDiagnostics,
 } from "@/lib/usage/compareDiagnosticsActualIntervals";
 import { buildOnePathIntervalDiagnosticsForPastResponse } from "@/modules/onePathSim/onePathIntervalCompareDiagnosticsV1";
 
@@ -123,5 +124,37 @@ describe("compareDiagnosticsActualIntervals", () => {
     expect(diagnostics.intervalTruthInterpretation.modelAccuracyTest).toBe(false);
     expect(diagnostics.intervalTruthInterpretation.intervalTruthPassthrough).toBe(true);
     expect(diagnostics.intervalTruthInterpretation.correctedTravelVacantReadback).toBe(true);
+  });
+
+  it("slices simulated interval series down to validation/posthoc days only", () => {
+    const validationDates = ["2025-07-01", "2025-07-02"];
+    const fullYearIntervals = Array.from({ length: 350 }, (_, index) => {
+      const day = String(Math.floor(index / 96) + 1).padStart(2, "0");
+      return {
+        timestamp: `2025-06-${day}T12:00:00.000Z`,
+        kwh: 0.25,
+      };
+    });
+    const validationIntervals = validationDates.flatMap((date) => [
+      { timestamp: `${date}T12:00:00.000Z`, kwh: 1.1, homeDateKey: date },
+      { timestamp: `${date}T12:15:00.000Z`, kwh: 1.2, homeDateKey: date },
+    ]);
+
+    const sliced = sliceSimulatedDatasetIntervalsForCompareDiagnostics({
+      simulatedDataset: {
+        meta: { timezone: "America/Chicago" },
+        daily: [{ date: "2025-07-01", kwh: 10 }],
+        series: { intervals15: [...fullYearIntervals, ...validationIntervals] },
+      },
+      compareProjection: {
+        rows: validationDates.map((localDate) => ({ localDate, validationDay: true })),
+      },
+    });
+
+    expect((sliced?.series as { intervals15: unknown[] })?.intervals15).toHaveLength(4);
+    expect(sliced?.meta).toMatchObject({
+      compareDiagnosticsSimulatedCompactSlice: true,
+      compareDiagnosticsCompactSliceDateKeys: validationDates,
+    });
   });
 });

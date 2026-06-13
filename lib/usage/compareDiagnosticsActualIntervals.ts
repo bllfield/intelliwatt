@@ -1,4 +1,5 @@
 import { extractValidationDayKeysFromCompareProjection } from "@/lib/admin/aiTuningBundleHelpers";
+import { smtCoverageDateKey } from "@/lib/time/chicago";
 import {
   getActualIntervalsForRange,
   type ActualIntervalPoint,
@@ -72,6 +73,87 @@ export function resolveCompareDiagnosticsDateKeys(args: {
 
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+function asChicagoDateKey(value: unknown): string | null {
+  const text = String(value ?? "").slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
+}
+
+function filterIntervalRowsToChicagoDateKeys(
+  rows: unknown[],
+  dateKeySet: Set<string>,
+  timezone: string
+): Array<{ timestamp: string; kwh: number }> {
+  const out: Array<{ timestamp: string; kwh: number }> = [];
+  for (const row of rows) {
+    const record = asRecord(row);
+    const timestamp = String(record.timestamp ?? "").trim();
+    const kwh = Number(record.kwh ?? Number.NaN);
+    if (!timestamp || !Number.isFinite(kwh)) continue;
+
+    const homeDateKey = asChicagoDateKey(record.homeDateKey);
+    if (homeDateKey && dateKeySet.has(homeDateKey)) {
+      out.push({ timestamp, kwh });
+      continue;
+    }
+
+    const ts = new Date(timestamp);
+    if (!Number.isFinite(ts.getTime())) continue;
+    const localDate =
+      timezone === "America/Chicago" ? smtCoverageDateKey(ts) : asChicagoDateKey(timestamp);
+    if (localDate && dateKeySet.has(localDate)) {
+      out.push({ timestamp, kwh });
+    }
+  }
+  return out;
+}
+
+/**
+ * Compare/export only: keep full simulated daily/meta rows but slice interval series to
+ * validation/posthoc days so admin readback does not scan a full-year interval payload.
+ */
+export function sliceSimulatedDatasetIntervalsForCompareDiagnostics(args: {
+  simulatedDataset?: Record<string, unknown> | null;
+  compareProjection?: unknown;
+  includePosthocTopMissIntervalCurves?: boolean;
+  posthocTopMissDayCount?: number;
+  artifactMeta?: Record<string, unknown> | null;
+}): Record<string, unknown> | null {
+  const dataset = asRecord(args.simulatedDataset);
+  if (!Object.keys(dataset).length) return null;
+
+  const dateKeys = resolveCompareDiagnosticsDateKeys(args);
+  if (dateKeys.length === 0) return dataset;
+
+  const meta = asRecord(dataset.meta);
+  if (meta.compareDiagnosticsSimulatedCompactSlice === true) {
+    return dataset;
+  }
+
+  const series = asRecord(dataset.series);
+  const allIntervals = asArray(series.intervals15);
+  if (allIntervals.length === 0) return dataset;
+
+  const timezone = String(meta.timezone ?? "America/Chicago").trim() || "America/Chicago";
+  const dateKeySet = new Set(dateKeys);
+  const filtered = filterIntervalRowsToChicagoDateKeys(allIntervals, dateKeySet, timezone);
+  if (filtered.length === 0 || filtered.length === allIntervals.length) {
+    return dataset;
+  }
+
+  return {
+    ...dataset,
+    meta: {
+      ...meta,
+      compareDiagnosticsSimulatedCompactSlice: true,
+      compareDiagnosticsCompactSliceDateKeys: dateKeys,
+    },
+    series: {
+      ...series,
+      intervals15: filtered,
+    },
+  };
 }
 
 function buildDailyRowsFromIntervalPoints(

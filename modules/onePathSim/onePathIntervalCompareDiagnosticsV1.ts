@@ -1,4 +1,6 @@
 import type { TravelRange } from "@/modules/simulatedUsage/types";
+import { dateKeyInTimezone } from "@/lib/admin/gapfillLab";
+import { smtCoverageDateKey } from "@/lib/time/chicago";
 import { resolveReportedCoverageWindow } from "@/lib/usage/canonicalMetadataWindow";
 
 function asTravelDateKey(value: unknown): string | null {
@@ -519,6 +521,36 @@ function readIntervalPoints(dataset: unknown): IntervalPoint[] {
       kwh: Number(row?.kwh ?? Number.NaN),
     }))
     .filter((row: IntervalPoint) => row.timestamp && Number.isFinite(row.kwh));
+}
+
+function readIntervalPointsForCurveDates(
+  dataset: unknown,
+  selectedDateKeys: Set<string>,
+  timezone: string
+): IntervalPoint[] {
+  if (selectedDateKeys.size === 0) return [];
+  const rows = Array.isArray((dataset as any)?.series?.intervals15) ? (dataset as any).series.intervals15 : [];
+  const out: IntervalPoint[] = [];
+  for (const row of rows) {
+    const timestamp = String(row?.timestamp ?? "").trim();
+    const kwh = Number(row?.kwh ?? Number.NaN);
+    if (!timestamp || !Number.isFinite(kwh)) continue;
+
+    const homeDateKey = String(row?.homeDateKey ?? "").slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(homeDateKey) && selectedDateKeys.has(homeDateKey)) {
+      out.push({ timestamp, kwh });
+      continue;
+    }
+
+    const ts = new Date(timestamp);
+    if (!Number.isFinite(ts.getTime())) continue;
+    const localDate =
+      timezone === "America/Chicago" ? smtCoverageDateKey(ts) : dateKeyInTimezone(timestamp, timezone);
+    if (localDate && selectedDateKeys.has(localDate)) {
+      out.push({ timestamp, kwh });
+    }
+  }
+  return out;
 }
 
 function countIntervalRowsForDates(rows: IntervalPoint[], timezone: string, dateKeys: Set<string>): number {
@@ -1051,8 +1083,12 @@ export function buildOnePathIntervalCompareDiagnosticsV1(
   const posthocTopMissDayKeysUsed = [...posthocDates].sort();
   const curveDates = Array.from(new Set([...selectedValidationDayKeysUsed, ...posthocTopMissDayKeysUsed])).sort();
   const curveDateSet = new Set(curveDates);
-  const actualIntervals = readIntervalPoints(args.actualDataset);
-  const simulatedIntervalsRaw = readIntervalPoints(args.simulatedDataset);
+  const actualIntervals = readIntervalPointsForCurveDates(args.actualDataset, curveDateSet, timezone);
+  const simulatedIntervalsRaw = readIntervalPointsForCurveDates(
+    args.simulatedDataset,
+    curveDateSet,
+    timezone
+  );
   const intervalTruthPassthrough = detectIntervalTruthPassthrough({
     sourceType: args.sourceType,
     actualDataset: args.actualDataset,
