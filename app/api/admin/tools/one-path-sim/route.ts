@@ -106,10 +106,13 @@ import { buildOnePathIntervalDiagnosticsForPastResponse } from "@/modules/onePat
 import type { ManualUsagePayload } from "@/modules/onePathSim/simulatedUsage/types";
 import { hashManualGapfillSavedSeedPayload } from "@/modules/manualUsage/manualGapfillSeed";
 import { loadPastSimBuildInputsForRead } from "@/lib/usage/loadPastSimBuildInputsForRead";
+import { buildImmutablePastArtifactKey } from "@/lib/usage/pastArtifactIdentity";
 import {
   resolvePastSimPreferredActualSource,
   resolveValidationCompareProjectionForRead,
 } from "@/lib/usage/pastSimValidationCompareRead";
+import { buildValidationCompareProjectionSidecar } from "@/lib/usage/validationCompareProjection";
+import { getPersistedPastArtifactRowMeta } from "@/modules/onePathSim/usageSimulator/pastCache";
 import { createSimCorrelationId, getMemoryRssMb, logSimPipelineEvent } from "@/modules/onePathSim/usageSimulator/simObservability";
 import { resolveCanonicalUsage365CoverageWindow } from "@/modules/onePathSim/usageSimulator/metadataWindow";
 import { chicagoPullDateKey } from "@/lib/usage/smtDayCoverageLedger";
@@ -694,6 +697,7 @@ async function resolveSageActualTruthForRunDisplay(args: {
   userId: string;
   houseId: string;
   actualContextHouseId?: string | null;
+  actualContextUserId?: string | null;
   smtSourceEsiid?: string | null;
   preferredActualSource?: "SMT" | "GREEN_BUTTON" | null;
   greenButtonFullYearIntervalsForDisplay?: boolean;
@@ -702,11 +706,75 @@ async function resolveSageActualTruthForRunDisplay(args: {
     userId: args.userId,
     houseId: args.houseId,
     actualContextHouseId: args.actualContextHouseId ?? args.houseId,
+    actualContextUserId: args.actualContextUserId ?? null,
     smtSourceEsiid: args.smtSourceEsiid ?? null,
     seedIfMissing: false,
     preferredActualSource: args.preferredActualSource ?? null,
     greenButtonFullYearIntervalsForDisplay: args.greenButtonFullYearIntervalsForDisplay === true,
   }).catch(() => null);
+}
+
+async function buildPastReadbackArtifactSummary(args: {
+  userId: string;
+  houseId: string;
+  scenarioId: string;
+  exactArtifactInputHash?: string | null;
+  actualContextHouseId?: string | null;
+  datasetMeta?: Record<string, unknown> | null;
+}) {
+  const scenarioId = String(args.scenarioId ?? "").trim();
+  const artifactInputHash =
+    String(
+      args.exactArtifactInputHash ??
+        args.datasetMeta?.artifactInputHash ??
+        args.datasetMeta?.artifactInputHashUsed ??
+        ""
+    ).trim() || null;
+  const [cacheMeta, buildRec] = await Promise.all([
+    artifactInputHash && scenarioId
+      ? getPersistedPastArtifactRowMeta({
+          houseId: args.houseId,
+          scenarioId,
+          inputHash: artifactInputHash,
+        }).catch(() => null)
+      : Promise.resolve(null),
+    scenarioId
+      ? (prisma as any).usageSimulatorBuild
+          .findUnique({
+            where: {
+              userId_houseId_scenarioKey: {
+                userId: args.userId,
+                houseId: args.houseId,
+                scenarioKey: scenarioId,
+              },
+            },
+            select: { id: true, buildInputsHash: true, createdAt: true, updatedAt: true },
+          })
+          .catch(() => null)
+      : Promise.resolve(null),
+  ]);
+  return {
+    artifactId: cacheMeta?.id ?? (buildRec?.id ? String(buildRec.id) : null),
+    buildRowId: buildRec?.id ? String(buildRec.id) : null,
+    immutableArtifactKey: buildImmutablePastArtifactKey({ scenarioId, artifactInputHash }),
+    artifactInputHash,
+    buildInputsHash: buildRec?.buildInputsHash ? String(buildRec.buildInputsHash) : null,
+    engineVersion:
+      typeof args.datasetMeta?.engineVersion === "string"
+        ? String(args.datasetMeta.engineVersion)
+        : typeof args.datasetMeta?.simVersion === "string"
+          ? String(args.datasetMeta.simVersion)
+          : null,
+    scenarioId,
+    houseId: args.houseId,
+    actualContextHouseId: args.actualContextHouseId ?? args.houseId,
+    createdAt:
+      cacheMeta?.createdAt?.toISOString() ??
+      (buildRec?.createdAt ? new Date(buildRec.createdAt).toISOString() : null),
+    updatedAt:
+      cacheMeta?.updatedAt?.toISOString() ??
+      (buildRec?.updatedAt ? new Date(buildRec.updatedAt).toISOString() : null),
+  };
 }
 
 /** Reuse adapt-time upstream truth for baseline passthrough runs instead of reloading intervals. */
@@ -931,6 +999,8 @@ async function buildPastSimRunReadbackResponse(args: {
     memoryRssMb: getMemoryRssMb(),
   });
   const sidecarStartedAt = Date.now();
+  const artifactDataset = asRecord(readback.dataset) ?? {};
+  const artifactMeta = asRecord(artifactDataset.meta);
   const buildInputsForCompare = await loadPastSimBuildInputsForRead({
     userId: args.userId,
     houseId: args.houseId,
@@ -945,26 +1015,37 @@ async function buildPastSimRunReadbackResponse(args: {
   const sageGbFullIntervals =
     preferredActualSourceForCompare === "GREEN_BUTTON";
   const needsFullYearActualIntervalsForDiagnostics = args.includePosthocTopMissIntervalCurves === true;
+  const embeddedCompareRows = Array.isArray(artifactMeta.validationCompareRows)
+    ? artifactMeta.validationCompareRows
+    : [];
+  const canReuseEmbeddedCompareSidecar =
+    embeddedCompareRows.length > 0 && !needsFullYearActualIntervalsForDiagnostics;
+  const canSkipSageTruthReload =
+    Boolean(args.exactArtifactInputHash) && canReuseEmbeddedCompareSidecar;
   logSimPipelineEvent("one_path_admin_past_compare_sidecar_start", {
     correlationId: args.correlationId ?? null,
     houseId: args.houseId,
     scenarioId: args.scenarioId,
     includePosthocTopMissIntervalCurves: needsFullYearActualIntervalsForDiagnostics,
     skipFullYearActualIntervalReload: !needsFullYearActualIntervalsForDiagnostics,
+    reuseEmbeddedCompareSidecar: canReuseEmbeddedCompareSidecar,
+    skipSageTruthReload: canSkipSageTruthReload,
     source: "buildPastSimRunReadbackResponse",
     memoryRssMb: getMemoryRssMb(),
   });
-  const sageTruthForCompare = await resolveSageActualTruthForRunDisplay({
-    userId: args.userId,
-    houseId: args.houseId,
-    actualContextHouseId:
-      args.actualContextHouseId ?? args.smtPostSimHealing?.actualContextHouseId ?? args.houseId,
-    smtSourceEsiid: args.smtSourceEsiid ?? args.smtPostSimHealing?.sourceEsiid ?? null,
-    preferredActualSource: preferredActualSourceForCompare,
-    greenButtonFullYearIntervalsForDisplay: sageGbFullIntervals,
-  });
   const actualContextHouseIdForCompare =
     args.actualContextHouseId ?? args.smtPostSimHealing?.actualContextHouseId ?? args.houseId;
+  const sageTruthForCompare = canSkipSageTruthReload
+    ? null
+    : await resolveSageActualTruthForRunDisplay({
+        userId: args.userId,
+        houseId: args.houseId,
+        actualContextHouseId: actualContextHouseIdForCompare,
+        actualContextUserId: args.linkedSourceUserId ?? null,
+        smtSourceEsiid: args.smtSourceEsiid ?? args.smtPostSimHealing?.sourceEsiid ?? null,
+        preferredActualSource: preferredActualSourceForCompare,
+        greenButtonFullYearIntervalsForDisplay: sageGbFullIntervals,
+      });
   const actualDatasetForIntervalCompare = needsFullYearActualIntervalsForDiagnostics
     ? await resolveActualDatasetForCompareDiagnostics({
         userId: args.linkedSourceUserId ?? args.userId,
@@ -973,21 +1054,27 @@ async function buildPastSimRunReadbackResponse(args: {
         preferredActualSource: preferredActualSourceForCompare,
         baseDataset: sageTruthForCompare?.dataset ?? null,
       })
-    : sageTruthForCompare?.dataset && typeof sageTruthForCompare.dataset === "object"
-      ? (sageTruthForCompare.dataset as Record<string, unknown>)
-      : null;
-  const compareProjection = resolveValidationCompareProjectionForRead({
-    dataset: readback.dataset,
-    actualDataset: sageTruthForCompare?.dataset ?? null,
-    displayDataset: readback.dataset,
-    buildInputs: buildInputsForCompare,
-  });
+    : canSkipSageTruthReload
+      ? null
+      : sageTruthForCompare?.dataset && typeof sageTruthForCompare.dataset === "object"
+        ? (sageTruthForCompare.dataset as Record<string, unknown>)
+        : null;
+  const compareProjection = canReuseEmbeddedCompareSidecar
+    ? buildValidationCompareProjectionSidecar(artifactDataset)
+    : resolveValidationCompareProjectionForRead({
+        dataset: readback.dataset,
+        actualDataset: sageTruthForCompare?.dataset ?? null,
+        displayDataset: readback.dataset,
+        buildInputs: buildInputsForCompare,
+      });
   logSimPipelineEvent("one_path_admin_past_compare_sidecar_success", {
     correlationId: args.correlationId ?? null,
     houseId: args.houseId,
     scenarioId: args.scenarioId,
     rowCount: Array.isArray(compareProjection.rows) ? compareProjection.rows.length : 0,
     durationMs: Date.now() - sidecarStartedAt,
+    reuseEmbeddedCompareSidecar: canReuseEmbeddedCompareSidecar,
+    skipSageTruthReload: canSkipSageTruthReload,
     source: "buildPastSimRunReadbackResponse",
     memoryRssMb: getMemoryRssMb(),
   });
@@ -1019,13 +1106,12 @@ async function buildPastSimRunReadbackResponse(args: {
     userId: args.userId,
     houseId: args.houseId,
     scenarioId: args.scenarioId,
-    dataset: asRecord(readback.dataset),
-    sageActualDataset: asRecord(sageTruth?.dataset),
+    dataset: artifactDataset,
+    sageActualDataset: canSkipSageTruthReload ? null : asRecord(sageTruth?.dataset),
     smtSlotCompleteDateKeys: sageDisplayArgs.smtSlotCompleteDateKeys,
     linkedSourceUserId: args.linkedSourceUserId,
     persistDisplayWeatherToCache: false,
   });
-  const artifactDataset = asRecord(readback.dataset) ?? {};
   const pastWeather = resolveAdminPastWeatherResponse({
     dataset: artifactDataset,
     houseId: args.houseId,
@@ -1105,6 +1191,14 @@ async function buildPastSimRunReadbackResponse(args: {
           adminHouseId: args.houseId,
         })
       : null;
+  const readbackArtifact = await buildPastReadbackArtifactSummary({
+    userId: args.userId,
+    houseId: args.houseId,
+    scenarioId: args.scenarioId,
+    exactArtifactInputHash: args.exactArtifactInputHash,
+    actualContextHouseId: actualContextHouseIdForCompare,
+    datasetMeta: artifactMeta,
+  });
   return {
     ok: true as const,
     debugDiagnosticsIncluded: false,
@@ -1112,11 +1206,16 @@ async function buildPastSimRunReadbackResponse(args: {
     readbackPending: false,
     runType: "PAST_SIM" as const,
     correlationId: args.correlationId ?? null,
+    engineInput: {
+      scenarioId: args.scenarioId,
+      houseId: args.houseId,
+      actualContextHouseId: actualContextHouseIdForCompare,
+    },
     manualStageOneView: null,
     runDisplayView: compactRunDisplayView,
     ...pastWeatherApiFields,
     pastWeatherCrossSurfaceParity,
-    artifact: null,
+    artifact: readbackArtifact,
     onePathIntervalDiagnosticsV1: buildOnePathIntervalDiagnosticsForPastResponse({
       mode: preferredActualSourceForCompare === "GREEN_BUTTON" ? "GREEN_BUTTON" : "INTERVAL",
       preferredActualSource: preferredActualSourceForCompare,
@@ -1128,13 +1227,13 @@ async function buildPastSimRunReadbackResponse(args: {
     }),
     readModel: {
       ...buildCompactSimulationReadModel({
-        artifact: null,
+        artifact: readbackArtifact,
         artifactDataset,
-        artifactDatasetMeta: asRecord(artifactDataset.meta),
+        artifactDatasetMeta: artifactMeta,
         runDisplayView: compactRunDisplayView,
         compareProjection,
       }),
-      sageActualDataset: sageTruth?.dataset ?? null,
+      sageActualDataset: null,
       sageActualDaily: sageDisplayArgs.sageActualDaily ?? null,
     },
   };
